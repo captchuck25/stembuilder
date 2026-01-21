@@ -7,7 +7,7 @@ export default function Home() {
         <Image
           className="dark:invert"
           src="/next.svg"
-          alt="STEM Builder logo"
+          alt="STEM Builder (*live) "
           width={100}
           height={20}
           priority
