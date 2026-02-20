@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="carBody" x1="0" x2="1">
+      <stop offset="0" stop-color="#d35a3a"/>
+      <stop offset="1" stop-color="#a83c26"/>
+    </linearGradient>
+    <linearGradient id="carHighlight" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <!-- Soft shadow -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <g transform="translate(1200 0) scale(-1 1)">
+  <g filter="url(#shadow)">
+
+    <!-- ================= CAR BODY (RIGHT -> LEFT) ================= -->
+    <path d="M420,190
+             C410,162 430,138 466,128
+             L560,102
+             C610,88 700,88 760,110
+             L820,132
+             C860,146 880,166 884,190
+             L884,202
+             C884,216 872,226 858,226
+             L446,226
+             C432,226 420,216 420,202
+             Z"
+          fill="url(#carBody)" stroke="#5b2016" stroke-width="4" stroke-linejoin="round"/>
+
+    <!-- roof / cabin -->
+    <path d="M560,106
+             C590,78 642,64 700,66
+             C754,68 796,86 818,112
+             L760,110
+             C702,90 620,90 560,106 Z"
+          fill="#c24a31" stroke="#5b2016" stroke-width="4" stroke-linejoin="round"/>
+
+    <!-- window band -->
+    <path d="M590,112
+             C612,92 650,82 695,84
+             C738,86 770,98 788,116
+             L740,132
+             C706,120 646,120 602,128
+             Z"
+          fill="#bfe8ff" opacity="0.95" stroke="#5b2016" stroke-width="4" stroke-linejoin="round"/>
+
+    <!-- window divider -->
+    <path d="M690,88 L690,128" stroke="#5b2016" stroke-width="4" opacity="0.6"/>
+
+    <!-- highlight -->
+    <path d="M448,170
+             C520,140 650,134 818,164
+             C760,156 640,168 520,196
+             C492,202 466,208 448,214
+             Z"
+          fill="url(#carHighlight)" opacity="0.35"/>
+
+    <!-- headlight (front is LEFT for right->left travel) -->
+    <rect x="410" y="186" width="18" height="20" rx="4"
+          fill="#ffb000" stroke="#b44b00" stroke-width="4"/>
+    <rect x="412" y="190" width="14" height="12" rx="3" fill="#fff" opacity="0.55" stroke="none"/>
+
+    <!-- taillight -->
+    <rect x="872" y="192" width="14" height="18" rx="4"
+          fill="#ff5a5a" stroke="#8a1c1c" stroke-width="4"/>
+
+    <!-- ================= WHEELS ================= -->
+    <g transform="translate(520 226)">
+      <circle r="34" fill="#222"/>
+      <circle r="24" fill="#6b6b6b"/>
+      <circle r="12" fill="#b8b8b8"/>
+      <circle r="4" fill="#e6e6e6"/>
+    </g>
+    <g transform="translate(760 226)">
+      <circle r="34" fill="#222"/>
+      <circle r="24" fill="#6b6b6b"/>
+      <circle r="12" fill="#b8b8b8"/>
+      <circle r="4" fill="#e6e6e6"/>
+    </g>
+
+    <!-- fenders -->
+    <path d="M486,218 C486,194 504,178 526,178 C548,178 566,194 566,218"
+          fill="none" stroke="#303030" stroke-width="10" stroke-linecap="round"/>
+    <path d="M726,218 C726,194 744,178 766,178 C788,178 806,194 806,218"
+          fill="none" stroke="#303030" stroke-width="10" stroke-linecap="round"/>
+
+  </g>
+  </g>
+</svg>

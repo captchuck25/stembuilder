@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 260">
+  <defs>
+    <linearGradient id="pickupBody" x1="0" x2="1">
+      <stop offset="0" stop-color="#3a7bd5"/>
+      <stop offset="1" stop-color="#1f4f9e"/>
+    </linearGradient>
+    <linearGradient id="pickupHighlight" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#000" flood-opacity="0.2"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#shadow)">
+
+    <!-- ================= BED (LEFT) ================= -->
+    <rect x="420" y="120" width="260" height="70" rx="8"
+          fill="url(#pickupBody)" stroke="#14366b" stroke-width="4"/>
+
+    <!-- bed inner line -->
+    <rect x="440" y="132" width="220" height="40" rx="4"
+          fill="#1a3f7a" opacity="0.45" stroke="none"/>
+
+    <!-- tailgate line -->
+    <path d="M420,120 L420,190" stroke="#14366b" stroke-width="4" opacity="0.6"/>
+
+    <!-- ================= CAB (RIGHT) ================= -->
+    <path d="M680,178
+             L680,120
+             C680,80 710,56 756,56
+             L865,56
+             C905,56 930,78 930,118
+             L930,178
+             C930,204 916,220 892,220
+             L720,220
+             C696,220 680,204 680,178 Z"
+          fill="url(#pickupBody)" stroke="#14366b" stroke-width="4" stroke-linejoin="round"/>
+
+    <!-- nose -->
+    <path d="M930,168
+             C950,168 964,156 964,140
+             L964,118
+             C964,98 950,84 930,84
+             L900,84
+             L900,220
+             C916,220 930,204 930,178 Z"
+          fill="#4c8ef7" opacity="0.95" stroke="#14366b" stroke-width="4"/>
+
+    <!-- windshield -->
+    <path d="M780,86
+             L866,86
+             C884,86 898,100 900,118
+             L904,150
+             L788,150 Z"
+          fill="#bfe8ff" stroke="#14366b" stroke-width="4"/>
+
+    <!-- side window -->
+    <rect x="800" y="122" width="70" height="38" rx="6"
+          fill="#7fd0ff" opacity="0.35" stroke="#14366b" stroke-width="4"/>
+
+    <!-- window divider -->
+    <path d="M846,86 L846,160" stroke="#14366b" stroke-width="4" opacity="0.5"/>
+
+    <!-- mirror -->
+    <path d="M920,114 L980,128" stroke="#1f1f1f" stroke-width="10" stroke-linecap="round"/>
+    <rect x="966" y="120" width="26" height="12" rx="4" fill="#1f1f1f"/>
+
+    <!-- headlight -->
+    <rect x="968" y="186" width="18" height="22" rx="4"
+          fill="#ffb000" stroke="#b44b00" stroke-width="4"/>
+
+    <!-- highlight -->
+    <path d="M440,150
+             C520,120 700,116 900,150
+             C820,150 680,166 520,190
+             C480,196 460,202 440,206 Z"
+          fill="url(#pickupHighlight)" opacity="0.35"/>
+
+    <!-- ================= WHEELS ================= -->
+    <g transform="translate(520 226)">
+      <circle r="36" fill="#222"/>
+      <circle r="25" fill="#6b6b6b"/>
+      <circle r="13" fill="#b8b8b8"/>
+      <circle r="4" fill="#e6e6e6"/>
+    </g>
+    <g transform="translate(820 226)">
+      <circle r="36" fill="#222"/>
+      <circle r="25" fill="#6b6b6b"/>
+      <circle r="13" fill="#b8b8b8"/>
+      <circle r="4" fill="#e6e6e6"/>
+    </g>
+
+    <!-- fenders -->
+    <path d="M486,218 C486,190 508,172 536,172 C564,172 586,190 586,218"
+          fill="none" stroke="#303030" stroke-width="10" stroke-linecap="round"/>
+    <path d="M786,218 C786,190 808,172 836,172 C864,172 886,190 886,218"
+          fill="none" stroke="#303030" stroke-width="10" stroke-linecap="round"/>
+
+  </g>
+</svg>
