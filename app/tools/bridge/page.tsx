@@ -323,6 +323,7 @@ type VehicleType =
   | "Semi"
   | "Tank";
 type ExportPaperSize = "letter" | "legal";
+type ExportFormat = "pdf" | "png" | "jpeg";
 const LB_PER_TON = 2000;
 const LOAD_TON_OPTIONS = [8, 15, 30] as const;
 
@@ -422,6 +423,7 @@ export default function BridgeToolPage() {
   const testRafRef = useRef<number | null>(null);
   const testStopProgressRef = useRef<number>(1);
   const [showExportDialog, setShowExportDialog] = useState<boolean>(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [exportPrintIntent, setExportPrintIntent] = useState<"yes" | "no" | null>(null);
   const [exportPaperSize, setExportPaperSize] = useState<ExportPaperSize>("letter");
   const [exportPrintLengthIn, setExportPrintLengthIn] = useState<string>("");
@@ -3173,6 +3175,7 @@ export default function BridgeToolPage() {
   function closeExportDialog() {
     if (isExportingPdf) return;
     setShowExportDialog(false);
+    setExportFormat("pdf");
     setExportPrintIntent(null);
     setExportPaperSize("letter");
     setExportPrintLengthIn("");
@@ -3434,6 +3437,57 @@ export default function BridgeToolPage() {
     }
   }
 
+  async function exportDesignImage(format: "png" | "jpeg") {
+    let svgUrl: string | null = null;
+    try {
+      setIsExportingPdf(true);
+      const svgMarkup = buildExportSvgMarkup();
+      const svgBlob = new Blob([svgMarkup], {
+        type: "image/svg+xml;charset=utf-8",
+      });
+      svgUrl = URL.createObjectURL(svgBlob);
+
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Failed to render export image."));
+        img.src = svgUrl as string;
+      });
+
+      const exportWidth = image.naturalWidth || 1150;
+      const exportHeight = image.naturalHeight || 650;
+      const rasterScale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = exportWidth * rasterScale;
+      canvas.height = exportHeight * rasterScale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Could not create export canvas.");
+      ctx.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, exportWidth, exportHeight);
+      ctx.drawImage(image, 0, 0, exportWidth, exportHeight);
+
+      const mime = format === "jpeg" ? "image/jpeg" : "image/png";
+      const data = canvas.toDataURL(mime, format === "jpeg" ? 0.92 : undefined);
+      const fileBase = (bridgeName.trim() || "bridge-design")
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      const a = document.createElement("a");
+      a.href = data;
+      a.download = `${fileBase || "bridge-design"}.${format === "jpeg" ? "jpg" : "png"}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (error) {
+      console.error("Export failed:", error);
+      window.alert(`Could not export ${format.toUpperCase()}. Please try again.`);
+    } finally {
+      setIsExportingPdf(false);
+      if (svgUrl) URL.revokeObjectURL(svgUrl);
+    }
+  }
+
   // Keyboard shortcuts: V select, J joint, M member, E erase, Esc cancel, G snap toggle
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -3534,8 +3588,10 @@ export default function BridgeToolPage() {
     requestedPrintLength > 0 &&
     requestedPrintLength <= maxPrintableLengthIn;
   const canExportNow =
-    exportPrintIntent === "no" ||
-    (exportPrintIntent === "yes" && printLengthValid);
+    exportFormat === "pdf"
+      ? exportPrintIntent === "no" ||
+        (exportPrintIntent === "yes" && printLengthValid)
+      : true;
 
   return (
     <div className={styles.page}>
@@ -3568,7 +3624,7 @@ export default function BridgeToolPage() {
                 {[
                   { src: "save-file-icon.png", label: "Save Design", disabled: false },
                   { src: "open-file-icon.png", label: "Open Design", disabled: false },
-                  { src: "export-icon.png", label: "Export PDF", disabled: false },
+                  { src: "export-icon.png", label: "Export", disabled: false },
                 ].map((item) => (
                   <button
                     key={item.src}
@@ -4968,44 +5024,74 @@ export default function BridgeToolPage() {
               color: "#111",
             }}
           >
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#111" }}>Export PDF</div>
-            <div style={{ fontSize: 14, color: "#111", fontWeight: 600 }}>
-              Do you plan to print this design?
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setExportPrintIntent("yes")}
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#111" }}>Export Design</div>
+            <label style={{ display: "grid", gap: 6 }}>
+              <span style={{ fontSize: 14, color: "#111", fontWeight: 600 }}>
+                File type
+              </span>
+              <select
+                value={exportFormat}
+                onChange={(e) => {
+                  const next = e.target.value as ExportFormat;
+                  setExportFormat(next);
+                  if (next !== "pdf") setExportPrintIntent("no");
+                }}
                 style={{
-                  padding: "8px 12px",
+                  padding: "8px 10px",
                   borderRadius: 8,
                   border: "1px solid #6a6a6a",
-                  background: exportPrintIntent === "yes" ? "#1f6feb" : "#fff",
-                  color: exportPrintIntent === "yes" ? "#fff" : "#111",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: 13,
+                  fontSize: 14,
+                  background: "#fff",
+                  color: "#111",
                 }}
               >
-                Yes
-              </button>
-              <button
-                onClick={() => setExportPrintIntent("no")}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #6a6a6a",
-                  background: exportPrintIntent === "no" ? "#1f6feb" : "#fff",
-                  color: exportPrintIntent === "no" ? "#fff" : "#111",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                  fontSize: 13,
-                }}
-              >
-                No
-              </button>
-            </div>
+                <option value="pdf">PDF</option>
+                <option value="png">PNG</option>
+                <option value="jpeg">JPEG</option>
+              </select>
+            </label>
 
-            {exportPrintIntent === "yes" ? (
+            {exportFormat === "pdf" ? (
+              <>
+                <div style={{ fontSize: 14, color: "#111", fontWeight: 600 }}>
+                  Do you plan to print this design?
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => setExportPrintIntent("yes")}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #6a6a6a",
+                      background: exportPrintIntent === "yes" ? "#1f6feb" : "#fff",
+                      color: exportPrintIntent === "yes" ? "#fff" : "#111",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                      fontSize: 13,
+                    }}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => setExportPrintIntent("no")}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #6a6a6a",
+                      background: exportPrintIntent === "no" ? "#1f6feb" : "#fff",
+                      color: exportPrintIntent === "no" ? "#fff" : "#111",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                      fontSize: 13,
+                    }}
+                  >
+                    No
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {exportFormat === "pdf" && exportPrintIntent === "yes" ? (
               <>
                 <label style={{ display: "grid", gap: 6 }}>
                   <span style={{ fontSize: 14, color: "#111", fontWeight: 600 }}>
@@ -5071,15 +5157,20 @@ export default function BridgeToolPage() {
               </button>
               <button
                 onClick={async () => {
-                  if (!canExportNow || isExportingPdf || !exportPrintIntent) return;
-                  if (exportPrintIntent === "no") {
-                    await exportDesignPdf({ printIntent: "no" });
+                  if (!canExportNow || isExportingPdf) return;
+                  if (exportFormat === "pdf") {
+                    if (!exportPrintIntent) return;
+                    if (exportPrintIntent === "no") {
+                      await exportDesignPdf({ printIntent: "no" });
+                    } else {
+                      await exportDesignPdf({
+                        printIntent: "yes",
+                        paperSize: exportPaperSize,
+                        printLengthIn: requestedPrintLength,
+                      });
+                    }
                   } else {
-                    await exportDesignPdf({
-                      printIntent: "yes",
-                      paperSize: exportPaperSize,
-                      printLengthIn: requestedPrintLength,
-                    });
+                    await exportDesignImage(exportFormat);
                   }
                   closeExportDialog();
                 }}
