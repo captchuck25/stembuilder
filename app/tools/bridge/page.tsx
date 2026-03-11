@@ -3439,6 +3439,7 @@ export default function BridgeToolPage() {
 
   async function exportDesignImage(format: "png" | "jpeg") {
     let svgUrl: string | null = null;
+    let downloadUrl: string | null = null;
     try {
       setIsExportingPdf(true);
       const svgMarkup = buildExportSvgMarkup();
@@ -3468,16 +3469,34 @@ export default function BridgeToolPage() {
       ctx.drawImage(image, 0, 0, exportWidth, exportHeight);
 
       const mime = format === "jpeg" ? "image/jpeg" : "image/png";
-      const data = canvas.toDataURL(mime, format === "jpeg" ? 0.92 : undefined);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (nextBlob) => {
+            if (!nextBlob) {
+              reject(new Error("Could not create image blob."));
+              return;
+            }
+            resolve(nextBlob);
+          },
+          mime,
+          format === "jpeg" ? 0.92 : undefined
+        );
+      });
+      downloadUrl = URL.createObjectURL(blob);
       const fileBase = (bridgeName.trim() || "bridge-design")
         .toLowerCase()
         .replace(/[^a-z0-9-_]+/g, "-")
         .replace(/^-+|-+$/g, "");
+      const fileName = `${fileBase || "bridge-design"}.${format === "jpeg" ? "jpg" : "png"}`;
       const a = document.createElement("a");
-      a.href = data;
-      a.download = `${fileBase || "bridge-design"}.${format === "jpeg" ? "jpg" : "png"}`;
+      a.href = downloadUrl;
+      a.download = fileName;
       document.body.appendChild(a);
-      a.click();
+      if (typeof a.download === "string") {
+        a.click();
+      } else {
+        window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      }
       a.remove();
     } catch (error) {
       console.error("Export failed:", error);
@@ -3485,6 +3504,9 @@ export default function BridgeToolPage() {
     } finally {
       setIsExportingPdf(false);
       if (svgUrl) URL.revokeObjectURL(svgUrl);
+      if (downloadUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl as string), 1500);
+      }
     }
   }
 
