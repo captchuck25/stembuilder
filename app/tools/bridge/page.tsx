@@ -3102,12 +3102,13 @@ export default function BridgeToolPage() {
   <line x1="${supportA.x}" y1="${supportA.y}" x2="${supportB.x}" y2="${supportB.y}" stroke="#111111" stroke-width="10" stroke-linecap="square" />
   ${memberLines}
   ${nodeCircles}
-  <rect x="${titleX}" y="${titleY}" width="330" height="150" fill="#ffffff" stroke="#111111" stroke-width="2" rx="8" />
+  <rect x="${titleX}" y="${titleY}" width="330" height="178" fill="#ffffff" stroke="#111111" stroke-width="2" rx="8" />
   <text x="${titleX + 14}" y="${titleY + 28}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Bridge Name: ${safeBridgeName}</text>
   <text x="${titleX + 14}" y="${titleY + 56}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Designed by: ${safeDesignerName}</text>
-  <text x="${titleX + 14}" y="${titleY + 84}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Span &amp; Load: ${spanFeet} ft / ${formatTons(loadLb)}</text>
-  <text x="${titleX + 14}" y="${titleY + 112}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Scale: 1 square = 1 ft</text>
-  <text x="${titleX + 14}" y="${titleY + 140}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Inspection ${inspectionPass ? "Pass" : "Fail"} / Stress ${safeStressStatus}</text>
+  <text x="${titleX + 14}" y="${titleY + 84}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Cost: $${costSummary.totalCost.toFixed(2)}</text>
+  <text x="${titleX + 14}" y="${titleY + 112}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Span &amp; Load: ${spanFeet} ft / ${formatTons(loadLb)}</text>
+  <text x="${titleX + 14}" y="${titleY + 140}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Scale: 1 square = 1 ft</text>
+  <text x="${titleX + 14}" y="${titleY + 168}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Inspection ${inspectionPass ? "Pass" : "Fail"} / Stress ${safeStressStatus}</text>
 </svg>`;
   }
 
@@ -3383,7 +3384,7 @@ export default function BridgeToolPage() {
 
       if (printIntent === "yes") {
         const titleW = 3.65;
-        const titleH = 1.7;
+        const titleH = 1.96;
         const titleX = pageW - margin - titleW;
         const titleY = pageH - margin - titleH;
         pdf.setDrawColor(20, 20, 20);
@@ -3396,16 +3397,17 @@ export default function BridgeToolPage() {
         const designerText = designerName.trim() || "";
         pdf.text(`Bridge Name: ${bridgeText}`, titleX + 0.12, titleY + 0.28);
         pdf.text(`Designed by: ${designerText}`, titleX + 0.12, titleY + 0.54);
+        pdf.text(`Cost: $${costSummary.totalCost.toFixed(2)}`, titleX + 0.12, titleY + 0.8);
         pdf.text(
           `Span & Load: ${spanFeet} ft / ${formatTons(loadLb)}`,
           titleX + 0.12,
-          titleY + 0.8
+          titleY + 1.06
         );
-        pdf.text("Scale: 1 square = 1 ft", titleX + 0.12, titleY + 1.06);
+        pdf.text("Scale: 1 square = 1 ft", titleX + 0.12, titleY + 1.32);
         pdf.text(
           `Inspection ${inspectionPass ? "Pass" : "Fail"} / Stress ${stressTestStatusLabel}`,
           titleX + 0.12,
-          titleY + 1.32
+          titleY + 1.58
         );
       }
 
