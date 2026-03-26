@@ -477,6 +477,23 @@ export default function BridgeToolPage() {
     width: 0,
     height: 0,
   });
+
+  function resetAnalysisState(cancelRunningTest = false) {
+    if (cancelRunningTest && testRafRef.current) {
+      cancelAnimationFrame(testRafRef.current);
+      testRafRef.current = null;
+    }
+    setInspectionHasRun(false);
+    setStressTestResult(null);
+    setStressTestError(null);
+    setStressTestFrames(null);
+    stressTestFramesRef.current = null;
+    setLiveStressTestResult(null);
+    setIsTesting(false);
+    setTestProgress(0);
+    testStopProgressRef.current = 1;
+  }
+
   const updateSvgRect = React.useCallback(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -522,6 +539,7 @@ export default function BridgeToolPage() {
         setSelectedMemberIds(new Set());
         setSelectionBox(null);
         setDragNodeId(null);
+        resetAnalysisState(true);
       }
     } catch {
       // Ignore corrupted state.
@@ -570,7 +588,7 @@ export default function BridgeToolPage() {
   ]);
 
   useEffect(() => {
-    setInspectionHasRun(false);
+    resetAnalysisState(true);
   }, [nodes, members, spanFeet, loadLb]);
 
   useEffect(() => {
@@ -3271,14 +3289,7 @@ export default function BridgeToolPage() {
     setSelectedMemberIds(new Set());
     setSelectionBox(null);
     setDragNodeId(null);
-    setStressTestResult(null);
-    setStressTestError(null);
-    setStressTestFrames(null);
-    stressTestFramesRef.current = null;
-    setLiveStressTestResult(null);
-    setIsTesting(false);
-    setTestProgress(0);
-    setInspectionHasRun(false);
+    resetAnalysisState(true);
   }
 
   function onOpenDesignClick() {
