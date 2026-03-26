@@ -1758,6 +1758,46 @@ export default function BridgeToolPage() {
 
 
   const riskyBays = useMemo(() => findNonTriangulatedBays(), [nodes, members]);
+  const unstableJointIds = useMemo(() => {
+    const ids = new Set<string>();
+    const supportIds = new Set([SUPPORT_A_ID, SUPPORT_B_ID]);
+    const collinearTolerance = 1e-3;
+
+    for (const node of nodes) {
+      if (supportIds.has(node.id)) continue;
+      const connected = members.filter((m) => m.a === node.id || m.b === node.id);
+      if (connected.length === 0) continue;
+      if (connected.length === 1) {
+        ids.add(node.id);
+        continue;
+      }
+      if (connected.length !== 2) continue;
+
+      const neighbors = connected
+        .map((m) => nodeById.get(m.a === node.id ? m.b : m.a))
+        .filter((n): n is Node => Boolean(n));
+      if (neighbors.length !== 2) continue;
+
+      const v1x = neighbors[0].x - node.x;
+      const v1y = neighbors[0].y - node.y;
+      const v2x = neighbors[1].x - node.x;
+      const v2y = neighbors[1].y - node.y;
+      const len1 = Math.hypot(v1x, v1y);
+      const len2 = Math.hypot(v2x, v2y);
+      if (len1 < 1e-6 || len2 < 1e-6) {
+        ids.add(node.id);
+        continue;
+      }
+
+      const cross = Math.abs(v1x * v2y - v1y * v2x) / (len1 * len2);
+      const dot = (v1x * v2x + v1y * v2y) / (len1 * len2);
+      if (cross <= collinearTolerance && dot < -0.999) {
+        ids.add(node.id);
+      }
+    }
+
+    return ids;
+  }, [members, nodeById, nodes]);
   const longMemberIds = useMemo(() => {
     const ids = new Set<string>();
     for (const m of members) {
@@ -1912,11 +1952,15 @@ export default function BridgeToolPage() {
       (m.a === SUPPORT_B_ID && m.b === SUPPORT_A_ID)
   );
   const longMembersFail = longMembersCount > 0;
+  const unstableJointsFail = unstableJointIds.size > 0;
   const inspectionFailReasons = [
     !spanConnectivity ? "Connectivity: left support not connected to right support." : null,
     !supportAOk ? "Left support must connect to at least 2 members." : null,
     !supportBOk ? "Right support must connect to at least 2 members." : null,
     riskyBays.length > 0 ? "Non-triangulated bays present." : null,
+    unstableJointsFail
+      ? "Unstable joint present. Do not place a joint in the middle of a single member unless another member also connects there."
+      : null,
     longMembersFail ? "Members exceed maximum length." : null,
     !topChordPass ? "Missing continuous top chord." : null,
     !bottomChordPass
@@ -1940,6 +1984,7 @@ export default function BridgeToolPage() {
     supportAOk &&
     supportBOk &&
     riskyBays.length === 0 &&
+    !unstableJointsFail &&
     !longMembersFail &&
     topChordPass &&
     bottomChordPass;
@@ -2101,6 +2146,13 @@ export default function BridgeToolPage() {
     if (nodeCount === 0 || members.length === 0) {
       setStressTestResult(null);
     setStressTestError("Structure unstable - cannot run stress test.");
+      return;
+    }
+    if (unstableJointIds.size > 0) {
+      setStressTestResult(null);
+      setStressTestError(
+        "Unstable joint detected. Remove joints placed in the middle of a single member or connect another member to that joint."
+      );
       return;
     }
 
