@@ -331,6 +331,8 @@ const UNITS_PER_FOOT = 20; // 20 SVG units = 1 ft
 const CANVAS_CENTER_X = 500;
 const INITIAL_SPAN_FEET = 40;
 const COST_PER_JOINT = 5 * COST_SCALE;
+const DEFAULT_SNAP_TO_GRID = true;
+const DEFAULT_SNAP_STEP_FEET = 5 as const;
 type LoadLevel = "low" | "med" | "high";
 const MAX_MEMBER_FT = 12;
 const SUPPORT_X: Record<number, { left: number; right: number }> = {
@@ -379,9 +381,11 @@ export default function BridgeToolPage() {
   const [_historyVersion, setHistoryVersion] = useState<number>(0);
   const dragUndoArmedRef = useRef<boolean>(false);
   const [tool, setTool] = useState<Tool>("select");
-  const [snapToGrid, setSnapToGrid] = useState<boolean>(true);
+  const [snapToGrid, setSnapToGrid] = useState<boolean>(DEFAULT_SNAP_TO_GRID);
   const [showGrid, setShowGrid] = useState<boolean>(false);
-  const [snapStepFeet, setSnapStepFeet] = useState<0.5 | 1 | 2.5 | 5>(1);
+  const [snapStepFeet, setSnapStepFeet] = useState<0.5 | 1 | 2.5 | 5>(
+    DEFAULT_SNAP_STEP_FEET
+  );
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const [inspectionHasRun, setInspectionHasRun] = useState<boolean>(false);
   const [costExpanded, setCostExpanded] = useState<boolean>(false);
@@ -462,9 +466,15 @@ export default function BridgeToolPage() {
     current: { x: number; y: number };
   } | null>(null);
   const memberDragStartRef = useRef<string | null>(null);
+  const [memberPreview, setMemberPreview] = useState<{
+    x: number;
+    y: number;
+    targetNodeId: string | null;
+  } | null>(null);
 
   // Drag
   const [dragNodeId, setDragNodeId] = useState<string | null>(null);
+  const [isCoarsePointer, setIsCoarsePointer] = useState<boolean>(false);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [svgRect, setSvgRect] = useState<{
     top: number;
@@ -502,6 +512,15 @@ export default function BridgeToolPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(pointer: coarse)");
+    const update = () => setIsCoarsePointer(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
     if (hasLoadedRef.current) return;
     try {
       const raw = window.localStorage.getItem("bridge-designer-state");
@@ -523,8 +542,8 @@ export default function BridgeToolPage() {
       if (parsed?.nodes?.length && parsed?.members) {
         setSpanFeet(parsed.spanFeet ?? INITIAL_SPAN_FEET);
         setLoadLb(normalizeLoadLb(parsed.loadLb ?? LOAD_TON_OPTIONS[0] * LB_PER_TON));
-        setSnapStepFeet(parsed.snapStepFeet ?? 1);
-        setSnapToGrid(parsed.snapToGrid ?? true);
+        setSnapStepFeet(parsed.snapStepFeet ?? DEFAULT_SNAP_STEP_FEET);
+        setSnapToGrid(parsed.snapToGrid ?? DEFAULT_SNAP_TO_GRID);
         setShowGrid(parsed.showGrid ?? false);
       const normalizedMembers = parsed.members.map((m) => ({
         ...m,
@@ -676,6 +695,9 @@ export default function BridgeToolPage() {
     () => members.find((m) => m.id === selectedMemberId) ?? null,
     [members, selectedMemberId]
   );
+  const memberPreviewStart = memberDragStartRef.current
+    ? nodeById.get(memberDragStartRef.current) ?? null
+    : null;
   const activeStressTestResult = isTesting
     ? liveStressTestResult
     : stressTestResult;
@@ -705,6 +727,32 @@ export default function BridgeToolPage() {
     for (const w of activeStressTestResult.worstMembers) map[w.id] = w.utilization;
     return map;
   }, [activeStressTestResult]);
+  const memberHitStrokeWidth =
+    tool === "erase"
+      ? isCoarsePointer
+        ? 28
+        : 56
+      : tool === "select"
+      ? isCoarsePointer
+        ? 18
+        : 28
+      : 28;
+  const nodeHitRadius =
+    tool === "erase"
+      ? isCoarsePointer
+        ? 11
+        : 18
+      : tool === "member"
+      ? isCoarsePointer
+        ? 11
+        : 14
+      : 14;
+  const eraseCursor = isCoarsePointer ? "crosshair" : "not-allowed";
+  const jointDragCursor = isCoarsePointer
+    ? "crosshair"
+    : dragNodeId
+    ? "grabbing"
+    : "grab";
   const memberCapById = useMemo(() => {
     if (activeStressTestResult?.memberCapById) {
       return activeStressTestResult.memberCapById;
@@ -968,6 +1016,8 @@ export default function BridgeToolPage() {
     setSelectedMemberIds(new Set());
     setDragNodeId(null);
     setSelectionBox(null);
+    setSnapStepFeet(DEFAULT_SNAP_STEP_FEET);
+    setSnapToGrid(DEFAULT_SNAP_TO_GRID);
     setStressTestResult(null);
     setStressTestError(null);
     setBridgeName("");
@@ -1323,6 +1373,25 @@ export default function BridgeToolPage() {
       }
     }
     return bestId;
+  }
+
+  function findClosestNodeAtPoint(
+    x: number,
+    y: number,
+    threshold: number,
+    excludeId?: string
+  ): Node | null {
+    let best: Node | null = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (const n of nodes) {
+      if (excludeId && n.id === excludeId) continue;
+      const d = Math.hypot(n.x - x, n.y - y);
+      if (d <= threshold && d < bestDist) {
+        best = n;
+        bestDist = d;
+      }
+    }
+    return best;
   }
 
   function segmentIntersectsRect(
@@ -2747,9 +2816,9 @@ export default function BridgeToolPage() {
     setLiveStressTestResult(null);
   }
 
-  function startStressTest() {
+  function startStressTest(forceStart = false) {
     if (isTesting) return;
-    if (!canRunStressTest) {
+    if (!forceStart && !canRunStressTest) {
       setStressTestResult(null);
     setStressTestError("Run and pass the design inspection before stress testing.");
       return;
@@ -2799,6 +2868,19 @@ export default function BridgeToolPage() {
     testRafRef.current = requestAnimationFrame(tick);
   }
 
+  function runBridgeExaminer() {
+    if (isTesting) return;
+    setInspectionHasRun(true);
+    if (!inspectionPassRaw) {
+      setStressTestResult(null);
+      setStressTestError(
+        "Bridge cannot be stress tested until it passes its design inspection."
+      );
+      return;
+    }
+    startStressTest(true);
+  }
+
   function applySpanFeet(nextSpanFeet: 20 | 40 | 60 | 80 | 100) {
     pushHistorySnapshot();
     const { left: ax, right: bx } = SUPPORT_X[nextSpanFeet];
@@ -2825,6 +2907,10 @@ export default function BridgeToolPage() {
       e.stopPropagation();
       memberDragStartRef.current = nodeId;
       setPendingNodeId(nodeId);
+      const startNode = nodeById.get(nodeId);
+      setMemberPreview(
+        startNode ? { x: startNode.x, y: startNode.y, targetNodeId: null } : null
+      );
       setSelectedMemberId(null);
       setSelectedMemberIds(new Set());
       return;
@@ -2856,6 +2942,17 @@ export default function BridgeToolPage() {
         ? findClosestMemberIntersection(raw.x, raw.y, 18) ?? raw
         : raw;
     const { x, y } = tool === "joint" ? clampToRulerBounds(snapped) : snapped;
+
+    if (tool === "member" && memberDragStartRef.current) {
+      const closest = findClosestNodeAtPoint(loc.x, loc.y, 12, memberDragStartRef.current);
+      setMemberPreview(
+        closest
+          ? { x: closest.x, y: closest.y, targetNodeId: closest.id }
+          : { x: loc.x, y: loc.y, targetNodeId: null }
+      );
+      setHoverPoint(null);
+      return;
+    }
 
     if (dragNodeId) {
       const nextPoint =
@@ -2939,19 +3036,11 @@ export default function BridgeToolPage() {
     if (tool === "member" && memberDragStartRef.current) {
       const startId = memberDragStartRef.current;
       memberDragStartRef.current = null;
+      setMemberPreview(null);
       const loc = svgPointFromClient(e.clientX, e.clientY);
       if (loc) {
-        const threshold = 12;
-        let closest: Node | null = null;
-        let closestDist = Number.POSITIVE_INFINITY;
-        for (const n of nodes) {
-          const d = Math.hypot(n.x - loc.x, n.y - loc.y);
-          if (d < closestDist) {
-            closestDist = d;
-            closest = n;
-          }
-        }
-        if (closest && closestDist <= threshold && closest.id !== startId) {
+        const closest = findClosestNodeAtPoint(loc.x, loc.y, 12, startId);
+        if (closest) {
           pushHistorySnapshot();
           addMemberChain(startId, closest.id);
         }
@@ -2967,6 +3056,7 @@ export default function BridgeToolPage() {
     endDrag();
     setSelectionBox(null);
     setHoverPoint(null);
+    setMemberPreview(null);
   }
 
   // -------- A1: Engineering detection (logic only; console output) --------
@@ -3325,8 +3415,8 @@ export default function BridgeToolPage() {
 
     setSpanFeet(parsed.spanFeet ?? INITIAL_SPAN_FEET);
     setLoadLb(normalizeLoadLb(parsed.loadLb ?? LOAD_TON_OPTIONS[0] * LB_PER_TON));
-    setSnapStepFeet(parsed.snapStepFeet ?? 1);
-    setSnapToGrid(parsed.snapToGrid ?? true);
+    setSnapStepFeet(parsed.snapStepFeet ?? DEFAULT_SNAP_STEP_FEET);
+    setSnapToGrid(parsed.snapToGrid ?? DEFAULT_SNAP_TO_GRID);
     setShowGrid(parsed.showGrid ?? false);
     setNodes(parsed.nodes);
     setMembers(normalizedMembers);
@@ -3972,7 +4062,7 @@ export default function BridgeToolPage() {
                     : tool === "joint" || tool === "member"
                     ? "crosshair"
                     : tool === "erase"
-                    ? "not-allowed"
+                    ? eraseCursor
                     : dragNodeId
                     ? "grabbing"
                     : "default",
@@ -4222,6 +4312,29 @@ export default function BridgeToolPage() {
             />
           ) : null}
 
+          {tool === "member" && memberPreviewStart && memberPreview ? (
+            <g opacity={0.7} pointerEvents="none">
+              <line
+                x1={memberPreviewStart.x}
+                y1={memberPreviewStart.y}
+                x2={memberPreview.x}
+                y2={memberPreview.y}
+                stroke="#4f5560"
+                strokeWidth={thicknessToStrokeWidth(activeMemberType)}
+                strokeDasharray={memberPreview.targetNodeId ? "none" : "10 8"}
+                strokeLinecap="round"
+              />
+              <circle
+                cx={memberPreview.x}
+                cy={memberPreview.y}
+                r={memberPreview.targetNodeId ? 8 : 5}
+                fill={memberPreview.targetNodeId ? "rgba(79, 85, 96, 0.22)" : "rgba(79, 85, 96, 0.12)"}
+                stroke="#4f5560"
+                strokeWidth={1.5}
+              />
+            </g>
+          ) : null}
+
           {/* A2: highlight non-triangulated bays */}
           <g opacity={0.35} pointerEvents="none">
             {inspectionHasRun
@@ -4311,7 +4424,7 @@ export default function BridgeToolPage() {
                     x2={bPos.x}
                     y2={bPos.y}
                     stroke="transparent"
-                    strokeWidth={tool === "select" ? 28 : tool === "erase" ? 56 : 28}
+                    strokeWidth={memberHitStrokeWidth}
                     data-kind="member-hit"
                     pointerEvents="stroke"
                     onClick={(e) => {
@@ -4321,7 +4434,7 @@ export default function BridgeToolPage() {
                     style={{
                       cursor:
                         tool === "erase"
-                          ? "not-allowed"
+                          ? eraseCursor
                           : tool === "member"
                           ? "crosshair"
                           : "default",
@@ -4429,7 +4542,7 @@ export default function BridgeToolPage() {
                     <circle
                       cx={p.x}
                       cy={p.y}
-                      r={tool === "erase" ? 18 : 14}
+                      r={nodeHitRadius}
                       fill="transparent"
                       stroke="transparent"
                       strokeWidth={1}
@@ -4458,7 +4571,7 @@ export default function BridgeToolPage() {
                     style={{
                       cursor:
                         tool === "erase"
-                          ? "not-allowed"
+                          ? eraseCursor
                           : tool === "member"
                           ? "crosshair"
                           : tool === "select"
@@ -4466,9 +4579,7 @@ export default function BridgeToolPage() {
                           : tool === "joint"
                           ? isSupport
                             ? "default"
-                            : dragNodeId === n.id
-                            ? "grabbing"
-                            : "grab"
+                            : jointDragCursor
                           : "pointer",
                     }}
                   />
@@ -4781,6 +4892,22 @@ export default function BridgeToolPage() {
                   <div className={styles.sideCardTitle}>Bridge Examiner</div>
                 </div>
                 <div className={styles.sideCardBody} style={{ display: "grid", gap: 12 }}>
+                    <button
+                      onClick={runBridgeExaminer}
+                      style={{
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #b8b8b8",
+                        background: "#eeeeee",
+                        color: "#222",
+                        cursor: isTesting ? "wait" : "pointer",
+                        fontWeight: 700,
+                        fontSize: 12,
+                        width: "fit-content",
+                      }}
+                    >
+                      {isTesting ? "Running Test..." : "Run Bridge Test"}
+                    </button>
                     <div style={{ display: "grid", gap: 6 }}>
                       <div style={{ fontWeight: 800, fontSize: 12 }}>Design Inspection</div>
                       <div style={{ fontWeight: 700 }}>
@@ -4790,22 +4917,6 @@ export default function BridgeToolPage() {
                           ? "Pass"
                           : "Fail"}
                       </div>
-                      <button
-                        onClick={() => setInspectionHasRun(true)}
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 8,
-                          border: "1px solid #b8b8b8",
-                          background: "#eeeeee",
-                          color: "#222",
-                          cursor: "pointer",
-                          fontWeight: 600,
-                          fontSize: 12,
-                          width: "fit-content",
-                        }}
-                      >
-                        Run Now
-                      </button>
                       {inspectionHasRun && inspectionFailReasons.length > 0 ? (
                         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11 }}>
                           {inspectionFailReasons.map((reason) => (
@@ -4854,27 +4965,6 @@ export default function BridgeToolPage() {
                       <div style={{ fontWeight: 800, fontSize: 12 }}>Stress Test</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
-                          onClick={startStressTest}
-                          disabled={!canRunStressTest}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #b8b8b8",
-                            background: canRunStressTest ? "#eeeeee" : "#dddddd",
-                            color: "#222",
-                            cursor: canRunStressTest ? "pointer" : "not-allowed",
-                            fontWeight: 600,
-                            fontSize: 12,
-                          }}
-                          title={
-                            canRunStressTest
-                              ? "Run stress test"
-                              : "Pass design inspection to unlock stress test"
-                          }
-                        >
-                          Run Stress Test
-                        </button>
-                        <button
                           onClick={clearStressTest}
                           style={{
                             padding: "6px 10px",
@@ -4910,6 +5000,8 @@ export default function BridgeToolPage() {
                       <div style={{ fontSize: 11, color: "#444" }}>
                         {isTesting
                           ? "Running..."
+                          : inspectionHasRun && !inspectionPass
+                          ? "Bridge cannot be stress tested until it passes its design inspection."
                           : stressFailReason
                           ? stressFailReason
                           : activeStressTestError
