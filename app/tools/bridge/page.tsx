@@ -1,7 +1,12 @@
 ﻿"use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useUser, Show, UserButton } from "@clerk/nextjs";
 import BridgeScene from "./components/BridgeScene";
+import SiteHeader from "@/app/components/SiteHeader";
+import { upsertBridgeDesign, checkBridgeNameExists, fetchBridgeDesignById } from "@/lib/achievements";
 import styles from "./bridge-layout.module.css";
 
 type MemberType =
@@ -353,9 +358,20 @@ const ROADWAY_Y = 307;
 const SUPPORT_A_ID = "support-a";
 const SUPPORT_B_ID = "support-b";
 
-export default function BridgeToolPage() {
+function BridgeToolPage() {
+  const { user } = useUser();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Name of the cloud design currently open — saves go back to this record
+  const [activeCloudName, setActiveCloudName] = useState<string | null>(null);
+  // isDirtyRef drives the pushState intercept (sync); isDirty drives the dialog re-render
+  const isDirtyRef = useRef(false);
+  const [isDirty, setIsDirtyState] = useState(false);
+  function setIsDirty(val: boolean) { isDirtyRef.current = val; setIsDirtyState(val); }
+  // While true, state changes from loading a design don't mark the work as dirty
+  const suppressDirtyRef = useRef(true);
+  const [leaveUrl, setLeaveUrl] = useState<string | null>(null);
   const hasLoadedRef = useRef<boolean>(false);
-  const saveRafRef = useRef<number | null>(null);
   const historyRef = useRef<
     Array<{
       nodes: Node[];
@@ -433,8 +449,10 @@ export default function BridgeToolPage() {
   const [exportPrintLengthIn, setExportPrintLengthIn] = useState<string>("");
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   const [showSaveDialog, setShowSaveDialog] = useState<boolean>(false);
-  const [saveFileName, setSaveFileName] = useState<string>("");
-  const openFileInputRef = useRef<HTMLInputElement | null>(null);
+  // "name-required" = bridge has no name yet, "confirm-replace" = name already exists in cloud
+  const [saveDialogMode, setSaveDialogMode] = useState<"name-required" | "confirm-replace">("name-required");
+  const [savePendingName, setSavePendingName] = useState<string>("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // Real, clickable, connectable supports ON the grid
   const { left: initialLeft, right: initialRight } = SUPPORT_X[INITIAL_SPAN_FEET];
@@ -522,93 +540,54 @@ export default function BridgeToolPage() {
 
   useEffect(() => {
     if (hasLoadedRef.current) return;
-    try {
-      const raw = window.localStorage.getItem("bridge-designer-state");
-      if (!raw) {
-        hasLoadedRef.current = true;
-        return;
-      }
-      const parsed = JSON.parse(raw) as {
-        nodes: Node[];
-        members: Member[];
-        spanFeet: 20 | 40 | 60 | 80 | 100;
-        loadLb: number;
-        snapStepFeet: 0.5 | 1 | 2.5 | 5;
-        snapToGrid: boolean;
-        showGrid: boolean;
-        bridgeName?: string;
-        designerName?: string;
-      };
-      if (parsed?.nodes?.length && parsed?.members) {
-        setSpanFeet(parsed.spanFeet ?? INITIAL_SPAN_FEET);
-        setLoadLb(normalizeLoadLb(parsed.loadLb ?? LOAD_TON_OPTIONS[0] * LB_PER_TON));
-        setSnapStepFeet(parsed.snapStepFeet ?? DEFAULT_SNAP_STEP_FEET);
-        setSnapToGrid(parsed.snapToGrid ?? DEFAULT_SNAP_TO_GRID);
-        setShowGrid(parsed.showGrid ?? false);
-      const normalizedMembers = parsed.members.map((m) => ({
-        ...m,
-        grade: m.grade ?? "mild",
-      }));
-        setNodes(parsed.nodes);
-        setMembers(normalizedMembers);
-        setBridgeName(parsed.bridgeName ?? "");
-        setDesignerName(parsed.designerName ?? "");
-        setPendingNodeId(null);
-        setSelectedMemberId(null);
-        setSelectedMemberIds(new Set());
-        setSelectionBox(null);
-        setDragNodeId(null);
-        resetAnalysisState(true);
-      }
-    } catch {
-      // Ignore corrupted state.
-    } finally {
-      hasLoadedRef.current = true;
-    }
+    hasLoadedRef.current = true;
+    suppressDirtyRef.current = false;
   }, []);
 
+  // Load a specific cloud design when opened via ?id= (from My Work / My Classes)
   useEffect(() => {
-    if (!hasLoadedRef.current) return;
-    if (saveRafRef.current !== null) {
-      window.cancelAnimationFrame(saveRafRef.current);
-    }
-    saveRafRef.current = window.requestAnimationFrame(() => {
-      const payload = {
-        nodes,
-        members,
-        spanFeet,
-        loadLb,
-        snapStepFeet,
-        snapToGrid,
-        showGrid,
-        bridgeName,
-        designerName,
-      };
-      try {
-        window.localStorage.setItem(
-          "bridge-designer-state",
-          JSON.stringify(payload)
-        );
-      } catch {
-        // Ignore storage errors.
-      }
-      saveRafRef.current = null;
+    const id = searchParams.get("id");
+    if (!id) return;
+    fetchBridgeDesignById(id).then(design => {
+      if (!design) return;
+      suppressDirtyRef.current = true;
+      applyImportedBridgeState({
+        nodes: design.nodes as Node[],
+        members: design.members as Member[],
+        spanFeet: design.span_feet as (20 | 40 | 60 | 80 | 100) ?? undefined,
+        loadLb: design.load_lb ?? undefined,
+        bridgeName: design.name,
+        designerName: design.designer_name ?? undefined,
+      });
+      setActiveCloudName(design.name);
+      setIsDirty(false);
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        suppressDirtyRef.current = false;
+      }));
     });
-  }, [
-    nodes,
-    members,
-    spanFeet,
-    loadLb,
-    snapStepFeet,
-    snapToGrid,
-    showGrid,
-    bridgeName,
-    designerName,
-  ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!hasLoadedRef.current || suppressDirtyRef.current) return;
+    setIsDirty(true);
+  }, [nodes, members, spanFeet, loadLb, snapStepFeet, snapToGrid, showGrid, bridgeName, designerName]);
 
   useEffect(() => {
     resetAnalysisState(true);
   }, [nodes, members, spanFeet, loadLb]);
+
+  // Hard navigation guard (tab close, refresh, browser back to external site)
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  function safeNavigate(url: string) {
+    if (isDirtyRef.current) { setLeaveUrl(url); } else { router.push(url); }
+  }
 
   useEffect(() => {
     const { left, right } = SUPPORT_X[spanFeet];
@@ -747,7 +726,7 @@ export default function BridgeToolPage() {
         ? 11
         : 14
       : 14;
-  const eraseCursor = isCoarsePointer ? "crosshair" : "not-allowed";
+  const eraseCursor = isCoarsePointer ? "crosshair" : `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><g transform='rotate(-45,16,16)'><rect x='12' y='1' width='8' height='14' rx='1.5' fill='%23fdd835' stroke='%23e6b800' stroke-width='1'/><rect x='13' y='2' width='2.5' height='10' rx='1' fill='%23ffffff' fill-opacity='0.25'/><rect x='11.5' y='15' width='9' height='4' rx='0.5' fill='%23c0c0c0' stroke='%23999999' stroke-width='0.8'/><rect x='12' y='19' width='8' height='9' rx='1' fill='%23f4a0a0' stroke='%23cc7070' stroke-width='1'/><rect x='12' y='26' width='8' height='2' rx='0' fill='%23e07878'/><rect x='13.5' y='20' width='2.5' height='6' rx='1' fill='%23ffffff' fill-opacity='0.28'/></g></svg>") 23 23, crosshair`;
   const jointDragCursor = isCoarsePointer
     ? "crosshair"
     : dragNodeId
@@ -3344,47 +3323,59 @@ export default function BridgeToolPage() {
 
   function closeSaveDialog() {
     setShowSaveDialog(false);
-    setSaveFileName("");
+    setSavePendingName("");
   }
 
-  function sanitizeFileName(value: string): string {
-    return value
-      .trim()
-      .replace(/[^a-zA-Z0-9-_ ]+/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-")
-      .replace(/^-+|-+$/g, "");
+  async function onSaveClick() {
+    if (!user) { window.alert("Sign in to save your design."); return; }
+    const name = bridgeName.trim();
+
+    // If this design was opened from the cloud, save back to the same record directly
+    if (activeCloudName) {
+      await performCloudSave(activeCloudName);
+      return;
+    }
+
+    if (!name) {
+      setSavePendingName("");
+      setSaveDialogMode("name-required");
+      setShowSaveDialog(true);
+      return;
+    }
+    // Check for duplicate name in cloud
+    const exists = await checkBridgeNameExists(user.id, name);
+    if (exists) {
+      setSaveDialogMode("confirm-replace");
+      setShowSaveDialog(true);
+      return;
+    }
+    await performCloudSave(name);
   }
 
-  function downloadBridgeState() {
-    const safeName = sanitizeFileName(saveFileName);
-    if (!safeName) return;
-    const payload = {
-      schemaVersion: 1,
-      exportedAt: new Date().toISOString(),
-      bridgeName,
-      designerName,
-      spanFeet,
-      loadLb,
-      snapStepFeet,
-      snapToGrid,
-      showGrid,
-      materialGrade,
-      activeMemberType,
-      nodes,
-      members,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${safeName}.bridge.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  async function performCloudSave(name: string) {
+    if (!user) return;
+    setSaveStatus("saving");
+    // If saving under a new name from the dialog, update the title box too
+    if (name !== bridgeName) setBridgeName(name);
+    try {
+      await upsertBridgeDesign(user.id, {
+        name,
+        spanFeet,
+        loadLb,
+        designerName,
+        nodes,
+        members,
+        passed: stressTestResult != null ? stressTestPass : null,
+        cost: costSummary.totalCost,
+      });
+      setActiveCloudName(name);
+      setIsDirty(false);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2500);
+    } catch {
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
     closeSaveDialog();
   }
 
@@ -3434,38 +3425,6 @@ export default function BridgeToolPage() {
     resetAnalysisState(true);
   }
 
-  function onOpenDesignClick() {
-    openFileInputRef.current?.click();
-  }
-
-  async function onOpenDesignFileChange(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const inputEl = e.target;
-    const file = inputEl.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as {
-        nodes?: Node[];
-        members?: Member[];
-        spanFeet?: 20 | 40 | 60 | 80 | 100;
-        loadLb?: number;
-        snapStepFeet?: 0.5 | 1 | 2.5 | 5;
-        snapToGrid?: boolean;
-        showGrid?: boolean;
-        bridgeName?: string;
-        designerName?: string;
-        materialGrade?: MaterialGrade;
-        activeMemberType?: MemberType;
-      };
-      applyImportedBridgeState(parsed);
-    } catch {
-      window.alert("Could not open this bridge file.");
-    } finally {
-      inputEl.value = "";
-    }
-  }
 
   async function exportDesignPdf(options?: {
     printIntent: "yes" | "no";
@@ -3772,26 +3731,21 @@ export default function BridgeToolPage() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.headerStrip}>
-        <div className={styles.headerInner}>
-          <img
-            className={styles.logoCentered}
-            src="/ui/sb-logo.png"
-            alt="STEM Builder"
-          />
-          <nav className={styles.nav}>
-            <a className={styles.navButton} href="/teachers">
-              Teachers
-            </a>
-            <a className={styles.navButton} href="/login">
-              Log In
-            </a>
-            <a className={styles.navButton} href="/signup">
-              Sign Up
-            </a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader
+        hideUserButton
+        onLogoClick={() => safeNavigate("/")}
+      >
+        <Show when="signed-in">
+          <UserButton appearance={{ elements: { avatarBox: { width: 48, height: 48 } } }}>
+            <UserButton.MenuItems>
+              <UserButton.Action label="My Work" labelIcon={<span>🏆</span>}
+                onClick={() => safeNavigate("/mywork")} />
+              <UserButton.Action label="My Classes" labelIcon={<span>🏫</span>}
+                onClick={() => safeNavigate("/dashboard")} />
+            </UserButton.MenuItems>
+          </UserButton>
+        </Show>
+      </SiteHeader>
 
       <main className={styles.main}>
         <div className={styles.frame}>
@@ -3800,18 +3754,14 @@ export default function BridgeToolPage() {
               <div className={styles.toolbarIcons}>
                 {[
                   { src: "save-file-icon.png", label: "Save Design", disabled: false },
-                  { src: "open-file-icon.png", label: "Open Design", disabled: false },
                   { src: "export-icon.png", label: "Export", disabled: false },
                 ].map((item) => (
                   <button
                     key={item.src}
                     onClick={
                       item.src === "save-file-icon.png"
-                        ? () => setShowSaveDialog(true)
-                        : item.src === "open-file-icon.png"
-                        ? onOpenDesignClick
-                        :
-                      item.src === "export-icon.png"
+                        ? onSaveClick
+                        : item.src === "export-icon.png"
                         ? () => setShowExportDialog(true)
                         : undefined
                     }
@@ -3824,6 +3774,16 @@ export default function BridgeToolPage() {
                     <img src={`/ui/${item.src}`} alt={item.label} />
                   </button>
                 ))}
+                {/* Save status feedback */}
+                {saveStatus === "saving" && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#888" }}>Saving…</span>
+                )}
+                {saveStatus === "saved" && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a" }}>✓ Saved</span>
+                )}
+                {saveStatus === "error" && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#dc2626" }}>Save failed</span>
+                )}
                 <button
                   onClick={undoLastEdit}
                   className={`${styles.toolbarIconButton} ${
@@ -5096,6 +5056,53 @@ export default function BridgeToolPage() {
         </div>
       </main>
 
+      {leaveUrl && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          display: "grid", placeItems: "center", zIndex: 60, padding: 16 }}>
+          <div style={{ background: "#fff", border: "2px solid #1f1f1f", borderRadius: 16,
+            padding: "28px 32px", maxWidth: 400, width: "100%", textAlign: "center",
+            boxShadow: "0 12px 32px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 900, color: "#111" }}>
+              Unsaved Changes
+            </h3>
+            <p style={{ margin: "0 0 24px", fontSize: 14, color: "#555", lineHeight: 1.6 }}>
+              You have unsaved changes to your bridge design. If you leave now your recent changes will be lost.
+            </p>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button onClick={() => setLeaveUrl(null)}
+                style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #d1d5db",
+                  background: "#fff", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                Stay & Keep Editing
+              </button>
+              {bridgeName.trim() && (
+                <button onClick={async () => {
+                  const url = leaveUrl!;
+                  setLeaveUrl(null);
+                  await performCloudSave(activeCloudName ?? bridgeName.trim());
+                  // isDirty is now false after save — router.push will pass through
+                  router.push(url);
+                }}
+                  style={{ padding: "10px 20px", borderRadius: 8, border: "none",
+                    background: "#2563eb", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                  Save & Leave
+                </button>
+              )}
+              <button onClick={() => {
+                const url = leaveUrl!;
+                setIsDirty(false); // Clear before navigating so pushState lets it through
+                setLeaveUrl(null);
+                router.push(url);
+              }}
+                style={{ padding: "10px 20px", borderRadius: 8, border: "none",
+                  background: "#dc2626", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                Leave Without Saving
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSaveDialog ? (
         <div
           style={{
@@ -5121,59 +5128,65 @@ export default function BridgeToolPage() {
               color: "#111",
             }}
           >
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#111" }}>Save Design</div>
-            <label style={{ display: "grid", gap: 6 }}>
-              <span style={{ fontSize: 14, color: "#111", fontWeight: 600 }}>
-                Name your save file
-              </span>
-              <input
-                type="text"
-                value={saveFileName}
-                onChange={(e) => setSaveFileName(e.target.value)}
-                placeholder="my-bridge-design"
-                style={{
-                  padding: "8px 10px",
-                  borderRadius: 8,
-                  border: "1px solid #6a6a6a",
-                  fontSize: 14,
-                  color: "#111",
-                }}
-              />
-              <span style={{ fontSize: 12, color: "#333", fontWeight: 600 }}>
-                File type: .bridge.json
-              </span>
-            </label>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
-              <button
-                onClick={closeSaveDialog}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #6a6a6a",
-                  background: "#fff",
-                  color: "#111",
-                  cursor: "pointer",
-                  fontWeight: 700,
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={downloadBridgeState}
-                disabled={!sanitizeFileName(saveFileName)}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: "1px solid #1d5f2c",
-                  background: sanitizeFileName(saveFileName) ? "#2f9e44" : "#b7d9bf",
-                  color: "#fff",
-                  fontWeight: 700,
-                  cursor: sanitizeFileName(saveFileName) ? "pointer" : "not-allowed",
-                }}
-              >
-                Download Now
-              </button>
-            </div>
+            {saveDialogMode === "name-required" ? (
+              <>
+                <div style={{ fontWeight: 800, fontSize: 18, color: "#111" }}>Name Your Bridge</div>
+                <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
+                  Enter a name for this design before saving.
+                </p>
+                <input
+                  type="text"
+                  value={savePendingName}
+                  onChange={(e) => setSavePendingName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && savePendingName.trim() && performCloudSave(savePendingName.trim())}
+                  placeholder="My Bridge Design"
+                  autoFocus
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #6a6a6a",
+                    fontSize: 14,
+                    color: "#111",
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                  <button onClick={closeSaveDialog}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #6a6a6a",
+                      background: "#fff", color: "#111", cursor: "pointer", fontWeight: 700 }}>
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => { const n = savePendingName.trim(); if (n) performCloudSave(n); }}
+                    disabled={!savePendingName.trim()}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #1d5f2c",
+                      background: savePendingName.trim() ? "#2f9e44" : "#b7d9bf",
+                      color: "#fff", fontWeight: 700,
+                      cursor: savePendingName.trim() ? "pointer" : "not-allowed" }}>
+                    Save
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 800, fontSize: 18, color: "#111" }}>Replace Existing Design?</div>
+                <p style={{ margin: 0, fontSize: 14, color: "#555" }}>
+                  A design named <strong>"{bridgeName}"</strong> is already saved.
+                  Do you want to replace it?
+                </p>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+                  <button onClick={closeSaveDialog}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #6a6a6a",
+                      background: "#fff", color: "#111", cursor: "pointer", fontWeight: 700 }}>
+                    Cancel
+                  </button>
+                  <button onClick={() => performCloudSave(bridgeName.trim())}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #b45309",
+                      background: "#d97706", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+                    Replace
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       ) : null}
@@ -5371,16 +5384,17 @@ export default function BridgeToolPage() {
         </div>
       ) : null}
 
-      <input
-        ref={openFileInputRef}
-        type="file"
-        accept=".bridge.json,application/json,.json"
-        onChange={onOpenDesignFileChange}
-        style={{ display: "none" }}
-      />
 
       <footer className={styles.footerStrip} />
     </div>
+  );
+}
+
+export default function BridgeToolPageRoot() {
+  return (
+    <React.Suspense fallback={null}>
+      <BridgeToolPage />
+    </React.Suspense>
   );
 }
 

@@ -1,5 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
+import { Show } from "@clerk/nextjs";
+import SiteHeader from "./components/SiteHeader";
 
 import styles from "./page.module.css";
 
@@ -9,101 +11,30 @@ const tiles = [
     href: "/tools/bridge",
     src: "/ui/bridge-button.png",
   },
+  {
+    label: "Code Lab",
+    href: "/tools/code-lab",
+    src: "/ui/codelab.png",
+  },
+  {
+    label: "Measurement Lab",
+    href: "/tools/measurement-lab",
+    src: "/ui/measurement-button.png",
+  },
 ];
 
 export default function Home() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <header
-        style={{
-          height: 120,
-          width: "100%",
-          backgroundImage: "url('/ui/header-metal.png')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
-        <div
-          style={{
-            position: "relative",
-            height: "100%",
-            maxWidth: 1200,
-            margin: "0 auto",
-            padding: "0 40px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "flex-end",
-          }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              left: "50%",
-              top: "50%",
-              transform: "translate(-50%, -50%)",
-            }}
-          >
-            <Image
-              src="/ui/sb-logo.png"
-              alt="STEM Builder"
-              width={86}
-              height={86}
-              style={{ height: "86px", width: "auto" }}
-              priority
-            />
-          </div>
-          <nav style={{ display: "flex", gap: 12 }}>
-            <Link
-              href="/teachers"
-              style={{
-                border: "1px solid #fff",
-                color: "#fff",
-                padding: "8px 14px",
-                borderRadius: 999,
-                fontWeight: 600,
-                fontSize: 14,
-                textDecoration: "none",
-                letterSpacing: "0.2px",
-                background: "transparent",
-              }}
-            >
-              Teachers
-            </Link>
-            <Link
-              href="/login"
-              style={{
-                border: "1px solid #fff",
-                color: "#fff",
-                padding: "8px 14px",
-                borderRadius: 999,
-                fontWeight: 600,
-                fontSize: 14,
-                textDecoration: "none",
-                letterSpacing: "0.2px",
-                background: "transparent",
-              }}
-            >
-              Log In
-            </Link>
-            <Link
-              href="/signup"
-              style={{
-                border: "1px solid #fff",
-                color: "#fff",
-                padding: "8px 14px",
-                borderRadius: 999,
-                fontWeight: 600,
-                fontSize: 14,
-                textDecoration: "none",
-                letterSpacing: "0.2px",
-                background: "transparent",
-              }}
-            >
-              Sign Up
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader>
+        <Show when="signed-out">
+          <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
+            letterSpacing: "0.2px", background: "transparent" }}>
+            Teachers
+          </Link>
+        </Show>
+      </SiteHeader>
       <main
         style={{
           flex: 1,
@@ -115,7 +46,7 @@ export default function Home() {
       >
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "60px 40px" }}>
           <div className={styles.container}>
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
               {tiles.map((tile) => (
                 <Link key={tile.label} href={tile.href} className={styles.tile}>
                   <Image

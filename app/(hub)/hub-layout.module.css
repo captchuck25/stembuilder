@@ -1,0 +1,103 @@
+.frame {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  height: 120px;
+  width: 100%;
+  background-image: url("/ui/header-metal.png");
+  background-size: cover;
+  background-position: center;
+}
+
+.headerInner {
+  position: relative;
+  height: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.logoWrap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.logo {
+  height: 64px;
+  width: auto;
+  display: block;
+}
+
+.nav {
+  display: flex;
+  gap: 12px;
+}
+
+.navButton {
+  border: 1px solid #fff;
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  letter-spacing: 0.2px;
+  background: transparent;
+}
+
+.navButton:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  background-image: url("/ui/bg-tools-pattern.png");
+  background-repeat: repeat;
+  background-size: auto;
+}
+
+.content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 60px 40px;
+}
+
+.footer {
+  height: 40px;
+  width: 100%;
+  background-image: url("/ui/footer-metal.png");
+  background-size: cover;
+  background-position: center;
+}
+
+@media (max-width: 700px) {
+  .headerInner {
+    padding: 0 20px;
+  }
+
+  .logo {
+    height: 50px;
+  }
+
+  .nav {
+    gap: 8px;
+  }
+
+  .navButton {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .content {
+    padding: 40px 20px;
+  }
+}

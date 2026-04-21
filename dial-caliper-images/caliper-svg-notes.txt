@@ -1,0 +1,15 @@
+Files:
+- caliper-base-final.svg
+- caliper-slider-final.svg
+
+These are clean vector SVG assets based on your approved PNG look.
+
+Suggested use:
+- Keep the base fixed.
+- Move the slider SVG horizontally in code.
+- Add dial ticks / numbers / needle as separate SVG elements or overlay them in React.
+
+Important:
+- The slider SVG intentionally has a plain dial face.
+- The base beam is plain and extended.
+- Both files share the same 1536x1024 viewBox for easy alignment.

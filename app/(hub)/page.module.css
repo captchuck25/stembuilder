@@ -1,0 +1,117 @@
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 48px;
+}
+
+.tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 360px;
+  height: 140px;
+  border-radius: 16px;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.tile:hover {
+  transform: scale(1.03);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.image {
+  height: auto;
+  width: 100%;
+  max-width: 420px;
+}
+
+.row + .row {
+  margin-top: 60px;
+}
+
+.codeLabTile {
+  width: 360px;
+  height: 140px;
+  border-radius: 8px;
+  background: linear-gradient(
+    180deg,
+    #3a3a3a 0%,
+    #6e6e6e 15%,
+    #b8b8b8 32%,
+    #d6d6d6 50%,
+    #b8b8b8 68%,
+    #6e6e6e 85%,
+    #3a3a3a 100%
+  );
+  border: 2.5px solid #111;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.45),
+    0 4px 12px rgba(0,0,0,0.55);
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  text-decoration: none;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.codeLabTile:hover {
+  transform: scale(1.03);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.45),
+    0 10px 22px rgba(0,0,0,0.60);
+}
+
+.codeLabIconArea {
+  width: 96px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    180deg,
+    #2a2a2a 0%,
+    #484848 25%,
+    #585858 50%,
+    #484848 75%,
+    #2a2a2a 100%
+  );
+  border-right: 2px solid #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.codeLabSymbol {
+  font-family: "Courier New", monospace;
+  font-size: 30px;
+  font-weight: 900;
+  color: #c8c8c8;
+  letter-spacing: -2px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+}
+
+.codeLabTextArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0 8px;
+}
+
+.codeLabLabel {
+  font-size: 38px;
+  font-weight: 900;
+  color: #fff;
+  text-shadow:
+    2px 2px 0 #000,
+    1px 1px 0 rgba(0,0,0,0.6);
+  letter-spacing: 3px;
+  line-height: 1.05;
+  font-family: system-ui, sans-serif;
+  text-transform: uppercase;
+}

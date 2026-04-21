@@ -1,0 +1,48 @@
+import Image from "next/image";
+import Link from "next/link";
+
+import styles from "./page.module.css";
+
+const imageTiles = [
+  {
+    label: "Bridge Builder",
+    href: "/tools/bridge",
+    src: "/ui/bridge-button.png",
+  },
+  {
+    label: "Code Lab",
+    href: "/tools/code-lab",
+    src: "/ui/codelab.png",
+  },
+];
+
+export default function Home() {
+  return (
+    <div className={styles.container}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 32,
+          flexWrap: "wrap",
+        }}
+      >
+        {imageTiles.map((tile) => (
+          <Link key={tile.label} href={tile.href} className={styles.tile}>
+            <Image
+              src={tile.src}
+              alt={tile.label}
+              width={420}
+              height={140}
+              className={styles.image}
+              priority
+              unoptimized
+            />
+          </Link>
+        ))}
+
+      </div>
+    </div>
+  );
+}
