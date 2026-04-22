@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import SiteHeader from "@/app/components/SiteHeader";
-import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, ProgressRow, ScoreRow, BridgeDesign } from "@/lib/achievements";
+import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission } from "@/lib/achievements";
+import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 
 // ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -415,6 +416,116 @@ function MeasurementSection({ scores }: { scores: ScoreRow[] }) {
   );
 }
 
+// ─── Turtle section ───────────────────────────────────────────────────────────
+
+function TurtleSection({ completedIds, submissions }: { completedIds: Set<string>; submissions: TurtleSubmission[] }) {
+  const tutorials   = TURTLE_CHALLENGES.filter(c => c.category === "tutorial");
+  const challenges  = TURTLE_CHALLENGES.filter(c => c.category === "challenge");
+  const tutsDone    = tutorials.filter(t => completedIds.has(t.id)).length;
+  const allTutsDone = tutsDone === tutorials.length;
+  const pct         = tutorials.length > 0 ? tutsDone / tutorials.length : 0;
+
+  return (
+    <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
+      <SectionHeader icon="🐢" title="Code Lab — Turtle" href="/tools/code-lab/turtle" linkLabel="Go to Turtle" />
+
+      {/* Tutorial progress bar */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <div style={{ flex: 1, height: 10, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${pct * 100}%`,
+            background: "#059669", borderRadius: 99, transition: "width 600ms" }} />
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#888", whiteSpace: "nowrap" }}>
+          {tutsDone}/{tutorials.length} tutorials
+        </span>
+      </div>
+
+      {/* Tutorial rows */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+        {tutorials.map((t, i) => {
+          const done = completedIds.has(t.id);
+          return (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                background: done ? "#059669" : "#e5e7eb",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 10, fontWeight: 900, color: done ? "#fff" : "#aaa" }}>
+                {done ? "✓" : i + 1}
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: done ? "#111" : "#aaa" }}>
+                {t.title.replace(/^\d+\.\s*/, "")}
+              </span>
+              {done && (
+                <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800,
+                  color: "#059669", background: "#f0fdf4",
+                  padding: "2px 8px", borderRadius: 6 }}>
+                  Complete
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Creative challenges */}
+      <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: allTutsDone ? "#111" : "#aaa" }}>
+            🎨 Creative Challenges
+          </div>
+          {!allTutsDone && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}>
+              🔒 Complete all tutorials to unlock
+            </span>
+          )}
+        </div>
+        {submissions.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+            {challenges.map(ch => {
+              const sub = submissions.find(s => s.challenge_id === ch.id);
+              if (!sub) return null;
+              const isSubmitted = !!sub.submitted_at;
+              const borderColor = sub.approved === true ? "#10b981"
+                : sub.approved === false ? "#dc2626"
+                : isSubmitted ? "#8b5cf6" : "#3b82f6";
+              const badge = sub.approved === true
+                ? { label: "✓ Approved", bg: "#f0fdf4", color: "#065f46" }
+                : sub.approved === false
+                ? { label: "✗ Not yet", bg: "#fef2f2", color: "#dc2626" }
+                : isSubmitted
+                ? { label: "⏳ Pending", bg: "#faf5ff", color: "#7c3aed" }
+                : { label: "💾 Saved", bg: "#eff6ff", color: "#2563eb" };
+              return (
+                <Link key={ch.id} href={`/tools/code-lab/turtle?challenge=${ch.id}`}
+                  style={{ textDecoration: "none", display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 4 }}>
+                  <div style={{ border: `2px solid ${borderColor}`, borderRadius: 8,
+                    overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.10)",
+                    transition: "box-shadow 150ms" }}>
+                    <img src={sub.image_data} alt={ch.title} width={90} height={90}
+                      style={{ display: "block" }} />
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#555", textAlign: "center",
+                    maxWidth: 90, lineHeight: 1.3 }}>{ch.title}</span>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: badge.color,
+                    background: badge.bg, padding: "1px 6px", borderRadius: 4 }}>
+                    {badge.label}
+                  </span>
+                </Link>
+              );
+            }).filter(Boolean)}
+          </div>
+        )}
+        {allTutsDone && submissions.length === 0 && (
+          <p style={{ fontSize: 12, color: "#aaa", margin: 0 }}>
+            No work saved yet. Head to Turtle to start!
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AchievementsPage() {
@@ -424,6 +535,15 @@ export default function AchievementsPage() {
   const [measScores,     setMeasScores]     = useState<ScoreRow[]>([]);
   const [bridgeDesigns,  setBridgeDesigns]  = useState<BridgeDesign[]>([]);
   const [dataLoading,    setDataLoading]    = useState(true);
+  const [turtleCompleted,    setTurtleCompleted]    = useState<Set<string>>(new Set());
+  const [turtleSubmissions,  setTurtleSubmissions]  = useState<TurtleSubmission[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("turtle_completed");
+      if (saved) setTurtleCompleted(new Set(JSON.parse(saved)));
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (!isLoaded || !user) { setDataLoading(false); return; }
@@ -433,11 +553,13 @@ export default function AchievementsPage() {
       fetchBlockLabProgress(user.id),
       fetchToolScores(user.id),
       fetchBridgeDesigns(user.id),
-    ]).then(([cl, bl, ms, bd]) => {
+      fetchTurtleSubmissions(user.id),
+    ]).then(([cl, bl, ms, bd, ts]) => {
       setCodeLabRows(cl);
       setBlockLabRows(bl);
       setMeasScores(ms);
       setBridgeDesigns(bd);
+      setTurtleSubmissions(ts);
       setDataLoading(false);
     });
   }, [user, isLoaded]);
@@ -489,6 +611,7 @@ export default function AchievementsPage() {
             <>
               <CodeLabSection rows={codeLabRows} />
               <BlockLabSection rows={blockLabRows} />
+              <TurtleSection completedIds={turtleCompleted} submissions={turtleSubmissions} />
               <BridgeSection
                 designs={bridgeDesigns}
                 onDeleted={id => setBridgeDesigns(prev => prev.filter(d => d.id !== id))}

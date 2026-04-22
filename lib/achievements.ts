@@ -120,6 +120,75 @@ export async function fetchToolScores(userId: string): Promise<ScoreRow[]> {
   return (data as ScoreRow[]) ?? [];
 }
 
+// ─── Turtle submissions ───────────────────────────────────────────────────────
+
+export interface TurtleSubmission {
+  id: string;
+  user_id: string;
+  challenge_id: string;
+  image_data: string;
+  code: string | null;
+  approved: boolean | null;
+  submitted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function saveTurtleWork(
+  userId: string, challengeId: string, code: string, imageData: string,
+): Promise<string | null> {
+  const { error } = await supabase.from("turtle_submissions").upsert(
+    { user_id: userId, challenge_id: challengeId, code, image_data: imageData, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,challenge_id" },
+  );
+  return error?.message ?? null;
+}
+
+export async function submitTurtleWork(
+  userId: string, challengeId: string, code: string, imageData: string,
+): Promise<string | null> {
+  const { error } = await supabase.from("turtle_submissions").upsert(
+    { user_id: userId, challenge_id: challengeId, code, image_data: imageData,
+      submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { onConflict: "user_id,challenge_id" },
+  );
+  return error?.message ?? null;
+}
+
+export async function fetchTurtleSubmission(userId: string, challengeId: string): Promise<TurtleSubmission | null> {
+  const { data } = await supabase
+    .from("turtle_submissions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("challenge_id", challengeId)
+    .maybeSingle();
+  return (data as TurtleSubmission) ?? null;
+}
+
+export async function fetchTurtleSubmissions(userId: string): Promise<TurtleSubmission[]> {
+  const { data } = await supabase
+    .from("turtle_submissions")
+    .select("*")
+    .eq("user_id", userId);
+  return (data as TurtleSubmission[]) ?? [];
+}
+
+export async function fetchTurtleSubmissionsForStudents(studentIds: string[]): Promise<TurtleSubmission[]> {
+  if (!studentIds.length) return [];
+  const { data } = await supabase
+    .from("turtle_submissions")
+    .select("*")
+    .in("user_id", studentIds)
+    .not("submitted_at", "is", null);
+  return (data as TurtleSubmission[]) ?? [];
+}
+
+export async function approveTurtleSubmission(id: string, approved: boolean | null): Promise<void> {
+  await supabase.from("turtle_submissions")
+    .update({ approved, updated_at: new Date().toISOString() })
+    .eq("id", id);
+}
+
 /** Save a measurement-lab high score. Only writes if it beats the existing record. */
 export async function upsertToolHighScore(
   userId: string,

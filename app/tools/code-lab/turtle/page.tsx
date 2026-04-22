@@ -2,8 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useUser } from "@clerk/nextjs";
 import SiteHeader from "@/app/components/SiteHeader";
 import { CHALLENGES, type TurtleChallenge } from "./challenges";
+import { saveTurtleWork, submitTurtleWork, fetchTurtleSubmission } from "@/lib/achievements";
+import { supabase } from "@/lib/supabase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CS      = 500;
@@ -429,6 +432,7 @@ const CMD_REF = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function TurtlePage() {
+  const { user } = useUser();
   const [view,          setView]          = useState<"hub" | "notes" | "editor">("hub");
   const [code,          setCode]          = useState(CHALLENGES[0].starterCode);
   const [speed,         setSpeed]         = useState(7);
@@ -439,6 +443,12 @@ export default function TurtlePage() {
   const [activeId,      setActiveId]      = useState<string>("line");
   const [justCompleted, setJustCompleted] = useState(false);
   const [completedIds,  setCompletedIds]  = useState<Set<string>>(new Set());
+  const [hasRunOnce,    setHasRunOnce]    = useState(false);
+  const [saving,        setSaving]        = useState(false);
+  const [submitting,    setSubmitting]    = useState(false);
+  const [isSaved,       setIsSaved]       = useState(false);
+  const [isSubmitted,   setIsSubmitted]   = useState(false);
+  const [isEnrolled,    setIsEnrolled]    = useState(false);
 
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const bgRef      = useRef<HTMLCanvasElement | null>(null);
@@ -455,6 +465,33 @@ export default function TurtlePage() {
       if (saved) setCompletedIds(new Set(JSON.parse(saved)));
     } catch {}
   }, []);
+
+  // Check if student is enrolled in any class
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("enrollments").select("id", { count: "exact", head: true })
+      .eq("student_id", user.id)
+      .then(({ count }) => setIsEnrolled((count ?? 0) > 0));
+  }, [user]);
+
+  // Handle ?challenge= param from My Work page (load saved code)
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const challengeId = params.get("challenge");
+    if (!challengeId) return;
+    const ch = CHALLENGES.find(c => c.id === challengeId);
+    if (!ch) return;
+    fetchTurtleSubmission(user.id, challengeId).then(saved => {
+      setCode(saved?.code ?? ch.starterCode);
+      setActiveId(ch.id);
+      setIsSaved(!!saved?.code);
+      setIsSubmitted(!!saved?.submitted_at);
+      setHasRunOnce(false);
+      setView("editor");
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   useEffect(() => {
     if (view !== "editor") return;
@@ -508,6 +545,30 @@ export default function TurtlePage() {
     });
   }
 
+  function captureCanvas(): string {
+    const src = canvasRef.current; if (!src) return "";
+    const thumb = document.createElement("canvas");
+    thumb.width = 200; thumb.height = 200;
+    thumb.getContext("2d")!.drawImage(src, 0, 0, CS, CS, 0, 0, 200, 200);
+    return thumb.toDataURL("image/jpeg", 0.8);
+  }
+
+  async function handleSave() {
+    if (!user) return;
+    setSaving(true);
+    const err = await saveTurtleWork(user.id, activeId, code, captureCanvas());
+    setSaving(false);
+    if (err) { setError("Save failed: " + err); } else { setIsSaved(true); }
+  }
+
+  async function handleSubmit() {
+    if (!user) return;
+    setSubmitting(true);
+    const err = await submitTurtleWork(user.id, activeId, code, captureCanvas());
+    setSubmitting(false);
+    if (err) { setError("Submit failed: " + err); } else { setIsSubmitted(true); setIsSaved(true); }
+  }
+
   function runCode() {
     stopAnim(); resetBg(); setError(null); setPrints([]); setJustCompleted(false);
     const { cmds, prints: p, error: err } = runTurtle(code);
@@ -521,6 +582,7 @@ export default function TurtlePage() {
       }
     }
 
+    setHasRunOnce(true);
     if (cmds.length === 0) return;
     cmdsRef.current = cmds; idxRef.current = 0;
 
@@ -537,10 +599,16 @@ export default function TurtlePage() {
   function handleChallengeSelect(ch: TurtleChallenge) {
     stopAnim();
     setError(null); setPrints([]); setJustCompleted(false);
+    setHasRunOnce(false); setIsSaved(false); setIsSubmitted(false);
     setCode(ch.starterCode); setActiveId(ch.id);
     setLeftTab("task");
-    // tutorials show notes intro first; challenges go straight to editor
     setView((ch.category === "tutorial" && ch.notes) || ch.previewLines ? "notes" : "editor");
+    // Load previously saved code for challenges
+    if (user && ch.category === "challenge") {
+      fetchTurtleSubmission(user.id, ch.id).then(saved => {
+        if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
+      });
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -781,9 +849,10 @@ export default function TurtlePage() {
 
   // ── Editor view ───────────────────────────────────────────────────────────
   const isTutorial = activeChallenge?.category === "tutorial";
+  const hasNotes   = isTutorial ? !!activeChallenge?.notes : !!activeChallenge?.previewLines;
   const editorTabs = [
     { key: "task",      label: "Task" },
-    ...(isTutorial && activeChallenge?.notes ? [{ key: "notes", label: "Notes" }] : []),
+    ...(hasNotes ? [{ key: "notes", label: "Notes" }] : []),
     { key: "reference", label: "Reference" },
   ] as { key: typeof leftTab; label: string }[];
 
@@ -910,8 +979,32 @@ export default function TurtlePage() {
                       {activeChallenge.hint}
                     </div>
                   )}
+                  {/* Save / Submit buttons (challenges only) */}
+                  {!isTutorial && user && (
+                    <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
+                      {/* Save button — always available */}
+                      <button onClick={handleSave} disabled={saving || running || !hasRunOnce}
+                        style={{ width:"100%", background: hasRunOnce ? "#1e40af" : "#e5e7eb",
+                          color: hasRunOnce ? "white" : "#9ca3af", border:"none",
+                          borderRadius:8, padding:"9px 0", fontSize:12, fontWeight:800,
+                          cursor: hasRunOnce && !running ? "pointer" : "default" }}>
+                        {saving ? "Saving…" : isSaved ? "💾 Saved ✓" : hasRunOnce ? "💾 Save Work" : "Run your code first"}
+                      </button>
+                      {/* Submit — only if enrolled in a class */}
+                      {isEnrolled && (
+                        <button onClick={handleSubmit} disabled={submitting || running || !hasRunOnce}
+                          style={{ width:"100%", background: hasRunOnce
+                            ? (isSubmitted ? "#059669" : "linear-gradient(135deg,#7c3aed,#8b5cf6)") : "#e5e7eb",
+                            color: hasRunOnce ? "white" : "#9ca3af", border:"none",
+                            borderRadius:8, padding:"9px 0", fontSize:12, fontWeight:800,
+                            cursor: hasRunOnce && !running ? "pointer" : "default" }}>
+                          {submitting ? "Submitting…" : isSubmitted ? "📤 Submitted ✓" : hasRunOnce ? "📤 Submit for Review" : ""}
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <button onClick={() => { stopAnim(); setView("hub"); setJustCompleted(false); }}
-                    style={{ marginTop:14, width:"100%", background:"transparent",
+                    style={{ marginTop:10, width:"100%", background:"transparent",
                       border:"1.5px solid #d1d5db", borderRadius:8, padding:"8px 0",
                       fontSize:12, fontWeight:700, color:"#555", cursor:"pointer" }}>
                     ← Back to Hub
@@ -920,25 +1013,64 @@ export default function TurtlePage() {
               )}
 
               {/* Notes tab */}
-              {leftTab === "notes" && activeChallenge?.notes && (
+              {leftTab === "notes" && activeChallenge && hasNotes && (
                 <div style={{ padding:"4px 4px 12px", userSelect:"none" }}>
-                  <div style={{ fontSize:10, fontWeight:800, color:"#3b82f6", letterSpacing:"0.8px",
-                    textTransform:"uppercase", marginBottom:10 }}>
-                    What you&apos;ll learn
-                  </div>
-                  <NotesParagraphs text={activeChallenge.notes} />
-                  {activeChallenge.example && (
+                  {isTutorial ? (
+                    <>
+                      <div style={{ fontSize:10, fontWeight:800, color:"#3b82f6", letterSpacing:"0.8px",
+                        textTransform:"uppercase", marginBottom:10 }}>
+                        What you&apos;ll learn
+                      </div>
+                      {activeChallenge.notes && <NotesParagraphs text={activeChallenge.notes} />}
+                      {activeChallenge.example && (
+                        <>
+                          <div style={{ fontSize:10, fontWeight:800, color:"#8b5cf6", letterSpacing:"0.8px",
+                            textTransform:"uppercase", margin:"14px 0 8px" }}>
+                            Example
+                          </div>
+                          <pre style={{ background:"#1e1e2e", color:"#e2e8f0", borderRadius:8,
+                            padding:"10px 12px", fontSize:11, fontFamily:"'Courier New', monospace",
+                            lineHeight:1.6, margin:0, overflowX:"auto",
+                            border:"1px solid #3a3a5e", whiteSpace:"pre-wrap" }}>
+                            {activeChallenge.example}
+                          </pre>
+                        </>
+                      )}
+                    </>
+                  ) : (
                     <>
                       <div style={{ fontSize:10, fontWeight:800, color:"#8b5cf6", letterSpacing:"0.8px",
-                        textTransform:"uppercase", margin:"14px 0 8px" }}>
-                        Example
+                        textTransform:"uppercase", marginBottom:10 }}>
+                        Starter Code Preview
                       </div>
-                      <pre style={{ background:"#1e1e2e", color:"#e2e8f0", borderRadius:8,
-                        padding:"10px 12px", fontSize:11, fontFamily:"'Courier New', monospace",
-                        lineHeight:1.6, margin:0, overflowX:"auto",
-                        border:"1px solid #3a3a5e", whiteSpace:"pre-wrap" }}>
-                        {activeChallenge.example}
-                      </pre>
+                      {(() => {
+                        const cLines = activeChallenge.starterCode.trimEnd().split("\n");
+                        const vis = cLines.slice(0, activeChallenge.previewLines ?? cLines.length).join("\n");
+                        const blr = activeChallenge.previewLines ? cLines.slice(activeChallenge.previewLines).join("\n") : "";
+                        return (
+                          <pre style={{ background:"#1e1e2e", borderRadius:8, padding:"10px 12px",
+                            fontSize:11, fontFamily:"'Courier New', monospace", lineHeight:1.6,
+                            margin:"0 0 14px", border:"1px solid #3a3a5e", overflowX:"hidden",
+                            whiteSpace:"pre-wrap", userSelect:"none" }}>
+                            <span style={{ color:"#e2e8f0" }}>{vis}</span>
+                            {blr && (
+                              <span style={{ display:"block", color:"#e2e8f0",
+                                filter:"blur(4px)", pointerEvents:"none" }}>
+                                {blr}
+                              </span>
+                            )}
+                          </pre>
+                        );
+                      })()}
+                      {activeChallenge.solutionCode && (
+                        <>
+                          <div style={{ fontSize:10, fontWeight:800, color:"#8b5cf6", letterSpacing:"0.8px",
+                            textTransform:"uppercase", marginBottom:8 }}>
+                            Goal
+                          </div>
+                          <ExampleCanvas code={activeChallenge.solutionCode} size={238} />
+                        </>
+                      )}
                     </>
                   )}
                 </div>

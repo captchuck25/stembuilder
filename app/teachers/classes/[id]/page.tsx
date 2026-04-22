@@ -7,6 +7,8 @@ import Link from "next/link";
 import { supabase, type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
+import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
+import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, type TurtleSubmission } from "@/lib/achievements";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const CARD: React.CSSProperties = {
@@ -35,7 +37,8 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "bridge">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "bridge" | "turtle">("code-lab");
+  const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -88,8 +91,15 @@ export default function ClassDetailPage() {
         })
       );
       setStudents(rows);
+      const subs = await fetchTurtleSubmissionsForStudents(studentIds);
+      setTurtleSubs(subs);
     }
     setLoading(false);
+  }
+
+  async function handleApprove(id: string, approved: boolean | null) {
+    await approveTurtleSubmission(id, approved);
+    setTurtleSubs(prev => prev.map(s => s.id === id ? { ...s, approved } : s));
   }
 
   async function toggleLevel(levelId: number) {
@@ -161,6 +171,8 @@ export default function ClassDetailPage() {
                 color: "#2563eb", desc: "Python maze challenges" },
               { id: "bridge" as const, label: "Bridge Builder", icon: "🌉",
                 color: "#d97706", desc: "Structural engineering" },
+              { id: "turtle" as const, label: "Turtle Challenges", icon: "🐢",
+                color: "#059669", desc: "Creative drawing review" },
             ].map(tool => {
               const active = selectedTool === tool.id;
               return (
@@ -261,6 +273,80 @@ export default function ClassDetailPage() {
               </div>
             </div>
           )}
+
+          {/* Turtle panel */}
+          {selectedTool === "turtle" && (() => {
+            const challenges = TURTLE_CHALLENGES.filter(c => c.category === "challenge");
+            const studentMap = new Map(students.map(s => [s.id, s]));
+            const hasSubs = turtleSubs.length > 0;
+            return (
+              <div style={{ ...CARD, padding: "26px 28px" }}>
+                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 6 }}>
+                  Turtle Creative Challenges
+                </h2>
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 24 }}>
+                  Review student submissions. Click ✓ to approve or ✗ to send back.
+                </p>
+                {!hasSubs ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
+                    No submissions yet.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+                    {challenges.map(ch => {
+                      const chSubs = turtleSubs.filter(s => s.challenge_id === ch.id);
+                      if (!chSubs.length) return null;
+                      return (
+                        <div key={ch.id}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#111",
+                            marginBottom: 12, paddingBottom: 6, borderBottom: "2px solid #f0f0f0" }}>
+                            {ch.title}
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                            {chSubs.map(sub => {
+                              const student = studentMap.get(sub.user_id);
+                              const borderColor = sub.approved === true ? "#10b981"
+                                : sub.approved === false ? "#dc2626" : "#d1d5db";
+                              return (
+                                <div key={sub.id} style={{ display: "flex", flexDirection: "column",
+                                  alignItems: "center", gap: 6 }}>
+                                  <div style={{ border: `3px solid ${borderColor}`, borderRadius: 10,
+                                    overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.12)" }}>
+                                    <img src={sub.image_data} alt={student?.name ?? "Student"}
+                                      width={100} height={100} style={{ display: "block" }} />
+                                  </div>
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: "#333",
+                                    maxWidth: 106, textAlign: "center", lineHeight: 1.3 }}>
+                                    {student?.name ?? "Unknown"}
+                                  </span>
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <button onClick={() => handleApprove(sub.id, sub.approved === true ? null : true)}
+                                      style={{ padding: "4px 10px", borderRadius: 6, border: "none",
+                                        background: sub.approved === true ? "#10b981" : "#e5e7eb",
+                                        color: sub.approved === true ? "#fff" : "#555",
+                                        fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                                      ✓
+                                    </button>
+                                    <button onClick={() => handleApprove(sub.id, sub.approved === false ? null : false)}
+                                      style={{ padding: "4px 10px", borderRadius: 6, border: "none",
+                                        background: sub.approved === false ? "#dc2626" : "#e5e7eb",
+                                        color: sub.approved === false ? "#fff" : "#555",
+                                        fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                                      ✗
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }).filter(Boolean)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Bridge Builder panel */}
           {selectedTool === "bridge" && (
