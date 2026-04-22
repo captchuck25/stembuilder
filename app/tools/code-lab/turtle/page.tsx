@@ -670,14 +670,14 @@ export default function TurtlePage() {
             borderRight: "2px solid #e5e7eb", background: "rgba(255,255,255,0.95)" }}>
 
             <div style={{ display: "flex", borderBottom: "2px solid #e5e7eb" }}>
-              {(["challenges", "reference"] as const).map(tab => (
+              {([["challenges", "Task"], ["reference", "Reference"]] as const).map(([tab, label]) => (
                 <button key={tab} onClick={() => setLeftTab(tab)} style={{
                   flex: 1, padding: "9px 0", background: "transparent", border: "none",
                   borderBottom: leftTab === tab ? "3px solid #10b981" : "3px solid transparent",
                   fontWeight: 700, fontSize: 12, color: leftTab === tab ? "#10b981" : "#888",
-                  cursor: "pointer", textTransform: "capitalize", letterSpacing: "0.3px",
+                  cursor: "pointer", letterSpacing: "0.3px",
                 }}>
-                  {tab}
+                  {label}
                 </button>
               ))}
             </div>
@@ -685,20 +685,39 @@ export default function TurtlePage() {
             <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
               {leftTab === "challenges" ? (
                 <>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "#aaa", letterSpacing: "0.8px",
-                    textTransform: "uppercase", paddingLeft: 4, marginBottom: 6 }}>Tutorials</div>
-                  {tutorials.map(ch => (
-                    <ChallengeRow key={ch.id} ch={ch} active={activeId === ch.id}
-                      completed={completedIds.has(ch.id)}
-                      onSelect={() => handleChallengeSelect(ch)} />
-                  ))}
-                  <div style={{ fontSize: 10, fontWeight: 800, color: "#aaa", letterSpacing: "0.8px",
-                    textTransform: "uppercase", paddingLeft: 4, marginTop: 14, marginBottom: 6 }}>Challenges</div>
-                  {challenges.map(ch => (
-                    <ChallengeRow key={ch.id} ch={ch} active={activeId === ch.id}
-                      completed={completedIds.has(ch.id)}
-                      onSelect={() => handleChallengeSelect(ch)} />
-                  ))}
+                  {activeChallenge && (
+                    <div style={{ padding: "4px 4px 12px" }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, color: "#aaa", letterSpacing: "0.8px",
+                        textTransform: "uppercase", marginBottom: 8 }}>
+                        {activeChallenge.category === "tutorial" ? "Tutorial" : "Challenge"}
+                      </div>
+                      <div style={{ fontWeight: 800, fontSize: 14, color: "#111", marginBottom: 8 }}>
+                        {activeChallenge.title}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#444", lineHeight: 1.55, marginBottom: 14 }}>
+                        {activeChallenge.description}
+                      </div>
+                      {completedIds.has(activeChallenge.id) ? (
+                        <div style={{ background: "#f0fdf4", border: "1.5px solid #6ee7b7",
+                          borderRadius: 10, padding: "10px 12px", fontSize: 12,
+                          fontWeight: 700, color: "#065f46" }}>
+                          ✅ Completed! Keep experimenting or go back to the hub.
+                        </div>
+                      ) : (
+                        <div style={{ background: "#fefce8", border: "1.5px solid #fde68a",
+                          borderRadius: 10, padding: "10px 12px", fontSize: 12, color: "#713f12" }}>
+                          <span style={{ fontWeight: 800, display: "block", marginBottom: 3 }}>Goal</span>
+                          {activeChallenge.description}
+                        </div>
+                      )}
+                      <button onClick={() => { stopAnim(); setView("hub"); setJustCompleted(false); }}
+                        style={{ marginTop: 14, width: "100%", background: "transparent",
+                          border: "1.5px solid #d1d5db", borderRadius: 8, padding: "8px 0",
+                          fontSize: 12, fontWeight: 700, color: "#555", cursor: "pointer" }}>
+                        ← Back to Hub
+                      </button>
+                    </div>
+                  )}
                 </>
               ) : (
                 CMD_REF.map(group => (
@@ -864,24 +883,3 @@ function ChallengeCard({ ch, locked, onClick }: {
   );
 }
 
-// ─── Editor sidebar row ───────────────────────────────────────────────────────
-function ChallengeRow({ ch, active, completed, onSelect }: {
-  ch: TurtleChallenge; active: boolean; completed: boolean; onSelect: () => void;
-}) {
-  return (
-    <button onClick={onSelect} style={{
-      width: "100%", textAlign: "left",
-      background: active ? "#f0fdf4" : "transparent",
-      border: `2px solid ${active ? "#10b981" : "transparent"}`,
-      borderRadius: 8, padding: "7px 10px", cursor: "pointer",
-      marginBottom: 3, transition: "all 100ms",
-    }}>
-      <div style={{ fontWeight: 700, fontSize: 12, color: active ? "#065f46" : "#222",
-        display: "flex", justifyContent: "space-between" }}>
-        <span>{ch.title}</span>
-        {completed && <span style={{ color: "#10b981" }}>✓</span>}
-      </div>
-      <div style={{ fontSize: 11, color: "#666", marginTop: 1 }}>{ch.description}</div>
-    </button>
-  );
-}
