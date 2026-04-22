@@ -142,6 +142,48 @@ export default async function CodeLabPage() {
                 </span>
               </div>
             </Link>
+            {/* Turtle tile */}
+            <Link href="/tools/code-lab/turtle" style={{ textDecoration: "none" }}>
+              <div
+                style={{
+                  width: 280,
+                  height: 180,
+                  borderRadius: 20,
+                  background:
+                    "linear-gradient(135deg, #064e3b 0%, #065f46 55%, #059669 100%)",
+                  border: "2px solid rgba(255,255,255,0.15)",
+                  boxShadow: "0 8px 28px rgba(0,0,0,0.30)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  cursor: "pointer",
+                  transition: "transform 160ms ease, box-shadow 160ms ease",
+                }}
+              >
+                <span style={{ fontSize: 40, lineHeight: 1 }}>🐢</span>
+                <span
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: "#fff",
+                    letterSpacing: "0.3px",
+                  }}
+                >
+                  Turtle
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(255,255,255,0.85)",
+                    fontWeight: 700,
+                  }}
+                >
+                  Python Drawing
+                </span>
+              </div>
+            </Link>
           </div>
         </div>
       </main>
