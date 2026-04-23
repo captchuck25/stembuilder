@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import { MODULES } from "./modules";
@@ -64,14 +64,12 @@ function blocksForModule(moduleId: number): BlockDef[] {
   return ALL_BLOCKS.filter(b => b.module <= moduleId);
 }
 
-async function syncToCloud(userId: string, mi: number, ci: number | null, completed: boolean, quizScore?: number) {
-  const { supabase } = await import("@/lib/supabase");
-  await supabase.from("user_progress").upsert({
-    user_id: userId, tool: "block-lab",
-    level_idx: mi, challenge_idx: ci,
-    completed, quiz_score: quizScore ?? null,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id,tool,level_idx,challenge_idx" });
+async function syncToCloud(_userId: string, mi: number, ci: number | null, completed: boolean, quizScore?: number) {
+  await fetch("/api/progress", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tool: "block-lab", level_idx: mi, challenge_idx: ci, completed, quiz_score: quizScore ?? null }),
+  });
 }
 
 // ─── Canvas rendering ─────────────────────────────────────────────────────────
@@ -277,7 +275,8 @@ function renderBlockLabel(
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function BlocksPage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
 
   const [phase,     setPhase]     = useState<Phase>({ tag: "overview" });
   const [progress,  setProgress]  = useState<Progress>(() => loadProgress());
@@ -435,7 +434,7 @@ export default function BlocksPage() {
     };
     setProgress(next);
     saveProgress(next);
-    if (user?.id) syncToCloud(user.id, mi, ci, true).catch(() => {});
+    if (userId) syncToCloud(userId, mi, ci, true).catch(() => {});
   }
 
   function saveScriptForCurrent(s: ScriptNode[]) {
@@ -512,7 +511,7 @@ export default function BlocksPage() {
       const finalScore = quizScore + (quizSelected === MODULES[phase.mi].quiz[quizIdx].answer ? 1 : 0);
       const next = { ...progress, quizScores: { ...progress.quizScores, [phase.mi]: finalScore } };
       setProgress(next); saveProgress(next);
-      if (user?.id) syncToCloud(user.id, phase.mi, null, true, finalScore).catch(() => {});
+      if (userId) syncToCloud(userId, phase.mi, null, true, finalScore).catch(() => {});
       setPhase({ tag: "complete", mi: phase.mi, score: finalScore });
     } else {
       setQuizIdx(i => i + 1);

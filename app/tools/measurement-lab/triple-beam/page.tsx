@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
 
@@ -403,7 +403,8 @@ function TripleBeamSVG({ riders, target, mode, answered, onDrag }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function TripleBeamPage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
   const [gameMode,  setGameMode]  = useState<GameMode>("read");
   const [target,    setTarget]    = useState<Target>({ hundreds: 0, tens: 0, ones: 0, total: 0, label: "0.0 g" });
   const [userRiders, setUserRiders] = useState<Riders>({ hundreds: 0, tens: 0, ones: 0 });
@@ -434,7 +435,7 @@ export default function TripleBeamPage() {
     if (isCorrect) {
       const ns = score + 1;
       setScore(ns);
-      if (user) upsertToolHighScore(user.id, "meas-triple-beam", 0, gameMode === "read" ? 0 : 1, ns);
+      if (userId) upsertToolHighScore(userId, "meas-triple-beam", 0, gameMode === "read" ? 0 : 1, ns);
       timerRef.current = setTimeout(nextQuestion, 1400);
     } else {
       const ns = strikes + 1;
@@ -481,7 +482,7 @@ export default function TripleBeamPage() {
     setUserRiders(r => ({ ...r, [beam]: val }));
   }
 
-  // In read mode, display target riders (beam level); in balance mode, display user riders
+  // In read mode, display target riders (beam level); in balance mode, display userId riders
   const displayRiders = gameMode === "read" ? target : userRiders;
 
   const zoomRiderSum  = Math.round((displayRiders.hundreds + displayRiders.tens + displayRiders.ones) * 10) / 10;

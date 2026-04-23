@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission } from "@/lib/achievements";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
@@ -529,7 +529,7 @@ function TurtleSection({ completedIds, submissions }: { completedIds: Set<string
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AchievementsPage() {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
   const [codeLabRows,    setCodeLabRows]    = useState<ProgressRow[]>([]);
   const [blockLabRows,   setBlockLabRows]   = useState<ProgressRow[]>([]);
   const [measScores,     setMeasScores]     = useState<ScoreRow[]>([]);
@@ -546,14 +546,15 @@ export default function AchievementsPage() {
   }, []);
 
   useEffect(() => {
-    if (!isLoaded || !user) { setDataLoading(false); return; }
+    if (status === "loading" || !session?.user?.id) { setDataLoading(false); return; }
+    const uid = session.user.id;
 
     Promise.all([
-      fetchCodeLabProgress(user.id),
-      fetchBlockLabProgress(user.id),
-      fetchToolScores(user.id),
-      fetchBridgeDesigns(user.id),
-      fetchTurtleSubmissions(user.id),
+      fetchCodeLabProgress(uid),
+      fetchBlockLabProgress(uid),
+      fetchToolScores(uid),
+      fetchBridgeDesigns(uid),
+      fetchTurtleSubmissions(uid),
     ]).then(([cl, bl, ms, bd, ts]) => {
       setCodeLabRows(cl);
       setBlockLabRows(bl);
@@ -562,7 +563,7 @@ export default function AchievementsPage() {
       setTurtleSubmissions(ts);
       setDataLoading(false);
     });
-  }, [user, isLoaded]);
+  }, [status, session?.user?.id]);
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column",
@@ -579,15 +580,15 @@ export default function AchievementsPage() {
               textShadow: "0 2px 8px rgba(0,0,0,0.4)" }}>
               🏆 My Work
             </h1>
-            {user && (
+            {session?.user && (
               <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", margin: 0, fontWeight: 600 }}>
-                {user.firstName ?? user.emailAddresses[0]?.emailAddress}
+                {session.user.name ?? session.user.email}
               </p>
             )}
           </div>
 
           {/* Not signed in */}
-          {isLoaded && !user && (
+          {status !== "loading" && !session?.user && (
             <div style={{ ...CARD, padding: "60px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>🔒</div>
               <h2 style={{ fontSize: 22, fontWeight: 900, color: "#111", marginBottom: 8 }}>
@@ -600,14 +601,14 @@ export default function AchievementsPage() {
           )}
 
           {/* Loading */}
-          {isLoaded && user && dataLoading && (
+          {status !== "loading" && session?.user && dataLoading && (
             <div style={{ ...CARD, padding: "60px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 14, color: "#888", fontWeight: 600 }}>Loading your progress…</div>
             </div>
           )}
 
           {/* Content */}
-          {isLoaded && user && !dataLoading && (
+          {status !== "loading" && session?.user && !dataLoading && (
             <>
               <CodeLabSection rows={codeLabRows} />
               <BlockLabSection rows={blockLabRows} />

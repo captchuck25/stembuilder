@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { SignInButton, SignUpButton, Show, UserButton } from "@clerk/nextjs";
+import { useSession, signOut } from "next-auth/react";
+import { useState } from "react";
 
 const NAV_BTN: React.CSSProperties = {
   border: "1px solid #fff",
@@ -13,26 +14,24 @@ const NAV_BTN: React.CSSProperties = {
   letterSpacing: "0.2px",
   background: "transparent",
   cursor: "pointer",
+  textDecoration: "none",
+  display: "inline-block",
 };
 
-/**
- * Shared site header used across all pages.
- * `children` renders inside the nav, to the left of the auth buttons.
- * `onLogoClick` — if provided, intercepts the logo click (e.g. unsaved-changes guard).
- * `hideUserButton` — if true, suppresses the default UserButton so the caller can render its own.
- */
 export default function SiteHeader({ children, onLogoClick, hideUserButton }: {
   children?: React.ReactNode;
   onLogoClick?: (e: React.MouseEvent) => void;
   hideUserButton?: boolean;
 }) {
+  const { data: session } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <header style={{ height: 120, width: "100%", backgroundImage: "url('/ui/header-metal.png')",
       backgroundSize: "cover", backgroundPosition: "center" }}>
       <div style={{ position: "relative", height: "100%", maxWidth: 1200, margin: "0 auto",
         padding: "0 40px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
 
-        {/* Centered logo */}
         <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)" }}>
           {onLogoClick ? (
             <button onClick={onLogoClick} style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}>
@@ -45,26 +44,52 @@ export default function SiteHeader({ children, onLogoClick, hideUserButton }: {
           )}
         </div>
 
-        {/* Right-side nav */}
         <nav style={{ display: "flex", gap: 12, alignItems: "center" }}>
           {children}
-          <Show when="signed-out">
-            <SignInButton mode="modal" forceRedirectUrl="/dashboard">
-              <button style={NAV_BTN}>Log In</button>
-            </SignInButton>
-            <SignUpButton mode="modal" forceRedirectUrl="/onboarding">
-              <button style={NAV_BTN}>Sign Up</button>
-            </SignUpButton>
-          </Show>
-          {!hideUserButton && (
-            <Show when="signed-in">
-              <UserButton appearance={{ elements: { avatarBox: { width: 48, height: 48 } } }}>
-                <UserButton.MenuItems>
-                  <UserButton.Link label="My Work" labelIcon={<span>🏆</span>} href="/mywork" />
-                  <UserButton.Link label="My Classes" labelIcon={<span>🏫</span>} href="/dashboard" />
-                </UserButton.MenuItems>
-              </UserButton>
-            </Show>
+          {session?.user ? (
+            !hideUserButton && (
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setMenuOpen(o => !o)}
+                  style={{ ...NAV_BTN, display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  {session.user.image ? (
+                    <img src={session.user.image} alt="" style={{ width: 32, height: 32, borderRadius: "50%", display: "block" }} />
+                  ) : (
+                    <span style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
+                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800 }}>
+                      {(session.user.name ?? session.user.email ?? "?")[0].toUpperCase()}
+                    </span>
+                  )}
+                </button>
+                {menuOpen && (
+                  <div style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", background: "#fff",
+                    borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,0.18)", minWidth: 180,
+                    border: "1px solid #e5e7eb", zIndex: 50, overflow: "hidden" }}>
+                    <Link href="/mywork" onClick={() => setMenuOpen(false)}
+                      style={{ display: "block", padding: "10px 16px", fontSize: 14, fontWeight: 600,
+                        color: "#111", textDecoration: "none", borderBottom: "1px solid #f3f4f6" }}>
+                      🏆 My Work
+                    </Link>
+                    <Link href="/dashboard" onClick={() => setMenuOpen(false)}
+                      style={{ display: "block", padding: "10px 16px", fontSize: 14, fontWeight: 600,
+                        color: "#111", textDecoration: "none", borderBottom: "1px solid #f3f4f6" }}>
+                      🏫 My Classes
+                    </Link>
+                    <button onClick={() => { setMenuOpen(false); signOut({ callbackUrl: "/" }); }}
+                      style={{ width: "100%", padding: "10px 16px", fontSize: 14, fontWeight: 600,
+                        color: "#dc2626", textAlign: "left", background: "none", border: "none", cursor: "pointer" }}>
+                      Sign Out
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <>
+              <Link href="/sign-in" style={NAV_BTN}>Log In</Link>
+              <Link href="/sign-up" style={{ ...NAV_BTN, background: "rgba(255,255,255,0.15)" }}>Sign Up</Link>
+            </>
           )}
         </nav>
       </div>

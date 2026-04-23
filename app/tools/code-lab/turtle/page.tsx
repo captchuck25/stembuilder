@@ -2,11 +2,10 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { CHALLENGES, type TurtleChallenge } from "./challenges";
 import { saveTurtleWork, submitTurtleWork, fetchTurtleSubmission } from "@/lib/achievements";
-import { supabase } from "@/lib/supabase";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CS      = 500;
@@ -432,7 +431,8 @@ const CMD_REF = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function TurtlePage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
   const [view,          setView]          = useState<"hub" | "notes" | "editor">("hub");
   const [code,          setCode]          = useState(CHALLENGES[0].starterCode);
   const [speed,         setSpeed]         = useState(7);
@@ -468,21 +468,21 @@ export default function TurtlePage() {
 
   // Check if student is enrolled in any class
   useEffect(() => {
-    if (!user) return;
-    supabase.from("enrollments").select("id", { count: "exact", head: true })
-      .eq("student_id", user.id)
-      .then(({ count }) => setIsEnrolled((count ?? 0) > 0));
-  }, [user]);
+    if (!session?.user) return;
+    fetch("/api/enrollments/check")
+      .then(r => r.json())
+      .then(d => setIsEnrolled(d.enrolled ?? false));
+  }, [userId]);
 
   // Handle ?challenge= param from My Work page (load saved code)
   useEffect(() => {
-    if (!user) return;
+    if (!session?.user) return;
     const params = new URLSearchParams(window.location.search);
     const challengeId = params.get("challenge");
     if (!challengeId) return;
     const ch = CHALLENGES.find(c => c.id === challengeId);
-    if (!ch) return;
-    fetchTurtleSubmission(user.id, challengeId).then(saved => {
+    if (!ch || !userId) return;
+    fetchTurtleSubmission(userId, challengeId).then(saved => {
       setCode(saved?.code ?? ch.starterCode);
       setActiveId(ch.id);
       setIsSaved(!!saved?.code);
@@ -491,7 +491,7 @@ export default function TurtlePage() {
       setView("editor");
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     if (view !== "editor") return;
@@ -554,17 +554,17 @@ export default function TurtlePage() {
   }
 
   async function handleSave() {
-    if (!user) return;
+    if (!session?.user || !userId) return;
     setSaving(true);
-    const err = await saveTurtleWork(user.id, activeId, code, captureCanvas());
+    const err = await saveTurtleWork(userId, activeId, code, captureCanvas());
     setSaving(false);
     if (err) { setError("Save failed: " + err); } else { setIsSaved(true); }
   }
 
   async function handleSubmit() {
-    if (!user) return;
+    if (!session?.user || !userId) return;
     setSubmitting(true);
-    const err = await submitTurtleWork(user.id, activeId, code, captureCanvas());
+    const err = await submitTurtleWork(userId, activeId, code, captureCanvas());
     setSubmitting(false);
     if (err) { setError("Submit failed: " + err); } else { setIsSubmitted(true); setIsSaved(true); }
   }
@@ -604,8 +604,8 @@ export default function TurtlePage() {
     setLeftTab("task");
     setView((ch.category === "tutorial" && ch.notes) || ch.previewLines ? "notes" : "editor");
     // Load previously saved code for challenges
-    if (user && ch.category === "challenge") {
-      fetchTurtleSubmission(user.id, ch.id).then(saved => {
+    if (session?.user && userId && ch.category === "challenge") {
+      fetchTurtleSubmission(userId, ch.id).then(saved => {
         if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
       });
     }
@@ -980,7 +980,7 @@ export default function TurtlePage() {
                     </div>
                   )}
                   {/* Save / Submit buttons (challenges only) */}
-                  {!isTutorial && user && (
+                  {!isTutorial && session?.user && (
                     <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
                       {/* Save button — always available */}
                       <button onClick={handleSave} disabled={saving || running || !hasRunOnce}

@@ -1,11 +1,11 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase, type Class } from "@/lib/supabase";
-import { getProfile, generateJoinCode } from "@/lib/profile";
+import { type Class } from "@/lib/supabase";
+import { getProfile } from "@/lib/profile";
 import SiteHeader from "@/app/components/SiteHeader";
 
 
@@ -17,7 +17,7 @@ const CARD: React.CSSProperties = {
 };
 
 export default function TeacherDashboard() {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [classes, setClasses] = useState<Class[]>([]);
   const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
@@ -27,50 +27,38 @@ export default function TeacherDashboard() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!user) { router.push("/"); return; }
+    if (status === "loading") return;
+    if (!session?.user) { router.push("/"); return; }
 
     // Verify teacher role
-    getProfile(user.id).then(profile => {
+    getProfile(session?.user?.id).then(profile => {
       if (!profile) { router.push("/onboarding"); return; }
       if (profile.role !== "teacher") { router.push("/tools/code-lab"); return; }
-      loadClasses(user.id);
+      loadClasses(session?.user?.id);
     });
-  }, [isLoaded, user]);
+  }, [status, session?.user?.id]);
 
-  async function loadClasses(teacherId: string) {
-    const { data } = await supabase
-      .from("classes")
-      .select("*")
-      .eq("teacher_id", teacherId)
-      .order("created_at", { ascending: false });
-
-    const classList = data ?? [];
+  async function loadClasses(_teacherId: string) {
+    const res = await fetch("/api/teacher/classes");
+    const data = res.ok ? await res.json() : [];
+    const classList: (Class & { studentCount: number })[] = data;
     setClasses(classList);
-
-    // Count students per class
     const counts: Record<string, number> = {};
-    await Promise.all(classList.map(async (c) => {
-      const { count } = await supabase
-        .from("enrollments")
-        .select("*", { count: "exact", head: true })
-        .eq("class_id", c.id);
-      counts[c.id] = count ?? 0;
-    }));
+    for (const c of classList) counts[c.id] = c.studentCount ?? 0;
     setStudentCounts(counts);
     setLoading(false);
   }
 
   async function createClass() {
-    if (!user || !newClassName.trim()) return;
+    if (!newClassName.trim()) return;
     setCreating(true);
-    const { data, error } = await supabase.from("classes").insert({
-      teacher_id: user.id,
-      name: newClassName.trim(),
-      join_code: generateJoinCode(),
-    }).select().single();
-
-    if (!error && data) {
+    const res = await fetch("/api/teacher/classes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newClassName.trim() }),
+    });
+    const data = await res.json();
+    if (res.ok) {
       setClasses(prev => [data, ...prev]);
       setStudentCounts(prev => ({ ...prev, [data.id]: 0 }));
     }
@@ -79,7 +67,7 @@ export default function TeacherDashboard() {
     setCreating(false);
   }
 
-  if (!isLoaded || loading) return (
+  if (status === "loading" || loading) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
       backgroundImage: "url('/ui/bg-tools-pattern.png')", backgroundRepeat: "repeat" }}>
       <div style={{ fontSize: 16, color: "#555", fontWeight: 600 }}>Loading...</div>
@@ -89,9 +77,9 @@ export default function TeacherDashboard() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
       <SiteHeader>
-        {user?.firstName && (
+        {session?.user?.name && (
           <span style={{ color: "#fff", fontSize: 14, fontWeight: 600, opacity: 0.85 }}>
-            {user.firstName}
+            {session.user.name}
           </span>
         )}
       </SiteHeader>

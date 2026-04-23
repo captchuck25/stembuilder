@@ -1,13 +1,12 @@
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { getProfile } from "@/lib/profile";
 
-// Post-login hub — reads the user's role and sends them to the right place.
 export default async function DashboardPage() {
-  const { userId } = await auth();
-  if (!userId) redirect("/");
+  const session = await auth();
+  if (!session?.user?.id) redirect("/sign-in");
 
-  const profile = await getProfile(userId);
+  const profile = await getProfile(session.user.id);
 
   // New user — hasn't picked a role yet
   if (!profile) redirect("/onboarding");

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { auth } from "@clerk/nextjs/server";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const TILE_STYLE = {
@@ -17,18 +16,15 @@ const TILE_STYLE = {
   transition: "transform 160ms ease, box-shadow 160ms ease",
 };
 
-export default async function CodeLabPage() {
-  const { userId } = await auth();
+export default function CodeLabPage() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <SiteHeader>
-        {!userId && (
-          <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
-            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
-            letterSpacing: "0.2px", background: "transparent" }}>
-            Teachers
-          </Link>
-        )}
+        <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+          borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
+          letterSpacing: "0.2px", background: "transparent" }}>
+          Teachers
+        </Link>
       </SiteHeader>
 
       <main style={{ flex: 1, width: "100%",
@@ -50,7 +46,7 @@ export default async function CodeLabPage() {
           <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
 
             {/* Blocks */}
-            <Link href="/tools/code-lab/blocks" style={{ textDecoration: "none" }}>
+            <Link href="/tools/block-lab" style={{ textDecoration: "none" }}>
               <div style={{ ...TILE_STYLE, background: "linear-gradient(135deg, #1e3a5f 0%, #2563eb 55%, #60a5fa 100%)" }}>
                 <span style={{ fontSize: 40, lineHeight: 1 }}>🧩</span>
                 <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: "0.3px" }}>Blocks</span>

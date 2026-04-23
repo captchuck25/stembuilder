@@ -1,5 +1,3 @@
-import { supabase } from "./supabase";
-
 export interface BridgeDesign {
   id: string;
   user_id: string;
@@ -15,17 +13,14 @@ export interface BridgeDesign {
   updated_at: string;
 }
 
-export async function fetchBridgeDesigns(userId: string): Promise<BridgeDesign[]> {
-  const { data } = await supabase
-    .from("bridge_designs")
-    .select("*")
-    .eq("user_id", userId)
-    .order("updated_at", { ascending: false });
-  return (data as BridgeDesign[]) ?? [];
+export async function fetchBridgeDesigns(_userId: string): Promise<BridgeDesign[]> {
+  const res = await fetch('/api/bridge')
+  if (!res.ok) return []
+  return res.json()
 }
 
 export async function upsertBridgeDesign(
-  userId: string,
+  _userId: string,
   design: {
     name: string;
     spanFeet: number;
@@ -37,44 +32,28 @@ export async function upsertBridgeDesign(
     cost: number | null;
   }
 ): Promise<void> {
-  await supabase.from("bridge_designs").upsert(
-    {
-      user_id: userId,
-      name: design.name,
-      span_feet: design.spanFeet,
-      load_lb: design.loadLb,
-      designer_name: design.designerName,
-      nodes: design.nodes,
-      members: design.members,
-      passed: design.passed,
-      cost: design.cost,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id,name" }
-  );
+  await fetch('/api/bridge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(design),
+  })
 }
 
 export async function fetchBridgeDesignById(id: string): Promise<BridgeDesign | null> {
-  const { data } = await supabase
-    .from("bridge_designs")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  return (data as BridgeDesign) ?? null;
+  const res = await fetch(`/api/bridge/${id}`)
+  if (!res.ok) return null
+  return res.json()
 }
 
 export async function deleteBridgeDesign(id: string): Promise<void> {
-  await supabase.from("bridge_designs").delete().eq("id", id);
+  await fetch(`/api/bridge/${id}`, { method: 'DELETE' })
 }
 
-export async function checkBridgeNameExists(userId: string, name: string): Promise<boolean> {
-  const { data } = await supabase
-    .from("bridge_designs")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("name", name)
-    .maybeSingle();
-  return data != null;
+export async function checkBridgeNameExists(_userId: string, name: string): Promise<boolean> {
+  const res = await fetch(`/api/bridge/check?name=${encodeURIComponent(name)}`)
+  if (!res.ok) return false
+  const data = await res.json()
+  return data.exists
 }
 
 export interface ProgressRow {
@@ -93,31 +72,37 @@ export interface ScoreRow {
   updated_at: string;
 }
 
-export async function fetchCodeLabProgress(userId: string): Promise<ProgressRow[]> {
-  const { data } = await supabase
-    .from("user_progress")
-    .select("level_idx, challenge_idx, completed, quiz_score, updated_at")
-    .eq("user_id", userId)
-    .eq("tool", "code-lab-python");
-  return (data as ProgressRow[]) ?? [];
+export async function fetchCodeLabProgress(_userId: string): Promise<ProgressRow[]> {
+  const res = await fetch('/api/progress?tool=code-lab-python')
+  if (!res.ok) return []
+  return res.json()
 }
 
-export async function fetchBlockLabProgress(userId: string): Promise<ProgressRow[]> {
-  const { data } = await supabase
-    .from("user_progress")
-    .select("level_idx, challenge_idx, completed, quiz_score, updated_at")
-    .eq("user_id", userId)
-    .eq("tool", "block-lab");
-  return (data as ProgressRow[]) ?? [];
+export async function fetchBlockLabProgress(_userId: string): Promise<ProgressRow[]> {
+  const res = await fetch('/api/progress?tool=block-lab')
+  if (!res.ok) return []
+  return res.json()
 }
 
-export async function fetchToolScores(userId: string): Promise<ScoreRow[]> {
-  const { data } = await supabase
-    .from("user_progress")
-    .select("tool, level_idx, challenge_idx, quiz_score, updated_at")
-    .eq("user_id", userId)
-    .like("tool", "meas-%");
-  return (data as ScoreRow[]) ?? [];
+export async function fetchToolScores(_userId: string): Promise<ScoreRow[]> {
+  const res = await fetch('/api/progress?tool=meas')
+  if (!res.ok) return []
+  const data: ScoreRow[] = await res.json()
+  return data.filter((r) => r.tool?.startsWith('meas-'))
+}
+
+export async function upsertToolHighScore(
+  _userId: string,
+  tool: string,
+  levelIdx: number,
+  challengeIdx: number,
+  newScore: number,
+): Promise<void> {
+  await fetch('/api/progress/highscore', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool, levelIdx, challengeIdx, score: newScore }),
+  })
 }
 
 // ─── Turtle submissions ───────────────────────────────────────────────────────
@@ -135,90 +120,52 @@ export interface TurtleSubmission {
 }
 
 export async function saveTurtleWork(
-  userId: string, challengeId: string, code: string, imageData: string,
+  _userId: string, challengeId: string, code: string, imageData: string,
 ): Promise<string | null> {
-  const { error } = await supabase.from("turtle_submissions").upsert(
-    { user_id: userId, challenge_id: challengeId, code, image_data: imageData, updated_at: new Date().toISOString() },
-    { onConflict: "user_id,challenge_id" },
-  );
-  return error?.message ?? null;
+  const res = await fetch('/api/turtle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challengeId, code, imageData, submit: false }),
+  })
+  if (!res.ok) { const d = await res.json(); return d.error ?? 'Error' }
+  return null
 }
 
 export async function submitTurtleWork(
-  userId: string, challengeId: string, code: string, imageData: string,
+  _userId: string, challengeId: string, code: string, imageData: string,
 ): Promise<string | null> {
-  const { error } = await supabase.from("turtle_submissions").upsert(
-    { user_id: userId, challenge_id: challengeId, code, image_data: imageData,
-      submitted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-    { onConflict: "user_id,challenge_id" },
-  );
-  return error?.message ?? null;
+  const res = await fetch('/api/turtle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challengeId, code, imageData, submit: true }),
+  })
+  if (!res.ok) { const d = await res.json(); return d.error ?? 'Error' }
+  return null
 }
 
-export async function fetchTurtleSubmission(userId: string, challengeId: string): Promise<TurtleSubmission | null> {
-  const { data } = await supabase
-    .from("turtle_submissions")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("challenge_id", challengeId)
-    .maybeSingle();
-  return (data as TurtleSubmission) ?? null;
+export async function fetchTurtleSubmission(_userId: string, challengeId: string): Promise<TurtleSubmission | null> {
+  const res = await fetch(`/api/turtle/${encodeURIComponent(challengeId)}`)
+  if (!res.ok) return null
+  return res.json()
 }
 
-export async function fetchTurtleSubmissions(userId: string): Promise<TurtleSubmission[]> {
-  const { data } = await supabase
-    .from("turtle_submissions")
-    .select("*")
-    .eq("user_id", userId);
-  return (data as TurtleSubmission[]) ?? [];
+export async function fetchTurtleSubmissions(_userId: string): Promise<TurtleSubmission[]> {
+  const res = await fetch('/api/turtle')
+  if (!res.ok) return []
+  return res.json()
 }
 
 export async function fetchTurtleSubmissionsForStudents(studentIds: string[]): Promise<TurtleSubmission[]> {
-  if (!studentIds.length) return [];
-  const { data } = await supabase
-    .from("turtle_submissions")
-    .select("*")
-    .in("user_id", studentIds)
-    .not("submitted_at", "is", null);
-  return (data as TurtleSubmission[]) ?? [];
+  if (!studentIds.length) return []
+  const res = await fetch(`/api/turtle/review?studentIds=${studentIds.join(',')}`)
+  if (!res.ok) return []
+  return res.json()
 }
 
 export async function approveTurtleSubmission(id: string, approved: boolean | null): Promise<void> {
-  await supabase.from("turtle_submissions")
-    .update({ approved, updated_at: new Date().toISOString() })
-    .eq("id", id);
-}
-
-/** Save a measurement-lab high score. Only writes if it beats the existing record. */
-export async function upsertToolHighScore(
-  userId: string,
-  tool: string,
-  levelIdx: number,
-  challengeIdx: number,
-  newScore: number,
-): Promise<void> {
-  const { data } = await supabase
-    .from("user_progress")
-    .select("quiz_score")
-    .eq("user_id", userId)
-    .eq("tool", tool)
-    .eq("level_idx", levelIdx)
-    .eq("challenge_idx", challengeIdx)
-    .maybeSingle();
-
-  if ((data?.quiz_score ?? 0) >= newScore) return;
-
-  await supabase.from("user_progress").upsert(
-    {
-      user_id: userId,
-      tool,
-      level_idx: levelIdx,
-      challenge_idx: challengeIdx,
-      completed: true,
-      quiz_score: newScore,
-      saved_code: null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id,tool,level_idx,challenge_idx" },
-  );
+  await fetch('/api/turtle/review', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, approved }),
+  })
 }

@@ -1,9 +1,10 @@
 ﻿"use client";
+import { useSession } from "next-auth/react";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useUser, Show, UserButton } from "@clerk/nextjs";
+
 import BridgeScene from "./components/BridgeScene";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertBridgeDesign, checkBridgeNameExists, fetchBridgeDesignById } from "@/lib/achievements";
@@ -359,7 +360,8 @@ const SUPPORT_A_ID = "support-a";
 const SUPPORT_B_ID = "support-b";
 
 function BridgeToolPage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
   const router = useRouter();
   const searchParams = useSearchParams();
   // Name of the cloud design currently open — saves go back to this record
@@ -3327,7 +3329,7 @@ function BridgeToolPage() {
   }
 
   async function onSaveClick() {
-    if (!user) { window.alert("Sign in to save your design."); return; }
+    if (!session?.user) { window.alert("Sign in to save your design."); return; }
     const name = bridgeName.trim();
 
     // If this design was opened from the cloud, save back to the same record directly
@@ -3343,7 +3345,7 @@ function BridgeToolPage() {
       return;
     }
     // Check for duplicate name in cloud
-    const exists = await checkBridgeNameExists(user.id, name);
+    const exists = await checkBridgeNameExists(userId ?? "", name);
     if (exists) {
       setSaveDialogMode("confirm-replace");
       setShowSaveDialog(true);
@@ -3353,12 +3355,12 @@ function BridgeToolPage() {
   }
 
   async function performCloudSave(name: string) {
-    if (!user) return;
+    if (!session?.user || !userId) return;
     setSaveStatus("saving");
     // If saving under a new name from the dialog, update the title box too
     if (name !== bridgeName) setBridgeName(name);
     try {
-      await upsertBridgeDesign(user.id, {
+      await upsertBridgeDesign(userId, {
         name,
         spanFeet,
         loadLb,
@@ -3731,20 +3733,7 @@ function BridgeToolPage() {
 
   return (
     <div className={styles.page}>
-      <SiteHeader
-        hideUserButton
-        onLogoClick={() => safeNavigate("/")}
-      >
-        <Show when="signed-in">
-          <UserButton appearance={{ elements: { avatarBox: { width: 48, height: 48 } } }}>
-            <UserButton.MenuItems>
-              <UserButton.Action label="My Work" labelIcon={<span>🏆</span>}
-                onClick={() => safeNavigate("/mywork")} />
-              <UserButton.Action label="My Classes" labelIcon={<span>🏫</span>}
-                onClick={() => safeNavigate("/dashboard")} />
-            </UserButton.MenuItems>
-          </UserButton>
-        </Show>
+      <SiteHeader onLogoClick={() => safeNavigate("/")}>
       </SiteHeader>
 
       <main className={styles.main}>

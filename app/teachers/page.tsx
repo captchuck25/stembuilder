@@ -1,5 +1,4 @@
-import { auth } from "@clerk/nextjs/server";
-import { SignInButton, SignUpButton } from "@clerk/nextjs";
+import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { getProfile } from "@/lib/profile";
 import Link from "next/link";
@@ -17,13 +16,12 @@ const BTN: React.CSSProperties = {
 };
 
 export default async function TeachersLandingPage() {
-  const { userId } = await auth();
+  const session = await auth();
 
-  if (userId) {
-    const profile = await getProfile(userId);
+  if (session?.user?.id) {
+    const profile = await getProfile(session.user.id);
     if (!profile) redirect("/onboarding");
     if (profile.role === "teacher") redirect("/teachers/dashboard");
-    // Student visiting /teachers — fall through to show the page
   }
 
   return (
@@ -67,18 +65,14 @@ export default async function TeachersLandingPage() {
 
           {/* CTA */}
           <div style={{ display: "flex", gap: 16, justifyContent: "center", flexWrap: "wrap" }}>
-            <SignUpButton mode="modal" forceRedirectUrl="/onboarding">
-              <button style={{ ...BTN, background: "#2563eb", color: "#fff",
-                boxShadow: "0 4px 16px rgba(37,99,235,0.35)", fontSize: 16 }}>
-                Get Started Free →
-              </button>
-            </SignUpButton>
-            <SignInButton mode="modal" forceRedirectUrl="/dashboard">
-              <button style={{ ...BTN, background: "rgba(255,255,255,0.15)", border: "2px solid rgba(255,255,255,0.8)",
-                color: "#fff", fontSize: 16 }}>
-                Sign In to Dashboard
-              </button>
-            </SignInButton>
+            <Link href="/sign-up" style={{ ...BTN, background: "#2563eb", color: "#fff",
+              boxShadow: "0 4px 16px rgba(37,99,235,0.35)", fontSize: 16 }}>
+              Get Started Free →
+            </Link>
+            <Link href="/sign-in" style={{ ...BTN, background: "rgba(255,255,255,0.15)",
+              border: "2px solid rgba(255,255,255,0.8)", color: "#fff", fontSize: 16 }}>
+              Sign In to Dashboard
+            </Link>
           </div>
         </div>
       </main>

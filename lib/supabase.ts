@@ -8,10 +8,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 // ─── Types matching our database tables ──────────────────────────────────────
 
 export interface Profile {
-  id: string           // Clerk user ID
+  id: string
   email: string
   name: string
   role: 'teacher' | 'student'
+  password_hash?: string
+  google_id?: string
   created_at: string
 }
 

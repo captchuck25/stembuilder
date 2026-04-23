@@ -1,9 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { auth } from "@clerk/nextjs/server";
 
-export default async function HubLayout({ children }: { children: ReactNode }) {
-  const { userId } = await auth();
+export default function HubLayout({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
@@ -48,24 +46,22 @@ export default async function HubLayout({ children }: { children: ReactNode }) {
             />
           </div>
           <nav style={{ display: "flex", gap: 12 }}>
-            {!userId && (
-              <Link
-                href="/teachers"
-                style={{
-                  border: "1px solid #fff",
-                  color: "#fff",
-                  padding: "8px 14px",
-                  borderRadius: 999,
-                  fontWeight: 600,
-                  fontSize: 14,
-                  textDecoration: "none",
-                  letterSpacing: "0.2px",
-                  background: "transparent",
-                }}
-              >
-                Teachers
-              </Link>
-            )}
+            <Link
+              href="/teachers"
+              style={{
+                border: "1px solid #fff",
+                color: "#fff",
+                padding: "8px 14px",
+                borderRadius: 999,
+                fontWeight: 600,
+                fontSize: 14,
+                textDecoration: "none",
+                letterSpacing: "0.2px",
+                background: "transparent",
+              }}
+            >
+              Teachers
+            </Link>
             <Link
               href="/login"
               style={{

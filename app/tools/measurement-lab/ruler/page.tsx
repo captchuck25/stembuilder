@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
 
@@ -303,7 +303,8 @@ const MM_STEPS: { val: MmStep; label: string }[] = [
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function RulerGamePage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
   const [mode,     setMode]     = useState<Mode>("inches");
   const [inchPrec, setInchPrec] = useState<InchPrec>(2);
   const [mmStep,   setMmStep]   = useState<MmStep>(10);
@@ -352,12 +353,12 @@ export default function RulerGamePage() {
     if (correct) {
       const newScore = score + 1;
       setScore(newScore);
-      if (user) {
+      if (userId) {
         const li = mode === "inches" ? 0 : 1;
         const ci = mode === "inches"
           ? INCH_PRECS.findIndex(p => p.val === inchPrec)
           : MM_STEPS.findIndex(s => s.val === mmStep);
-        upsertToolHighScore(user.id, "meas-ruler", li, ci, newScore);
+        upsertToolHighScore(userId, "meas-ruler", li, ci, newScore);
       }
       // Advance after short delay
       timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1200);

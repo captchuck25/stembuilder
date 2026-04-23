@@ -1,25 +1,25 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { upsertProfile } from "@/lib/profile";
 
 export default function OnboardingPage() {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [selecting, setSelecting] = useState(false);
 
-  if (!isLoaded) return null;
-  if (!user) { router.push("/"); return null; }
+  if (status === "loading") return null;
+  if (!session?.user) { router.push("/sign-in"); return null; }
 
   async function choose(role: "teacher" | "student") {
-    if (!user || selecting) return;
+    if (!session?.user || selecting) return;
     setSelecting(true);
     await upsertProfile({
-      id: user.id,
-      email: user.primaryEmailAddress?.emailAddress ?? "",
-      name: user.fullName ?? user.firstName ?? "User",
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
       role,
     });
     router.push(role === "teacher" ? "/teachers/dashboard" : "/student/dashboard");

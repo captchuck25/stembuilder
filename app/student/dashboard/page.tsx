@@ -1,10 +1,10 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase, type Class, type Assignment } from "@/lib/supabase";
+import { type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import SiteHeader from "@/app/components/SiteHeader";
@@ -22,7 +22,7 @@ interface EnrolledClass {
 }
 
 export default function StudentDashboard() {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,87 +32,47 @@ export default function StudentDashboard() {
   const [showJoin, setShowJoin] = useState(false);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!user) { router.push("/"); return; }
-    getProfile(user.id).then(profile => {
+    if (status === "loading") return;
+    if (!session?.user) { router.push("/"); return; }
+    getProfile(session?.user?.id).then(profile => {
       if (!profile) { router.push("/onboarding"); return; }
       if (profile.role === "teacher") { router.push("/teachers/dashboard"); return; }
-      loadClasses(user.id);
+      loadClasses();
     });
-  }, [isLoaded, user]);
+  }, [status, session?.user?.id]);
 
-  async function loadClasses(studentId: string) {
-    const { data: enrollments } = await supabase
-      .from("enrollments")
-      .select("class_id")
-      .eq("student_id", studentId);
-
-    if (!enrollments?.length) { setLoading(false); return; }
-
-    const classIds = enrollments.map(e => e.class_id);
-    const { data: classes } = await supabase
-      .from("classes")
-      .select("*")
-      .in("id", classIds);
-
-    const result: EnrolledClass[] = await Promise.all(
-      (classes ?? []).map(async (cls) => {
-        const { data: assignments } = await supabase
-          .from("assignments")
-          .select("*")
-          .eq("class_id", cls.id)
-          .order("level_id");
-        return { class: cls, assignments: assignments ?? [] };
-      })
-    );
-
-    setEnrolledClasses(result);
+  async function loadClasses() {
+    const res = await fetch("/api/student/classes");
+    const data = res.ok ? await res.json() : [];
+    setEnrolledClasses(data);
     setLoading(false);
   }
 
   async function joinClass() {
-    if (!user || !joinCode.trim()) return;
+    if (!joinCode.trim()) return;
     setJoining(true);
     setJoinError("");
 
-    const { data: cls } = await supabase
-      .from("classes")
-      .select("*")
-      .eq("join_code", joinCode.trim().toUpperCase())
-      .single();
-
-    if (!cls) {
-      setJoinError("Class not found. Check the code and try again.");
-      setJoining(false);
-      return;
-    }
-
-    // Check already enrolled
-    const { data: existing } = await supabase
-      .from("enrollments")
-      .select("id")
-      .eq("class_id", cls.id)
-      .eq("student_id", user.id)
-      .single();
-
-    if (existing) {
-      setJoinError("You are already enrolled in this class.");
-      setJoining(false);
-      return;
-    }
-
-    await supabase.from("enrollments").insert({
-      class_id: cls.id,
-      student_id: user.id,
+    const res = await fetch("/api/student/classes/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: joinCode.trim() }),
     });
+    const data = await res.json();
+
+    if (!res.ok) {
+      setJoinError(data.error ?? "Failed to join class.");
+      setJoining(false);
+      return;
+    }
 
     setJoinCode("");
     setShowJoin(false);
-    loadClasses(user.id);
+    loadClasses();
     setJoining(false);
   }
 
-  if (!isLoaded || loading) return (
+  if (status === "loading" || loading) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
       backgroundImage: "url('/ui/bg-tools-pattern.png')", backgroundRepeat: "repeat" }}>
       <div style={{ fontSize: 16, color: "#555", fontWeight: 600 }}>Loading...</div>
@@ -122,8 +82,8 @@ export default function StudentDashboard() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
       <SiteHeader>
-        {user?.firstName && (
-          <span style={{ color: "#fff", fontSize: 14, fontWeight: 600 }}>{user.firstName}</span>
+        {session?.user?.name && (
+          <span style={{ color: "#fff", fontSize: 14, fontWeight: 600 }}>{session?.user?.name}</span>
         )}
       </SiteHeader>
 
@@ -148,7 +108,6 @@ export default function StudentDashboard() {
             </button>
           </div>
 
-          {/* Join class modal */}
           {showJoin && (
             <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
               display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
@@ -189,7 +148,6 @@ export default function StudentDashboard() {
             </div>
           )}
 
-          {/* No classes yet */}
           {enrolledClasses.length === 0 ? (
             <div style={{ ...CARD, padding: "64px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 52, marginBottom: 16 }}>🎒</div>
@@ -220,7 +178,7 @@ export default function StudentDashboard() {
                     </div>
                   ) : (
                     <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {assignments.map(a => {
+                      {assignments.map((a: Assignment) => {
                         const level = LEVELS[a.level_id];
                         if (!level) return null;
                         return (

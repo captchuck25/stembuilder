@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
 
@@ -289,7 +289,8 @@ function DisplacementDisplay({ sizeIdx, dt, answered }: {
 type Mode = "read" | "displace";
 
 export default function GraduatedCylinderPage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
   const [sizeIdx,        setSizeIdx]        = useState<SizeKey>(0);
   const [mode,           setMode]           = useState<Mode>("read");
   // Null on SSR to avoid hydration mismatch (Math.random)
@@ -350,7 +351,7 @@ export default function GraduatedCylinderPage() {
     if (isCorrect) {
       const newScore = score + 1;
       setScore(newScore);
-      if (user) upsertToolHighScore(user.id, "meas-cylinder", sizeIdx, mode === "read" ? 0 : 1, newScore);
+      if (userId) upsertToolHighScore(userId, "meas-cylinder", sizeIdx, mode === "read" ? 0 : 1, newScore);
       timerRef.current = setTimeout(() => nextQuestion(sizeIdx, mode), 1200);
     } else {
       const ns = strikes + 1;

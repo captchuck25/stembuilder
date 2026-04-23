@@ -1,10 +1,10 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { supabase, type Class, type Assignment } from "@/lib/supabase";
+import { type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
@@ -27,7 +27,7 @@ interface StudentRow {
 }
 
 export default function ClassDetailPage() {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const params = useParams();
   const classId = params.id as string;
@@ -41,57 +41,25 @@ export default function ClassDetailPage() {
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!user) { router.push("/"); return; }
-    getProfile(user.id).then(profile => {
+    if (status === "loading") return;
+    if (!session?.user) { router.push("/"); return; }
+    getProfile(session?.user?.id).then(profile => {
       if (!profile || profile.role !== "teacher") { router.push("/"); return; }
       loadClass();
     });
-  }, [isLoaded, user]);
+  }, [status, session?.user?.id]);
 
   async function loadClass() {
-    const [{ data: classData }, { data: assignData }, { data: enrollData }] = await Promise.all([
-      supabase.from("classes").select("*").eq("id", classId).single(),
-      supabase.from("assignments").select("*").eq("class_id", classId).order("level_id"),
-      supabase.from("enrollments").select("student_id").eq("class_id", classId),
-    ]);
+    const res = await fetch(`/api/teacher/classes/${classId}`);
+    if (!res.ok) { router.push("/teachers/dashboard"); return; }
+    const data = await res.json();
 
-    if (!classData) { router.push("/teachers/dashboard"); return; }
-    setCls(classData);
-    setAssignments(assignData ?? []);
+    setCls(data.class);
+    setAssignments(data.assignments ?? []);
+    setStudents(data.students ?? []);
 
-    // Load student profiles + progress
-    const studentIds = (enrollData ?? []).map(e => e.student_id);
-    if (studentIds.length) {
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("id, name, email")
-        .in("id", studentIds);
-
-      const totalChallenges = (assignData ?? []).reduce((sum, a) => {
-        const level = LEVELS[a.level_id];
-        return sum + (level?.challenges.length ?? 0);
-      }, 0);
-
-      const rows: StudentRow[] = await Promise.all(
-        (profiles ?? []).map(async (p) => {
-          const { count } = await supabase
-            .from("user_progress")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", p.id)
-            .eq("completed", true)
-            .not("challenge_idx", "is", null);
-          return {
-            id: p.id,
-            name: p.name,
-            email: p.email,
-            completedChallenges: count ?? 0,
-            totalChallenges,
-          };
-        })
-      );
-      setStudents(rows);
-      const subs = await fetchTurtleSubmissionsForStudents(studentIds);
+    if ((data.studentIds ?? []).length) {
+      const subs = await fetchTurtleSubmissionsForStudents(data.studentIds);
       setTurtleSubs(subs);
     }
     setLoading(false);
@@ -107,20 +75,21 @@ export default function ClassDetailPage() {
     setSaving(true);
     const existing = assignments.find(a => a.level_id === levelId);
     if (existing) {
-      await supabase.from("assignments").delete().eq("id", existing.id);
+      await fetch(`/api/teacher/assignments?id=${existing.id}`, { method: "DELETE" });
       setAssignments(prev => prev.filter(a => a.level_id !== levelId));
     } else {
-      const { data } = await supabase.from("assignments").insert({
-        class_id: cls.id,
-        tool: "code-lab",
-        level_id: levelId,
-      }).select().single();
-      if (data) setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
+      const res = await fetch("/api/teacher/assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId: cls.id, tool: "code-lab", levelId }),
+      });
+      const data = await res.json();
+      if (res.ok) setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
     }
     setSaving(false);
   }
 
-  if (!isLoaded || loading || !cls) return (
+  if (status === "loading" || loading || !cls) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
       backgroundImage: "url('/ui/bg-tools-pattern.png')", backgroundRepeat: "repeat" }}>
       <div style={{ fontSize: 16, color: "#555", fontWeight: 600 }}>Loading...</div>

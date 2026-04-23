@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
+import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
 
@@ -355,7 +355,8 @@ function CaliperSVG({ value, answered, correct, interactive, onDrag, unit }: {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function DialCaliperPage() {
-  const { user } = useUser();
+  const { data: session } = useSession();
+  const userId = session?.user?.id ?? null;
   const [gameMode,  setGameMode]  = useState<GameMode>("read");
   const [unit,      setUnit]      = useState<Unit>("in");
   const [target,    setTarget]    = useState<Target>({ value: 0, label: '0.000"' });
@@ -419,7 +420,7 @@ export default function DialCaliperPage() {
     if (isCorrect) {
       const ns = score + 1;
       setScore(ns);
-      if (user) upsertToolHighScore(user.id, "meas-dial-caliper", unit === "mm" ? 1 : 0, gameMode === "read" ? 0 : 1, ns);
+      if (userId) upsertToolHighScore(userId, "meas-dial-caliper", unit === "mm" ? 1 : 0, gameMode === "read" ? 0 : 1, ns);
       timerRef.current = setTimeout(() => nextQuestion(gameMode, unit), 1400);
     } else {
       const ns = strikes + 1;

@@ -1084,14 +1084,14 @@ while not at_goal():
     },
     {
       title: "Long Corridor",
-      hint: "The same while loop works no matter how long the hallway is — you never need to count.",
+      hint: "The same while loop works no matter how long the hallway is — you never need to count steps.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:10, exitY:1,
-      starterCode: `# The goal is far away — let the while loop handle it.
+      startX:0, startY:1, startDir:1, exitX:14, exitY:1,
+      starterCode: `# The goal is very far away — let the while loop handle it.
 
 while not at_goal():
     forward()
@@ -1099,16 +1099,18 @@ while not at_goal():
     },
     {
       title: "Walk Until Blocked",
-      hint: "Move forward while the path ahead is clear, then turn and continue to the goal.",
+      hint: "Move forward while the path ahead is clear, then turn right and keep going down.",
       grid: [
-        [1,1,1,1,1,1],
-        [0,0,0,0,0,1],
-        [1,1,1,1,0,1],
-        [1,1,1,1,0,0],
-        [1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:5, exitY:3,
-      starterCode: `# Walk while the path ahead is clear, then turn right and continue.
+      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
+      starterCode: `# Walk right while the path is clear, then turn and go down.
 
 while has_path_forward():
     forward()
@@ -1120,17 +1122,29 @@ while not at_goal():
 `,
     },
     {
-      title: "Two Turns",
-      hint: "Use `while has_path_forward():` to walk each straight section, then turn between them.",
+      title: "The S-Curve",
+      hint: "Four straight sections connected by turns — use `while has_path_forward():` for each stretch.",
       grid: [
-        [1,1,1,1,1],
-        [0,0,0,0,1],
-        [1,1,1,0,1],
-        [1,1,1,0,0],
-        [1,1,1,1,1],
+        [1,1,1,1,1,1,1],
+        [0,0,0,0,1,1,1],
+        [1,1,1,0,1,1,1],
+        [1,1,1,0,0,0,1],
+        [1,1,1,1,1,0,1],
+        [1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:4, exitY:3,
-      starterCode: `# Walk the first section, turn, walk the second section.
+      startX:0, startY:1, startDir:1, exitX:5, exitY:5,
+      starterCode: `# Right → Down → Right → Down. A while loop handles each section.
+
+while has_path_forward():
+    forward()
+
+turn_right()
+
+while has_path_forward():
+    forward()
+
+turn_left()
 
 while has_path_forward():
     forward()
@@ -1145,13 +1159,15 @@ while not at_goal():
       title: "Follow the Left Wall",
       hint: "If there's space on your left, turn left and move. Otherwise go forward, or turn right.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1],
-        [1,0,1,0,1,0,1],
-        [1,0,0,0,1,0,0],
-        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1],
+        [0,0,1,0,0,0,0,1],
+        [1,0,1,0,1,1,0,1],
+        [1,0,1,0,1,1,0,1],
+        [1,0,0,0,1,1,0,1],
+        [1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
+      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
       starterCode: `# Left-hand rule: always try to turn left first.
 
 while not at_goal():
@@ -1168,13 +1184,14 @@ while not at_goal():
       title: "Right-Hand Rule",
       hint: "Always try to turn right first — hug the right wall all the way to the goal.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,1],
-        [1,1,0,1,0,1,1],
-        [1,1,0,0,0,0,0],
-        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1],
+        [0,0,0,1,0,0,0,0,1],
+        [1,1,0,1,0,1,1,0,1],
+        [1,1,0,0,0,1,1,0,1],
+        [1,1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
+      startX:0, startY:1, startDir:1, exitX:8, exitY:4,
       starterCode: `# Right-hand rule: always try to turn right first.
 
 while not at_goal():

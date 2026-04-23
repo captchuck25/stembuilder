@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Show } from "@clerk/nextjs";
 import SiteHeader from "./components/SiteHeader";
 
 import styles from "./page.module.css";
@@ -27,13 +26,11 @@ export default function Home() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <SiteHeader>
-        <Show when="signed-out">
-          <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
-            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
-            letterSpacing: "0.2px", background: "transparent" }}>
-            Teachers
-          </Link>
-        </Show>
+        <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+          borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
+          letterSpacing: "0.2px", background: "transparent" }}>
+          Teachers
+        </Link>
       </SiteHeader>
       <main
         style={{

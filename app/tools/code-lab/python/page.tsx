@@ -1,12 +1,15 @@
 "use client";
 
+import { useSession } from 'next-auth/react';
+
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useUser, Show } from "@clerk/nextjs";
+
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import { getProfile } from "@/lib/profile";
 import { EditorView, basicSetup } from "codemirror";
-import { python } from "@codemirror/lang-python";
+import { pythonLanguage } from "@codemirror/lang-python";
+import { CompletionContext, CompletionResult } from "@codemirror/autocomplete";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorState } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -38,7 +41,6 @@ function saveProgress(p: Progress) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
 }
 
-// Sync a challenge completion to Supabase (fires and forgets)
 async function syncProgressToCloud(
   userId: string,
   li: number,
@@ -47,42 +49,37 @@ async function syncProgressToCloud(
   savedCode?: string,
   quizScore?: number
 ) {
-  const { supabase } = await import("@/lib/supabase");
-  await supabase.from("user_progress").upsert({
-    user_id: userId,
-    tool: "code-lab-python",
-    level_idx: li,
-    challenge_idx: ci,
-    completed,
-    saved_code: savedCode ?? null,
-    quiz_score: quizScore ?? null,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id,tool,level_idx,challenge_idx" });
+  await fetch("/api/progress", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tool: "code-lab-python",
+      level_idx: li,
+      challenge_idx: ci,
+      completed,
+      saved_code: savedCode ?? null,
+      quiz_score: quizScore ?? null,
+    }),
+  });
 }
 
-// Save in-progress code without touching completed status.
-// ignoreDuplicates:true means: insert only if no row exists — never overwrite a completed row.
 async function syncCodeToCloud(userId: string, li: number, ci: number, code: string) {
-  const { supabase } = await import("@/lib/supabase");
-  await supabase.from("user_progress").upsert({
-    user_id: userId,
-    tool: "code-lab-python",
-    level_idx: li,
-    challenge_idx: ci,
-    completed: false,
-    saved_code: code,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "user_id,tool,level_idx,challenge_idx", ignoreDuplicates: true });
+  await fetch("/api/progress", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      tool: "code-lab-python",
+      level_idx: li,
+      challenge_idx: ci,
+      completed: false,
+      saved_code: code,
+    }),
+  });
 }
 
-// Load progress from Supabase and merge into local Progress object
-async function loadProgressFromCloud(userId: string): Promise<Progress> {
-  const { supabase } = await import("@/lib/supabase");
-  const { data } = await supabase
-    .from("user_progress")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("tool", "code-lab-python");
+async function loadProgressFromCloud(_userId: string): Promise<Progress> {
+  const res = await fetch("/api/progress?tool=code-lab-python");
+  const data = res.ok ? await res.json() : [];
 
   const p: Progress = { completedChallenges: {}, completedLevels: {}, savedCode: {} };
   for (const row of data ?? []) {
@@ -418,7 +415,7 @@ function SiteChrome({ children }: { children: React.ReactNode }) {
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
       <SiteHeader>
-        <Show when="signed-out"><Link href="/teachers" style={NAV_LINK}>Teachers</Link></Show>
+        <Link href="/teachers" style={NAV_LINK}>Teachers</Link>
       </SiteHeader>
       <main style={{flex:1,backgroundImage:"url('/ui/bg-tools-pattern.png')",backgroundRepeat:"repeat",backgroundSize:"auto"}}>
         {children}
@@ -514,6 +511,93 @@ function LevelIntro({ li, onStart }: { li: number; onStart: () => void }) {
   );
 }
 
+// ─── Per-level autocomplete ───────────────────────────────────────────────────
+
+const LEVEL_CMDS = [
+  // Level 0 — Commands
+  [
+    { label: "move_forward", apply: "move_forward()", type: "function", detail: "Move one step forward" },
+    { label: "turn_right",   apply: "turn_right()",   type: "function", detail: "Turn 90° clockwise" },
+    { label: "turn_left",    apply: "turn_left()",    type: "function", detail: "Turn 90° counter-clockwise" },
+  ],
+  // Level 1 — For Loops (cumulative)
+  [
+    { label: "move_forward", apply: "move_forward()", type: "function", detail: "Move one step forward" },
+    { label: "turn_right",   apply: "turn_right()",   type: "function", detail: "Turn 90° clockwise" },
+    { label: "turn_left",    apply: "turn_left()",    type: "function", detail: "Turn 90° counter-clockwise" },
+    { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
+    { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
+    { label: "in",    type: "keyword",  detail: "Used in for loops" },
+  ],
+  // Level 2 — If Statements (cumulative)
+  [
+    { label: "move_forward",    apply: "move_forward()",    type: "function", detail: "Move one step forward" },
+    { label: "turn_right",      apply: "turn_right()",      type: "function", detail: "Turn 90° clockwise" },
+    { label: "turn_left",       apply: "turn_left()",       type: "function", detail: "Turn 90° counter-clockwise" },
+    { label: "forward",         apply: "forward()",         type: "function", detail: "Move one step forward" },
+    { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
+    { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
+    { label: "in",    type: "keyword",  detail: "Used in for loops" },
+    { label: "if",    type: "keyword",  detail: "Run block if condition is true" },
+    { label: "elif",  type: "keyword",  detail: "Else-if condition" },
+    { label: "else",  type: "keyword",  detail: "Fallback block" },
+    { label: "has_path_ahead",  apply: "has_path_ahead()",  type: "function", detail: "True if path ahead is clear" },
+    { label: "has_path_left",   apply: "has_path_left()",   type: "function", detail: "True if path left is clear" },
+    { label: "has_path_right",  apply: "has_path_right()",  type: "function", detail: "True if path right is clear" },
+  ],
+  // Level 3 — While Loops (cumulative)
+  [
+    { label: "move_forward",    apply: "move_forward()",    type: "function", detail: "Move one step forward" },
+    { label: "turn_right",      apply: "turn_right()",      type: "function", detail: "Turn 90° clockwise" },
+    { label: "turn_left",       apply: "turn_left()",       type: "function", detail: "Turn 90° counter-clockwise" },
+    { label: "forward",         apply: "forward()",         type: "function", detail: "Move one step forward" },
+    { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
+    { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
+    { label: "in",    type: "keyword",  detail: "Used in for loops" },
+    { label: "if",    type: "keyword",  detail: "Run block if condition is true" },
+    { label: "elif",  type: "keyword",  detail: "Else-if condition" },
+    { label: "else",  type: "keyword",  detail: "Fallback block" },
+    { label: "while", type: "keyword",  detail: "Repeat while condition is true" },
+    { label: "not",   type: "keyword",  detail: "Logical NOT" },
+    { label: "has_path_ahead",    apply: "has_path_ahead()",    type: "function", detail: "True if path ahead is clear" },
+    { label: "has_path_left",     apply: "has_path_left()",     type: "function", detail: "True if path left is clear" },
+    { label: "has_path_right",    apply: "has_path_right()",    type: "function", detail: "True if path right is clear" },
+    { label: "has_path_forward",  apply: "has_path_forward()",  type: "function", detail: "True if path forward is clear" },
+    { label: "at_goal",           apply: "at_goal()",           type: "function", detail: "True if at the goal" },
+  ],
+  // Level 4 — elif and else (same as level 3, elif/else already included)
+  [
+    { label: "move_forward",    apply: "move_forward()",    type: "function", detail: "Move one step forward" },
+    { label: "turn_right",      apply: "turn_right()",      type: "function", detail: "Turn 90° clockwise" },
+    { label: "turn_left",       apply: "turn_left()",       type: "function", detail: "Turn 90° counter-clockwise" },
+    { label: "forward",         apply: "forward()",         type: "function", detail: "Move one step forward" },
+    { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
+    { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
+    { label: "in",    type: "keyword",  detail: "Used in for loops" },
+    { label: "if",    type: "keyword",  detail: "Run block if condition is true" },
+    { label: "elif",  type: "keyword",  detail: "Else-if condition" },
+    { label: "else",  type: "keyword",  detail: "Fallback block" },
+    { label: "while", type: "keyword",  detail: "Repeat while condition is true" },
+    { label: "not",   type: "keyword",  detail: "Logical NOT" },
+    { label: "has_path_ahead",    apply: "has_path_ahead()",    type: "function", detail: "True if path ahead is clear" },
+    { label: "has_path_left",     apply: "has_path_left()",     type: "function", detail: "True if path left is clear" },
+    { label: "has_path_right",    apply: "has_path_right()",    type: "function", detail: "True if path right is clear" },
+    { label: "has_path_forward",  apply: "has_path_forward()",  type: "function", detail: "True if path forward is clear" },
+    { label: "at_goal",           apply: "at_goal()",           type: "function", detail: "True if at the goal" },
+  ],
+];
+
+function makePythonCompleter(liRef: React.MutableRefObject<number>) {
+  return function(context: CompletionContext): CompletionResult | null {
+    const word = context.matchBefore(/\w+/);
+    if (!word || word.from === word.to) return null;
+    const cmds = LEVEL_CMDS[liRef.current] ?? LEVEL_CMDS[0];
+    const options = cmds.filter(c => c.label.startsWith(word.text));
+    if (!options.length) return null;
+    return { from: word.from, options };
+  };
+}
+
 // ─── Challenge screen ─────────────────────────────────────────────────────────
 
 function ChallengeView({
@@ -543,6 +627,8 @@ function ChallengeView({
   const viewRef    = useRef<EditorView|null>(null);
   const codeRef    = useRef(ch.starterCode);
   const flashIvRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liRef      = useRef(li);
+  useEffect(() => { liRef.current = li; }, [li]);
 
   const stopFlash = () => {
     if (flashIvRef.current) { clearInterval(flashIvRef.current); flashIvRef.current = null; }
@@ -591,7 +677,9 @@ function ChallengeView({
       state: EditorState.create({
         doc: ch.starterCode,
         extensions: [
-          basicSetup, python(), oneDark,
+          basicSetup, pythonLanguage,
+          pythonLanguage.data.of({ autocomplete: makePythonCompleter(liRef) }),
+          oneDark,
           indentUnit.of("    "),
           keymap.of([{ key: "Enter", run: pythonEnter }]),
           EditorView.updateListener.of(u => { if (u.docChanged) codeRef.current = u.state.doc.toString(); }),
@@ -860,7 +948,8 @@ function LevelComplete({ li, score, total, onContinue }: { li: number; score: nu
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PythonMazePage() {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
+  const userId = session?.user?.id ?? null;
   const [phase, setPhase] = useState<Phase>({ tag:"overview" });
   const [progress, setProgress] = useState<Progress>({ completedChallenges:{}, completedLevels:{}, savedCode:{} });
   const [isTeacher, setIsTeacher] = useState(false);
@@ -872,10 +961,10 @@ export default function PythonMazePage() {
   // Load progress — cloud if logged in, localStorage otherwise.
   // On cloud load we MERGE with localStorage so a failed sync never erases local data.
   useEffect(() => {
-    if (!isLoaded) return;
-    if (user) {
-      getProfile(user.id).then(p => { if (p?.role === "teacher") setIsTeacher(true); });
-      loadProgressFromCloud(user.id).then(cloudP => {
+    if (status === "loading") return;
+    if (userId) {
+      getProfile(userId).then(p => { if (p?.role === "teacher") setIsTeacher(true); });
+      loadProgressFromCloud(userId).then(cloudP => {
         const localP = loadProgress();
         const merged: Progress = {
           completedChallenges: { ...cloudP.completedChallenges, ...localP.completedChallenges },
@@ -891,7 +980,7 @@ export default function PythonMazePage() {
       progressRef.current = p;
       setProgress(p);
     }
-  }, [isLoaded, user]);
+  }, [status !== "loading", userId]);
 
   function updateProgress(p: Progress) {
     progressRef.current = p;
@@ -910,9 +999,9 @@ export default function PythonMazePage() {
     const allDone = LEVELS[li].challenges.every((_,idx) => p.completedChallenges[chalKey(li,idx)]);
     if (allDone) p.completedLevels = { ...p.completedLevels, [li]: true };
     updateProgress(p);
-    if (user) {
-      syncProgressToCloud(user.id, li, ci, true, code);
-      if (allDone) syncProgressToCloud(user.id, li, null, true);
+    if (userId) {
+      syncProgressToCloud(userId, li, ci, true, code);
+      if (allDone) syncProgressToCloud(userId, li, null, true);
     }
   }
 
@@ -920,7 +1009,7 @@ export default function PythonMazePage() {
     // Use progressRef.current so we never clobber a completion that just fired
     const p = { ...progressRef.current, savedCode: { ...progressRef.current.savedCode, [chalKey(li,ci)]: code } };
     updateProgress(p);
-    if (user) syncCodeToCloud(user.id, li, ci, code);
+    if (userId) syncCodeToCloud(userId, li, ci, code);
   }
 
   // Route to challenge
@@ -962,7 +1051,7 @@ export default function PythonMazePage() {
   if (phase.tag === "quiz") {
     return (
       <QuizView li={phase.li} onComplete={(score,total) => {
-        if (user) syncProgressToCloud(user.id, phase.li, null, true, undefined, score);
+        if (userId) syncProgressToCloud(userId, phase.li, null, true, undefined, score);
         setPhase({tag:"complete",li:phase.li,score,total});
       }}/>
     );
