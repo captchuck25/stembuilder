@@ -1,12 +1,13 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { getProfile } from "@/lib/profile";
+import { adminDb } from "@/lib/db.server";
 
 export default async function DashboardPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/sign-in");
 
-  const profile = await getProfile(session.user.id);
+  const db = adminDb();
+  const { data: profile } = await db.from("profiles").select("role").eq("id", session.user.id).single();
 
   // New user — hasn't picked a role yet
   if (!profile) redirect("/onboarding");
