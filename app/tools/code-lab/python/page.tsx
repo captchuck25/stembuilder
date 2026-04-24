@@ -55,7 +55,7 @@ async function syncProgressToCloud(
     body: JSON.stringify({
       tool: "code-lab-python",
       level_idx: li,
-      challenge_idx: ci,
+      challenge_idx: ci ?? -1,
       completed,
       saved_code: savedCode ?? null,
       quiz_score: quizScore ?? null,
@@ -83,7 +83,7 @@ async function loadProgressFromCloud(_userId: string): Promise<Progress> {
 
   const p: Progress = { completedChallenges: {}, completedLevels: {}, savedCode: {} };
   for (const row of data ?? []) {
-    if (row.challenge_idx !== null) {
+    if (row.challenge_idx !== null && row.challenge_idx >= 0) {
       const key = `${row.level_idx}_${row.challenge_idx}`;
       if (row.completed) p.completedChallenges[key] = true;
       if (row.saved_code) p.savedCode[key] = row.saved_code;
@@ -413,11 +413,11 @@ const NAV_LINK: React.CSSProperties = { border:"1px solid #fff",color:"#fff",pad
 
 function SiteChrome({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif",background:"#0c1120"}}>
       <SiteHeader>
         <Link href="/teachers" style={NAV_LINK}>Teachers</Link>
       </SiteHeader>
-      <main style={{flex:1,backgroundImage:"url('/ui/bg-tools-pattern.png')",backgroundRepeat:"repeat",backgroundSize:"auto"}}>
+      <main style={{flex:1}}>
         {children}
       </main>
       <footer style={{height:40,width:"100%",backgroundImage:"url('/ui/footer-metal.png')",backgroundSize:"cover",backgroundPosition:"center"}}/>
@@ -427,7 +427,7 @@ function SiteChrome({ children }: { children: React.ReactNode }) {
 
 // ─── Card style ───────────────────────────────────────────────────────────────
 
-const CARD: React.CSSProperties = { background:"rgba(255,255,255,0.97)",border:"3px solid #1f1f1f",borderRadius:20,boxShadow:"0 14px 30px rgba(0,0,0,0.22)" };
+const CARD: React.CSSProperties = { background:"#1a2540",border:"1px solid rgba(99,179,237,0.15)",borderRadius:20,boxShadow:"0 14px 30px rgba(0,0,0,0.5)" };
 
 // ─── Overview screen ──────────────────────────────────────────────────────────
 
@@ -435,11 +435,10 @@ function Overview({ progress, onSelect, isTeacher }: { progress: Progress; onSel
   return (
     <SiteChrome>
       <div style={{maxWidth:900,margin:"0 auto",padding:"40px 32px"}}>
-        <div style={{background:"rgba(255,255,255,0.97)",border:"3px solid #1f1f1f",borderRadius:20,
-          boxShadow:"0 8px 24px rgba(0,0,0,0.18)",padding:"18px 24px",marginBottom:28}}>
-          <Link href="/tools/code-lab" style={{color:"#555",fontSize:13,fontWeight:600,textDecoration:"none"}}>← Code Lab</Link>
-          <h1 style={{fontSize:28,fontWeight:900,color:"#111",margin:"8px 0 4px"}}>Python Maze Challenges</h1>
-          <p style={{fontSize:14,fontWeight:600,color:"#555",margin:0}}>
+        <div style={{...CARD,padding:"18px 24px",marginBottom:28}}>
+          <Link href="/tools/code-lab" style={{color:"#94a3b8",fontSize:13,fontWeight:600,textDecoration:"none"}}>← Code Lab</Link>
+          <h1 style={{fontSize:28,fontWeight:900,color:"#e2e8f0",margin:"8px 0 4px"}}>Python Maze Challenges</h1>
+          <p style={{fontSize:14,fontWeight:600,color:"#94a3b8",margin:0}}>
             {isTeacher ? "Preview all levels — students unlock them as they progress." : "Complete each level to unlock the next."}
           </p>
         </div>
@@ -459,12 +458,12 @@ function Overview({ progress, onSelect, isTeacher }: { progress: Progress; onSel
                 {locked && <div style={{position:"absolute",top:12,right:14,fontSize:18}}>🔒</div>}
                 {progress.completedLevels[li] && <div style={{position:"absolute",top:12,right:14,fontSize:18}}>✅</div>}
                 <div style={{fontSize:12,fontWeight:700,color:lv.color,textTransform:"uppercase",letterSpacing:"0.6px",marginTop:8}}>Level {lv.id}</div>
-                <div style={{fontSize:20,fontWeight:900,color:"#111",margin:"4px 0 6px"}}>{lv.title}</div>
-                <div style={{fontSize:12,color:"#666",marginBottom:14}}>{lv.tagline}</div>
-                <div style={{background:"#f0f0f0",borderRadius:20,height:6,overflow:"hidden"}}>
+                <div style={{fontSize:20,fontWeight:900,color:"#e2e8f0",margin:"4px 0 6px"}}>{lv.title}</div>
+                <div style={{fontSize:12,color:"#94a3b8",marginBottom:14}}>{lv.tagline}</div>
+                <div style={{background:"rgba(255,255,255,0.1)",borderRadius:20,height:6,overflow:"hidden"}}>
                   <div style={{width:`${pct}%`,height:"100%",background:lv.color,borderRadius:20,transition:"width 400ms ease"}}/>
                 </div>
-                <div style={{fontSize:11,color:"#888",marginTop:5}}>{done} / {total} challenges</div>
+                <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{done} / {total} challenges</div>
               </div>
             );
           })}
@@ -481,7 +480,7 @@ function LevelIntro({ li, onStart }: { li: number; onStart: () => void }) {
   return (
     <SiteChrome>
       <div style={{maxWidth:820,margin:"0 auto",padding:"40px 32px"}}>
-        <button onClick={() => history.back()} style={{background:"transparent",border:"none",color:"#555",fontSize:13,fontWeight:600,cursor:"pointer",padding:0,marginBottom:16}}>← Back to Levels</button>
+        <button onClick={() => history.back()} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",padding:0,marginBottom:16}}>← Back to Levels</button>
         <div style={{...CARD,padding:0,overflow:"hidden"}}>
           <div style={{background:lv.color,padding:"20px 28px"}}>
             <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.7)",textTransform:"uppercase",letterSpacing:"0.7px"}}>Level {lv.id}</div>
@@ -491,12 +490,12 @@ function LevelIntro({ li, onStart }: { li: number; onStart: () => void }) {
           <div style={{padding:"0 28px 28px"}}>
             <LessonPanel text={lv.introNotes}/>
             {lv.newCommands.length > 0 && (
-              <div style={{background:"#f8f9ff",border:"2px solid #e0e7ff",borderRadius:14,padding:"16px 20px",margin:"16px 0"}}>
-                <div style={{fontSize:12,fontWeight:800,color:"#3730a3",textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>New Commands This Level</div>
+              <div style={{background:"rgba(99,179,237,0.06)",border:"1px solid rgba(99,179,237,0.2)",borderRadius:14,padding:"16px 20px",margin:"16px 0"}}>
+                <div style={{fontSize:12,fontWeight:800,color:"#93c5fd",textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>New Commands This Level</div>
                 {lv.newCommands.map(c => (
                   <div key={c.cmd} style={{display:"flex",gap:12,marginBottom:8,alignItems:"flex-start"}}>
-                    <code style={{background:"#e0e7ff",color:"#3730a3",padding:"2px 8px",borderRadius:6,fontSize:13,fontFamily:"monospace",whiteSpace:"nowrap",flexShrink:0}}>{c.cmd}</code>
-                    <span style={{fontSize:13,color:"#444",lineHeight:1.5}}>{c.desc}</span>
+                    <code style={{background:"rgba(99,179,237,0.15)",color:"#93c5fd",padding:"2px 8px",borderRadius:6,fontSize:13,fontFamily:"monospace",whiteSpace:"nowrap",flexShrink:0}}>{c.cmd}</code>
+                    <span style={{fontSize:13,color:"#94a3b8",lineHeight:1.5}}>{c.desc}</span>
                   </div>
                 ))}
               </div>
@@ -730,7 +729,7 @@ function ChallengeView({
   const TAB = (active: boolean): React.CSSProperties => ({
     padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",border:"none",
     borderBottom:active?"3px solid #3b82f6":"3px solid transparent",
-    background:"transparent",color:active?"#3b82f6":"#555",transition:"color 120ms",
+    background:"transparent",color:active?"#3b82f6":"#64748b",transition:"color 120ms",
   });
 
   return (
@@ -738,10 +737,10 @@ function ChallengeView({
       <div style={{maxWidth:1400,margin:"0 auto",padding:"20px 28px 32px"}}>
         {/* Breadcrumb */}
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap"}}>
-          <button onClick={onBack} style={{background:"transparent",border:"none",color:"#555",fontSize:13,fontWeight:600,cursor:"pointer",padding:0}}>← Levels</button>
-          <span style={{color:"#ccc"}}>|</span>
+          <button onClick={onBack} style={{background:"transparent",border:"none",color:"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer",padding:0}}>← Levels</button>
+          <span style={{color:"rgba(255,255,255,0.2)"}}>|</span>
           <span style={{fontSize:13,fontWeight:700,color:lv.color}}>Level {lv.id} — {lv.title}</span>
-          <span style={{fontSize:13,color:"#888"}}>Challenge {ci+1} of {lv.challenges.length}</span>
+          <span style={{fontSize:13,color:"#64748b"}}>Challenge {ci+1} of {lv.challenges.length}</span>
         </div>
 
         {/* Level tabs — click any to jump to that challenge */}
@@ -752,9 +751,9 @@ function ChallengeView({
             return (
               <div key={idx} onClick={() => onJump(idx, codeRef.current)}
                 style={{padding:"5px 12px",borderRadius:16,fontSize:12,fontWeight:700,cursor:"pointer",
-                  background:active?lv.color:done?"#dcfce7":"rgba(255,255,255,0.7)",
-                  color:active?"#fff":done?"#16a34a":"#555",
-                  border:`2px solid ${active?lv.color:done?"#16a34a":"#ccc"}`,
+                  background:active?lv.color:done?"rgba(74,222,128,0.15)":"rgba(255,255,255,0.07)",
+                  color:active?"#fff":done?"#4ade80":"#64748b",
+                  border:`2px solid ${active?lv.color:done?"#4ade80":"rgba(255,255,255,0.18)"}`,
                   opacity: active ? 1 : 0.85,
                 }}>
                 {done?"✓ ":""}{idx+1}
@@ -767,7 +766,7 @@ function ChallengeView({
         <div style={{display:"flex",gap:18,alignItems:"flex-start",flexWrap:"wrap"}}>
           {/* Left: editor + lesson */}
           <div style={{...CARD,flex:"0 0 460px",minWidth:300,display:"flex",flexDirection:"column",height:580,overflow:"hidden"}}>
-            <div style={{display:"flex",borderBottom:"1px solid #e0e0e0",background:"#fafafa",flexShrink:0}}>
+            <div style={{display:"flex",borderBottom:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",flexShrink:0}}>
               <button style={TAB(leftTab==="code")}    onClick={()=>setLeftTab("code")}>Code</button>
               <button style={TAB(leftTab==="lesson")}  onClick={()=>setLeftTab("lesson")}>Lesson / Notes</button>
             </div>
@@ -775,11 +774,11 @@ function ChallengeView({
                 Unmounting the editor div destroys the CodeMirror instance. */}
             <div style={{flex:1,overflow:"hidden",flexDirection:"column",display:leftTab==="code"?"flex":"none"}}>
               <div ref={editorRef} style={{flex:1,overflow:"hidden"}}/>
-              <div style={{padding:"10px 12px",borderTop:"1px solid #e0e0e0",display:"flex",gap:8,background:"#f5f5f5",flexShrink:0}}>
+              <div style={{padding:"10px 12px",borderTop:"1px solid rgba(255,255,255,0.08)",display:"flex",gap:8,background:"rgba(255,255,255,0.04)",flexShrink:0}}>
                 <button onClick={handleRun} disabled={animating} style={{padding:"8px 22px",borderRadius:10,fontWeight:800,fontSize:14,background:animating?"#94a3b8":"#3b82f6",color:"#fff",border:"none",cursor:animating?"not-allowed":"pointer"}}>
                   {animating?"Running…":"▶  Run"}
                 </button>
-                <button onClick={handleReset} disabled={animating} style={{padding:"8px 14px",borderRadius:10,fontWeight:700,fontSize:14,background:"#f0f0f0",color:"#333",border:"1px solid #ccc",cursor:"pointer"}}>
+                <button onClick={handleReset} disabled={animating} style={{padding:"8px 14px",borderRadius:10,fontWeight:700,fontSize:14,background:"rgba(255,255,255,0.08)",color:"#94a3b8",border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer"}}>
                   Reset
                 </button>
                 {solved && (
@@ -797,18 +796,18 @@ function ChallengeView({
           {/* Right: level info + maze + output */}
           <div style={{flex:1,minWidth:300,display:"flex",flexDirection:"column",gap:14}}>
             <div style={{...CARD,padding:"14px 18px"}}>
-              <div style={{fontSize:17,fontWeight:900,color:"#111"}}>{ch.title}</div>
-              <div style={{fontSize:13,color:"#888",marginTop:3}}>💡 {ch.hint}</div>
+              <div style={{fontSize:17,fontWeight:900,color:"#e2e8f0"}}>{ch.title}</div>
+              <div style={{fontSize:13,color:"#94a3b8",marginTop:3}}>💡 {ch.hint}</div>
             </div>
             <div style={{...CARD,padding:"10px 14px",display:"flex",justifyContent:"center",overflowX:"auto"}}>
               <MazeCanvas ch={ch} px={px} py={py} pdir={pdir} solved={solved} robotFlash={robotFlash}/>
             </div>
             <div style={{...CARD,padding:"12px 16px",minHeight:64}}>
-              <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.7px",color:"#888",marginBottom:6}}>Output</div>
+              <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.7px",color:"#64748b",marginBottom:6}}>Output</div>
               {!output.length
-                ? <div style={{fontSize:13,color:"#aaa"}}>Press Run to execute your code.</div>
+                ? <div style={{fontSize:13,color:"#4a5568"}}>Press Run to execute your code.</div>
                 : output.map((o,idx)=>(
-                  <div key={idx} style={{fontSize:14,fontWeight:600,padding:"6px 10px",borderRadius:8,background:o.type==="error"?"#fef2f2":o.type==="success"?"#f0fdf4":"#f0f9ff",color:o.type==="error"?"#dc2626":o.type==="success"?"#16a34a":"#0369a1"}}>
+                  <div key={idx} style={{fontSize:14,fontWeight:600,padding:"6px 10px",borderRadius:8,background:o.type==="error"?"rgba(239,68,68,0.15)":o.type==="success"?"rgba(74,222,128,0.15)":"rgba(56,189,248,0.1)",color:o.type==="error"?"#fca5a5":o.type==="success"?"#4ade80":"#7dd3fc"}}>
                     {o.text}
                   </div>
                 ))
@@ -865,11 +864,11 @@ function QuizView({ li, onComplete }: { li: number; onComplete: (score: number, 
               const parts = q.question.split("\n\n");
               return (
                 <div style={{marginBottom:20}}>
-                  <p style={{fontSize:16,fontWeight:700,color:"#111",margin:"0 0 12px",lineHeight:1.5}}>{parts[0]}</p>
+                  <p style={{fontSize:16,fontWeight:700,color:"#e2e8f0",margin:"0 0 12px",lineHeight:1.5}}>{parts[0]}</p>
                   {parts.slice(1).map((block, bi) => (
                     <pre key={bi} style={{fontFamily:"'Courier New', monospace",fontSize:14,fontWeight:700,
-                      background:"#f4f4f4",border:"1.5px solid #ddd",borderRadius:8,
-                      padding:"12px 16px",margin:0,whiteSpace:"pre",overflowX:"auto",color:"#1a1a1a",lineHeight:1.7}}>
+                      background:"#0f172a",border:"1px solid rgba(255,255,255,0.12)",borderRadius:8,
+                      padding:"12px 16px",margin:0,whiteSpace:"pre",overflowX:"auto",color:"#e2e8f0",lineHeight:1.7}}>
                       {block}
                     </pre>
                   ))}
@@ -878,11 +877,11 @@ function QuizView({ li, onComplete }: { li: number; onComplete: (score: number, 
             })()}
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               {q.options.map((opt,idx)=>{
-                let bg="#fafafa", border="2px solid #e0e0e0", color="#333";
+                let bg="rgba(255,255,255,0.05)", border="2px solid rgba(255,255,255,0.15)", color="#e2e8f0";
                 if (submitted) {
-                  if (idx===q.answer) { bg="#f0fdf4"; border="2px solid #22c55e"; color="#16a34a"; }
-                  else if (idx===selected) { bg="#fef2f2"; border="2px solid #dc2626"; color="#dc2626"; }
-                } else if (idx===selected) { bg="#eff6ff"; border=`2px solid ${lv.color}`; color="#111"; }
+                  if (idx===q.answer) { bg="rgba(74,222,128,0.15)"; border="2px solid #22c55e"; color="#4ade80"; }
+                  else if (idx===selected) { bg="rgba(239,68,68,0.15)"; border="2px solid #dc2626"; color="#fca5a5"; }
+                } else if (idx===selected) { bg="rgba(99,179,237,0.12)"; border=`2px solid ${lv.color}`; color="#e2e8f0"; }
                 return (
                   <button key={idx} disabled={submitted} onClick={()=>setSelected(idx)}
                     style={{textAlign:"left",padding:"12px 16px",borderRadius:10,background:bg,border,color,fontWeight:600,fontSize:14,cursor:submitted?"default":"pointer",transition:"all 120ms"}}>

@@ -239,3 +239,14 @@ export function updateParam(
     return n;
   });
 }
+
+export function moveNode(nodes: ScriptNode[], id: string, dir: 'up' | 'down'): ScriptNode[] {
+  const idx = nodes.findIndex(n => n.id === id);
+  if (idx !== -1) {
+    const arr = [...nodes];
+    if (dir === 'up' && idx > 0) [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+    else if (dir === 'down' && idx < arr.length - 1) [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]];
+    return arr;
+  }
+  return nodes.map(n => n.children ? { ...n, children: moveNode(n.children, id, dir) } : n);
+}

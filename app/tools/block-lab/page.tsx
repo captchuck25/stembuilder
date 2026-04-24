@@ -6,7 +6,7 @@ import Link from 'next/link';
 import SiteHeader from '@/app/components/SiteHeader';
 import { UNITS, chalKey, countCompleted, BlockUnit } from './units';
 import { blocksForLevel, BLOCK_MAP, BlockDef } from './engine/blocks';
-import { ScriptNode, appendNode, deleteNode, updateParam, MazeRuntime } from './engine/runtime';
+import { ScriptNode, appendNode, deleteNode, updateParam, moveNode, MazeRuntime } from './engine/runtime';
 import { THEMES } from './engine/themes';
 import MazeBoard, { MazeBoardHandle } from './components/MazeBoard';
 
@@ -36,7 +36,7 @@ async function syncToCloud(_userId: string, ui: number, ci: number | null, compl
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      tool: 'block-lab', level_idx: ui, challenge_idx: ci,
+      tool: 'block-lab', level_idx: ui, challenge_idx: ci ?? -1,
       completed, saved_code: savedScript ? JSON.stringify(savedScript) : null,
     }),
   });
@@ -46,7 +46,7 @@ async function loadFromCloud(_userId: string): Promise<Progress> {
   const data = res.ok ? await res.json() : [];
   const p = emptyProgress();
   for (const row of data ?? []) {
-    if (row.challenge_idx !== null) {
+    if (row.challenge_idx !== null && row.challenge_idx >= 0) {
       const key = chalKey(row.level_idx, row.challenge_idx);
       if (row.completed) p.completedChallenges[key] = true;
       if (row.saved_code) { try { p.savedScripts[key] = JSON.parse(row.saved_code); } catch { /* ignore */ } }
@@ -70,8 +70,7 @@ type Phase =
 
 function SiteChrome({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column',
-      backgroundImage: "url('/ui/bg-tools-pattern.png')", backgroundRepeat: 'repeat' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#0c1120' }}>
       <SiteHeader />
       <main style={{ flex: 1 }}>{children}</main>
     </div>
@@ -79,8 +78,8 @@ function SiteChrome({ children }: { children: React.ReactNode }) {
 }
 
 const CARD: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.97)', border: '2px solid rgba(0,0,0,0.08)',
-  borderRadius: 20, boxShadow: '0 8px 28px rgba(0,0,0,0.14)',
+  background: '#1a2540', border: '1px solid rgba(99,179,237,0.15)',
+  borderRadius: 20, boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
 };
 
 // ─── Markdown renderer (same as Python) ───────────────────────────────────────
@@ -101,28 +100,28 @@ function LessonPanel({ text }: { text: string }) {
   };
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
-    if (raw.startsWith('# '))  { flushTable(); nodes.push(<h2 key={k++} style={{ fontSize: 20, fontWeight: 900, color: '#111', margin: '18px 0 6px' }}>{raw.slice(2)}</h2>); continue; }
-    if (raw.startsWith('## ')) { flushTable(); nodes.push(<h3 key={k++} style={{ fontSize: 16, fontWeight: 800, color: '#222', margin: '14px 0 4px' }}>{raw.slice(3)}</h3>); continue; }
-    if (raw.startsWith('> '))  { flushTable(); nodes.push(<blockquote key={k++} style={{ borderLeft: '4px solid #3b82f6', paddingLeft: 12, margin: '8px 0', color: '#444', fontStyle: 'italic', fontSize: 13 }}>{raw.slice(2)}</blockquote>); continue; }
+    if (raw.startsWith('# '))  { flushTable(); nodes.push(<h2 key={k++} style={{ fontSize: 20, fontWeight: 900, color: '#e2e8f0', margin: '18px 0 6px' }}>{raw.slice(2)}</h2>); continue; }
+    if (raw.startsWith('## ')) { flushTable(); nodes.push(<h3 key={k++} style={{ fontSize: 16, fontWeight: 800, color: '#e2e8f0', margin: '14px 0 4px' }}>{raw.slice(3)}</h3>); continue; }
+    if (raw.startsWith('> '))  { flushTable(); nodes.push(<blockquote key={k++} style={{ borderLeft: '4px solid #3b82f6', paddingLeft: 12, margin: '8px 0', color: '#94a3b8', fontStyle: 'italic', fontSize: 13 }}>{raw.slice(2)}</blockquote>); continue; }
     if (raw.startsWith('|')) {
       const cells = raw.split('|').slice(1, -1).map(c => c.trim());
       if (cells.every(c => /^[-:]+$/.test(c))) { tableRows.push(<thead key={k++} />); continue; }
       const isHead = tableRows.length === 1 && (tableRows[0] as React.ReactElement).type === 'thead';
       if (isHead) {
-        tableRows[0] = <thead key={k++}><tr>{cells.map((c, j) => <th key={j} style={{ textAlign: 'left', padding: '6px 10px', background: '#f0f4ff', borderBottom: '2px solid #ddd', fontSize: 13 }}>{c}</th>)}</tr></thead>;
+        tableRows[0] = <thead key={k++}><tr>{cells.map((c, j) => <th key={j} style={{ textAlign: 'left', padding: '6px 10px', background: 'rgba(99,179,237,0.12)', borderBottom: '1px solid rgba(99,179,237,0.2)', fontSize: 13, color: '#e2e8f0' }}>{c}</th>)}</tr></thead>;
       } else {
-        tableRows.push(<tr key={k++}>{cells.map((c, j) => <td key={j} style={{ padding: '5px 10px', borderBottom: '1px solid #eee', fontSize: 13, fontFamily: c.startsWith('`') ? 'monospace' : 'inherit' }}>{c.replace(/`/g, '')}</td>)}</tr>);
+        tableRows.push(<tr key={k++}>{cells.map((c, j) => <td key={j} style={{ padding: '5px 10px', borderBottom: '1px solid rgba(255,255,255,0.07)', fontSize: 13, color: '#cbd5e1', fontFamily: c.startsWith('`') ? 'monospace' : 'inherit' }}>{c.replace(/`/g, '')}</td>)}</tr>);
       }
       continue;
     }
     flushTable();
     if (raw === '') { nodes.push(<div key={k++} style={{ height: 8 }} />); continue; }
     const parts = raw.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, j) => {
-      if (p.startsWith('**') && p.endsWith('**')) return <strong key={j}>{p.slice(2, -2)}</strong>;
-      if (p.startsWith('`') && p.endsWith('`')) return <code key={j} style={{ background: '#f0f4ff', color: '#3730a3', padding: '1px 5px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace' }}>{p.slice(1, -1)}</code>;
+      if (p.startsWith('**') && p.endsWith('**')) return <strong key={j} style={{ color: '#e2e8f0' }}>{p.slice(2, -2)}</strong>;
+      if (p.startsWith('`') && p.endsWith('`')) return <code key={j} style={{ background: 'rgba(99,179,237,0.15)', color: '#93c5fd', padding: '1px 5px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace' }}>{p.slice(1, -1)}</code>;
       return p;
     });
-    nodes.push(<p key={k++} style={{ margin: '4px 0', fontSize: 13, color: '#333', lineHeight: 1.6 }}>{parts}</p>);
+    nodes.push(<p key={k++} style={{ margin: '4px 0', fontSize: 13, color: '#cbd5e1', lineHeight: 1.6 }}>{parts}</p>);
   }
   flushTable();
   return <div style={{ padding: '16px 20px' }}>{nodes}</div>;
@@ -135,9 +134,9 @@ function Overview({ progress, onSelect }: { progress: Progress; onSelect: (ui: n
     <SiteChrome>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 32px' }}>
         <div style={{ ...CARD, padding: '18px 24px', marginBottom: 28 }}>
-          <Link href="/tools/code-lab" style={{ color: '#555', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>← Code Lab</Link>
-          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#111', margin: '8px 0 4px' }}>Block Lab</h1>
-          <p style={{ fontSize: 14, fontWeight: 600, color: '#555', margin: 0 }}>
+          <Link href="/tools/code-lab" style={{ color: '#94a3b8', fontSize: 13, fontWeight: 600, textDecoration: 'none' }}>← Code Lab</Link>
+          <h1 style={{ fontSize: 28, fontWeight: 900, color: '#e2e8f0', margin: '8px 0 4px' }}>Block Lab</h1>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#94a3b8', margin: 0 }}>
             Learn to code by guiding STEM Bot through maze challenges. Complete each unit to unlock the next.
           </p>
         </div>
@@ -160,12 +159,12 @@ function Overview({ progress, onSelect }: { progress: Progress; onSelect: (ui: n
                 {progress.completedUnits[ui] && <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18 }}>✅</div>}
                 <div style={{ fontSize: 13, marginTop: 8 }}>{theme.emoji}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px', marginTop: 4 }}>Unit {unit.id}</div>
-                <div style={{ fontSize: 20, fontWeight: 900, color: '#111', margin: '4px 0 6px' }}>{unit.title}</div>
-                <div style={{ fontSize: 12, color: '#666', marginBottom: 14 }}>{unit.tagline}</div>
-                <div style={{ background: '#f0f0f0', borderRadius: 20, height: 6, overflow: 'hidden' }}>
+                <div style={{ fontSize: 20, fontWeight: 900, color: '#e2e8f0', margin: '4px 0 6px' }}>{unit.title}</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14 }}>{unit.tagline}</div>
+                <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 20, height: 6, overflow: 'hidden' }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: unit.color, borderRadius: 20, transition: 'width 400ms ease' }} />
                 </div>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 5 }}>{done} / {total} challenges</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 5 }}>{done} / {total} challenges</div>
               </div>
             );
           })}
@@ -182,7 +181,7 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
   return (
     <SiteChrome>
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '40px 32px' }}>
-        <button onClick={() => history.back()} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 16 }}>
+        <button onClick={() => history.back()} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0, marginBottom: 16 }}>
           ← Back to Units
         </button>
         <div style={{ ...CARD, padding: 0, overflow: 'hidden' }}>
@@ -194,12 +193,12 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
           <div style={{ padding: '0 28px 28px' }}>
             <LessonPanel text={unit.introNotes} />
             {unit.newBlocks.length > 0 && (
-              <div style={{ background: '#f8f9ff', border: '2px solid #e0e7ff', borderRadius: 14, padding: '16px 20px', margin: '16px 0' }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: '#3730a3', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 10 }}>New Blocks This Unit</div>
+              <div style={{ background: 'rgba(99,179,237,0.06)', border: '1px solid rgba(99,179,237,0.2)', borderRadius: 14, padding: '16px 20px', margin: '16px 0' }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 10 }}>New Blocks This Unit</div>
                 {unit.newBlocks.map(b => (
                   <div key={b.blockId} style={{ display: 'flex', gap: 12, marginBottom: 8, alignItems: 'flex-start' }}>
                     <span style={{ background: BLOCK_MAP[b.blockId]?.color ?? '#3b82f6', color: '#fff', padding: '2px 10px', borderRadius: 8, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{b.label}</span>
-                    <span style={{ fontSize: 13, color: '#444', lineHeight: 1.5 }}>{b.desc}</span>
+                    <span style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.5 }}>{b.desc}</span>
                   </div>
                 ))}
               </div>
@@ -315,7 +314,7 @@ function ChallengeView({
   const TAB = (active: boolean): React.CSSProperties => ({
     padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none',
     borderBottom: active ? `3px solid ${unit.color}` : '3px solid transparent',
-    background: 'transparent', color: active ? unit.color : '#666', transition: 'color 120ms',
+    background: 'transparent', color: active ? unit.color : '#64748b', transition: 'color 120ms',
   });
 
   const insertLabel = insertTargetId
@@ -334,10 +333,10 @@ function ChallengeView({
 
         {/* Breadcrumb */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-          <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: '#555', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Units</button>
-          <span style={{ color: '#ccc' }}>|</span>
+          <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Units</button>
+          <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: unit.color }}>{theme.emoji} Unit {unit.id} — {unit.title}</span>
-          <span style={{ fontSize: 13, color: '#888' }}>Challenge {ci + 1} of {unit.challenges.length}</span>
+          <span style={{ fontSize: 13, color: '#64748b' }}>Challenge {ci + 1} of {unit.challenges.length}</span>
         </div>
 
         {/* Challenge dots */}
@@ -349,9 +348,9 @@ function ChallengeView({
               <div key={idx}
                 onClick={() => onJump(idx, scriptRef.current)}
                 style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                  background: active ? unit.color : done ? '#dcfce7' : 'rgba(255,255,255,0.7)',
-                  color: active ? '#fff' : done ? '#16a34a' : '#555',
-                  border: `2px solid ${active ? unit.color : done ? '#16a34a' : '#ccc'}` }}>
+                  background: active ? unit.color : done ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
+                  color: active ? '#fff' : done ? '#4ade80' : '#64748b',
+                  border: `2px solid ${active ? unit.color : done ? '#4ade80' : 'rgba(255,255,255,0.18)'}` }}>
                 {done ? '✓ ' : ''}{idx + 1}
               </div>
             );
@@ -365,7 +364,7 @@ function ChallengeView({
           <div style={{ ...CARD, flex: '0 0 460px', minWidth: 300, display: 'flex', flexDirection: 'column', height: 620, overflow: 'hidden' }}>
 
             {/* Tabs */}
-            <div style={{ display: 'flex', borderBottom: '1px solid #e0e0e0', background: '#fafafa', flexShrink: 0 }}>
+            <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', flexShrink: 0 }}>
               <button style={TAB(leftTab === 'script')} onClick={() => setLeftTab('script')}>Script</button>
               <button style={TAB(leftTab === 'notes')} onClick={() => setLeftTab('notes')}>Lesson / Notes</button>
             </div>
@@ -374,8 +373,8 @@ function ChallengeView({
             <div style={{ flex: 1, display: leftTab === 'script' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
 
               {/* Block palette */}
-              <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid #eee', flexShrink: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: '#999', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>Add Blocks</div>
+              <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>Add Blocks</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                   {Object.entries(grouped).map(([cat, defs]) => (
                     <div key={cat} style={{ display: 'contents' }}>
@@ -391,8 +390,8 @@ function ChallengeView({
               </div>
 
               {/* Insertion indicator */}
-              <div style={{ padding: '4px 12px', background: '#f9fafb', borderBottom: '1px solid #eee', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 11, color: '#888', flex: 1 }}>Adding to: <strong style={{ color: '#444' }}>{insertLabel}</strong></span>
+              <div style={{ padding: '4px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>Adding to: <strong style={{ color: '#e2e8f0' }}>{insertLabel}</strong></span>
                 {insertTargetId && (
                   <button onClick={() => setInsertTargetId(null)} style={{ fontSize: 11, color: unit.color, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>↑ Back to main</button>
                 )}
@@ -401,12 +400,13 @@ function ChallengeView({
               {/* Script list */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {script.length === 0 ? (
-                  <div style={{ color: '#aaa', fontSize: 13, fontStyle: 'italic', textAlign: 'center', marginTop: 32, padding: '0 16px' }}>
+                  <div style={{ color: '#4a5568', fontSize: 13, fontStyle: 'italic', textAlign: 'center', marginTop: 32, padding: '0 16px' }}>
                     Click a block above to add it here
                   </div>
                 ) : (
                   script.map(node => (
                     <ScriptNodeRow key={node.id} node={node} script={script} onChange={setScript}
+                      onMove={(id, dir) => setScript(prev => moveNode(prev, id, dir))}
                       insertTargetId={insertTargetId} onSetInsert={setInsertTargetId}
                       running={running} unitColor={unit.color} depth={0} />
                   ))
@@ -414,7 +414,7 @@ function ChallengeView({
               </div>
 
               {/* Run / Stop / Clear */}
-              <div style={{ padding: '10px 12px', borderTop: '1px solid #e0e0e0', background: '#f5f5f5', flexShrink: 0, display: 'flex', gap: 8 }}>
+              <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', flexShrink: 0, display: 'flex', gap: 8 }}>
                 {!running ? (
                   <button onClick={handleRun} disabled={script.length === 0}
                     style={{ flex: 1, padding: '9px 20px', borderRadius: 10, fontWeight: 800, fontSize: 14, background: script.length === 0 ? '#94a3b8' : '#22c55e', color: '#fff', border: 'none', cursor: script.length === 0 ? 'not-allowed' : 'pointer' }}>
@@ -427,11 +427,11 @@ function ChallengeView({
                   </button>
                 )}
                 <button onClick={handleReset} disabled={running}
-                  style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: '#f0f0f0', color: '#333', border: '1px solid #ccc', cursor: 'pointer' }}>
+                  style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.08)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
                   ↺
                 </button>
                 <button onClick={handleClear} disabled={running}
-                  style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: '#f0f0f0', color: '#333', border: '1px solid #ccc', cursor: 'pointer' }}>
+                  style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.08)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
                   🗑
                 </button>
               </div>
@@ -448,8 +448,8 @@ function ChallengeView({
             {/* Challenge header */}
             <div style={{ ...CARD, padding: '14px 20px', marginBottom: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Challenge {ci + 1}</div>
-              <div style={{ fontSize: 18, fontWeight: 900, color: '#111', margin: '2px 0 4px' }}>{ch.title}</div>
-              <div style={{ fontSize: 13, color: bumpFlash ? '#b91c1c' : '#666', background: bumpFlash ? '#fef2f2' : 'transparent', padding: bumpFlash ? '6px 10px' : 0, borderRadius: 8, transition: 'all 200ms' }}>
+              <div style={{ fontSize: 18, fontWeight: 900, color: '#e2e8f0', margin: '2px 0 4px' }}>{ch.title}</div>
+              <div style={{ fontSize: 13, color: bumpFlash ? '#fca5a5' : '#94a3b8', background: bumpFlash ? 'rgba(239,68,68,0.15)' : 'transparent', padding: bumpFlash ? '6px 10px' : 0, borderRadius: 8, transition: 'all 200ms' }}>
                 {bumpFlash ? '💥 STEM Bot hit a wall! Check your script.' : `💡 ${ch.hint}`}
               </div>
             </div>
@@ -466,11 +466,11 @@ function ChallengeView({
 
             {/* Win banner */}
             {solved && (
-              <div style={{ ...CARD, padding: '16px 20px', marginTop: 14, background: '#f0fdf4', border: '2px solid #86efac', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ ...CARD, padding: '16px 20px', marginTop: 14, background: 'rgba(74,222,128,0.08)', border: '1px solid #4ade80', display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span style={{ fontSize: 28 }}>🎉</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 800, color: '#166534', fontSize: 15 }}>Challenge complete!</div>
-                  <div style={{ fontSize: 13, color: '#4ade80' }}>{isLast ? 'All challenges done — take the quiz!' : 'Ready for the next one?'}</div>
+                  <div style={{ fontWeight: 800, color: '#4ade80', fontSize: 15 }}>Challenge complete!</div>
+                  <div style={{ fontSize: 13, color: '#86efac' }}>{isLast ? 'All challenges done — take the quiz!' : 'Ready for the next one?'}</div>
                 </div>
                 {isLast ? (
                   <button onClick={() => onFinish(scriptRef.current)}
@@ -494,8 +494,9 @@ function ChallengeView({
 
 // ─── Script node renderer ─────────────────────────────────────────────────────
 
-function ScriptNodeRow({ node, script, onChange, insertTargetId, onSetInsert, running, unitColor, depth }: {
+function ScriptNodeRow({ node, script, onChange, onMove, insertTargetId, onSetInsert, running, unitColor, depth }: {
   node: ScriptNode; script: ScriptNode[]; onChange: (s: ScriptNode[]) => void;
+  onMove: (id: string, dir: 'up' | 'down') => void;
   insertTargetId: string | null; onSetInsert: (id: string | null) => void;
   running: boolean; unitColor: string; depth: number;
 }) {
@@ -519,6 +520,12 @@ function ScriptNodeRow({ node, script, onChange, insertTargetId, onSetInsert, ru
             )}
             {node.blockId === 'repeat' && <span style={{ opacity: 0.75, fontSize: 11 }}>times</span>}
           </span>
+          {depth === 0 && <>
+            <button disabled={running} onClick={() => onMove(node.id, 'up')}
+              style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↑</button>
+            <button disabled={running} onClick={() => onMove(node.id, 'down')}
+              style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↓</button>
+          </>}
           <button disabled={running} onClick={() => onSetInsert(isTarget ? null : node.id)}
             style={{ fontSize: 10, background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 6, color: '#fff', padding: '2px 6px', cursor: 'pointer', fontWeight: 700 }}>
             {isTarget ? '✓ here' : '+ in'}
@@ -530,7 +537,7 @@ function ScriptNodeRow({ node, script, onChange, insertTargetId, onSetInsert, ru
           {(node.children ?? []).length === 0
             ? <div style={{ fontSize: 11, color: def.color + 'AA', fontStyle: 'italic', padding: '4px 6px' }}>empty — click &quot;+ in&quot;</div>
             : (node.children ?? []).map(child => (
-              <ScriptNodeRow key={child.id} node={child} script={script} onChange={onChange}
+              <ScriptNodeRow key={child.id} node={child} script={script} onChange={onChange} onMove={onMove}
                 insertTargetId={insertTargetId} onSetInsert={onSetInsert}
                 running={running} unitColor={unitColor} depth={0} />
             ))
@@ -546,6 +553,12 @@ function ScriptNodeRow({ node, script, onChange, insertTargetId, onSetInsert, ru
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: depth * 14, borderRadius: 10, padding: '6px 10px', background: def.color, color: '#fff', fontSize: 12, fontWeight: 700 }}>
       <span style={{ flex: 1 }}>{def.label}</span>
+      {depth === 0 && <>
+        <button disabled={running} onClick={() => onMove(node.id, 'up')}
+          style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↑</button>
+        <button disabled={running} onClick={() => onMove(node.id, 'down')}
+          style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↓</button>
+      </>}
       <button disabled={running} onClick={() => onChange(deleteNode(script, node.id))}
         style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
     </div>
@@ -575,7 +588,7 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
               const correct = submitted ? chosen === q.answer : null;
               return (
                 <div key={qi} style={{ marginBottom: 28 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111', marginBottom: 10 }}>{qi + 1}. {q.question}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#e2e8f0', marginBottom: 10 }}>{qi + 1}. {q.question}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {q.options.map((opt, oi) => {
                       const picked = chosen === oi;
@@ -584,7 +597,7 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
                       return (
                         <button key={oi} disabled={submitted}
                           onClick={() => setAnswers(prev => { const a = [...prev]; a[qi] = oi; return a; })}
-                          style={{ textAlign: 'left', padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer', border: `2px solid ${isCorrect ? '#22c55e' : isWrong ? '#ef4444' : picked ? unit.color : '#e0e0e0'}`, background: isCorrect ? '#f0fdf4' : isWrong ? '#fef2f2' : picked ? unit.color + '15' : '#fff', color: '#222', transition: 'all 120ms' }}>
+                          style={{ textAlign: 'left', padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: submitted ? 'default' : 'pointer', border: `2px solid ${isCorrect ? '#22c55e' : isWrong ? '#ef4444' : picked ? unit.color : 'rgba(255,255,255,0.15)'}`, background: isCorrect ? 'rgba(74,222,128,0.15)' : isWrong ? 'rgba(239,68,68,0.15)' : picked ? unit.color + '22' : 'rgba(255,255,255,0.05)', color: '#e2e8f0', transition: 'all 120ms' }}>
                           {opt}
                           {isCorrect && ' ✓'}
                           {isWrong && ' ✗'}
@@ -593,7 +606,7 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
                     })}
                   </div>
                   {submitted && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#555', background: '#f8f9ff', borderRadius: 8, padding: '8px 12px', borderLeft: `4px solid ${unit.color}` }}>
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#94a3b8', background: 'rgba(99,179,237,0.06)', borderRadius: 8, padding: '8px 12px', borderLeft: `4px solid ${unit.color}` }}>
                       {q.explanation}
                     </div>
                   )}
@@ -611,8 +624,8 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
               <div>
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
                   <div style={{ fontSize: 40 }}>{score === unit.quiz.length ? '🏆' : score >= unit.quiz.length * 0.75 ? '🎉' : '📚'}</div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: '#111' }}>{score} / {unit.quiz.length}</div>
-                  <div style={{ fontSize: 14, color: '#666', marginTop: 4 }}>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: '#e2e8f0' }}>{score} / {unit.quiz.length}</div>
+                  <div style={{ fontSize: 14, color: '#94a3b8', marginTop: 4 }}>
                     {score === unit.quiz.length ? 'Perfect score!' : score >= unit.quiz.length * 0.75 ? 'Great work — keep it up!' : 'Review the lesson notes and try again.'}
                   </div>
                 </div>
@@ -641,9 +654,9 @@ function UnitComplete({ ui, score, total, onNext, onBack }: { ui: number; score:
         <div style={{ ...CARD, padding: '40px 36px' }}>
           <div style={{ fontSize: 60, marginBottom: 16 }}>{pct >= 80 ? '🏆' : pct >= 60 ? '🎉' : '📚'}</div>
           <div style={{ fontSize: 12, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.7px' }}>Unit {unit.id} Complete</div>
-          <div style={{ fontSize: 28, fontWeight: 900, color: '#111', margin: '8px 0 4px' }}>{unit.title}</div>
-          <div style={{ fontSize: 16, color: '#888', marginBottom: 24 }}>Quiz score: {score} / {total} ({pct}%)</div>
-          <div style={{ fontSize: 14, color: '#555', marginBottom: 28 }}>
+          <div style={{ fontSize: 28, fontWeight: 900, color: '#e2e8f0', margin: '8px 0 4px' }}>{unit.title}</div>
+          <div style={{ fontSize: 16, color: '#94a3b8', marginBottom: 24 }}>Quiz score: {score} / {total} ({pct}%)</div>
+          <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>
             {pct >= 80 ? 'Excellent work!' : pct >= 60 ? 'Good job — keep practicing!' : 'Review the lesson notes and try the quiz again when ready.'}
           </div>
           {hasNext ? (
@@ -651,15 +664,15 @@ function UnitComplete({ ui, score, total, onNext, onBack }: { ui: number; score:
               Start Unit {ui + 2} →
             </button>
           ) : (
-            <div style={{ background: '#f0fdf4', border: '2px solid #86efac', borderRadius: 12, padding: '16px', marginBottom: 12 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#166534' }}>🎓 Block Lab Complete!</div>
-              <div style={{ fontSize: 13, color: '#555', marginTop: 4 }}>You have mastered block coding. Ready for Python?</div>
+            <div style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid #4ade80', borderRadius: 12, padding: '16px', marginBottom: 12 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#4ade80' }}>🎓 Block Lab Complete!</div>
+              <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>You have mastered block coding. Ready for Python?</div>
               <Link href="/tools/code-lab/python" style={{ display: 'block', marginTop: 12, padding: '12px 0', background: '#7C3AED', color: '#fff', borderRadius: 10, fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>
                 Try Python Maze Challenges →
               </Link>
             </div>
           )}
-          <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: '#888', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             ← Back to Units
           </button>
         </div>

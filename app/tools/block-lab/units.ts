@@ -248,9 +248,9 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Triple Corridor',
       hint: 'Three horizontal corridors stacked — Repeat gets you down each one.',
-      grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,0,1,1,1,1,0,1],[1,0,1,1,1,1,0,1],[1,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:0, exitY:5,
-      collectibles:[{x:3,y:1},{x:3,y:5}],
+      grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,0,0,0,0,0,0,1],[1,0,1,1,1,1,1,1],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
+      collectibles:[{x:3,y:1},{x:3,y:3},{x:4,y:5}],
     },
     {
       title: 'Square Route',

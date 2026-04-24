@@ -375,10 +375,10 @@ function NotesParagraphs({ text }: { text: string }) {
         if (!line.trim()) return <div key={i} style={{ height: 8 }} />;
         const parts = line.split(/`([^`]+)`/);
         return (
-          <p key={i} style={{ margin: "0 0 4px", fontSize: 13, color: "#333", lineHeight: 1.65 }}>
+          <p key={i} style={{ margin: "0 0 4px", fontSize: 13, color: "#cbd5e1", lineHeight: 1.65 }}>
             {parts.map((part, j) =>
               j % 2 === 1
-                ? <code key={j} style={{ background: "#f1f5f9", color: "#1d4ed8",
+                ? <code key={j} style={{ background: "rgba(99,179,237,0.15)", color: "#93c5fd",
                     padding: "1px 5px", borderRadius: 4, fontFamily: "monospace", fontSize: 12 }}>{part}</code>
                 : part
             )}
@@ -641,31 +641,31 @@ export default function TurtlePage() {
           </Link>
         </SiteHeader>
 
-        <main style={{ flex:1, backgroundImage:"url('/ui/bg-tools-pattern.png')", backgroundRepeat:"repeat", backgroundSize:"auto" }}>
+        <main style={{ flex:1, background:"#0c1120" }}>
           <div style={{ maxWidth:1100, margin:"0 auto", padding:"40px 32px" }}>
 
-            <div style={{ background:"rgba(255,255,255,0.97)", border:"3px solid #1f1f1f",
-              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"22px 28px", marginBottom:28 }}>
+            <div style={{ background:"#1a2540", border:"1px solid rgba(99,179,237,0.15)",
+              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.5)", padding:"22px 28px", marginBottom:28 }}>
               <div style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <span style={{ fontSize:36 }}>🐢</span>
                 <div>
-                  <h1 style={{ fontSize:26, fontWeight:900, color:"#111", margin:"0 0 4px" }}>Python Turtle</h1>
-                  <p style={{ fontSize:13, color:"#555", fontWeight:600, margin:0 }}>
+                  <h1 style={{ fontSize:26, fontWeight:900, color:"#e2e8f0", margin:"0 0 4px" }}>Python Turtle</h1>
+                  <p style={{ fontSize:13, color:"#94a3b8", fontWeight:600, margin:0 }}>
                     Learn to draw with code — complete the tutorials in order, then tackle the creative challenges.
                   </p>
                 </div>
                 {allTutsDone && (
-                  <div style={{ marginLeft:"auto", background:"#f0fdf4", border:"2px solid #10b981",
-                    borderRadius:12, padding:"8px 14px", fontSize:13, fontWeight:800, color:"#065f46" }}>
+                  <div style={{ marginLeft:"auto", background:"rgba(74,222,128,0.12)", border:"1px solid #4ade80",
+                    borderRadius:12, padding:"8px 14px", fontSize:13, fontWeight:800, color:"#4ade80" }}>
                     🎉 All tutorials complete!
                   </div>
                 )}
               </div>
             </div>
 
-            <div style={{ background:"rgba(255,255,255,0.97)", border:"3px solid #1f1f1f",
-              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"24px 28px", marginBottom:24 }}>
-              <h2 style={{ fontSize:14, fontWeight:900, color:"#111", margin:"0 0 16px",
+            <div style={{ background:"#1a2540", border:"1px solid rgba(99,179,237,0.15)",
+              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.5)", padding:"24px 28px", marginBottom:24 }}>
+              <h2 style={{ fontSize:14, fontWeight:900, color:"#e2e8f0", margin:"0 0 16px",
                 textTransform:"uppercase", letterSpacing:"0.5px" }}>
                 Tutorials — complete in order
               </h2>
@@ -681,15 +681,15 @@ export default function TurtlePage() {
               </div>
             </div>
 
-            <div style={{ background:"rgba(255,255,255,0.97)", border:"3px solid #1f1f1f",
-              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.18)", padding:"24px 28px" }}>
+            <div style={{ background:"#1a2540", border:"1px solid rgba(99,179,237,0.15)",
+              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.5)", padding:"24px 28px" }}>
               <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
-                <h2 style={{ fontSize:14, fontWeight:900, color:"#111", margin:0,
+                <h2 style={{ fontSize:14, fontWeight:900, color:"#e2e8f0", margin:0,
                   textTransform:"uppercase", letterSpacing:"0.5px" }}>
                   Creative Challenges
                 </h2>
                 {!allTutsDone && (
-                  <span style={{ fontSize:12, color:"#9ca3af", fontWeight:600 }}>
+                  <span style={{ fontSize:12, color:"#64748b", fontWeight:600 }}>
                     🔒 Finish all tutorials to unlock
                   </span>
                 )}
@@ -732,13 +732,12 @@ export default function TurtlePage() {
           </button>
         </SiteHeader>
 
-        <main style={{ flex:1, backgroundImage:"url('/ui/bg-tools-pattern.png')",
-          backgroundRepeat:"repeat", backgroundSize:"auto", overflowY:"auto" }}>
+        <main style={{ flex:1, background:"#0c1120", overflowY:"auto" }}>
           <div style={{ maxWidth:960, margin:"0 auto", padding:"36px 32px 48px" }}>
 
             {/* Header */}
-            <div style={{ background:"rgba(255,255,255,0.97)", border:"3px solid #1f1f1f",
-              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.18)",
+            <div style={{ background:"#1a2540", border:"1px solid rgba(99,179,237,0.15)",
+              borderRadius:20, boxShadow:"0 8px 24px rgba(0,0,0,0.5)",
               padding:"20px 28px", marginBottom:24 }}>
               <div style={{ display:"flex", alignItems:"center", gap:12 }}>
                 <div style={{
@@ -747,29 +746,29 @@ export default function TurtlePage() {
                   {isTut ? `Tutorial ${tutNum} of ${tutorials.length}` : "Creative Challenge"}
                 </div>
                 {completedIds.has(ch.id) && (
-                  <div style={{ background:"#f0fdf4", border:"1.5px solid #6ee7b7",
-                    borderRadius:10, padding:"4px 12px", fontSize:11, fontWeight:800, color:"#065f46" }}>
+                  <div style={{ background:"rgba(74,222,128,0.12)", border:"1px solid #4ade80",
+                    borderRadius:10, padding:"4px 12px", fontSize:11, fontWeight:800, color:"#4ade80" }}>
                     ✅ Completed
                   </div>
                 )}
               </div>
-              <h1 style={{ fontSize:24, fontWeight:900, color:"#111", margin:"10px 0 4px" }}>
+              <h1 style={{ fontSize:24, fontWeight:900, color:"#e2e8f0", margin:"10px 0 4px" }}>
                 {ch.title.replace(/^\d+\.\s*/, "")}
               </h1>
-              <p style={{ fontSize:13, color:"#555", fontWeight:600, margin:0 }}>{ch.description}</p>
+              <p style={{ fontSize:13, color:"#94a3b8", fontWeight:600, margin:0 }}>{ch.description}</p>
             </div>
 
             {/* Two columns */}
             <div style={{ display:"flex", gap:20, alignItems:"flex-start", flexWrap:"wrap" }}>
 
               {/* LEFT: tutorial notes OR challenge code preview */}
-              <div style={{ flex:1, minWidth:280, background:"rgba(255,255,255,0.97)",
-                border:"3px solid #1f1f1f", borderRadius:20,
-                boxShadow:"0 6px 20px rgba(0,0,0,0.14)", padding:"22px 24px", userSelect:"none" }}>
+              <div style={{ flex:1, minWidth:280, background:"#1a2540",
+                border:"1px solid rgba(99,179,237,0.15)", borderRadius:20,
+                boxShadow:"0 6px 20px rgba(0,0,0,0.4)", padding:"22px 24px", userSelect:"none" }}>
 
                 {isTut ? (
                   <>
-                    <div style={{ fontSize:11, fontWeight:800, color:"#3b82f6", textTransform:"uppercase",
+                    <div style={{ fontSize:11, fontWeight:800, color:"#60a5fa", textTransform:"uppercase",
                       letterSpacing:"0.6px", marginBottom:12 }}>
                       What you&apos;ll learn
                     </div>
@@ -777,7 +776,7 @@ export default function TurtlePage() {
                   </>
                 ) : (
                   <>
-                    <div style={{ fontSize:11, fontWeight:800, color:"#8b5cf6", textTransform:"uppercase",
+                    <div style={{ fontSize:11, fontWeight:800, color:"#a78bfa", textTransform:"uppercase",
                       letterSpacing:"0.6px", marginBottom:12 }}>
                       Starter Code — figure out the rest!
                     </div>
@@ -803,11 +802,11 @@ export default function TurtlePage() {
 
               {/* RIGHT: tutorial example canvas OR challenge solution canvas */}
               {(isTut ? ch.example : ch.solutionCode) && (
-                <div style={{ width:340, flexShrink:0, background:"rgba(255,255,255,0.97)",
-                  border:"3px solid #1f1f1f", borderRadius:20,
-                  boxShadow:"0 6px 20px rgba(0,0,0,0.14)", padding:"22px 24px", userSelect:"none" }}>
+                <div style={{ width:340, flexShrink:0, background:"#1a2540",
+                  border:"1px solid rgba(99,179,237,0.15)", borderRadius:20,
+                  boxShadow:"0 6px 20px rgba(0,0,0,0.4)", padding:"22px 24px", userSelect:"none" }}>
                   <div style={{ fontSize:11, fontWeight:800,
-                    color: isTut ? "#8b5cf6" : "#8b5cf6",
+                    color:"#a78bfa",
                     textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:12 }}>
                     {isTut ? "Example" : "Goal"}
                   </div>
@@ -857,8 +856,8 @@ export default function TurtlePage() {
   ] as { key: typeof leftTab; label: string }[];
 
   const CARD: React.CSSProperties = {
-    background:"rgba(255,255,255,0.97)", border:"3px solid #1f1f1f",
-    borderRadius:16, boxShadow:"0 6px 20px rgba(0,0,0,0.14)",
+    background:"#1a2540", border:"1px solid rgba(99,179,237,0.15)",
+    borderRadius:16, boxShadow:"0 6px 20px rgba(0,0,0,0.5)",
   };
 
   return (
@@ -871,22 +870,22 @@ export default function TurtlePage() {
         </button>
       </SiteHeader>
 
-      <main style={{ flex:1, display:"flex", flexDirection:"column", backgroundColor:"#f0f2f8", overflow:"hidden" }}>
+      <main style={{ flex:1, display:"flex", flexDirection:"column", backgroundColor:"#0c1120", overflow:"hidden" }}>
 
         {/* Top bar */}
-        <div style={{ background:"rgba(255,255,255,0.97)", borderBottom:"2px solid #e5e7eb",
+        <div style={{ background:"#131d2e", borderBottom:"1px solid rgba(255,255,255,0.08)",
           padding:"10px 20px", display:"flex", alignItems:"center", gap:14, flexShrink:0 }}>
-          <span style={{ fontWeight:900, fontSize:15, color:"#111" }}>🐢 Python Turtle</span>
-          <span style={{ color:"#d1d5db" }}>|</span>
-          <span style={{ fontSize:13, color:"#888", fontWeight:600 }}>{activeChallenge?.title ?? "Sandbox"}</span>
+          <span style={{ fontWeight:900, fontSize:15, color:"#e2e8f0" }}>🐢 Python Turtle</span>
+          <span style={{ color:"rgba(255,255,255,0.2)" }}>|</span>
+          <span style={{ fontSize:13, color:"#64748b", fontWeight:600 }}>{activeChallenge?.title ?? "Sandbox"}</span>
           {completedIds.has(activeId) && (
-            <span style={{ fontSize:12, fontWeight:800, color:"#10b981",
-              background:"#f0fdf4", border:"1.5px solid #6ee7b7", borderRadius:20, padding:"2px 10px" }}>
+            <span style={{ fontSize:12, fontWeight:800, color:"#4ade80",
+              background:"rgba(74,222,128,0.12)", border:"1px solid #4ade80", borderRadius:20, padding:"2px 10px" }}>
               ✓ Completed
             </span>
           )}
           <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:11, fontWeight:700, color:"#aaa" }}>Speed</span>
+            <span style={{ fontSize:11, fontWeight:700, color:"#64748b" }}>Speed</span>
             <input type="range" min={0} max={10} value={speed} onChange={e=>setSpeed(+e.target.value)}
               style={{ width:90, accentColor:"#10b981" }} />
             <span style={{ fontSize:11, fontWeight:700, color:"#10b981", width:44 }}>
@@ -926,14 +925,14 @@ export default function TurtlePage() {
 
           {/* LEFT */}
           <div style={{ width:270, flexShrink:0, display:"flex", flexDirection:"column",
-            borderRight:"2px solid #e5e7eb", background:"rgba(255,255,255,0.95)" }}>
+            borderRight:"1px solid rgba(255,255,255,0.08)", background:"#131d2e" }}>
 
-            <div style={{ display:"flex", borderBottom:"2px solid #e5e7eb" }}>
+            <div style={{ display:"flex", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
               {editorTabs.map(({ key, label }) => (
                 <button key={key} onClick={() => setLeftTab(key)} style={{
                   flex:1, padding:"9px 0", background:"transparent", border:"none",
                   borderBottom: leftTab===key ? "3px solid #10b981" : "3px solid transparent",
-                  fontWeight:700, fontSize:12, color: leftTab===key ? "#10b981" : "#888",
+                  fontWeight:700, fontSize:12, color: leftTab===key ? "#10b981" : "#64748b",
                   cursor:"pointer", letterSpacing:"0.3px",
                 }}>
                   {label}
@@ -946,21 +945,21 @@ export default function TurtlePage() {
               {/* Task tab */}
               {leftTab === "task" && activeChallenge && (
                 <div style={{ padding:"4px 4px 12px" }}>
-                  <div style={{ fontSize:10, fontWeight:800, color:"#aaa", letterSpacing:"0.8px",
+                  <div style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:"0.8px",
                     textTransform:"uppercase", marginBottom:8 }}>
                     {activeChallenge.category === "tutorial" ? "Tutorial" : "Challenge"}
                   </div>
-                  <div style={{ fontWeight:800, fontSize:14, color:"#111", marginBottom:8 }}>
+                  <div style={{ fontWeight:800, fontSize:14, color:"#e2e8f0", marginBottom:8 }}>
                     {activeChallenge.title}
                   </div>
-                  <div style={{ fontSize:12, color:"#444", lineHeight:1.55, marginBottom:14 }}>
+                  <div style={{ fontSize:12, color:"#94a3b8", lineHeight:1.55, marginBottom:14 }}>
                     {activeChallenge.description}
                   </div>
                   {completedIds.has(activeChallenge.id) ? (
                     <div>
-                      <div style={{ background:"#f0fdf4", border:"1.5px solid #6ee7b7",
+                      <div style={{ background:"rgba(74,222,128,0.12)", border:"1px solid #4ade80",
                         borderRadius:10, padding:"10px 12px", fontSize:12, fontWeight:700,
-                        color:"#065f46", marginBottom: nextTutorial ? 8 : 0 }}>
+                        color:"#4ade80", marginBottom: nextTutorial ? 8 : 0 }}>
                         ✅ Completed! Keep experimenting or go back to the hub.
                       </div>
                       {nextTutorial && (
@@ -973,8 +972,8 @@ export default function TurtlePage() {
                       )}
                     </div>
                   ) : (
-                    <div style={{ background:"#fefce8", border:"1.5px solid #fde68a",
-                      borderRadius:10, padding:"10px 12px", fontSize:12, color:"#713f12" }}>
+                    <div style={{ background:"rgba(234,179,8,0.1)", border:"1px solid rgba(234,179,8,0.4)",
+                      borderRadius:10, padding:"10px 12px", fontSize:12, color:"#fde68a" }}>
                       <span style={{ fontWeight:800, display:"block", marginBottom:3 }}>💡 Hint</span>
                       {activeChallenge.hint}
                     </div>
@@ -1005,8 +1004,8 @@ export default function TurtlePage() {
                   )}
                   <button onClick={() => { stopAnim(); setView("hub"); setJustCompleted(false); }}
                     style={{ marginTop:10, width:"100%", background:"transparent",
-                      border:"1.5px solid #d1d5db", borderRadius:8, padding:"8px 0",
-                      fontSize:12, fontWeight:700, color:"#555", cursor:"pointer" }}>
+                      border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"8px 0",
+                      fontSize:12, fontWeight:700, color:"#94a3b8", cursor:"pointer" }}>
                     ← Back to Hub
                   </button>
                 </div>
@@ -1017,7 +1016,7 @@ export default function TurtlePage() {
                 <div style={{ padding:"4px 4px 12px", userSelect:"none" }}>
                   {isTutorial ? (
                     <>
-                      <div style={{ fontSize:10, fontWeight:800, color:"#3b82f6", letterSpacing:"0.8px",
+                      <div style={{ fontSize:10, fontWeight:800, color:"#60a5fa", letterSpacing:"0.8px",
                         textTransform:"uppercase", marginBottom:10 }}>
                         What you&apos;ll learn
                       </div>
@@ -1079,16 +1078,16 @@ export default function TurtlePage() {
               {/* Reference tab */}
               {leftTab === "reference" && <div style={{ userSelect:"none" }}>{CMD_REF.map(group => (
                 <div key={group.group} style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:10, fontWeight:800, color:"#aaa", letterSpacing:"0.8px",
+                  <div style={{ fontSize:10, fontWeight:800, color:"#64748b", letterSpacing:"0.8px",
                     textTransform:"uppercase", paddingLeft:4, marginBottom:5 }}>{group.group}</div>
                   {group.items.map(item => (
                     <div key={item.cmd} style={{ display:"flex", alignItems:"baseline",
                       gap:6, padding:"3px 6px", borderRadius:6 }}>
-                      <code style={{ fontSize:11, fontFamily:"monospace", color:"#1d4ed8",
-                        background:"#eff6ff", padding:"1px 5px", borderRadius:4, flexShrink:0 }}>
+                      <code style={{ fontSize:11, fontFamily:"monospace", color:"#93c5fd",
+                        background:"rgba(99,179,237,0.15)", padding:"1px 5px", borderRadius:4, flexShrink:0 }}>
                         {item.cmd}
                       </code>
-                      {item.desc && <span style={{ fontSize:11, color:"#666" }}>{item.desc}</span>}
+                      {item.desc && <span style={{ fontSize:11, color:"#94a3b8" }}>{item.desc}</span>}
                     </div>
                   ))}
                 </div>
@@ -1142,30 +1141,30 @@ export default function TurtlePage() {
           {/* RIGHT: canvas + output */}
           <div style={{ flex:1, display:"flex", flexDirection:"column",
             alignItems:"center", justifyContent:"flex-start",
-            padding:"20px 16px", overflowY:"auto", background:"#f0f2f8" }}>
+            padding:"20px 16px", overflowY:"auto", background:"#0c1120" }}>
 
             <div style={{ ...CARD, padding:0, overflow:"hidden", marginBottom:12,
-              border:`3px solid ${error?"#dc2626":"#1f1f1f"}`,
-              boxShadow:error?"0 0 0 3px rgba(220,38,38,0.2), 0 8px 24px rgba(0,0,0,0.18)":undefined }}>
+              border:error?"2px solid #dc2626":"1px solid rgba(99,179,237,0.15)",
+              boxShadow:error?"0 0 0 3px rgba(220,38,38,0.2), 0 8px 24px rgba(0,0,0,0.5)":undefined }}>
               <canvas ref={canvasRef} width={CS} height={CS} style={{ display:"block", maxWidth:"100%" }} />
             </div>
 
             {(error || prints.length > 0) && (
               <div style={{ ...CARD, padding:"10px 14px", width:CS, maxWidth:"100%",
-                borderColor:error?"#fca5a5":"#a7f3d0",
-                background:error?"#fef2f2":"#f0fdf4" }}>
+                borderColor:error?"#dc2626":"#4ade80",
+                background:error?"rgba(239,68,68,0.1)":"rgba(74,222,128,0.08)" }}>
                 <div style={{ fontSize:10, fontWeight:800, letterSpacing:"0.7px",
-                  textTransform:"uppercase", color:error?"#dc2626":"#16a34a", marginBottom:4 }}>
+                  textTransform:"uppercase", color:error?"#fca5a5":"#4ade80", marginBottom:4 }}>
                   {error?"Error":"Output"}
                 </div>
-                {error && <div style={{ fontFamily:"monospace", fontSize:12, color:"#dc2626" }}>{error}</div>}
+                {error && <div style={{ fontFamily:"monospace", fontSize:12, color:"#fca5a5" }}>{error}</div>}
                 {prints.map((p,i) => (
-                  <div key={i} style={{ fontFamily:"monospace", fontSize:12, color:"#166534" }}>{p}</div>
+                  <div key={i} style={{ fontFamily:"monospace", fontSize:12, color:"#86efac" }}>{p}</div>
                 ))}
               </div>
             )}
 
-            <div style={{ marginTop:8, fontSize:11, color:"#9ca3af", fontWeight:600 }}>
+            <div style={{ marginTop:8, fontSize:11, color:"#4a5568", fontWeight:600 }}>
               Ctrl+Enter to run · Tab inserts 4 spaces
             </div>
           </div>
@@ -1180,25 +1179,25 @@ export default function TurtlePage() {
 function TutorialCard({ ch, index, completed, locked, onClick }: {
   ch: TurtleChallenge; index: number; completed: boolean; locked: boolean; onClick?: () => void;
 }) {
-  const bgColor = locked ? "#f3f4f6" : completed ? "#f0fdf4" : "#ffffff";
-  const border  = locked ? "2px solid #e5e7eb" : completed ? "2px solid #10b981" : "2px solid #3b82f6";
+  const bgColor = locked ? "rgba(255,255,255,0.04)" : completed ? "rgba(74,222,128,0.08)" : "#1a2540";
+  const border  = locked ? "1px solid rgba(255,255,255,0.08)" : completed ? "1px solid #4ade80" : "1px solid rgba(99,179,237,0.25)";
   return (
     <button onClick={onClick} disabled={locked}
       style={{ width:175, textAlign:"left", background:bgColor, border, borderRadius:14,
         padding:"14px 16px", cursor:locked?"not-allowed":"pointer", opacity:locked?0.55:1,
-        boxShadow:locked?"none":"0 2px 8px rgba(0,0,0,0.10)" }}>
+        boxShadow:locked?"none":"0 2px 8px rgba(0,0,0,0.3)" }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
         <span style={{ fontSize:11, fontWeight:800,
-          color:locked?"#9ca3af":completed?"#10b981":"#3b82f6",
+          color:locked?"#4a5568":completed?"#4ade80":"#60a5fa",
           textTransform:"uppercase", letterSpacing:"0.5px" }}>
           Step {index + 1}
         </span>
         <span style={{ fontSize:16 }}>{locked?"🔒":completed?"✅":""}</span>
       </div>
-      <div style={{ fontWeight:800, fontSize:13, color:locked?"#9ca3af":"#111", marginBottom:4 }}>
+      <div style={{ fontWeight:800, fontSize:13, color:locked?"#4a5568":"#e2e8f0", marginBottom:4 }}>
         {ch.title.replace(/^\d+\.\s*/, "")}
       </div>
-      <div style={{ fontSize:11, color:locked?"#9ca3af":"#666", lineHeight:1.4 }}>{ch.description}</div>
+      <div style={{ fontSize:11, color:locked?"#4a5568":"#94a3b8", lineHeight:1.4 }}>{ch.description}</div>
     </button>
   );
 }
@@ -1209,21 +1208,21 @@ function ChallengeCard({ ch, locked, onClick }: {
   return (
     <button onClick={onClick} disabled={locked}
       style={{ width:175, textAlign:"left",
-        background:locked?"#f3f4f6":"#ffffff",
-        border:locked?"2px solid #e5e7eb":"2px solid #8b5cf6",
+        background:locked?"rgba(255,255,255,0.04)":"#1a2540",
+        border:locked?"1px solid rgba(255,255,255,0.08)":"1px solid rgba(139,92,246,0.35)",
         borderRadius:14, padding:"14px 16px", cursor:locked?"not-allowed":"pointer",
-        opacity:locked?0.55:1, boxShadow:locked?"none":"0 2px 8px rgba(0,0,0,0.10)" }}>
+        opacity:locked?0.55:1, boxShadow:locked?"none":"0 2px 8px rgba(0,0,0,0.3)" }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
         <span style={{ fontSize:11, fontWeight:800,
-          color:locked?"#9ca3af":"#8b5cf6", textTransform:"uppercase", letterSpacing:"0.5px" }}>
+          color:locked?"#4a5568":"#a78bfa", textTransform:"uppercase", letterSpacing:"0.5px" }}>
           Challenge
         </span>
         {locked && <span style={{ fontSize:14 }}>🔒</span>}
       </div>
-      <div style={{ fontWeight:800, fontSize:13, color:locked?"#9ca3af":"#111", marginBottom:4 }}>
+      <div style={{ fontWeight:800, fontSize:13, color:locked?"#4a5568":"#e2e8f0", marginBottom:4 }}>
         {ch.title}
       </div>
-      <div style={{ fontSize:11, color:locked?"#9ca3af":"#666", lineHeight:1.4 }}>{ch.description}</div>
+      <div style={{ fontSize:11, color:locked?"#4a5568":"#94a3b8", lineHeight:1.4 }}>{ch.description}</div>
     </button>
   );
 }

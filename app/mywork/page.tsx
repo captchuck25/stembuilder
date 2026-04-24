@@ -123,7 +123,7 @@ function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
   const activeModules = BLOCK_MODULES.filter(m => m.challenges > 0);
   return (
     <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
-      <SectionHeader icon="🧩" title="Code Lab — Blocks" href="/tools/code-lab/blocks" linkLabel="Go to Block Lab" />
+      <SectionHeader icon="🧩" title="Code Lab — Blocks" href="/tools/block-lab" linkLabel="Go to Block Lab" />
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {activeModules.map((mod, mi) => {
           const moduleRows = rows.filter(r => r.level_idx === mi);
