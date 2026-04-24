@@ -11,10 +11,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id: classId } = await params
   const db = adminDb()
 
-  const [{ data: classData }, { data: assignData }, { data: enrollData }] = await Promise.all([
+  const [{ data: classData }, { data: assignData }, { data: enrollData }, { data: lockData }] = await Promise.all([
     db.from('classes').select('*').eq('id', classId).single(),
     db.from('assignments').select('*').eq('class_id', classId).order('level_id'),
     db.from('enrollments').select('student_id').eq('class_id', classId),
+    db.from('lesson_locks').select('*').eq('class_id', classId),
   ])
 
   if (!classData) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -46,5 +47,5 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     )
   }
 
-  return NextResponse.json({ class: classData, assignments: assignData ?? [], students, studentIds })
+  return NextResponse.json({ class: classData, assignments: assignData ?? [], locks: lockData ?? [], students, studentIds })
 }

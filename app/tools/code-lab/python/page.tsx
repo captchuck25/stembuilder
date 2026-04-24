@@ -416,7 +416,7 @@ const TeacherCtx = createContext(false);
 function SiteChrome({ children }: { children: React.ReactNode }) {
   const isTeacher = useContext(TeacherCtx);
   return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif",background:"#0c1120"}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif",backgroundImage:"url('/ui/bg-tools-pattern.png')",backgroundRepeat:"repeat",backgroundSize:"auto"}}>
       <SiteHeader>
         {isTeacher && <Link href="/teachers/dashboard" style={NAV_LINK}>← Dashboard</Link>}
       </SiteHeader>
@@ -434,7 +434,7 @@ const CARD: React.CSSProperties = { background:"#1a2540",border:"1px solid rgba(
 
 // ─── Overview screen ──────────────────────────────────────────────────────────
 
-function Overview({ progress, onSelect, isTeacher }: { progress: Progress; onSelect: (li: number) => void; isTeacher: boolean }) {
+function Overview({ progress, onSelect, isTeacher, lockedLevels }: { progress: Progress; onSelect: (li: number) => void; isTeacher: boolean; lockedLevels: Set<number> }) {
   return (
     <SiteChrome>
       <div style={{maxWidth:900,margin:"0 auto",padding:"40px 32px"}}>
@@ -449,7 +449,8 @@ function Overview({ progress, onSelect, isTeacher }: { progress: Progress; onSel
           {LEVELS.map((lv, li) => {
             const done = countCompleted(li, progress);
             const total = lv.challenges.length;
-            const locked = !isTeacher && li > 0 && !progress.completedLevels[li-1];
+            const teacherLocked = lockedLevels.has(li);
+            const locked = teacherLocked || (!isTeacher && li > 0 && !progress.completedLevels[li-1]);
             const pct = total ? Math.round(done/total*100) : 0;
             return (
               <div key={lv.id} onClick={() => !locked && onSelect(li)}
@@ -603,15 +604,17 @@ function makePythonCompleter(liRef: React.MutableRefObject<number>) {
 // ─── Challenge screen ─────────────────────────────────────────────────────────
 
 function ChallengeView({
-  li, ci, progress,
+  li, ci, progress, lockedCis,
   onSolve, onNext, onFinish, onBack, onJump,
 }: {
-  li: number; ci: number; progress: Progress;
+  li: number; ci: number; progress: Progress; lockedCis?: Set<number>;
   onSolve: (code: string) => void;
   onNext: (code: string) => void; onFinish: (code: string) => void;
   onBack: () => void; onJump: (ci: number, code: string) => void;
 }) {
   const lv = LEVELS[li];
+  const levelLocked = lockedCis?.has(-1) ?? false;
+  const isLocked = levelLocked || (lockedCis?.has(ci) ?? false);
   const ch = lv.challenges[ci];
   const isLast = ci === lv.challenges.length - 1;
 
@@ -735,6 +738,25 @@ function ChallengeView({
     background:"transparent",color:active?"#3b82f6":"#64748b",transition:"color 120ms",
   });
 
+  if (isLocked) return (
+    <SiteChrome>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"60vh",padding:"40px 28px"}}>
+        <div style={{...CARD,padding:"48px 40px",textAlign:"center",maxWidth:440}}>
+          <div style={{fontSize:60,marginBottom:16}}>🔒</div>
+          <h2 style={{fontSize:22,fontWeight:900,color:"#e2e8f0",margin:"0 0 12px"}}>Challenge Locked</h2>
+          <p style={{fontSize:15,color:"#94a3b8",lineHeight:1.6,margin:"0 0 24px"}}>
+            Your teacher has locked this challenge. Check back once it&apos;s been unlocked.
+          </p>
+          <button onClick={onBack}
+            style={{padding:"10px 24px",borderRadius:10,fontWeight:800,fontSize:14,
+              background:"#3b82f6",color:"#fff",border:"none",cursor:"pointer"}}>
+            ← Back to Levels
+          </button>
+        </div>
+      </div>
+    </SiteChrome>
+  );
+
   return (
     <SiteChrome>
       <div style={{maxWidth:1400,margin:"0 auto",padding:"20px 28px 32px"}}>
@@ -751,15 +773,19 @@ function ChallengeView({
           {lv.challenges.map((_,idx) => {
             const done = progress.completedChallenges[chalKey(li,idx)];
             const active = idx === ci;
+            const dotLocked = levelLocked || (lockedCis?.has(idx) ?? false);
             return (
-              <div key={idx} onClick={() => onJump(idx, codeRef.current)}
-                style={{padding:"5px 12px",borderRadius:16,fontSize:12,fontWeight:700,cursor:"pointer",
-                  background:active?lv.color:done?"rgba(74,222,128,0.15)":"rgba(255,255,255,0.07)",
-                  color:active?"#fff":done?"#4ade80":"#64748b",
-                  border:`2px solid ${active?lv.color:done?"#4ade80":"rgba(255,255,255,0.18)"}`,
-                  opacity: active ? 1 : 0.85,
+              <div key={idx}
+                onClick={() => !dotLocked && onJump(idx, codeRef.current)}
+                title={dotLocked ? "Locked by teacher" : undefined}
+                style={{padding:"5px 12px",borderRadius:16,fontSize:12,fontWeight:700,
+                  cursor: dotLocked ? "not-allowed" : "pointer",
+                  background: dotLocked ? "rgba(255,255,255,0.04)" : active ? lv.color : done ? "rgba(74,222,128,0.15)" : "rgba(255,255,255,0.07)",
+                  color: dotLocked ? "#475569" : active ? "#fff" : done ? "#4ade80" : "#64748b",
+                  border: `2px solid ${dotLocked ? "rgba(255,255,255,0.1)" : active ? lv.color : done ? "#4ade80" : "rgba(255,255,255,0.18)"}`,
+                  opacity: dotLocked ? 0.55 : active ? 1 : 0.85,
                 }}>
-                {done?"✓ ":""}{idx+1}
+                {dotLocked ? "🔒" : done ? "✓ " : ""}{dotLocked ? "" : idx+1}
               </div>
             );
           })}
@@ -955,6 +981,7 @@ export default function PythonMazePage() {
   const [phase, setPhase] = useState<Phase>({ tag:"overview" });
   const [progress, setProgress] = useState<Progress>({ completedChallenges:{}, completedLevels:{}, savedCode:{} });
   const [isTeacher, setIsTeacher] = useState(false);
+  const [lockedChallenges, setLockedChallenges] = useState<{level_idx:number;challenge_idx:number}[]>([]);
 
   // progressRef always holds the latest value — avoids stale-closure bugs
   // when multiple callbacks (onSolve, onJump) fire in quick succession.
@@ -962,6 +989,13 @@ export default function PythonMazePage() {
 
   // Load progress — cloud if logged in, localStorage otherwise.
   // On cloud load we MERGE with localStorage so a failed sync never erases local data.
+  useEffect(() => {
+    if (status === "loading") return;
+    fetch("/api/student/locks?tool=code-lab")
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setLockedChallenges(data ?? []));
+  }, [status]);
+
   useEffect(() => {
     if (status === "loading") return;
     if (userId) {
@@ -1014,10 +1048,12 @@ export default function PythonMazePage() {
     if (userId) syncCodeToCloud(userId, li, ci, code);
   }
 
+  const lockedLevels = new Set(lockedChallenges.filter(lc => lc.challenge_idx === -1).map(lc => lc.level_idx));
+
   // Route to challenge
   let view: React.ReactNode = null;
   if (phase.tag === "overview") {
-    view = <Overview progress={progress} isTeacher={isTeacher} onSelect={li => setPhase({tag:"intro",li})}/>;
+    view = <Overview progress={progress} isTeacher={isTeacher} lockedLevels={lockedLevels} onSelect={li => setPhase({tag:"intro",li})}/>;
   } else if (phase.tag === "intro") {
     view = <LevelIntro li={phase.li} onStart={() => {
       const li = phase.li;
@@ -1028,9 +1064,10 @@ export default function PythonMazePage() {
     }}/>;
   } else if (phase.tag === "challenge") {
     const { li, ci } = phase;
+    const lockedCis = new Set(lockedChallenges.filter(lc => lc.level_idx === li).map(lc => lc.challenge_idx));
     view = (
       <ChallengeView
-        li={li} ci={ci} progress={progress}
+        li={li} ci={ci} progress={progress} lockedCis={lockedCis}
         onSolve={(code) => markChallengeComplete(li, ci, code)}
         onNext={(code) => {
           markChallengeComplete(li, ci, code);

@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { getProfile } from "@/lib/profile";
+import { adminDb } from "@/lib/db.server";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 
@@ -19,7 +19,8 @@ export default async function TeachersLandingPage() {
   const session = await auth();
 
   if (session?.user?.id) {
-    const profile = await getProfile(session.user.id);
+    const db = adminDb();
+    const { data: profile } = await db.from("profiles").select("role").eq("id", session.user.id).single();
     if (!profile) redirect("/onboarding");
     if (profile.role === "teacher") redirect("/teachers/dashboard");
   }

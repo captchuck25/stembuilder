@@ -70,7 +70,7 @@ type Phase =
 
 function SiteChrome({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#0c1120' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundImage: "url('/ui/bg-tools-pattern.png')", backgroundRepeat: 'repeat', backgroundSize: 'auto' }}>
       <SiteHeader />
       <main style={{ flex: 1 }}>{children}</main>
     </div>
@@ -129,10 +129,11 @@ function LessonPanel({ text }: { text: string }) {
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
-function Overview({ progress, onSelect, assignedUnits }: {
+function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
   progress: Progress;
   onSelect: (ui: number) => void;
   assignedUnits: number[] | null;
+  lockedLevels: Set<number>;
 }) {
   const assignedSet = assignedUnits ? new Set(assignedUnits) : null;
   return (
@@ -149,8 +150,7 @@ function Overview({ progress, onSelect, assignedUnits }: {
           {UNITS.map((unit, ui) => {
             const done = countCompleted(ui, progress.completedChallenges);
             const total = unit.challenges.length;
-            // Teacher-locked if teacher has configured this tool but hasn't assigned this unit
-            const teacherLocked = assignedSet !== null && !assignedSet.has(ui);
+            const teacherLocked = lockedLevels.has(ui) || (assignedSet !== null && !assignedSet.has(ui));
             const locked = teacherLocked || (ui > 0 && !progress.completedUnits[ui - 1]);
             const pct = total ? Math.round(done / total * 100) : 0;
             const theme = THEMES[unit.theme];
@@ -231,10 +231,10 @@ function flatNodes(node: ScriptNode): ScriptNode[] {
 // ─── Challenge view ───────────────────────────────────────────────────────────
 
 function ChallengeView({
-  ui, ci, progress,
+  ui, ci, progress, lockedCis,
   onSolve, onNext, onFinish, onBack, onJump,
 }: {
-  ui: number; ci: number; progress: Progress;
+  ui: number; ci: number; progress: Progress; lockedCis?: Set<number>;
   onSolve: (script: ScriptNode[]) => void;
   onNext: (script: ScriptNode[]) => void;
   onFinish: (script: ScriptNode[]) => void;
@@ -242,6 +242,8 @@ function ChallengeView({
   onJump: (ci: number, script: ScriptNode[]) => void;
 }) {
   const unit = UNITS[ui];
+  const levelLocked = lockedCis?.has(-1) ?? false;
+  const isLocked = levelLocked || (lockedCis?.has(ci) ?? false);
   const ch = unit.challenges[ci];
   const isLast = ci === unit.challenges.length - 1;
   const availableBlocks = blocksForLevel(ui * 4); // desert=0, forest=4, space=8
@@ -334,6 +336,25 @@ function ChallengeView({
   }, {});
   const CAT_LABELS: Record<string, string> = { motion: 'Motion', control: 'Control' };
 
+  if (isLocked) return (
+    <SiteChrome>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: '40px 28px' }}>
+        <div style={{ ...CARD, padding: '48px 40px', textAlign: 'center', maxWidth: 440 }}>
+          <div style={{ fontSize: 60, marginBottom: 16 }}>🔒</div>
+          <h2 style={{ fontSize: 22, fontWeight: 900, color: '#e2e8f0', margin: '0 0 12px' }}>Challenge Locked</h2>
+          <p style={{ fontSize: 15, color: '#94a3b8', lineHeight: 1.6, margin: '0 0 24px' }}>
+            Your teacher has locked this challenge. Check back once it&apos;s been unlocked.
+          </p>
+          <button onClick={onBack}
+            style={{ padding: '10px 24px', borderRadius: 10, fontWeight: 800, fontSize: 14,
+              background: unit.color, color: '#fff', border: 'none', cursor: 'pointer' }}>
+            ← Back to Units
+          </button>
+        </div>
+      </div>
+    </SiteChrome>
+  );
+
   return (
     <SiteChrome>
       <div style={{ maxWidth: 1400, margin: '0 auto', padding: '20px 28px 32px' }}>
@@ -351,14 +372,18 @@ function ChallengeView({
           {unit.challenges.map((_, idx) => {
             const done = progress.completedChallenges[chalKey(ui, idx)];
             const active = idx === ci;
+            const dotLocked = levelLocked || (lockedCis?.has(idx) ?? false);
             return (
               <div key={idx}
-                onClick={() => onJump(idx, scriptRef.current)}
-                style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 700, cursor: 'pointer',
-                  background: active ? unit.color : done ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
-                  color: active ? '#fff' : done ? '#4ade80' : '#64748b',
-                  border: `2px solid ${active ? unit.color : done ? '#4ade80' : 'rgba(255,255,255,0.18)'}` }}>
-                {done ? '✓ ' : ''}{idx + 1}
+                onClick={() => !dotLocked && onJump(idx, scriptRef.current)}
+                title={dotLocked ? 'Locked by teacher' : undefined}
+                style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 700,
+                  cursor: dotLocked ? 'not-allowed' : 'pointer',
+                  background: dotLocked ? 'rgba(255,255,255,0.04)' : active ? unit.color : done ? 'rgba(74,222,128,0.15)' : 'rgba(255,255,255,0.07)',
+                  color: dotLocked ? '#475569' : active ? '#fff' : done ? '#4ade80' : '#64748b',
+                  border: `2px solid ${dotLocked ? 'rgba(255,255,255,0.1)' : active ? unit.color : done ? '#4ade80' : 'rgba(255,255,255,0.18)'}`,
+                  opacity: dotLocked ? 0.55 : active ? 1 : 0.85 }}>
+                {dotLocked ? '🔒' : done ? '✓ ' : ''}{dotLocked ? '' : idx + 1}
               </div>
             );
           })}
@@ -697,6 +722,7 @@ export default function BlockLabPage() {
   const [phase, setPhase] = useState<Phase>({ tag: 'overview' });
   const progressRef = useRef<Progress>(emptyProgress());
   const [assignedUnits, setAssignedUnits] = useState<number[] | null>(null);
+  const [lockedChallenges, setLockedChallenges] = useState<{level_idx:number;challenge_idx:number}[]>([]);
 
   useEffect(() => {
     const local = loadProgress();
@@ -721,6 +747,9 @@ export default function BlockLabPage() {
     fetch('/api/student/assignments?tool=block-lab')
       .then(r => r.ok ? r.json() : null)
       .then(data => setAssignedUnits(data));
+    fetch('/api/student/locks?tool=block-lab')
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setLockedChallenges(data ?? []));
   }, [status]);
 
   const updateProgress = useCallback((updater: (p: Progress) => Progress) => {
@@ -742,8 +771,10 @@ export default function BlockLabPage() {
     return next;
   }, [updateProgress, userId]);
 
+  const lockedLevels = new Set(lockedChallenges.filter(lc => lc.challenge_idx === -1).map(lc => lc.level_idx));
+
   if (phase.tag === 'overview') {
-    return <Overview progress={progress} assignedUnits={assignedUnits} onSelect={ui => setPhase({ tag: 'intro', ui })} />;
+    return <Overview progress={progress} assignedUnits={assignedUnits} lockedLevels={lockedLevels} onSelect={ui => setPhase({ tag: 'intro', ui })} />;
   }
 
   if (phase.tag === 'intro') {
@@ -753,9 +784,10 @@ export default function BlockLabPage() {
   if (phase.tag === 'challenge') {
     const { ui, ci } = phase;
     const unit = UNITS[ui];
+    const lockedCis = new Set(lockedChallenges.filter(lc => lc.level_idx === ui).map(lc => lc.challenge_idx));
     return (
       <ChallengeView
-        ui={ui} ci={ci} progress={progress}
+        ui={ui} ci={ci} progress={progress} lockedCis={lockedCis}
         onSolve={script => handleSolve(ui, ci, script)}
         onNext={script => {
           handleSolve(ui, ci, script);

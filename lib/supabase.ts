@@ -40,6 +40,15 @@ export interface Assignment {
   created_at: string
 }
 
+export interface LessonLock {
+  id: string
+  class_id: string
+  tool: string
+  level_idx: number
+  challenge_idx: number
+  created_at: string
+}
+
 export interface UserProgress {
   id: string
   user_id: string

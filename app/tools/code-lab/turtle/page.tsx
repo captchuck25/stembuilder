@@ -655,7 +655,7 @@ export default function TurtlePage() {
           </Link>
         </SiteHeader>
 
-        <main style={{ flex:1, background:"#0c1120" }}>
+        <main style={{ flex:1, backgroundImage:"url('/ui/bg-tools-pattern.png')", backgroundRepeat:"repeat", backgroundSize:"auto" }}>
           <div style={{ maxWidth:1100, margin:"0 auto", padding:"40px 32px" }}>
 
             <div style={{ background:"#1a2540", border:"1px solid rgba(99,179,237,0.15)",
@@ -746,7 +746,7 @@ export default function TurtlePage() {
           </button>
         </SiteHeader>
 
-        <main style={{ flex:1, background:"#0c1120", overflowY:"auto" }}>
+        <main style={{ flex:1, backgroundImage:"url('/ui/bg-tools-pattern.png')", backgroundRepeat:"repeat", backgroundSize:"auto", overflowY:"auto" }}>
           <div style={{ maxWidth:960, margin:"0 auto", padding:"36px 32px 48px" }}>
 
             {/* Header */}
