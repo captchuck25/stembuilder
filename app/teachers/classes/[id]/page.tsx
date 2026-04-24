@@ -7,6 +7,7 @@ import Link from "next/link";
 import { type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
+import { UNITS } from "@/app/tools/block-lab/units";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, type TurtleSubmission } from "@/lib/achievements";
 import SiteHeader from "@/app/components/SiteHeader";
@@ -37,7 +38,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "bridge" | "turtle">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "bridge" | "turtle">("code-lab");
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
 
   useEffect(() => {
@@ -70,18 +71,18 @@ export default function ClassDetailPage() {
     setTurtleSubs(prev => prev.map(s => s.id === id ? { ...s, approved } : s));
   }
 
-  async function toggleLevel(levelId: number) {
+  async function toggleLevel(tool: string, levelId: number) {
     if (!cls || saving) return;
     setSaving(true);
-    const existing = assignments.find(a => a.level_id === levelId);
+    const existing = assignments.find(a => a.tool === tool && a.level_id === levelId);
     if (existing) {
       await fetch(`/api/teacher/assignments?id=${existing.id}`, { method: "DELETE" });
-      setAssignments(prev => prev.filter(a => a.level_id !== levelId));
+      setAssignments(prev => prev.filter(a => a.id !== existing.id));
     } else {
       const res = await fetch("/api/teacher/assignments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId: cls.id, tool: "code-lab", levelId }),
+        body: JSON.stringify({ classId: cls.id, tool, levelId }),
       });
       const data = await res.json();
       if (res.ok) setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
@@ -96,7 +97,8 @@ export default function ClassDetailPage() {
     </div>
   );
 
-  const assignedIds = new Set(assignments.map(a => a.level_id));
+  const assignedCodeLab  = new Set(assignments.filter(a => a.tool === "code-lab").map(a => a.level_id));
+  const assignedBlockLab = new Set(assignments.filter(a => a.tool === "block-lab").map(a => a.level_id));
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
@@ -136,12 +138,10 @@ export default function ClassDetailPage() {
           {/* Tool selector */}
           <div style={{ display: "flex", gap: 14, marginBottom: 28, flexWrap: "wrap" }}>
             {[
-              { id: "code-lab" as const, label: "Code Lab", icon: "🐍",
-                color: "#2563eb", desc: "Python maze challenges" },
-              { id: "bridge" as const, label: "Bridge Builder", icon: "🌉",
-                color: "#d97706", desc: "Structural engineering" },
-              { id: "turtle" as const, label: "Turtle Challenges", icon: "🐢",
-                color: "#059669", desc: "Creative drawing review" },
+              { id: "code-lab"  as const, label: "Python Code Lab",  icon: "🐍", color: "#2563eb", desc: "Maze challenges" },
+              { id: "block-lab" as const, label: "Block Lab",         icon: "🧩", color: "#7c3aed", desc: "Visual block coding" },
+              { id: "bridge"    as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
+              { id: "turtle"    as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
             ].map(tool => {
               const active = selectedTool === tool.id;
               return (
@@ -176,9 +176,9 @@ export default function ClassDetailPage() {
                 </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {LEVELS.map((level, idx) => {
-                    const assigned = assignedIds.has(idx);
+                    const assigned = assignedCodeLab.has(idx);
                     return (
-                      <button key={idx} onClick={() => toggleLevel(idx)} disabled={saving}
+                      <button key={idx} onClick={() => toggleLevel("code-lab", idx)} disabled={saving}
                         style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
                           borderRadius: 14, border: `2px solid ${assigned ? level.color : "#e0e0e0"}`,
                           background: assigned ? `${level.color}18` : "#fafafa",
@@ -237,6 +237,67 @@ export default function ClassDetailPage() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Block Lab panel */}
+          {selectedTool === "block-lab" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28, alignItems: "start" }}>
+              <div style={{ ...CARD, padding: "26px 28px" }}>
+                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 6 }}>Assign Units</h2>
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                  Toggle which Block Lab units this class can access.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {UNITS.map((unit, idx) => {
+                    const assigned = assignedBlockLab.has(idx);
+                    return (
+                      <button key={idx} onClick={() => toggleLevel("block-lab", idx)} disabled={saving}
+                        style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px",
+                          borderRadius: 14, border: `2px solid ${assigned ? unit.color : "#e0e0e0"}`,
+                          background: assigned ? `${unit.color}18` : "#fafafa",
+                          cursor: saving ? "not-allowed" : "pointer", textAlign: "left",
+                          transition: "all 150ms", opacity: saving ? 0.6 : 1 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 999,
+                          background: assigned ? unit.color : "#e0e0e0",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0, fontSize: 14, color: "#fff", fontWeight: 800,
+                          transition: "background 150ms" }}>
+                          {assigned ? "✓" : idx + 1}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                            Unit {unit.id} — {unit.title}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#666" }}>{unit.tagline}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ ...CARD, padding: "26px 28px" }}>
+                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 6 }}>Student Progress</h2>
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                  Challenges completed across assigned units.
+                </p>
+                {students.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
+                    No students enrolled yet.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {students.map(s => (
+                      <div key={s.id} style={{ padding: "12px 14px", borderRadius: 12,
+                        border: "2px solid #e8e8e8", background: "#fafafa" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{s.name}</div>
+                        <div style={{ fontSize: 11, color: "#888" }}>{s.email}</div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

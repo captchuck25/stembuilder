@@ -129,7 +129,12 @@ function LessonPanel({ text }: { text: string }) {
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
-function Overview({ progress, onSelect }: { progress: Progress; onSelect: (ui: number) => void }) {
+function Overview({ progress, onSelect, assignedUnits }: {
+  progress: Progress;
+  onSelect: (ui: number) => void;
+  assignedUnits: number[] | null;
+}) {
+  const assignedSet = assignedUnits ? new Set(assignedUnits) : null;
   return (
     <SiteChrome>
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 32px' }}>
@@ -144,7 +149,9 @@ function Overview({ progress, onSelect }: { progress: Progress; onSelect: (ui: n
           {UNITS.map((unit, ui) => {
             const done = countCompleted(ui, progress.completedChallenges);
             const total = unit.challenges.length;
-            const locked = ui > 0 && !progress.completedUnits[ui - 1];
+            // Teacher-locked if teacher has configured this tool but hasn't assigned this unit
+            const teacherLocked = assignedSet !== null && !assignedSet.has(ui);
+            const locked = teacherLocked || (ui > 0 && !progress.completedUnits[ui - 1]);
             const pct = total ? Math.round(done / total * 100) : 0;
             const theme = THEMES[unit.theme];
             return (
@@ -684,11 +691,12 @@ function UnitComplete({ ui, score, total, onNext, onBack }: { ui: number; score:
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function BlockLabPage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const userId = session?.user?.id ?? null;
   const [progress, setProgress] = useState<Progress>(emptyProgress());
   const [phase, setPhase] = useState<Phase>({ tag: 'overview' });
   const progressRef = useRef<Progress>(emptyProgress());
+  const [assignedUnits, setAssignedUnits] = useState<number[] | null>(null);
 
   useEffect(() => {
     const local = loadProgress();
@@ -707,6 +715,13 @@ export default function BlockLabPage() {
       });
     }
   }, [userId]);
+
+  useEffect(() => {
+    if (status === 'loading') return;
+    fetch('/api/student/assignments?tool=block-lab')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setAssignedUnits(data));
+  }, [status]);
 
   const updateProgress = useCallback((updater: (p: Progress) => Progress) => {
     const next = updater(progressRef.current);
@@ -728,7 +743,7 @@ export default function BlockLabPage() {
   }, [updateProgress, userId]);
 
   if (phase.tag === 'overview') {
-    return <Overview progress={progress} onSelect={ui => setPhase({ tag: 'intro', ui })} />;
+    return <Overview progress={progress} assignedUnits={assignedUnits} onSelect={ui => setPhase({ tag: 'intro', ui })} />;
   }
 
   if (phase.tag === 'intro') {

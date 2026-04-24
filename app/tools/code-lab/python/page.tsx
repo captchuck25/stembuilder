@@ -2,7 +2,7 @@
 
 import { useSession } from 'next-auth/react';
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, createContext, useContext } from "react";
 
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
@@ -411,11 +411,14 @@ function ic(text: string): React.ReactNode {
 
 const NAV_LINK: React.CSSProperties = { border:"1px solid #fff",color:"#fff",padding:"8px 14px",borderRadius:999,fontWeight:600,fontSize:14,textDecoration:"none",background:"transparent" };
 
+const TeacherCtx = createContext(false);
+
 function SiteChrome({ children }: { children: React.ReactNode }) {
+  const isTeacher = useContext(TeacherCtx);
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif",background:"#0c1120"}}>
       <SiteHeader>
-        <Link href="/teachers" style={NAV_LINK}>Teachers</Link>
+        {isTeacher && <Link href="/teachers/dashboard" style={NAV_LINK}>← Dashboard</Link>}
       </SiteHeader>
       <main style={{flex:1}}>
         {children}
@@ -1012,22 +1015,20 @@ export default function PythonMazePage() {
   }
 
   // Route to challenge
+  let view: React.ReactNode = null;
   if (phase.tag === "overview") {
-    return <Overview progress={progress} isTeacher={isTeacher} onSelect={li => setPhase({tag:"intro",li})}/>;
-  }
-  if (phase.tag === "intro") {
-    return <LevelIntro li={phase.li} onStart={() => {
-      // Resume from first incomplete challenge instead of always challenge 0
+    view = <Overview progress={progress} isTeacher={isTeacher} onSelect={li => setPhase({tag:"intro",li})}/>;
+  } else if (phase.tag === "intro") {
+    view = <LevelIntro li={phase.li} onStart={() => {
       const li = phase.li;
       const firstIncomplete = LEVELS[li].challenges.findIndex(
         (_, idx) => !progress.completedChallenges[chalKey(li, idx)]
       );
       setPhase({tag:"challenge", li, ci: firstIncomplete >= 0 ? firstIncomplete : 0});
     }}/>;
-  }
-  if (phase.tag === "challenge") {
+  } else if (phase.tag === "challenge") {
     const { li, ci } = phase;
-    return (
+    view = (
       <ChallengeView
         li={li} ci={ci} progress={progress}
         onSolve={(code) => markChallengeComplete(li, ci, code)}
@@ -1046,18 +1047,16 @@ export default function PythonMazePage() {
         }}
       />
     );
-  }
-  if (phase.tag === "quiz") {
-    return (
+  } else if (phase.tag === "quiz") {
+    view = (
       <QuizView li={phase.li} onComplete={(score,total) => {
         if (userId) syncProgressToCloud(userId, phase.li, null, true, undefined, score);
         setPhase({tag:"complete",li:phase.li,score,total});
       }}/>
     );
-  }
-  if (phase.tag === "complete") {
+  } else if (phase.tag === "complete") {
     const { li, score, total } = phase;
-    return (
+    view = (
       <LevelComplete li={li} score={score} total={total}
         onContinue={() => {
           const nextLi = li+1 < LEVELS.length ? li+1 : li;
@@ -1067,5 +1066,5 @@ export default function PythonMazePage() {
       />
     );
   }
-  return null;
+  return <TeacherCtx.Provider value={isTeacher}>{view}</TeacherCtx.Provider>;
 }

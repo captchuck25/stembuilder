@@ -7,6 +7,7 @@ import Link from "next/link";
 import { type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
+import { UNITS } from "@/app/tools/block-lab/units";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const CARD: React.CSSProperties = {
@@ -127,7 +128,7 @@ export default function StudentDashboard() {
                     border: joinError ? "2px solid #dc2626" : "2px solid #e0e0e0",
                     fontSize: 22, fontWeight: 900, letterSpacing: "4px", textAlign: "center",
                     fontFamily: "monospace", outline: "none", boxSizing: "border-box",
-                    textTransform: "uppercase" }}
+                    textTransform: "uppercase", color: "#111", background: "#fff" }}
                 />
                 {joinError && <p style={{ color: "#dc2626", fontSize: 13, marginTop: 8 }}>{joinError}</p>}
                 <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
@@ -177,30 +178,71 @@ export default function StudentDashboard() {
                       No assignments yet — check back soon.
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                      {assignments.map((a: Assignment) => {
-                        const level = LEVELS[a.level_id];
-                        if (!level) return null;
-                        return (
-                          <Link key={a.id} href={`/tools/code-lab/python`}
-                            style={{ textDecoration: "none" }}>
-                            <div style={{ padding: "14px 20px", borderRadius: 14,
-                              background: `linear-gradient(135deg, ${level.color}22, ${level.color}44)`,
-                              border: `2px solid ${level.color}`,
-                              display: "flex", alignItems: "center", gap: 10 }}>
-                              <div style={{ fontSize: 22 }}>
-                                {a.level_id === 0 ? "🐍" : a.level_id === 1 ? "🔁" : "🧠"}
-                              </div>
-                              <div>
-                                <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
-                                  Level {level.id} — {level.title}
-                                </div>
-                                <div style={{ fontSize: 12, color: "#555" }}>{level.tagline}</div>
-                              </div>
-                            </div>
-                          </Link>
-                        );
-                      })}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      {/* Python Code Lab */}
+                      {assignments.filter((a: Assignment) => a.tool === "code-lab").length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            🐍 Python Code Lab
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {assignments.filter((a: Assignment) => a.tool === "code-lab").map((a: Assignment) => {
+                              const level = LEVELS[a.level_id];
+                              if (!level) return null;
+                              return (
+                                <Link key={a.id} href="/tools/code-lab/python" style={{ textDecoration: "none" }}>
+                                  <div style={{ padding: "14px 20px", borderRadius: 14,
+                                    background: `linear-gradient(135deg, ${level.color}22, ${level.color}44)`,
+                                    border: `2px solid ${level.color}`,
+                                    display: "flex", alignItems: "center", gap: 10 }}>
+                                    <div style={{ fontSize: 22 }}>
+                                      {a.level_id === 0 ? "🐍" : a.level_id === 1 ? "🔁" : "🧠"}
+                                    </div>
+                                    <div>
+                                      <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                        Level {level.id} — {level.title}
+                                      </div>
+                                      <div style={{ fontSize: 12, color: "#555" }}>{level.tagline}</div>
+                                    </div>
+                                  </div>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {/* Block Lab */}
+                      {assignments.filter((a: Assignment) => a.tool === "block-lab").length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            🧩 Block Lab
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {assignments.filter((a: Assignment) => a.tool === "block-lab").map((a: Assignment) => {
+                              const unit = UNITS[a.level_id];
+                              if (!unit) return null;
+                              return (
+                                <Link key={a.id} href="/tools/block-lab" style={{ textDecoration: "none" }}>
+                                  <div style={{ padding: "14px 20px", borderRadius: 14,
+                                    background: `linear-gradient(135deg, ${unit.color}22, ${unit.color}44)`,
+                                    border: `2px solid ${unit.color}`,
+                                    display: "flex", alignItems: "center", gap: 10 }}>
+                                    <div style={{ fontSize: 22 }}>🧩</div>
+                                    <div>
+                                      <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                        Unit {unit.id} — {unit.title}
+                                      </div>
+                                      <div style={{ fontSize: 12, color: "#555" }}>{unit.tagline}</div>
+                                    </div>
+                                  </div>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

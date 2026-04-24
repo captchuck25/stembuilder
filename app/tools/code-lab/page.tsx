@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { auth } from "@/auth";
+import { adminDb } from "@/lib/db.server";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const TILE_STYLE = {
@@ -16,15 +18,25 @@ const TILE_STYLE = {
   transition: "transform 160ms ease, box-shadow 160ms ease",
 };
 
-export default function CodeLabPage() {
+export default async function CodeLabPage() {
+  const session = await auth();
+  let showTeacherLink = true; // show for unauthenticated visitors
+  if (session?.user?.id) {
+    const db = adminDb();
+    const { data: p } = await db.from("profiles").select("role").eq("id", session.user.id).single();
+    showTeacherLink = !p || p.role === "teacher";
+  }
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <SiteHeader>
-        <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
-          borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
-          letterSpacing: "0.2px", background: "transparent" }}>
-          Teachers
-        </Link>
+        {showTeacherLink && (
+          <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
+            letterSpacing: "0.2px", background: "transparent" }}>
+            Teachers
+          </Link>
+        )}
       </SiteHeader>
 
       <main style={{ flex: 1, width: "100%",
