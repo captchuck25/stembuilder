@@ -611,6 +611,20 @@ export default function TurtlePage() {
     }
   }
 
+  function jumpToEditor(ch: TurtleChallenge) {
+    stopAnim();
+    setError(null); setPrints([]); setJustCompleted(false);
+    setHasRunOnce(false); setIsSaved(false); setIsSubmitted(false);
+    setCode(ch.starterCode); setActiveId(ch.id);
+    setLeftTab("task");
+    setView("editor");
+    if (session?.user && userId && ch.category === "challenge") {
+      fetchTurtleSubmission(userId, ch.id).then(saved => {
+        if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
+      });
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Tab") {
       e.preventDefault();
@@ -758,6 +772,46 @@ export default function TurtlePage() {
               <p style={{ fontSize:13, color:"#94a3b8", fontWeight:600, margin:0 }}>{ch.description}</p>
             </div>
 
+            {/* Progress dots */}
+            <div style={{ background:"#131d2e", border:"1px solid rgba(255,255,255,0.07)",
+              borderRadius:14, padding:"10px 18px", marginBottom:24,
+              display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+              {tutorials.map((tut, i) => {
+                const done = completedIds.has(tut.id);
+                const act  = ch.id === tut.id;
+                const lock = i > 0 && !completedIds.has(tutorials[i-1].id);
+                return (
+                  <button key={tut.id} onClick={lock ? undefined : () => handleChallengeSelect(tut)}
+                    style={{ padding:"4px 12px", borderRadius:14, fontSize:12, fontWeight:700,
+                      cursor:lock?"default":"pointer", border:"none",
+                      background:act?"#3b82f6":done?"rgba(74,222,128,0.15)":"rgba(255,255,255,0.05)",
+                      color:act?"#fff":done?"#4ade80":"#4a5568",
+                      outline:`2px solid ${act?"#3b82f6":done?"#4ade80":"rgba(255,255,255,0.12)"}`,
+                      outlineOffset:-2, opacity:lock?0.45:1 }}>
+                    {done&&!act?"✓ ":""}{i+1}
+                  </button>
+                );
+              })}
+              {challenges.length > 0 && (
+                <div style={{ width:1, height:18, background:"rgba(255,255,255,0.1)", margin:"0 4px" }} />
+              )}
+              {challenges.map((chalItem, i) => {
+                const act  = ch.id === chalItem.id;
+                const lock = !tutorials.every(t => completedIds.has(t.id));
+                return (
+                  <button key={chalItem.id} onClick={lock ? undefined : () => handleChallengeSelect(chalItem)}
+                    style={{ padding:"4px 12px", borderRadius:14, fontSize:12, fontWeight:700,
+                      cursor:lock?"default":"pointer", border:"none",
+                      background:act?"#8b5cf6":"rgba(255,255,255,0.05)",
+                      color:act?"#fff":lock?"#4a5568":"#64748b",
+                      outline:`2px solid ${act?"#8b5cf6":"rgba(255,255,255,0.12)"}`,
+                      outlineOffset:-2, opacity:lock?0.45:1 }}>
+                    C{i+1}
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Two columns */}
             <div style={{ display:"flex", gap:20, alignItems:"flex-start", flexWrap:"wrap" }}>
 
@@ -892,6 +946,45 @@ export default function TurtlePage() {
               {speed===0?"Instant":speed<=3?"Slow":speed<=6?"Medium":speed<=8?"Fast":"Turbo"}
             </span>
           </div>
+        </div>
+
+        {/* Progress dots */}
+        <div style={{ background:"#0d1629", borderBottom:"1px solid rgba(255,255,255,0.06)",
+          padding:"6px 20px", display:"flex", alignItems:"center", gap:6, flexShrink:0, overflowX:"auto" }}>
+          {tutorials.map((tut, i) => {
+            const done = completedIds.has(tut.id);
+            const act  = activeId === tut.id;
+            const lock = i > 0 && !completedIds.has(tutorials[i-1].id);
+            return (
+              <button key={tut.id} onClick={lock ? undefined : () => jumpToEditor(tut)}
+                style={{ padding:"4px 12px", borderRadius:14, fontSize:12, fontWeight:700,
+                  cursor:lock?"default":"pointer", flexShrink:0, border:"none",
+                  background:act?"#3b82f6":done?"rgba(74,222,128,0.15)":"rgba(255,255,255,0.05)",
+                  color:act?"#fff":done?"#4ade80":"#4a5568",
+                  outline:`2px solid ${act?"#3b82f6":done?"#4ade80":"rgba(255,255,255,0.12)"}`,
+                  outlineOffset:-2, opacity:lock?0.45:1 }}>
+                {done&&!act?"✓ ":""}{i+1}
+              </button>
+            );
+          })}
+          {challenges.length > 0 && (
+            <div style={{ width:1, height:18, background:"rgba(255,255,255,0.1)", margin:"0 4px", flexShrink:0 }} />
+          )}
+          {challenges.map((chalItem, i) => {
+            const act  = activeId === chalItem.id;
+            const lock = !tutorials.every(t => completedIds.has(t.id));
+            return (
+              <button key={chalItem.id} onClick={lock ? undefined : () => jumpToEditor(chalItem)}
+                style={{ padding:"4px 12px", borderRadius:14, fontSize:12, fontWeight:700,
+                  cursor:lock?"default":"pointer", flexShrink:0, border:"none",
+                  background:act?"#8b5cf6":"rgba(255,255,255,0.05)",
+                  color:act?"#fff":lock?"#4a5568":"#64748b",
+                  outline:`2px solid ${act?"#8b5cf6":"rgba(255,255,255,0.12)"}`,
+                  outlineOffset:-2, opacity:lock?0.45:1 }}>
+                C{i+1}
+              </button>
+            );
+          })}
         </div>
 
         {/* Success banner */}
