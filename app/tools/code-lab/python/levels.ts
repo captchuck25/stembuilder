@@ -1228,17 +1228,17 @@ while not at_goal():
 `,
     },
     {
-      title: "Dead Ends",
-      hint: "When all three directions are blocked, turn right twice to reverse direction.",
+      title: "Right Traps",
+      hint: "The path goes straight — but two dead ends branch off to the right. If your code checks right before forward, the robot detours into every trap.",
       grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,0,1,0],
-        [1,1,0,1,0,1,0,1,0],
-        [1,1,0,0,0,1,0,0,0],
-        [1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,0,1,1,1,0,1,1,1],
+        [1,1,1,0,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:3,
-      starterCode: `# If all paths are blocked, turn right twice to reverse.
+      startX:0, startY:1, startDir:1, exitX:10, exitY:1,
+      starterCode: `# Two fake exits branch right — check forward FIRST or you'll take every wrong turn.
 
 while not at_goal():
     if has_path_forward():
@@ -1255,31 +1255,36 @@ while not at_goal():
 `,
     },
     {
-      title: "Counter Loop",
-      hint: "Use a variable to count steps. Walk exactly 4 steps, turn, then loop to the goal.",
+      title: "The Open Maze",
+      hint: "The exit is at the top-right. Try the left-hand rule — always check left first, then forward, then right.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,0,0,1,1],
-        [1,1,1,1,0,1,1],
-        [1,1,1,1,0,0,0],
-        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,1,0,0,0,1,0,0],
+        [1,1,1,0,1,0,1,0,1,0,1],
+        [1,0,0,0,0,0,1,0,0,0,1],
+        [1,0,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# Walk exactly 4 steps using a counter, then turn and loop to the goal.
-steps = 0
-while steps < 4:
-    forward()
-    steps = steps + 1
-
-turn_right()
+      startX:0, startY:1, startDir:1, exitX:10, exitY:1,
+      starterCode: `# Left-hand rule — always try left first.
 
 while not at_goal():
-    forward()
+    if has_path_left():
+        turn_left()
+        forward()
+    elif has_path_forward():
+        forward()
+    elif has_path_right():
+        turn_right()
+        forward()
+    else:
+        turn_right()
+        turn_right()
 `,
     },
     {
-      title: "The Open Maze",
-      hint: "Apply everything — while, if/elif/else, all three sensors — to find your own way through.",
+      title: "The Open Maze II",
+      hint: "Same maze — but the exit is now at the bottom-right. The left-hand rule won't get you there. Try right first.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1],
         [0,0,0,0,1,0,0,0,1,0,0],
@@ -1289,7 +1294,7 @@ while not at_goal():
         [1,0,0,0,0,0,0,0,0,0,0],
       ],
       startX:0, startY:1, startDir:1, exitX:10, exitY:5,
-      starterCode: `# A complex maze — write your own solver!
+      starterCode: `# Right-hand rule — always try right first.
 
 while not at_goal():
     if has_path_right():

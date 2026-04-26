@@ -10,11 +10,15 @@ export async function GET(req: NextRequest) {
   if (!tool) return NextResponse.json({ error: 'Missing tool' }, { status: 400 })
 
   const db = adminDb()
-  const { data } = await db
+  // Prefix query (e.g. 'meas' matches 'meas-ruler', 'meas-cylinder')
+  // Exact query for fully-qualified tool ids (e.g. 'code-lab-python')
+  const q = db
     .from('user_progress')
-    .select('level_idx, challenge_idx, completed, quiz_score, saved_code, updated_at')
+    .select('tool, level_idx, challenge_idx, completed, quiz_score, saved_code, updated_at')
     .eq('user_id', session.user.id)
-    .eq('tool', tool)
+  const { data } = await (tool.includes('-')
+    ? q.eq('tool', tool)
+    : q.ilike('tool', `${tool}-%`))
 
   return NextResponse.json(data ?? [])
 }

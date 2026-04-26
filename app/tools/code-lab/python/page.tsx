@@ -356,17 +356,17 @@ function LessonPanel({ text }: { text: string }) {
       continue;
     }
     if (inCode) { codeLines.push(line); continue; }
-    if (line.startsWith("# ")) els.push(<h2 key={k++} style={{fontSize:20,fontWeight:900,margin:"0 0 12px",color:"#111"}}>{line.slice(2)}</h2>);
-    else if (line.startsWith("## ")) els.push(<h3 key={k++} style={{fontSize:15,fontWeight:800,margin:"14px 0 4px",color:"#111"}}>{line.slice(3)}</h3>);
+    if (line.startsWith("# ")) els.push(<h2 key={k++} style={{fontSize:20,fontWeight:900,margin:"0 0 12px",color:"#f1f5f9"}}>{line.slice(2)}</h2>);
+    else if (line.startsWith("## ")) els.push(<h3 key={k++} style={{fontSize:15,fontWeight:800,margin:"14px 0 4px",color:"#f1f5f9"}}>{line.slice(3)}</h3>);
     else if (line.startsWith("| ")) {
       const cells = line.split("|").filter((_,i,a)=>i>0&&i<a.length-1).map(c=>c.trim());
       const isHeader = lines[lines.indexOf(line)+1]?.startsWith("|---");
-      if (!isHeader) els.push(<tr key={k++}>{cells.map((c,i)=><td key={i} style={{padding:"6px 12px",borderBottom:"1px solid #e5e7eb",fontSize:13,color:"#222"}}>{ic(c)}</td>)}</tr>);
-      else els.push(<thead key={k++}><tr>{cells.map((c,i)=><th key={i} style={{padding:"6px 12px",textAlign:"left",background:"#e8eaf0",color:"#111",fontSize:13,fontWeight:800,borderBottom:"2px solid #c7cadc"}}>{c}</th>)}</tr></thead>);
+      if (!isHeader) els.push(<tr key={k++}>{cells.map((c,i)=><td key={i} style={{padding:"6px 12px",borderBottom:"1px solid rgba(255,255,255,0.08)",fontSize:13,color:"#e2e8f0"}}>{ic(c)}</td>)}</tr>);
+      else els.push(<thead key={k++}><tr>{cells.map((c,i)=><th key={i} style={{padding:"6px 12px",textAlign:"left",background:"rgba(99,179,237,0.12)",color:"#f1f5f9",fontSize:13,fontWeight:800,borderBottom:"2px solid rgba(99,179,237,0.2)"}}>{c}</th>)}</tr></thead>);
     } else if (line.startsWith("|---")) { /* skip separator */ }
-    else if (line.startsWith("- ")) els.push(<li key={k++} style={{marginLeft:16,fontSize:13,lineHeight:1.8,color:"#222"}}>{ic(line.slice(2))}</li>);
+    else if (line.startsWith("- ")) els.push(<li key={k++} style={{marginLeft:16,fontSize:13,lineHeight:1.8,color:"#e2e8f0"}}>{ic(line.slice(2))}</li>);
     else if (line.trim()==="") els.push(<div key={k++} style={{height:8}}/>);
-    else els.push(<p key={k++} style={{fontSize:13,lineHeight:1.8,color:"#222",margin:"2px 0"}}>{ic(line)}</p>);
+    else els.push(<p key={k++} style={{fontSize:13,lineHeight:1.8,color:"#e2e8f0",margin:"2px 0"}}>{ic(line)}</p>);
   }
   // Wrap table rows in table — keep thead outside tbody
   const wrapped: React.ReactNode[] = [];
@@ -376,7 +376,7 @@ function LessonPanel({ text }: { text: string }) {
     const head = tableRows.filter(r => (r as React.ReactElement).type === "thead");
     const body = tableRows.filter(r => (r as React.ReactElement).type === "tr");
     wrapped.push(
-      <table key={`t${k++}`} style={{borderCollapse:"collapse",width:"100%",margin:"8px 0",color:"#222"}}>
+      <table key={`t${k++}`} style={{borderCollapse:"collapse",width:"100%",margin:"8px 0",color:"#e2e8f0"}}>
         {head}
         <tbody>{body}</tbody>
       </table>
@@ -400,9 +400,9 @@ function ic(text: string): React.ReactNode {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
   return parts.map((p,i) => {
     if (p.startsWith("`") && p.endsWith("`"))
-      return <code key={i} style={{background:"#dde1f0",color:"#1a1a3e",padding:"1px 6px",borderRadius:4,fontSize:12,fontFamily:"monospace",fontWeight:600}}>{p.slice(1,-1)}</code>;
+      return <code key={i} style={{background:"rgba(99,179,237,0.15)",color:"#93c5fd",padding:"1px 6px",borderRadius:4,fontSize:12,fontFamily:"monospace",fontWeight:600}}>{p.slice(1,-1)}</code>;
     if (p.startsWith("**") && p.endsWith("**"))
-      return <strong key={i} style={{fontWeight:800,color:"#111"}}>{p.slice(2,-2)}</strong>;
+      return <strong key={i} style={{fontWeight:800,color:"#e2e8f0"}}>{p.slice(2,-2)}</strong>;
     return p;
   });
 }
@@ -1010,6 +1010,21 @@ export default function PythonMazePage() {
         progressRef.current = merged;
         setProgress(merged);
         saveProgress(merged);
+
+        // Back-fill any challenge completions that are in localStorage but missing from cloud
+        for (const key of Object.keys(localP.completedChallenges)) {
+          if (localP.completedChallenges[key] && !cloudP.completedChallenges[key]) {
+            const [liStr, ciStr] = key.split("_");
+            const li = parseInt(liStr, 10), ci = parseInt(ciStr, 10);
+            syncProgressToCloud(userId, li, ci, true, localP.savedCode[key]);
+          }
+        }
+        for (const liStr of Object.keys(localP.completedLevels)) {
+          const li = parseInt(liStr, 10);
+          if (localP.completedLevels[li] && !cloudP.completedLevels[li]) {
+            syncProgressToCloud(userId, li, null, true);
+          }
+        }
       });
     } else {
       const p = loadProgress();

@@ -127,9 +127,9 @@ function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {activeModules.map((mod, mi) => {
           const moduleRows = rows.filter(r => r.level_idx === mi);
-          const challengeRows = moduleRows.filter(r => r.challenge_idx !== null);
+          const challengeRows = moduleRows.filter(r => r.challenge_idx !== null && r.challenge_idx >= 0);
           const done = challengeRows.filter(r => r.completed).length;
-          const quizRow = moduleRows.find(r => r.challenge_idx === null && r.quiz_score != null);
+          const quizRow = moduleRows.find(r => (r.challenge_idx === null || r.challenge_idx === -1) && r.quiz_score != null);
           const pct = mod.challenges > 0 ? done / mod.challenges : 0;
           const started = done > 0 || quizRow != null;
           return (
@@ -181,9 +181,9 @@ function CodeLabSection({ rows }: { rows: ProgressRow[] }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {CODE_LEVELS.map((lv, li) => {
           const levelRows = rows.filter(r => r.level_idx === li);
-          const challengeRows = levelRows.filter(r => r.challenge_idx !== null);
+          const challengeRows = levelRows.filter(r => r.challenge_idx !== null && r.challenge_idx >= 0);
           const done = challengeRows.filter(r => r.completed).length;
-          const quizRow = levelRows.find(r => r.challenge_idx === null && r.quiz_score != null);
+          const quizRow = levelRows.find(r => (r.challenge_idx === null || r.challenge_idx === -1) && r.quiz_score != null);
           const pct = lv.challenges > 0 ? done / lv.challenges : 0;
           const started = done > 0 || quizRow != null;
 
