@@ -110,6 +110,15 @@ export default function ClassDetailPage() {
   const [lockError, setLockError] = useState<string | null>(null);
   const fetchedRef = useRef<Set<string>>(new Set());
 
+  // Class settings state
+  const [showSettings, setShowSettings] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState("");
+  const [confirmDeleteClass, setConfirmDeleteClass] = useState(false);
+  const [deletingClass, setDeletingClass] = useState(false);
+  const [removingStudentId, setRemovingStudentId] = useState<string | null>(null);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) { router.push("/"); return; }
@@ -149,6 +158,59 @@ export default function ClassDetailPage() {
   async function handleApprove(id: string, approved: boolean | null) {
     await approveTurtleSubmission(id, approved);
     setTurtleSubs(prev => prev.map(s => s.id === id ? { ...s, approved } : s));
+  }
+
+  async function handleRename() {
+    if (!cls || !editName.trim() || editName.trim() === cls.name) return;
+    setRenameSaving(true);
+    setRenameError("");
+    const res = await fetch(`/api/teacher/classes/${classId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName.trim() }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setCls(data);
+    } else {
+      const e = await res.json();
+      setRenameError(e.error ?? "Failed to rename");
+    }
+    setRenameSaving(false);
+  }
+
+  async function handleDeleteClass() {
+    setDeletingClass(true);
+    const res = await fetch(`/api/teacher/classes/${classId}`, { method: "DELETE" });
+    if (res.ok) {
+      router.push("/teachers/dashboard");
+    } else {
+      const e = await res.json();
+      alert(e.error ?? "Failed to delete class");
+      setDeletingClass(false);
+      setConfirmDeleteClass(false);
+    }
+  }
+
+  async function handleRemoveStudent(studentId: string) {
+    setRemovingStudentId(studentId);
+    const res = await fetch(`/api/teacher/classes/${classId}?studentId=${studentId}`, { method: "DELETE" });
+    if (res.ok) {
+      setStudents(prev => prev.filter(s => s.id !== studentId));
+      setGrades(prev => {
+        const updated = { ...prev };
+        for (const tool of Object.keys(updated)) {
+          if (updated[tool]) {
+            updated[tool] = {
+              ...updated[tool]!,
+              students: updated[tool]!.students.filter(s => s.id !== studentId),
+            };
+          }
+        }
+        return updated;
+      });
+    }
+    setRemovingStudentId(null);
   }
 
   async function toggleLevel(tool: string, levelId: number) {
@@ -494,23 +556,130 @@ export default function ClassDetailPage() {
         <div style={{ maxWidth: 1300, margin: "0 auto", padding: "48px 40px" }}>
 
           {/* Class header */}
-          <div style={{ ...CARD, padding: "22px 28px", marginBottom: 28,
-            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-            <div>
-              <h1 style={{ fontSize: 28, fontWeight: 900, color: "#111", margin: "0 0 10px" }}>{cls.name}</h1>
-              <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-                <div style={{ background: "#f0f4ff", border: "2px solid #c7d7fd", borderRadius: 10,
-                  padding: "6px 16px", display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: "#3730a3",
-                    textTransform: "uppercase", letterSpacing: "0.6px" }}>Join Code</span>
-                  <span style={{ fontSize: 18, fontWeight: 900, color: "#2563eb",
-                    letterSpacing: "3px", fontFamily: "monospace" }}>{cls.join_code}</span>
+          <div style={{ ...CARD, padding: "22px 28px", marginBottom: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+              <div>
+                <h1 style={{ fontSize: 28, fontWeight: 900, color: "#111", margin: "0 0 10px" }}>{cls.name}</h1>
+                <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                  <div style={{ background: "#f0f4ff", border: "2px solid #c7d7fd", borderRadius: 10,
+                    padding: "6px 16px", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#3730a3",
+                      textTransform: "uppercase", letterSpacing: "0.6px" }}>Join Code</span>
+                    <span style={{ fontSize: 18, fontWeight: 900, color: "#2563eb",
+                      letterSpacing: "3px", fontFamily: "monospace" }}>{cls.join_code}</span>
+                  </div>
+                  <span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>
+                    {students.length} student{students.length !== 1 ? "s" : ""} enrolled
+                  </span>
                 </div>
-                <span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>
-                  {students.length} student{students.length !== 1 ? "s" : ""} enrolled
-                </span>
               </div>
+              <button
+                onClick={() => { setShowSettings(s => !s); setEditName(cls.name); setRenameError(""); setConfirmDeleteClass(false); }}
+                style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #e5e7eb",
+                  background: showSettings ? "#f3f4f6" : "#fff", color: "#374151",
+                  fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                ⚙ {showSettings ? "Close Settings" : "Class Settings"}
+              </button>
             </div>
+
+            {/* Settings panel */}
+            {showSettings && (
+              <div style={{ marginTop: 24, borderTop: "2px solid #f0f0f0", paddingTop: 24,
+                display: "flex", flexDirection: "column", gap: 28 }}>
+
+                {/* Rename */}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 10 }}>Rename Class</div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      value={editName}
+                      onChange={e => { setEditName(e.target.value); setRenameError(""); }}
+                      onKeyDown={e => e.key === "Enter" && handleRename()}
+                      maxLength={80}
+                      style={{ flex: 1, maxWidth: 340, padding: "10px 14px", borderRadius: 10,
+                        border: renameError ? "2px solid #dc2626" : "2px solid #e0e0e0",
+                        fontSize: 15, fontWeight: 700, color: "#111", outline: "none" }}
+                    />
+                    <button
+                      onClick={handleRename}
+                      disabled={renameSaving || !editName.trim() || editName.trim() === cls.name}
+                      style={{ padding: "10px 20px", borderRadius: 10, border: "none",
+                        background: (!editName.trim() || editName.trim() === cls.name) ? "#e5e7eb" : "#2563eb",
+                        color: (!editName.trim() || editName.trim() === cls.name) ? "#9ca3af" : "#fff",
+                        fontWeight: 800, fontSize: 14,
+                        cursor: (!editName.trim() || editName.trim() === cls.name) ? "not-allowed" : "pointer" }}>
+                      {renameSaving ? "Saving…" : "Save Name"}
+                    </button>
+                  </div>
+                  {renameError && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{renameError}</div>}
+                </div>
+
+                {/* Student roster */}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 10 }}>
+                    Students ({students.length})
+                  </div>
+                  {students.length === 0 ? (
+                    <div style={{ fontSize: 13, color: "#aaa", fontStyle: "italic" }}>No students enrolled yet.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 560 }}>
+                      {students.map(s => (
+                        <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb", background: "#fafafa" }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{s.name}</div>
+                            <div style={{ fontSize: 12, color: "#888" }}>{s.email}</div>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveStudent(s.id)}
+                            disabled={removingStudentId === s.id}
+                            style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #fca5a5",
+                              background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
+                              cursor: removingStudentId === s.id ? "not-allowed" : "pointer",
+                              opacity: removingStudentId === s.id ? 0.6 : 1 }}>
+                            {removingStudentId === s.id ? "Removing…" : "✕ Remove"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Danger zone */}
+                <div style={{ borderTop: "2px solid #fee2e2", paddingTop: 20 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#dc2626", marginBottom: 10 }}>Danger Zone</div>
+                  {!confirmDeleteClass ? (
+                    <button
+                      onClick={() => setConfirmDeleteClass(true)}
+                      style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #dc2626",
+                        background: "#fff", color: "#dc2626", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                      🗑 Delete This Class
+                    </button>
+                  ) : (
+                    <div style={{ background: "#fef2f2", border: "2px solid #fca5a5", borderRadius: 12,
+                      padding: "16px 20px", maxWidth: 480 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#111", marginBottom: 6 }}>
+                        Are you sure? This will permanently delete <strong>{cls.name}</strong> and remove all students and assignments.
+                      </div>
+                      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                        <button onClick={() => setConfirmDeleteClass(false)}
+                          style={{ padding: "8px 20px", borderRadius: 8, border: "2px solid #e5e7eb",
+                            background: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", color: "#555" }}>
+                          Cancel
+                        </button>
+                        <button onClick={handleDeleteClass} disabled={deletingClass}
+                          style={{ padding: "8px 20px", borderRadius: 8, border: "none",
+                            background: deletingClass ? "#fca5a5" : "#dc2626", color: "#fff",
+                            fontWeight: 800, fontSize: 13, cursor: deletingClass ? "not-allowed" : "pointer" }}>
+                          {deletingClass ? "Deleting…" : "Yes, Delete Class"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
           </div>
 
           {/* Tool selector */}
