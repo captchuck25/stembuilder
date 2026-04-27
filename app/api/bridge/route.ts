@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { name, spanFeet, loadLb, designerName, nodes, members, passed, cost } = body
+  const { name, spanFeet, loadLb, designerName, nodes, members, passed, cost, assignmentId } = body
 
   const db = adminDb()
   const { error } = await db.from('bridge_designs').upsert(
@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
       members,
       passed,
       cost,
+      assignment_id: assignmentId ?? null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id,name' }

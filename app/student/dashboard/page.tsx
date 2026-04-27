@@ -33,11 +33,15 @@ interface BridgeAssignment {
   class_id: string;
 }
 
+// tool -> level_idx -> completed challenge count
+type ProgressMap = Record<string, Record<number, number>>;
+
 export default function StudentDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
+  const [progressMap, setProgressMap] = useState<ProgressMap>({});
   const [loading, setLoading] = useState(true);
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
@@ -55,12 +59,25 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes] = await Promise.all([
+    const [classRes, bridgeRes, progressRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
+      fetch("/api/student/my-progress"),
     ]);
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
+
+    if (progressRes.ok) {
+      const rows: { tool: string; level_idx: number; challenge_idx: number | null }[] = await progressRes.json();
+      const map: ProgressMap = {};
+      for (const row of rows) {
+        if (row.challenge_idx === null || row.challenge_idx < 0) continue;
+        const key = row.tool === "code-lab-python" ? "code-lab" : row.tool;
+        if (!map[key]) map[key] = {};
+        map[key][row.level_idx] = (map[key][row.level_idx] ?? 0) + 1;
+      }
+      setProgressMap(map);
+    }
     setLoading(false);
   }
 
@@ -208,20 +225,32 @@ export default function StudentDashboard() {
                             {assignments.filter((a: Assignment) => a.tool === "code-lab").map((a: Assignment) => {
                               const level = LEVELS[a.level_id];
                               if (!level) return null;
+                              const done = progressMap["code-lab"]?.[a.level_id] ?? 0;
+                              const total = level.challenges.length;
+                              const complete = done >= total && total > 0;
                               return (
                                 <Link key={a.id} href={`/tools/code-lab/python?level=${a.level_id}`} style={{ textDecoration: "none" }}>
                                   <div style={{ padding: "14px 20px", borderRadius: 14,
-                                    background: `linear-gradient(135deg, ${level.color}22, ${level.color}44)`,
-                                    border: `2px solid ${level.color}`,
+                                    background: complete ? `linear-gradient(135deg, #dcfce722, #dcfce744)` : `linear-gradient(135deg, ${level.color}22, ${level.color}44)`,
+                                    border: `2px solid ${complete ? "#16a34a" : level.color}`,
                                     display: "flex", alignItems: "center", gap: 10 }}>
                                     <div style={{ fontSize: 22 }}>
-                                      {a.level_id === 0 ? "🐍" : a.level_id === 1 ? "🔁" : "🧠"}
+                                      {complete ? "✅" : a.level_id === 0 ? "🐍" : a.level_id === 1 ? "🔁" : "🧠"}
                                     </div>
                                     <div>
                                       <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
                                         Level {level.id} — {level.title}
                                       </div>
                                       <div style={{ fontSize: 12, color: "#555" }}>{level.tagline}</div>
+                                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                        <div style={{ flex: 1, height: 5, borderRadius: 99, background: "#e5e7eb", minWidth: 80 }}>
+                                          <div style={{ height: "100%", borderRadius: 99, width: `${total > 0 ? (done / total) * 100 : 0}%`,
+                                            background: complete ? "#16a34a" : level.color, transition: "width 300ms" }} />
+                                        </div>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: complete ? "#16a34a" : "#555", whiteSpace: "nowrap" }}>
+                                          {complete ? "Complete" : `${done}/${total}`}
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
                                 </Link>
@@ -241,18 +270,30 @@ export default function StudentDashboard() {
                             {assignments.filter((a: Assignment) => a.tool === "block-lab").map((a: Assignment) => {
                               const unit = UNITS[a.level_id];
                               if (!unit) return null;
+                              const done = progressMap["block-lab"]?.[a.level_id] ?? 0;
+                              const total = unit.challenges.length;
+                              const complete = done >= total && total > 0;
                               return (
                                 <Link key={a.id} href="/tools/block-lab" style={{ textDecoration: "none" }}>
                                   <div style={{ padding: "14px 20px", borderRadius: 14,
-                                    background: `linear-gradient(135deg, ${unit.color}22, ${unit.color}44)`,
-                                    border: `2px solid ${unit.color}`,
+                                    background: complete ? `linear-gradient(135deg, #dcfce722, #dcfce744)` : `linear-gradient(135deg, ${unit.color}22, ${unit.color}44)`,
+                                    border: `2px solid ${complete ? "#16a34a" : unit.color}`,
                                     display: "flex", alignItems: "center", gap: 10 }}>
-                                    <div style={{ fontSize: 22 }}>🧩</div>
+                                    <div style={{ fontSize: 22 }}>{complete ? "✅" : "🧩"}</div>
                                     <div>
                                       <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
                                         Unit {unit.id} — {unit.title}
                                       </div>
                                       <div style={{ fontSize: 12, color: "#555" }}>{unit.tagline}</div>
+                                      <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                        <div style={{ flex: 1, height: 5, borderRadius: 99, background: "#e5e7eb", minWidth: 80 }}>
+                                          <div style={{ height: "100%", borderRadius: 99, width: `${total > 0 ? (done / total) * 100 : 0}%`,
+                                            background: complete ? "#16a34a" : unit.color, transition: "width 300ms" }} />
+                                        </div>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: complete ? "#16a34a" : "#555", whiteSpace: "nowrap" }}>
+                                          {complete ? "Complete" : `${done}/${total}`}
+                                        </span>
+                                      </div>
                                     </div>
                                   </div>
                                 </Link>

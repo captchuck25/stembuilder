@@ -576,22 +576,36 @@ function BridgeToolPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Load assignment config when opened via ?assignment=<id>
+  // Load assignment config (and any existing saved design) when opened via ?assignment=<id>
   useEffect(() => {
     const aid = searchParams.get("assignment");
     if (!aid) return;
-    fetch(`/api/bridge-assignments/${aid}`)
-      .then(r => r.ok ? r.json() : null)
-      .then((data: AssignmentConfig | null) => {
-        if (!data) return;
-        setAssignmentConfig(data);
-        suppressDirtyRef.current = true;
-        setSpanFeet(data.span_feet);
-        setLoadLb(data.load_lb);
-        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-          suppressDirtyRef.current = false;
-        }));
-      });
+    Promise.all([
+      fetch(`/api/bridge-assignments/${aid}`).then(r => r.ok ? r.json() : null),
+      fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null),
+    ]).then(([config, existingDesign]: [AssignmentConfig | null, { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null } | null]) => {
+      if (!config) return;
+      setAssignmentConfig(config);
+      suppressDirtyRef.current = true;
+      if (existingDesign?.nodes?.length) {
+        applyImportedBridgeState({
+          nodes: existingDesign.nodes as Node[],
+          members: existingDesign.members as Member[],
+          spanFeet: config.span_feet,
+          loadLb: config.load_lb,
+          bridgeName: existingDesign.name,
+          designerName: existingDesign.designer_name ?? undefined,
+        });
+        setActiveCloudName(existingDesign.name);
+        setIsDirty(false);
+      } else {
+        setSpanFeet(config.span_feet);
+        setLoadLb(config.load_lb);
+      }
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        suppressDirtyRef.current = false;
+      }));
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -3400,6 +3414,7 @@ function BridgeToolPage() {
         members,
         passed: stressTestResult != null ? stressTestPass : null,
         cost: costSummary.totalCost,
+        assignmentId: assignmentConfig?.id ?? null,
       });
       setActiveCloudName(name);
       setIsDirty(false);

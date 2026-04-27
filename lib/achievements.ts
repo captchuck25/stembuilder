@@ -30,6 +30,7 @@ export async function upsertBridgeDesign(
     members: unknown[];
     passed: boolean | null;
     cost: number | null;
+    assignmentId?: string | null;
   }
 ): Promise<void> {
   await fetch('/api/bridge', {
