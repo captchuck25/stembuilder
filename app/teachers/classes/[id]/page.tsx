@@ -167,7 +167,7 @@ export default function ClassDetailPage() {
   }
 
   async function handleCreateBridgeAssignment() {
-    const maxCostNum = Number(bridgeForm.maxCost);
+    const maxCostNum = parseFloat(Number(bridgeForm.maxCost).toFixed(2));
     if (!bridgeForm.maxCost || isNaN(maxCostNum) || maxCostNum <= 0) {
       setBridgeFormError("Please enter a valid max cost (e.g. 5000).");
       return;
@@ -1014,9 +1014,10 @@ export default function ClassDetailPage() {
                       <input
                         value={bridgeForm.maxCost}
                         onChange={e => { setBridgeForm(f => ({ ...f, maxCost: e.target.value })); setBridgeFormError(""); }}
-                        placeholder="e.g. 5000"
+                        placeholder="e.g. 5000 or 5000.00"
                         type="number"
-                        min={1}
+                        min={0.01}
+                        step={0.01}
                         style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 12px",
                           borderRadius: 8, border: bridgeFormError ? "2px solid #dc2626" : "2px solid #e0e0e0",
                           fontSize: 14, fontWeight: 600, color: "#111", outline: "none", boxSizing: "border-box" }}
