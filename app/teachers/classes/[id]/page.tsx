@@ -112,12 +112,16 @@ export default function ClassDetailPage() {
 
   // Bridge assignments state
   interface BridgeAssignment { id: string; title: string; span_feet: number; load_lb: number; max_cost: number; completionCount: number; created_at: string; }
+  interface BridgeSubmissionRow { rank: number; student_id: string; name: string; email: string; cost: number; submitted_at: string; }
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [showBridgeForm, setShowBridgeForm] = useState(false);
   const [bridgeForm, setBridgeForm] = useState({ title: "", spanFeet: 40, loadTon: 8, maxCost: "" });
   const [bridgeFormSaving, setBridgeFormSaving] = useState(false);
   const [bridgeFormError, setBridgeFormError] = useState("");
   const [deletingBridgeId, setDeletingBridgeId] = useState<string | null>(null);
+  const [expandedBridgeId, setExpandedBridgeId] = useState<string | null>(null);
+  const [bridgeLeaderboards, setBridgeLeaderboards] = useState<Record<string, BridgeSubmissionRow[]>>({});
+  const [loadingLeaderboardId, setLoadingLeaderboardId] = useState<string | null>(null);
 
   // Class settings state
   const [showSettings, setShowSettings] = useState(false);
@@ -200,8 +204,21 @@ export default function ClassDetailPage() {
   async function handleDeleteBridgeAssignment(id: string) {
     setDeletingBridgeId(id);
     const res = await fetch(`/api/teacher/bridge-assignments?id=${id}`, { method: "DELETE" });
-    if (res.ok) setBridgeAssignments(prev => prev.filter(a => a.id !== id));
+    if (res.ok) {
+      setBridgeAssignments(prev => prev.filter(a => a.id !== id));
+      if (expandedBridgeId === id) setExpandedBridgeId(null);
+    }
     setDeletingBridgeId(null);
+  }
+
+  async function toggleLeaderboard(id: string) {
+    if (expandedBridgeId === id) { setExpandedBridgeId(null); return; }
+    setExpandedBridgeId(id);
+    if (bridgeLeaderboards[id]) return;
+    setLoadingLeaderboardId(id);
+    const res = await fetch(`/api/teacher/bridge-submissions?assignmentId=${id}`);
+    if (res.ok) { const data = await res.json(); setBridgeLeaderboards(prev => ({ ...prev, [id]: data })); }
+    setLoadingLeaderboardId(null);
   }
 
   async function handleApprove(id: string, approved: boolean | null) {
@@ -1043,35 +1060,111 @@ export default function ClassDetailPage() {
                   No bridge assignments yet — click <strong>+ New Assignment</strong> to create one.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {bridgeAssignments.map(a => (
-                    <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                      padding: "16px 18px", borderRadius: 12, border: "2px solid #fde68a",
-                      background: "#fffbeb", flexWrap: "wrap", gap: 12 }}>
-                      <div>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>
-                          {a.title || "Bridge Assignment"}
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {bridgeAssignments.map(a => {
+                    const isExpanded = expandedBridgeId === a.id;
+                    const leaderboard = bridgeLeaderboards[a.id] ?? [];
+                    const isLoadingLb = loadingLeaderboardId === a.id;
+                    const MEDALS = ["🥇", "🥈", "🥉"];
+                    return (
+                      <div key={a.id} style={{ borderRadius: 14, border: "2px solid #fde68a", background: "#fffbeb", overflow: "hidden" }}>
+                        {/* Assignment header row */}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "16px 18px", flexWrap: "wrap", gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>
+                              {a.title || "Bridge Assignment"}
+                            </div>
+                            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Span: {a.span_feet} ft</span>
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Load: {a.load_lb / 2000} ton</span>
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Budget: ${Number(a.max_cost).toFixed(2)}</span>
+                              <span style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
+                                ✓ {a.completionCount} student{a.completionCount !== 1 ? "s" : ""} passed
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              onClick={() => toggleLeaderboard(a.id)}
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #d97706",
+                                background: isExpanded ? "#d97706" : "#fff", color: isExpanded ? "#fff" : "#92400e",
+                                fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                              {isExpanded ? "▲ Hide" : "🏆 Leaderboard"}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBridgeAssignment(a.id)}
+                              disabled={deletingBridgeId === a.id}
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #fca5a5",
+                                background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
+                                cursor: deletingBridgeId === a.id ? "not-allowed" : "pointer",
+                                opacity: deletingBridgeId === a.id ? 0.6 : 1 }}>
+                              {deletingBridgeId === a.id ? "Deleting…" : "✕ Delete"}
+                            </button>
+                          </div>
                         </div>
-                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Span: {a.span_feet} ft</span>
-                          <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Load: {a.load_lb / 2000} ton</span>
-                          <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Max Cost: ${a.max_cost.toFixed(2)}</span>
-                          <span style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
-                            ✓ {a.completionCount} student{a.completionCount !== 1 ? "s" : ""} completed
-                          </span>
-                        </div>
+
+                        {/* Leaderboard panel */}
+                        {isExpanded && (
+                          <div style={{ borderTop: "2px solid #fde68a", padding: "20px 18px" }}>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: "#92400e", marginBottom: 14 }}>
+                              🏆 Leaderboard — {a.title || "Bridge Assignment"}
+                            </div>
+                            {isLoadingLb ? (
+                              <div style={{ color: "#888", fontSize: 13 }}>Loading…</div>
+                            ) : leaderboard.length === 0 ? (
+                              <div style={{ color: "#aaa", fontSize: 13, fontStyle: "italic" }}>
+                                No submissions yet.
+                              </div>
+                            ) : (
+                              <div style={{ overflowX: "auto", borderRadius: 10, border: "2px solid #fde68a" }}>
+                                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 380 }}>
+                                  <thead>
+                                    <tr style={{ background: "#fef9c3" }}>
+                                      <th style={{ ...TH, width: 48, textAlign: "center" }}>Rank</th>
+                                      <th style={{ ...TH }}>Student</th>
+                                      <th style={{ ...TH, textAlign: "right" }}>Cost</th>
+                                      <th style={{ ...TH, textAlign: "right" }}>vs Budget</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {leaderboard.map((row, si) => {
+                                      const savings = Number(a.max_cost) - row.cost;
+                                      const savingsPct = Number(a.max_cost) > 0 ? (savings / Number(a.max_cost) * 100) : 0;
+                                      return (
+                                        <tr key={row.student_id} style={{ background: si % 2 === 0 ? "#fff" : "#fffbeb" }}>
+                                          <td style={{ ...TD, textAlign: "center", fontSize: 18 }}>
+                                            {MEDALS[si] ?? `#${row.rank}`}
+                                          </td>
+                                          <td style={{ ...TD }}>
+                                            <div style={{ fontWeight: 700, color: "#111" }}>{row.name}</div>
+                                            <div style={{ fontSize: 11, color: "#888" }}>{row.email}</div>
+                                          </td>
+                                          <td style={{ ...TD, textAlign: "right", fontWeight: 800,
+                                            color: si === 0 ? "#d97706" : "#111" }}>
+                                            ${row.cost.toFixed(2)}
+                                          </td>
+                                          <td style={{ ...TD, textAlign: "right" }}>
+                                            <span style={{ fontSize: 12, fontWeight: 700,
+                                              color: savings >= 0 ? "#16a34a" : "#dc2626" }}>
+                                              {savings >= 0 ? `-$${savings.toFixed(2)}` : `+$${Math.abs(savings).toFixed(2)}`}
+                                              <span style={{ fontSize: 10, color: "#888", marginLeft: 4 }}>
+                                                ({savingsPct.toFixed(0)}% saved)
+                                              </span>
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={() => handleDeleteBridgeAssignment(a.id)}
-                        disabled={deletingBridgeId === a.id}
-                        style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #fca5a5",
-                          background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
-                          cursor: deletingBridgeId === a.id ? "not-allowed" : "pointer",
-                          opacity: deletingBridgeId === a.id ? 0.6 : 1 }}>
-                        {deletingBridgeId === a.id ? "Deleting…" : "✕ Delete"}
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
