@@ -294,15 +294,19 @@ function BridgeSection({ designs, onDeleted }: { designs: BridgeDesign[]; onDele
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {designs.map(d => (
-            <div key={d.id} style={{ background: "#fafafa", border: "2px solid #e5e7eb",
+          {designs.map(d => {
+            const isAssignment = d.name.startsWith('asgn_');
+            const displayName = isAssignment ? '🌉 Assignment Bridge' : d.name;
+            return (
+            <div key={d.id} style={{ background: isAssignment ? "#fffbeb" : "#fafafa",
+              border: `2px solid ${isAssignment ? "#fde68a" : "#e5e7eb"}`,
               borderRadius: 12, padding: "14px 18px", transition: "border-color 150ms" }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = "#7c3aed")}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = "#e5e7eb")}>
+              onMouseEnter={e => (e.currentTarget.style.borderColor = isAssignment ? "#d97706" : "#7c3aed")}
+              onMouseLeave={e => (e.currentTarget.style.borderColor = isAssignment ? "#fde68a" : "#e5e7eb")}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <Link href={`/tools/bridge?id=${d.id}`} style={{ textDecoration: "none", flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 900, color: "#111", marginBottom: 6 }}>
-                    {d.name}
+                    {displayName}
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", alignItems: "center",
                     overflow: "hidden" }}>
@@ -351,7 +355,8 @@ function BridgeSection({ designs, onDeleted }: { designs: BridgeDesign[]; onDele
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

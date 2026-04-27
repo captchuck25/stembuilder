@@ -122,6 +122,11 @@ export default function ClassDetailPage() {
   const [expandedBridgeId, setExpandedBridgeId] = useState<string | null>(null);
   const [bridgeLeaderboards, setBridgeLeaderboards] = useState<Record<string, BridgeSubmissionRow[]>>({});
   const [loadingLeaderboardId, setLoadingLeaderboardId] = useState<string | null>(null);
+  interface BridgeSubmissionCell { cost: number; passed: boolean; }
+  // submissionMap[student_id][assignment_id] = cell
+  const [bridgeSubmissionMap, setBridgeSubmissionMap] = useState<Record<string, Record<string, BridgeSubmissionCell>>>({});
+  const [loadingBridgeGradebook, setLoadingBridgeGradebook] = useState(false);
+  const bridgeGradebookLoadedRef = useRef(false);
 
   // Class settings state
   const [showSettings, setShowSettings] = useState(false);
@@ -151,6 +156,23 @@ export default function ClassDetailPage() {
       .then(r => r.json())
       .then(data => setGrades(prev => ({ ...prev, [selectedTool]: data })))
       .finally(() => setLoadingGrades(false));
+  }, [selectedTool, cls]);
+
+  useEffect(() => {
+    if (!cls || selectedTool !== "bridge" || bridgeGradebookLoadedRef.current) return;
+    bridgeGradebookLoadedRef.current = true;
+    setLoadingBridgeGradebook(true);
+    fetch(`/api/teacher/bridge-gradebook?classId=${classId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: Array<{ assignment_id: string; student_id: string; cost: number; passed: boolean }>) => {
+        const map: Record<string, Record<string, BridgeSubmissionCell>> = {};
+        for (const row of rows) {
+          if (!map[row.student_id]) map[row.student_id] = {};
+          map[row.student_id][row.assignment_id] = { cost: row.cost, passed: row.passed };
+        }
+        setBridgeSubmissionMap(map);
+      })
+      .finally(() => setLoadingBridgeGradebook(false));
   }, [selectedTool, cls]);
 
   async function loadClass() {
@@ -539,6 +561,122 @@ export default function ClassDetailPage() {
                             color: quizPassed ? "#166534" : "#991b1b",
                           }}>
                             {quizScore}/{quizTotal}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
+                        )}
+                      </td>,
+                    ];
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderBridgeGradebook() {
+    if (loadingBridgeGradebook) {
+      return <div style={{ padding: "32px 0", textAlign: "center", color: "#888", fontSize: 14 }}>Loading gradebook…</div>;
+    }
+    if (bridgeAssignments.length === 0) return null;
+
+    const sorted = [...students].sort((a, b) => a.name.localeCompare(b.name));
+    if (sorted.length === 0) {
+      return (
+        <div style={{ padding: "40px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🎒</div>
+          No students enrolled yet.
+        </div>
+      );
+    }
+
+    function exportBridgeCSV() {
+      const header = ["Student", "Email", ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Passed`), ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Cost`)];
+      const rows: string[][] = [header];
+      for (const s of sorted) {
+        const row = [s.name, s.email];
+        for (const a of bridgeAssignments) {
+          const cell = bridgeSubmissionMap[s.id]?.[a.id];
+          row.push(cell ? (cell.passed ? "Yes" : "No") : "—");
+        }
+        for (const a of bridgeAssignments) {
+          const cell = bridgeSubmissionMap[s.id]?.[a.id];
+          row.push(cell ? `$${cell.cost.toFixed(2)}` : "—");
+        }
+        rows.push(row);
+      }
+      downloadCSV(rows, `bridge-gradebook-${classId}.csv`);
+    }
+
+    return (
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div style={{ fontSize: 14, color: "#555" }}>
+            {sorted.length} student{sorted.length !== 1 ? "s" : ""} · {bridgeAssignments.length} assignment{bridgeAssignments.length !== 1 ? "s" : ""}
+          </div>
+          <button onClick={exportBridgeCSV}
+            style={{ padding: "8px 18px", borderRadius: 10, border: "2px solid #d97706",
+              background: "#fffbeb", color: "#92400e", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+            ↓ Export CSV
+          </button>
+        </div>
+        <div style={{ overflowX: "auto", borderRadius: 12, border: "2px solid #fde68a" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 400 }}>
+            <thead>
+              <tr>
+                <th style={{ ...TH, ...NAME_TD, background: "#fef9c3", zIndex: 2 }}>Student</th>
+                {bridgeAssignments.map(a => (
+                  <th key={a.id} colSpan={2}
+                    style={{ ...TH, borderLeft: "4px solid #d97706", textAlign: "center", paddingLeft: 16, background: "#fef9c308" }}>
+                    <div style={{ color: "#92400e", fontWeight: 900 }}>{a.title || "Bridge Assignment"}</div>
+                    <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginTop: 2 }}>
+                      {a.span_feet} ft · {a.load_lb / 2000} ton · ${Number(a.max_cost).toFixed(0)} budget
+                    </div>
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                <th style={{ ...TH, ...NAME_TD, background: "#fef9c3", zIndex: 2 }} />
+                {bridgeAssignments.map(a => [
+                  <th key={`${a.id}-pass`} style={{ ...TH, borderLeft: "4px solid #d97706" + "30", color: "#666", fontWeight: 700, background: "#fef9c305", textAlign: "center" }}>Result</th>,
+                  <th key={`${a.id}-cost`} style={{ ...TH, color: "#666", fontWeight: 700, background: "#fef9c305", textAlign: "right" }}>Cost</th>,
+                ])}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((s, si) => (
+                <tr key={s.id} style={{ background: si % 2 === 0 ? "#fff" : "#fffdf5" }}>
+                  <td style={{ ...NAME_TD, background: si % 2 === 0 ? "#fff" : "#fffdf5" }}>
+                    <div style={{ fontWeight: 700, color: "#111" }}>{s.name}</div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{s.email}</div>
+                  </td>
+                  {bridgeAssignments.map(a => {
+                    const cell = bridgeSubmissionMap[s.id]?.[a.id];
+                    return [
+                      <td key={`${a.id}-pass`} style={{ ...TD, borderLeft: "4px solid #d97706" + "30", textAlign: "center" }}>
+                        {cell ? (
+                          <span style={{
+                            display: "inline-block", padding: "2px 10px", borderRadius: 6,
+                            fontWeight: 800, fontSize: 12,
+                            background: cell.passed ? "#dcfce7" : "#fee2e2",
+                            color: cell.passed ? "#166534" : "#991b1b",
+                          }}>
+                            {cell.passed ? "✓ Pass" : "✗ Fail"}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
+                        )}
+                      </td>,
+                      <td key={`${a.id}-cost`} style={{ ...TD, textAlign: "right" }}>
+                        {cell ? (
+                          <span style={{
+                            fontWeight: 700, fontSize: 13,
+                            color: cell.cost <= Number(a.max_cost) ? "#166534" : "#991b1b",
+                          }}>
+                            ${cell.cost.toFixed(2)}
                           </span>
                         ) : (
                           <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
@@ -1052,6 +1190,12 @@ export default function ClassDetailPage() {
                     </button>
                   </div>
                 </div>
+              )}
+
+              {renderBridgeGradebook()}
+
+              {bridgeAssignments.length > 0 && (
+                <div style={{ borderTop: "2px solid #fde68a", margin: "4px 0 24px", opacity: 0.6 }} />
               )}
 
               {bridgeAssignments.length === 0 ? (

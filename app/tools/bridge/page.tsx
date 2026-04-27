@@ -584,31 +584,42 @@ function BridgeToolPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Load assignment config (and any existing saved design) when opened via ?assignment=<id>
+  // Load assignment config, existing design, and prior submission status when opened via ?assignment=<id>
   useEffect(() => {
     const aid = searchParams.get("assignment");
     if (!aid) return;
     Promise.all([
       fetch(`/api/bridge-assignments/${aid}`).then(r => r.ok ? r.json() : null),
       fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null),
-    ]).then(([config, existingDesign]: [AssignmentConfig | null, { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null } | null]) => {
+      fetch(`/api/bridge-submissions/mine?assignmentId=${aid}`).then(r => r.ok ? r.json() : null),
+    ]).then(([config, existingDesign, priorSubmission]: [
+      AssignmentConfig | null,
+      { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null } | null,
+      { cost: number; passed: boolean } | null,
+    ]) => {
       if (!config) return;
       setAssignmentConfig(config);
+      if (priorSubmission) setAssignmentSubmitted(true);
       suppressDirtyRef.current = true;
+      // Deterministic save key: asgn_<assignmentId> — unique per student+assignment, no SQL column needed
+      const saveKey = `asgn_${aid}`;
+      const displayName = config.title || 'Bridge Assignment';
       if (existingDesign?.nodes?.length) {
         applyImportedBridgeState({
           nodes: existingDesign.nodes as Node[],
           members: existingDesign.members as Member[],
           spanFeet: config.span_feet,
           loadLb: config.load_lb,
-          bridgeName: existingDesign.name,
+          bridgeName: displayName,
           designerName: existingDesign.designer_name ?? undefined,
         });
-        setActiveCloudName(existingDesign.name);
+        setActiveCloudName(saveKey);
         setIsDirty(false);
       } else {
         setSpanFeet(config.span_feet);
         setLoadLb(config.load_lb);
+        setBridgeName(displayName);
+        setActiveCloudName(saveKey);
       }
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
         suppressDirtyRef.current = false;
@@ -625,6 +636,18 @@ function BridgeToolPage() {
   useEffect(() => {
     resetAnalysisState(true);
   }, [nodes, members, spanFeet, loadLb]);
+
+  // Auto-save in assignment mode so work is always recoverable on reopen
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isDirty || !assignmentConfig || !activeCloudName || !session?.user) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      performCloudSave(activeCloudName);
+    }, 4000);
+    return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty, nodes, members, assignmentConfig, activeCloudName]);
 
   // Hard navigation guard (tab close, refresh, browser back to external site)
   useEffect(() => {
@@ -3410,8 +3433,8 @@ function BridgeToolPage() {
   async function performCloudSave(name: string) {
     if (!session?.user || !userId) return;
     setSaveStatus("saving");
-    // If saving under a new name from the dialog, update the title box too
-    if (name !== bridgeName) setBridgeName(name);
+    // Don't overwrite the display name when saving under the internal asgn_ key
+    if (!name.startsWith('asgn_') && name !== bridgeName) setBridgeName(name);
     try {
       await upsertBridgeDesign(userId, {
         name,
@@ -3422,7 +3445,6 @@ function BridgeToolPage() {
         members,
         passed: stressTestResult != null ? stressTestPass : null,
         cost: costSummary.totalCost,
-        assignmentId: assignmentConfig?.id ?? null,
       });
       setActiveCloudName(name);
       setIsDirty(false);
@@ -3436,8 +3458,30 @@ function BridgeToolPage() {
   }
 
   async function handleSubmitAssignment() {
-    if (!assignmentConfig) return;
+    if (!assignmentConfig || !userId) return;
     setAssignmentSubmitting(true);
+
+    // Save the design first — the name asgn_<id> is the key for reloading on reopen
+    const saveKey = `asgn_${assignmentConfig.id}`;
+    try {
+      await upsertBridgeDesign(userId, {
+        name: saveKey,
+        spanFeet,
+        loadLb,
+        designerName,
+        nodes,
+        members,
+        passed: stressTestPass,
+        cost: costSummary.totalCost,
+      });
+      setActiveCloudName(saveKey);
+      setIsDirty(false);
+    } catch (err) {
+      setAssignmentSubmitting(false);
+      alert(`Could not save your bridge before submitting. Please try again.\n\n${err instanceof Error ? err.message : 'Unknown error'}`);
+      return;
+    }
+
     const res = await fetch("/api/bridge-submissions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3931,21 +3975,14 @@ function BridgeToolPage() {
           border: "1px solid #bdbdbd",
           borderRadius: 6,
           overflow: "hidden",
-          position: "relative",
         }}
       >
-        {svgRect.width > 0 ? (
+        <div style={{ position: "relative", width: 1150, height: 650, overflow: "hidden" }}>
           <svg
             width={1150}
             height={28}
             viewBox="0 0 1150 28"
-            style={{
-              position: "fixed",
-              left: svgRect.left,
-              top: svgRect.top,
-              pointerEvents: "none",
-              zIndex: 6,
-            }}
+            style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 6 }}
           >
             <g opacity={0.75}>
               {(() => {
@@ -3956,38 +3993,18 @@ function BridgeToolPage() {
                 const rulerTopY = 0;
                 return (
                   <>
-                    <line
-                      x1={leftPx}
-                      y1={rulerTopY}
-                      x2={rightPx}
-                      y2={rulerTopY}
-                      stroke="#141414"
-                      strokeWidth={1}
-                      opacity={0.55}
-                    />
+                    <line x1={leftPx} y1={rulerTopY} x2={rightPx} y2={rulerTopY}
+                      stroke="#141414" strokeWidth={1} opacity={0.55} />
                     {Array.from({ length: spanFt + 1 }).map((_, ft) => {
                       const x = leftPx + ft * pxPerFt;
                       if (x < leftPx || x > rightPx) return null;
                       const isMajor = ft % 5 === 0;
                       return (
                         <g key={`rt-fixed-${ft}`}>
-                          <line
-                            x1={x}
-                            y1={rulerTopY}
-                            x2={x}
-                            y2={rulerTopY + (isMajor ? 10 : 6)}
-                            stroke="#141414"
-                            strokeWidth={1}
-                            opacity={isMajor ? 0.85 : 0.55}
-                          />
+                          <line x1={x} y1={rulerTopY} x2={x} y2={rulerTopY + (isMajor ? 10 : 6)}
+                            stroke="#141414" strokeWidth={1} opacity={isMajor ? 0.85 : 0.55} />
                           {isMajor ? (
-                            <text
-                              x={x + 2}
-                              y={rulerTopY + 16}
-                              fill="#141414"
-                              fontSize={10}
-                              opacity={0.85}
-                            >
+                            <text x={x + 2} y={rulerTopY + 16} fill="#141414" fontSize={10} opacity={0.85}>
                               {ft}
                             </text>
                           ) : null}
@@ -3999,51 +4016,27 @@ function BridgeToolPage() {
               })()}
             </g>
           </svg>
-        ) : null}
-        {svgRect.height > 0 ? (
           <svg
             width={60}
-            height={svgRect.height}
+            height={650}
             viewBox="0 0 60 650"
-            style={{
-              position: "fixed",
-              left: svgRect.left,
-              top: svgRect.top,
-              pointerEvents: "none",
-              zIndex: 6,
-            }}
+            style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none", zIndex: 6 }}
           >
             <g opacity={0.75}>
-              {Array.from({
-                length: VSPACE[spanFt].above + VSPACE[spanFt].below + 1,
-              }).map((_, i) => {
+              {Array.from({ length: VSPACE[spanFt].above + VSPACE[spanFt].below + 1 }).map((_, i) => {
                 const usablePx = SUPPORT_X[spanFt].right - SUPPORT_X[spanFt].left;
                 const pxPerFt = usablePx / spanFt;
                 const ft = VSPACE[spanFt].above - i;
-                const y =
-                  ft >= 0 ? ROADWAY_Y - ft * pxPerFt : ROADWAY_Y + Math.abs(ft) * pxPerFt;
+                const y = ft >= 0 ? ROADWAY_Y - ft * pxPerFt : ROADWAY_Y + Math.abs(ft) * pxPerFt;
                 if (y < 0 || y > 650) return null;
                 const isMajor = ft % 5 === 0;
                 const showLabel = spanFt === 20 ? true : isMajor;
-                const rulerLeftX = 0;
                 return (
                   <g key={`rl-fixed-${i}`}>
-                    <line
-                      x1={rulerLeftX}
-                      y1={y}
-                      x2={rulerLeftX + (isMajor ? 10 : 6)}
-                      y2={y}
-                      stroke="#141414"
-                      strokeWidth={1}
-                      opacity={isMajor ? 0.85 : 0.55}
-                    />
-                    <text
-                      x={rulerLeftX + (isMajor ? 12 : 10)}
-                      y={y + 3}
-                      fill="#141414"
-                      fontSize={isMajor ? 10 : 8}
-                      opacity={isMajor ? 0.85 : 0.6}
-                    >
+                    <line x1={0} y1={y} x2={isMajor ? 10 : 6} y2={y}
+                      stroke="#141414" strokeWidth={1} opacity={isMajor ? 0.85 : 0.55} />
+                    <text x={isMajor ? 12 : 10} y={y + 3} fill="#141414"
+                      fontSize={isMajor ? 10 : 8} opacity={isMajor ? 0.85 : 0.6}>
                       {showLabel ? (ft >= 0 ? `+${ft}` : ft) : ""}
                     </text>
                   </g>
@@ -4051,8 +4044,6 @@ function BridgeToolPage() {
               })}
             </g>
           </svg>
-        ) : null}
-        <div style={{ position: "relative", width: 1150, height: 650, overflow: "hidden" }}>
           <div
             style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}
           >
@@ -4724,9 +4715,21 @@ function BridgeToolPage() {
                       )
                     )}
                     {assignmentSubmitted && (
-                      <div style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>
-                        Great work! Your bridge passed and was submitted.
-                      </div>
+                      <>
+                        <div style={{ fontSize: 12, color: "#166534", fontWeight: 700, marginBottom: nodes.length > 0 ? 0 : 8 }}>
+                          Great work! Your bridge passed and was submitted.
+                        </div>
+                        {nodes.length > 0 && assignmentComplete && (
+                          <button
+                            onClick={handleSubmitAssignment}
+                            disabled={assignmentSubmitting}
+                            style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 8, border: "none",
+                              background: assignmentSubmitting ? "#86efac" : "#15803d",
+                              color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
+                            {assignmentSubmitting ? "Resubmitting…" : "↺ Resubmit Improved Bridge"}
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

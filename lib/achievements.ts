@@ -31,14 +31,17 @@ export async function upsertBridgeDesign(
     members: unknown[];
     passed: boolean | null;
     cost: number | null;
-    assignmentId?: string | null;
   }
 ): Promise<void> {
-  await fetch('/api/bridge', {
+  const res = await fetch('/api/bridge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(design),
   })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error ?? `Save failed (${res.status})`)
+  }
 }
 
 export async function fetchBridgeDesignById(id: string): Promise<BridgeDesign | null> {
