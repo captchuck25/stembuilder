@@ -339,14 +339,16 @@ export default function ClassDetailPage() {
     }
     if (!data || data.assignedLevelIds.length === 0) {
       return (
-        <div style={{ padding: "32px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
-          No levels assigned yet. Toggle some levels on the left.
+        <div style={{ padding: "48px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
+          No levels assigned yet — use the chips above to assign levels to this class.
         </div>
       );
     }
     if (data.students.length === 0) {
       return (
-        <div style={{ padding: "32px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
+        <div style={{ padding: "48px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🎒</div>
           No students enrolled yet.
         </div>
       );
@@ -378,7 +380,12 @@ export default function ClassDetailPage() {
 
     return (
       <div>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 14, color: "#555" }}>
+              {gbStudents.length} student{gbStudents.length !== 1 ? "s" : ""} · {assignedLevelIds.length} level{assignedLevelIds.length !== 1 ? "s" : ""} assigned
+            </div>
+          </div>
           <button onClick={exportCSV}
             style={{ padding: "8px 18px", borderRadius: 10, border: "2px solid #2563eb",
               background: "#eff6ff", color: "#2563eb", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
@@ -395,8 +402,8 @@ export default function ClassDetailPage() {
                   if (!meta) return null;
                   return (
                     <th key={li} colSpan={2}
-                      style={{ ...TH, borderLeft: `4px solid ${meta.color}`, textAlign: "center", paddingLeft: 16 }}>
-                      {meta.title}
+                      style={{ ...TH, borderLeft: `4px solid ${meta.color}`, textAlign: "center", paddingLeft: 16, background: `${meta.color}08` }}>
+                      <div style={{ color: meta.color, fontWeight: 900 }}>{meta.title}</div>
                     </th>
                   );
                 })}
@@ -407,10 +414,10 @@ export default function ClassDetailPage() {
                   const meta = levelMeta[li];
                   if (!meta) return null;
                   return [
-                    <th key={`${li}-ch`} style={{ ...TH, borderLeft: `4px solid ${meta.color}30`, color: "#666", fontWeight: 700 }}>
+                    <th key={`${li}-ch`} style={{ ...TH, borderLeft: `4px solid ${meta.color}30`, color: "#666", fontWeight: 700, background: `${meta.color}05` }}>
                       Challenges
                     </th>,
-                    <th key={`${li}-qz`} style={{ ...TH, color: "#666", fontWeight: 700 }}>Quiz</th>,
+                    <th key={`${li}-qz`} style={{ ...TH, color: "#666", fontWeight: 700, background: `${meta.color}05` }}>Quiz</th>,
                   ];
                 })}
               </tr>
@@ -469,66 +476,35 @@ export default function ClassDetailPage() {
     );
   }
 
-  function renderAssignList(
+  function renderAssignChips(
     tool: "code-lab" | "block-lab",
-    items: Array<{ id: number; title: string; tagline: string; color: string; challenges: { title: string }[] }>,
+    items: Array<{ id: number; title: string; color: string }>,
     assignedSet: Set<number>,
   ) {
+    const label = tool === "code-lab" ? "Level" : "Unit";
     return (
-      <>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {items.map((item, idx) => {
           const assigned = assignedSet.has(idx);
-          const isLevelLocked = locks.some(
-            l => l.tool === tool && l.level_idx === idx && l.challenge_idx === -1,
-          );
-
+          const isLevelLocked = locks.some(l => l.tool === tool && l.level_idx === idx && l.challenge_idx === -1);
+          const borderColor = isLevelLocked ? "#16a34a" : assigned ? item.color : "#d1d5db";
+          const bg = isLevelLocked ? "#dcfce7" : assigned ? `${item.color}18` : "#f9fafb";
+          const color = isLevelLocked ? "#166534" : assigned ? item.color : "#6b7280";
           return (
-            <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {/* Level info display */}
-              <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 12,
-                padding: "11px 13px", borderRadius: 12,
-                border: `2px solid ${assigned ? item.color : "#e0e0e0"}`,
-                background: assigned ? `${item.color}14` : "#fafafa",
-                opacity: saving ? 0.6 : 1, minWidth: 0, position: "relative" }}>
-                <div style={{ width: 24, height: 24, borderRadius: 999,
-                  background: assigned ? item.color : "#e0e0e0",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0, fontSize: 12, color: "#fff", fontWeight: 800 }}>
-                  {assigned ? "✓" : idx + 1}
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: "#111", whiteSpace: "nowrap",
-                    overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {tool === "code-lab" ? "Level" : "Unit"} {item.id} — {item.title}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#777", whiteSpace: "nowrap",
-                    overflow: "hidden", textOverflow: "ellipsis" }}>{item.tagline}</div>
-                </div>
-                {isLevelLocked && (
-                  <div style={{ fontSize: 14, flexShrink: 0 }}>🔒</div>
-                )}
-              </div>
-
-              {/* Assign / Unlock / Unassign button */}
-              <button
-                onClick={() => {
-                  if (assigned && isLevelLocked) toggleLevelLock(tool, idx);
-                  else toggleLevel(tool, idx);
-                }}
-                disabled={saving}
-                title={assigned && isLevelLocked ? "Unlock this level for students" : assigned ? "Unassign this level" : "Assign this level"}
-                style={{ padding: "0 10px", borderRadius: 10, flexShrink: 0, height: 48,
-                  border: `2px solid ${assigned && isLevelLocked ? "#16a34a" : assigned ? item.color : "#e5e7eb"}`,
-                  background: assigned && isLevelLocked ? "#dcfce7" : assigned ? `${item.color}18` : "#fafafa",
-                  cursor: saving ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800,
-                  color: assigned && isLevelLocked ? "#166534" : assigned ? item.color : "#6b7280",
-                  lineHeight: 1.3, textAlign: "center", minWidth: 58 }}>
-                {assigned && isLevelLocked ? <>🔓<br/>Assign</> : assigned ? <>✓<br/>Assigned</> : <>+<br/>Assign</>}
-              </button>
-            </div>
+            <button key={idx}
+              onClick={() => { if (assigned && isLevelLocked) toggleLevelLock(tool, idx); else toggleLevel(tool, idx); }}
+              disabled={saving}
+              title={isLevelLocked ? "Unlock for students" : assigned ? "Click to unassign" : "Click to assign"}
+              style={{ padding: "8px 16px", borderRadius: 99, border: `2px solid ${borderColor}`,
+                background: bg, color, fontWeight: 800, fontSize: 13,
+                cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6,
+                opacity: saving ? 0.6 : 1, transition: "all 120ms" }}>
+              <span>{isLevelLocked ? "🔒" : assigned ? "✓" : "+"}</span>
+              {label} {item.id} — {item.title}
+            </button>
           );
         })}
-      </>
+      </div>
     );
   }
 
@@ -740,22 +716,21 @@ export default function ClassDetailPage() {
 
           {/* ── Code Lab panel ─────────────────────────────────────────────────────── */}
           {selectedTool === "code-lab" && (
-            <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 28, alignItems: "start" }}>
-              <div style={{ ...CARD, padding: "26px 28px" }}>
-                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 4 }}>Assign Levels</h2>
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                  Use <strong>+ Assign</strong> to give access. Use the tab&apos;s <strong>🔒 Lock All</strong> to block everything, then click <strong>🔓 Assign</strong> on a level to open it for students.
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {renderAssignList("code-lab", LEVELS.map(l => ({ ...l, challenges: l.challenges })), assignedCodeLab)}
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div style={{ ...CARD, padding: "20px 24px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: 0 }}>Assign Levels</h2>
+                    <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                      Click to assign · Use <strong>🔒 Lock All</strong> on the tab to restrict access
+                    </p>
+                  </div>
                 </div>
+                {renderAssignChips("code-lab", LEVELS.map(l => ({ id: l.id, title: l.title, color: l.color })), assignedCodeLab)}
               </div>
 
-              <div style={{ ...CARD, padding: "26px 28px" }}>
-                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#2563eb", marginBottom: 6 }}>Student Progress</h2>
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                  Challenges completed and quiz scores per assigned level.
-                </p>
+              <div style={{ ...CARD, padding: "24px 28px" }}>
+                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#2563eb", marginBottom: 16 }}>Student Progress — Python Code Lab</h2>
                 {renderGradebook(
                   "code-lab",
                   LEVELS.map(l => ({ id: l.id, title: l.title, color: l.color })),
@@ -767,22 +742,21 @@ export default function ClassDetailPage() {
 
           {/* ── Block Lab panel ────────────────────────────────────────────────────── */}
           {selectedTool === "block-lab" && (
-            <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 28, alignItems: "start" }}>
-              <div style={{ ...CARD, padding: "26px 28px" }}>
-                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 4 }}>Assign Units</h2>
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                  Use <strong>+ Assign</strong> to give access. Use the tab&apos;s <strong>🔒 Lock All</strong> to block everything, then click <strong>🔓 Assign</strong> on a unit to open it for students.
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {renderAssignList("block-lab", UNITS.map(u => ({ ...u, challenges: u.challenges })), assignedBlockLab)}
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div style={{ ...CARD, padding: "20px 24px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                  <div>
+                    <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: 0 }}>Assign Units</h2>
+                    <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                      Click to assign · Use <strong>🔒 Lock All</strong> on the tab to restrict access
+                    </p>
+                  </div>
                 </div>
+                {renderAssignChips("block-lab", UNITS.map(u => ({ id: u.id, title: u.title, color: u.color })), assignedBlockLab)}
               </div>
 
-              <div style={{ ...CARD, padding: "26px 28px" }}>
-                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#7c3aed", marginBottom: 6 }}>Student Progress</h2>
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                  Challenges completed and quiz scores per assigned unit.
-                </p>
+              <div style={{ ...CARD, padding: "24px 28px" }}>
+                <h2 style={{ fontSize: 18, fontWeight: 900, color: "#7c3aed", marginBottom: 16 }}>Student Progress — Block Lab</h2>
                 {renderGradebook(
                   "block-lab",
                   UNITS.map(u => ({ id: u.id, title: u.title, color: u.color })),
