@@ -191,7 +191,7 @@ export default function StudentDashboard() {
                               const level = LEVELS[a.level_id];
                               if (!level) return null;
                               return (
-                                <Link key={a.id} href="/tools/code-lab/python" style={{ textDecoration: "none" }}>
+                                <Link key={a.id} href={`/tools/code-lab/python?level=${a.level_id}`} style={{ textDecoration: "none" }}>
                                   <div style={{ padding: "14px 20px", borderRadius: 14,
                                     background: `linear-gradient(135deg, ${level.color}22, ${level.color}44)`,
                                     border: `2px solid ${level.color}`,

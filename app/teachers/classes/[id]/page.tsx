@@ -169,7 +169,15 @@ export default function ClassDetailPage() {
         body: JSON.stringify({ classId: cls.id, tool, levelId }),
       });
       const data = await res.json();
-      if (res.ok) setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
+      if (res.ok) {
+        setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
+        // Assigning a level should also remove its lock so students can access it
+        const existingLock = locks.find(l => l.tool === tool && l.level_idx === levelId && l.challenge_idx === -1);
+        if (existingLock) {
+          await fetch(`/api/teacher/locks?id=${existingLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLock.id));
+        }
+      }
     }
     fetchedRef.current.delete(tool);
     setGrades(prev => { const n = { ...prev }; delete n[tool]; return n; });

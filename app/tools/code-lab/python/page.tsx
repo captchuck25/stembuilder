@@ -1,6 +1,7 @@
 "use client";
 
 import { useSession } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 
 import React, { useEffect, useRef, useState, useCallback, createContext, useContext } from "react";
 
@@ -977,8 +978,20 @@ function LevelComplete({ li, score, total, onContinue }: { li: number; score: nu
 
 export default function PythonMazePage() {
   const { data: session, status } = useSession();
+  const searchParams = useSearchParams();
   const userId = session?.user?.id ?? null;
-  const [phase, setPhase] = useState<Phase>({ tag:"overview" });
+
+  // Support ?level=N deep-link from student assignments
+  const deepLinkLevel = (() => {
+    const v = searchParams.get("level");
+    if (v === null) return null;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n >= 0 && n < LEVELS.length ? n : null;
+  })();
+
+  const [phase, setPhase] = useState<Phase>(
+    deepLinkLevel !== null ? { tag:"intro", li: deepLinkLevel } : { tag:"overview" }
+  );
   const [progress, setProgress] = useState<Progress>({ completedChallenges:{}, completedLevels:{}, savedCode:{} });
   const [isTeacher, setIsTeacher] = useState(false);
   const [lockedChallenges, setLockedChallenges] = useState<{level_idx:number;challenge_idx:number}[]>([]);

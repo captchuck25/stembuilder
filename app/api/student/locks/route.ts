@@ -29,9 +29,18 @@ export async function GET(req: Request) {
 
   if (!locks?.length) return NextResponse.json([]);
 
-  // Deduplicate — union of all locks across all enrolled classes
+  // Assignments explicitly grant access — they override any lock for that level
+  const { data: assignments } = await db
+    .from('assignments')
+    .select('tool, level_id')
+    .eq('tool', tool)
+    .in('class_id', classIds);
+  const assignedLevelIds = new Set((assignments ?? []).map((a: { level_id: number }) => a.level_id));
+
+  // Deduplicate and remove locks for explicitly assigned levels
   const seen = new Set<string>();
   const unique = locks.filter((l: { level_idx: number; challenge_idx: number }) => {
+    if (l.challenge_idx === -1 && assignedLevelIds.has(l.level_idx)) return false;
     const k = `${l.level_idx}:${l.challenge_idx}`;
     if (seen.has(k)) return false;
     seen.add(k);
