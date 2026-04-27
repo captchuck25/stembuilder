@@ -456,6 +456,12 @@ function BridgeToolPage() {
   const [savePendingName, setSavePendingName] = useState<string>("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
+  // Assignment mode
+  interface AssignmentConfig { id: string; title: string; span_feet: 20 | 40 | 60 | 80 | 100; load_lb: number; max_cost: number; }
+  const [assignmentConfig, setAssignmentConfig] = useState<AssignmentConfig | null>(null);
+  const [assignmentSubmitted, setAssignmentSubmitted] = useState(false);
+  const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
+
   // Real, clickable, connectable supports ON the grid
   const { left: initialLeft, right: initialRight } = SUPPORT_X[INITIAL_SPAN_FEET];
   const [nodes, setNodes] = useState<Node[]>([
@@ -567,6 +573,25 @@ function BridgeToolPage() {
         suppressDirtyRef.current = false;
       }));
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Load assignment config when opened via ?assignment=<id>
+  useEffect(() => {
+    const aid = searchParams.get("assignment");
+    if (!aid) return;
+    fetch(`/api/bridge-assignments/${aid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((data: AssignmentConfig | null) => {
+        if (!data) return;
+        setAssignmentConfig(data);
+        suppressDirtyRef.current = true;
+        setSpanFeet(data.span_feet);
+        setLoadLb(data.load_lb);
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+          suppressDirtyRef.current = false;
+        }));
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
@@ -2055,6 +2080,12 @@ function BridgeToolPage() {
       : "Fail"
     : "Pending";
 
+  const assignmentComplete = assignmentConfig !== null
+    && stressTestPass
+    && inspectionPass
+    && stressTestResult !== null
+    && costSummary.totalCost <= assignmentConfig.max_cost;
+
   function getVehicleType(nextLoadLb: number): VehicleType {
     const tons = nearestLoadTon(nextLoadLb);
     if (tons === 30) return "Semi";
@@ -3381,6 +3412,18 @@ function BridgeToolPage() {
     closeSaveDialog();
   }
 
+  async function handleSubmitAssignment() {
+    if (!assignmentConfig) return;
+    setAssignmentSubmitting(true);
+    const res = await fetch("/api/bridge-submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignmentId: assignmentConfig.id, cost: costSummary.totalCost, passed: true }),
+    });
+    if (res.ok) setAssignmentSubmitted(true);
+    setAssignmentSubmitting(false);
+  }
+
   function applyImportedBridgeState(parsed: {
     nodes?: Node[];
     members?: Member[];
@@ -4620,6 +4663,51 @@ function BridgeToolPage() {
             </section>
 
             <aside className={styles.rightPanel}>
+              {assignmentConfig && (
+                <div className={styles.sideCard} style={{ background: assignmentSubmitted ? "#f0fdf4" : "#fffbeb", border: `2px solid ${assignmentSubmitted ? "#86efac" : "#fde68a"}` }}>
+                  <div className={styles.sideCardHeader} style={{ borderBottom: `1px solid ${assignmentSubmitted ? "#86efac" : "#fde68a"}` }}>
+                    <div className={styles.sideCardTitle} style={{ color: assignmentSubmitted ? "#166534" : "#92400e" }}>
+                      {assignmentSubmitted ? "✓ Assignment Submitted" : "🌉 Assignment"}
+                    </div>
+                  </div>
+                  <div className={styles.sideCardBody}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 8 }}>
+                      {assignmentConfig.title || "Bridge Assignment"}
+                    </div>
+                    <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>Span: {assignmentConfig.span_feet} ft (locked)</div>
+                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>Load: {assignmentConfig.load_lb / 2000} ton (locked)</div>
+                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>
+                        Budget: ${costSummary.totalCost.toFixed(2)} / ${assignmentConfig.max_cost.toFixed(2)}
+                        {costSummary.totalCost > assignmentConfig.max_cost && (
+                          <span style={{ color: "#dc2626", marginLeft: 4 }}>— over budget!</span>
+                        )}
+                      </div>
+                    </div>
+                    {!assignmentSubmitted && (
+                      assignmentComplete ? (
+                        <button
+                          onClick={handleSubmitAssignment}
+                          disabled={assignmentSubmitting}
+                          style={{ width: "100%", padding: "10px", borderRadius: 8, border: "none",
+                            background: assignmentSubmitting ? "#86efac" : "#16a34a",
+                            color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
+                          {assignmentSubmitting ? "Submitting…" : "Submit Assignment"}
+                        </button>
+                      ) : (
+                        <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
+                          {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : "Over budget — reduce material cost"}
+                        </div>
+                      )
+                    )}
+                    {assignmentSubmitted && (
+                      <div style={{ fontSize: 12, color: "#166534", fontWeight: 700 }}>
+                        Great work! Your bridge passed and was submitted.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className={styles.sideCard}>
                 <div className={styles.sideCardHeader}>
                   <div className={styles.sideCardTitle}>Load & Span</div>
@@ -4643,13 +4731,15 @@ function BridgeToolPage() {
                         onChange={(e) =>
                           applySpanFeet(Number(e.target.value) as 20 | 40 | 60 | 80 | 100)
                         }
+                        disabled={!!assignmentConfig}
                         style={{
                           padding: "6px 8px",
                           borderRadius: 8,
                           border: "1px solid #b8b8b8",
-                          background: "#ffffff",
+                          background: assignmentConfig ? "#f3f4f6" : "#ffffff",
                           fontSize: 12,
                           fontWeight: 600,
+                          opacity: assignmentConfig ? 0.7 : 1,
                         }}
                       >
                         <option value={20}>20 ft</option>
@@ -4674,13 +4764,15 @@ function BridgeToolPage() {
                         onChange={(e) =>
                           setLoadLb(Number(e.target.value) * LB_PER_TON)
                         }
+                        disabled={!!assignmentConfig}
                         style={{
                           padding: "6px 8px",
                           borderRadius: 8,
                           border: "1px solid #b8b8b8",
-                          background: "#ffffff",
+                          background: assignmentConfig ? "#f3f4f6" : "#ffffff",
                           fontSize: 12,
                           fontWeight: 600,
+                          opacity: assignmentConfig ? 0.7 : 1,
                         }}
                       >
                         <option value={8}>8 Ton</option>

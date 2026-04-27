@@ -110,6 +110,15 @@ export default function ClassDetailPage() {
   const [lockError, setLockError] = useState<string | null>(null);
   const fetchedRef = useRef<Set<string>>(new Set());
 
+  // Bridge assignments state
+  interface BridgeAssignment { id: string; title: string; span_feet: number; load_lb: number; max_cost: number; completionCount: number; created_at: string; }
+  const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
+  const [showBridgeForm, setShowBridgeForm] = useState(false);
+  const [bridgeForm, setBridgeForm] = useState({ title: "", spanFeet: 40, loadTon: 8, maxCost: "" });
+  const [bridgeFormSaving, setBridgeFormSaving] = useState(false);
+  const [bridgeFormError, setBridgeFormError] = useState("");
+  const [deletingBridgeId, setDeletingBridgeId] = useState<string | null>(null);
+
   // Class settings state
   const [showSettings, setShowSettings] = useState(false);
   const [editName, setEditName] = useState("");
@@ -152,7 +161,47 @@ export default function ClassDetailPage() {
       const subs = await fetchTurtleSubmissionsForStudents(data.studentIds);
       setTurtleSubs(subs);
     }
+    const bridgeRes = await fetch(`/api/teacher/bridge-assignments?classId=${classId}`);
+    if (bridgeRes.ok) setBridgeAssignments(await bridgeRes.json());
     setLoading(false);
+  }
+
+  async function handleCreateBridgeAssignment() {
+    const maxCostNum = Number(bridgeForm.maxCost);
+    if (!bridgeForm.maxCost || isNaN(maxCostNum) || maxCostNum <= 0) {
+      setBridgeFormError("Please enter a valid max cost (e.g. 5000).");
+      return;
+    }
+    setBridgeFormSaving(true);
+    setBridgeFormError("");
+    const res = await fetch("/api/teacher/bridge-assignments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        classId,
+        title: bridgeForm.title,
+        spanFeet: bridgeForm.spanFeet,
+        loadLb: bridgeForm.loadTon * 2000,
+        maxCost: maxCostNum,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setBridgeAssignments(prev => [data, ...prev]);
+      setShowBridgeForm(false);
+      setBridgeForm({ title: "", spanFeet: 40, loadTon: 8, maxCost: "" });
+    } else {
+      const e = await res.json();
+      setBridgeFormError(e.error ?? "Failed to create assignment");
+    }
+    setBridgeFormSaving(false);
+  }
+
+  async function handleDeleteBridgeAssignment(id: string) {
+    setDeletingBridgeId(id);
+    const res = await fetch(`/api/teacher/bridge-assignments?id=${id}`, { method: "DELETE" });
+    if (res.ok) setBridgeAssignments(prev => prev.filter(a => a.id !== id));
+    setDeletingBridgeId(null);
   }
 
   async function handleApprove(id: string, approved: boolean | null) {
@@ -898,20 +947,132 @@ export default function ClassDetailPage() {
 
           {/* ── Bridge Builder panel ───────────────────────────────────────────────── */}
           {selectedTool === "bridge" && (
-            <div style={{ ...CARD, padding: "48px 40px", textAlign: "center" }}>
-              <div style={{ fontSize: 52, marginBottom: 16 }}>🌉</div>
-              <h2 style={{ fontSize: 22, fontWeight: 900, color: "#111", marginBottom: 10 }}>
-                Bridge Builder Challenges
-              </h2>
-              <p style={{ fontSize: 15, color: "#555", maxWidth: 480, margin: "0 auto 16px", lineHeight: 1.6 }}>
-                Assigned challenges and student progress tracking for the Bridge Builder are coming soon.
-                Students can currently access the tool freely — scored challenges will be added in a future update.
-              </p>
-              <div style={{ display: "inline-block", padding: "8px 20px", borderRadius: 999,
-                background: "#fef3c7", border: "2px solid #fde68a", fontSize: 13,
-                fontWeight: 700, color: "#92400e" }}>
-                🚧 In Development
+            <div style={{ ...CARD, padding: "28px 28px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 900, color: "#d97706", margin: 0 }}>Bridge Assignments</h2>
+                  <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                    Students open the bridge builder with pre-set span, load, and cost targets.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setShowBridgeForm(v => !v); setBridgeFormError(""); }}
+                  style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #d97706",
+                    background: showBridgeForm ? "#fef3c7" : "#fff", color: "#92400e",
+                    fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                  {showBridgeForm ? "✕ Cancel" : "+ New Assignment"}
+                </button>
               </div>
+
+              {showBridgeForm && (
+                <div style={{ background: "#fffbeb", border: "2px solid #fde68a", borderRadius: 14,
+                  padding: "20px 22px", marginBottom: 24 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#92400e", marginBottom: 14 }}>Create Bridge Assignment</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 480 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                      Title (optional)
+                      <input
+                        value={bridgeForm.title}
+                        onChange={e => setBridgeForm(f => ({ ...f, title: e.target.value }))}
+                        placeholder="e.g. River Crossing Challenge"
+                        maxLength={80}
+                        style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 12px",
+                          borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14,
+                          fontWeight: 600, color: "#111", outline: "none", boxSizing: "border-box" }}
+                      />
+                    </label>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Span
+                        <select
+                          value={bridgeForm.spanFeet}
+                          onChange={e => setBridgeForm(f => ({ ...f, spanFeet: Number(e.target.value) as 20 | 40 | 60 | 80 | 100 }))}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          <option value={20}>20 ft</option>
+                          <option value={40}>40 ft</option>
+                          <option value={60}>60 ft</option>
+                          <option value={80}>80 ft</option>
+                          <option value={100}>100 ft</option>
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Load
+                        <select
+                          value={bridgeForm.loadTon}
+                          onChange={e => setBridgeForm(f => ({ ...f, loadTon: Number(e.target.value) as 8 | 15 | 30 }))}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          <option value={8}>8 Ton</option>
+                          <option value={15}>15 Ton</option>
+                          <option value={30}>30 Ton</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                      Max Total Cost ($)
+                      <input
+                        value={bridgeForm.maxCost}
+                        onChange={e => { setBridgeForm(f => ({ ...f, maxCost: e.target.value })); setBridgeFormError(""); }}
+                        placeholder="e.g. 5000"
+                        type="number"
+                        min={1}
+                        style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 12px",
+                          borderRadius: 8, border: bridgeFormError ? "2px solid #dc2626" : "2px solid #e0e0e0",
+                          fontSize: 14, fontWeight: 600, color: "#111", outline: "none", boxSizing: "border-box" }}
+                      />
+                    </label>
+                    {bridgeFormError && <div style={{ fontSize: 12, color: "#dc2626" }}>{bridgeFormError}</div>}
+                    <button
+                      onClick={handleCreateBridgeAssignment}
+                      disabled={bridgeFormSaving}
+                      style={{ padding: "11px 24px", borderRadius: 10, border: "none",
+                        background: bridgeFormSaving ? "#fcd34d" : "#d97706",
+                        color: "#fff", fontWeight: 800, fontSize: 14,
+                        cursor: bridgeFormSaving ? "not-allowed" : "pointer", alignSelf: "flex-start" }}>
+                      {bridgeFormSaving ? "Creating…" : "Create Assignment"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {bridgeAssignments.length === 0 ? (
+                <div style={{ padding: "40px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
+                  <div style={{ fontSize: 36, marginBottom: 10 }}>🌉</div>
+                  No bridge assignments yet — click <strong>+ New Assignment</strong> to create one.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {bridgeAssignments.map(a => (
+                    <div key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "16px 18px", borderRadius: 12, border: "2px solid #fde68a",
+                      background: "#fffbeb", flexWrap: "wrap", gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: "#92400e", marginBottom: 4 }}>
+                          {a.title || "Bridge Assignment"}
+                        </div>
+                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Span: {a.span_feet} ft</span>
+                          <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Load: {a.load_lb / 2000} ton</span>
+                          <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Max Cost: ${a.max_cost.toFixed(2)}</span>
+                          <span style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
+                            ✓ {a.completionCount} student{a.completionCount !== 1 ? "s" : ""} completed
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteBridgeAssignment(a.id)}
+                        disabled={deletingBridgeId === a.id}
+                        style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #fca5a5",
+                          background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
+                          cursor: deletingBridgeId === a.id ? "not-allowed" : "pointer",
+                          opacity: deletingBridgeId === a.id ? 0.6 : 1 }}>
+                        {deletingBridgeId === a.id ? "Deleting…" : "✕ Delete"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

@@ -22,10 +22,22 @@ interface EnrolledClass {
   assignments: Assignment[];
 }
 
+interface BridgeAssignment {
+  id: string;
+  title: string;
+  span_feet: number;
+  load_lb: number;
+  max_cost: number;
+  submitted: boolean;
+  passed: boolean;
+  class_id: string;
+}
+
 export default function StudentDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
+  const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
@@ -43,9 +55,12 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const res = await fetch("/api/student/classes");
-    const data = res.ok ? await res.json() : [];
-    setEnrolledClasses(data);
+    const [classRes, bridgeRes] = await Promise.all([
+      fetch("/api/student/classes"),
+      fetch("/api/student/bridge-assignments"),
+    ]);
+    setEnrolledClasses(classRes.ok ? await classRes.json() : []);
+    setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
     setLoading(false);
   }
 
@@ -166,14 +181,17 @@ export default function StudentDashboard() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-              {enrolledClasses.map(({ class: cls, assignments }) => (
+              {enrolledClasses.map(({ class: cls, assignments }) => {
+                const classBridgeAssignments = bridgeAssignments.filter(b => b.class_id === cls.id);
+                const totalAssignments = assignments.length + classBridgeAssignments.length;
+                return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
                   <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>
-                    {assignments.length} level{assignments.length !== 1 ? "s" : ""} assigned
+                    {totalAssignments} assignment{totalAssignments !== 1 ? "s" : ""} assigned
                   </div>
 
-                  {assignments.length === 0 ? (
+                  {totalAssignments === 0 ? (
                     <div style={{ fontSize: 13, color: "#aaa", fontStyle: "italic" }}>
                       No assignments yet — check back soon.
                     </div>
@@ -243,10 +261,43 @@ export default function StudentDashboard() {
                           </div>
                         </div>
                       )}
+                      {/* Bridge Assignments */}
+                      {classBridgeAssignments.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#d97706",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            🌉 Bridge Builder
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {classBridgeAssignments.map(b => (
+                              <Link key={b.id} href={`/tools/bridge?assignment=${b.id}`} style={{ textDecoration: "none" }}>
+                                <div style={{ padding: "14px 20px", borderRadius: 14,
+                                  background: b.passed ? "linear-gradient(135deg, #dcfce722, #dcfce744)" : "linear-gradient(135deg, #fef3c722, #fde68a44)",
+                                  border: `2px solid ${b.passed ? "#16a34a" : "#d97706"}`,
+                                  display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ fontSize: 22 }}>🌉</div>
+                                  <div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                      {b.title || "Bridge Assignment"}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: "#555" }}>
+                                      {b.span_feet} ft · {b.load_lb / 2000} ton · max ${b.max_cost.toFixed(0)}
+                                    </div>
+                                    {b.passed && (
+                                      <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>✓ Completed</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>
