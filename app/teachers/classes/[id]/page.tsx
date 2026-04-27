@@ -220,10 +220,23 @@ export default function ClassDetailPage() {
     if (existing) {
       await fetch(`/api/teacher/assignments?id=${existing.id}`, { method: "DELETE" });
       setAssignments(prev => prev.filter(a => a.id !== existing.id));
-      // Remove any locks for this level since it's being unassigned
+      // Remove any per-challenge locks for this level
       const locksToDelete = locks.filter(l => l.tool === tool && l.level_idx === levelId);
       await Promise.all(locksToDelete.map(l => fetch(`/api/teacher/locks?id=${l.id}`, { method: "DELETE" })));
       setLocks(prev => prev.filter(l => !(l.tool === tool && l.level_idx === levelId)));
+      // Re-lock this level if Lock All is active (other levels still have level locks)
+      const lockAllActive = locks.some(l => l.tool === tool && l.level_idx !== levelId && l.challenge_idx === -1);
+      if (lockAllActive) {
+        const res = await fetch("/api/teacher/locks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classId: cls.id, tool, levelIdx: levelId, challengeIdx: -1 }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setLocks(prev => [...prev, data]);
+        }
+      }
     } else {
       const res = await fetch("/api/teacher/assignments", {
         method: "POST",
