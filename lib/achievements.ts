@@ -9,6 +9,7 @@ export interface BridgeDesign {
   members: unknown[];
   passed: boolean | null;
   cost: number | null;
+  assignment_id: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -556,7 +556,7 @@ function BridgeToolPage() {
   useEffect(() => {
     const id = searchParams.get("id");
     if (!id) return;
-    fetchBridgeDesignById(id).then(design => {
+    fetchBridgeDesignById(id).then(async design => {
       if (!design) return;
       suppressDirtyRef.current = true;
       applyImportedBridgeState({
@@ -569,6 +569,14 @@ function BridgeToolPage() {
       });
       setActiveCloudName(design.name);
       setIsDirty(false);
+      // If this design was created for an assignment, restore assignment mode
+      if (design.assignment_id) {
+        const res = await fetch(`/api/bridge-assignments/${design.assignment_id}`);
+        if (res.ok) {
+          const config: AssignmentConfig = await res.json();
+          setAssignmentConfig(config);
+        }
+      }
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
         suppressDirtyRef.current = false;
       }));
