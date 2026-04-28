@@ -633,6 +633,7 @@ function ChallengeView({
   const viewRef    = useRef<EditorView|null>(null);
   const codeRef    = useRef(ch.starterCode);
   const flashIvRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const animIvRef  = useRef<ReturnType<typeof setInterval> | null>(null);
   const liRef      = useRef(li);
   useEffect(() => { liRef.current = li; }, [li]);
 
@@ -641,8 +642,14 @@ function ChallengeView({
     setRobotFlash(false);
   };
 
-  // Reinit when challenge changes — restore saved code if available
+  const stopAnimation = useCallback(() => {
+    if (animIvRef.current) { clearInterval(animIvRef.current); animIvRef.current = null; }
+    setAnimating(false);
+  }, []);
+
+  // Reinit when challenge changes — cancel any running animation first
   useEffect(() => {
+    stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
     setSolved(false); setOutput([]); setAnimating(false);
@@ -707,9 +714,9 @@ function ChallengeView({
     if (!moves.length) { setOutput([{text:"No moves yet — add some commands!",type:"info"}]); return; }
     setAnimating(true);
     let step=0;
-    const iv = setInterval(() => {
+    animIvRef.current = setInterval(() => {
       if (step >= moves.length) {
-        clearInterval(iv); setAnimating(false);
+        clearInterval(animIvRef.current!); animIvRef.current = null; setAnimating(false);
         if (didSolve) {
           setSolved(true);
           onSolve(codeRef.current); // save immediately — don't wait for Next button
@@ -727,11 +734,19 @@ function ChallengeView({
     }, 120);
   }, [ch, animating]);
 
+  const handleStop = useCallback(() => {
+    stopAnimation();
+    stopFlash();
+    setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
+    setOutput([{text:"Stopped.", type:"info"}]);
+  }, [ch, stopAnimation]);
+
   const handleReset = useCallback(() => {
+    stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
     setSolved(false); setOutput([]);
-  }, [ch]);
+  }, [ch, stopAnimation]);
 
   const TAB = (active: boolean): React.CSSProperties => ({
     padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer",border:"none",
@@ -805,10 +820,16 @@ function ChallengeView({
             <div style={{flex:1,overflow:"hidden",flexDirection:"column",display:leftTab==="code"?"flex":"none"}}>
               <div ref={editorRef} style={{flex:1,overflow:"hidden"}}/>
               <div style={{padding:"10px 12px",borderTop:"1px solid rgba(255,255,255,0.08)",display:"flex",gap:8,background:"rgba(255,255,255,0.04)",flexShrink:0}}>
-                <button onClick={handleRun} disabled={animating} style={{padding:"8px 22px",borderRadius:10,fontWeight:800,fontSize:14,background:animating?"#94a3b8":"#3b82f6",color:"#fff",border:"none",cursor:animating?"not-allowed":"pointer"}}>
-                  {animating?"Running…":"▶  Run"}
-                </button>
-                <button onClick={handleReset} disabled={animating} style={{padding:"8px 14px",borderRadius:10,fontWeight:700,fontSize:14,background:"rgba(255,255,255,0.08)",color:"#94a3b8",border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer"}}>
+                {animating ? (
+                  <button onClick={handleStop} style={{padding:"8px 22px",borderRadius:10,fontWeight:800,fontSize:14,background:"#dc2626",color:"#fff",border:"none",cursor:"pointer"}}>
+                    ■ Stop
+                  </button>
+                ) : (
+                  <button onClick={handleRun} style={{padding:"8px 22px",borderRadius:10,fontWeight:800,fontSize:14,background:"#3b82f6",color:"#fff",border:"none",cursor:"pointer"}}>
+                    ▶  Run
+                  </button>
+                )}
+                <button onClick={handleReset} style={{padding:"8px 14px",borderRadius:10,fontWeight:700,fontSize:14,background:"rgba(255,255,255,0.08)",color:"#94a3b8",border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer"}}>
                   Reset
                 </button>
                 {solved && (

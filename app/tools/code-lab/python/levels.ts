@@ -1184,12 +1184,12 @@ while not at_goal():
       title: "Right-Hand Rule",
       hint: "Always try to turn right first — hug the right wall all the way to the goal.",
       grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,0,0,1],
-        [1,1,0,1,0,1,1,0,1],
-        [1,1,0,0,0,1,1,0,1],
-        [1,1,1,1,1,1,1,0,0],
-        [1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,1,0,0,0,0,0,0,0,1],
+        [1,1,0,1,0,1,1,0,1,1,1,1],
+        [1,1,0,0,0,1,1,0,1,1,1,1],
+        [1,1,1,1,1,1,1,0,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
       startX:0, startY:1, startDir:1, exitX:8, exitY:4,
       starterCode: `# Right-hand rule: always try to turn right first.
@@ -1206,15 +1206,17 @@ while not at_goal():
     },
     {
       title: "The Winding Path",
-      hint: "Use while not at_goal() with if/elif/else to handle every twist and turn.",
+      hint: "Use while not at_goal() with if/elif/else to handle every twist and turn. Watch out — one corridor goes nowhere!",
       grid: [
         [1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,0,0,0,0,1],
+        [1,1,1,1,1,1,0,1,1],
         [0,0,0,0,1,0,0,0,1],
         [1,1,1,0,1,0,1,0,1],
         [1,1,1,0,0,0,1,0,0],
         [1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:3,
+      startX:0, startY:3, startDir:1, exitX:8, exitY:5,
       starterCode: `# Navigate the winding path using a single while loop.
 
 while not at_goal():
@@ -1229,16 +1231,18 @@ while not at_goal():
     },
     {
       title: "Right Traps",
-      hint: "The path goes straight — but two dead ends branch off to the right. If your code checks right before forward, the robot detours into every trap.",
+      hint: "The straight path is blocked — you must go through the O-shaped corridor. One dead end inside has only a single cell. The ORDER you check directions determines whether you reach the exit or get lost.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,0,0],
+        [0,0,0,0,1,0,1,0,0,0,0],
+        [1,1,1,0,0,0,0,0,1,1,1],
         [1,1,1,0,1,1,1,0,1,1,1],
-        [1,1,1,0,1,1,1,1,1,1,1],
+        [1,1,1,0,0,0,0,0,1,1,1],
         [1,1,1,1,1,1,1,1,1,1,1],
       ],
       startX:0, startY:1, startDir:1, exitX:10, exitY:1,
-      starterCode: `# Two fake exits branch right — check forward FIRST or you'll take every wrong turn.
+      starterCode: `# The straight path is blocked — navigate through the O-shaped corridor.
+# Check forward FIRST or you'll detour into the one-block trap inside.
 
 while not at_goal():
     if has_path_forward():
@@ -1317,66 +1321,66 @@ while not at_goal():
       question: "A while loop runs its body…",
       options: [
         "A fixed number of times",
-        "As long as its condition is True",
         "Only once",
+        "As long as its condition is True",
         "Until the program ends",
       ],
-      answer: 1,
+      answer: 2,
       explanation: "The while loop checks its condition before every iteration and keeps running while it remains True.",
     },
     {
       question: "What happens if a while loop's condition is never False?",
       options: [
-        "The loop runs forever (infinite loop)",
         "Python raises a SyntaxError",
         "The loop skips its body",
         "Python automatically breaks after 10 iterations",
+        "The loop runs forever (infinite loop)",
       ],
-      answer: 0,
+      answer: 3,
       explanation: "An infinite loop runs without stopping — always make sure your condition can eventually become False.",
     },
     {
       question: "Which code correctly moves the robot forward until it reaches the goal?",
       options: [
-        "while not at_goal():\n    forward()",
         "while at_goal():\n    forward()",
+        "while not at_goal():\n    forward()",
         "if not at_goal():\n    forward()",
         "for at_goal() in range(10):\n    forward()",
       ],
-      answer: 0,
+      answer: 1,
       explanation: "`while not at_goal()` keeps looping as long as the robot has NOT reached the goal.",
     },
     {
       question: "You want to walk forward while the path ahead is clear. Which condition should you use?",
       options: [
-        "while has_path_forward():",
         "while not has_path_forward():",
         "if has_path_forward():",
+        "while has_path_forward():",
         "for has_path_forward() in steps:",
       ],
-      answer: 0,
+      answer: 2,
       explanation: "`while has_path_forward()` means 'keep going as long as the path ahead is clear'.",
     },
     {
       question: "What is the main difference between a for loop and a while loop?",
       options: [
-        "A for loop repeats a known number of times; a while loop repeats until a condition changes",
         "A while loop always runs faster than a for loop",
+        "A for loop repeats a known number of times; a while loop repeats until a condition changes",
         "A for loop can use if statements; a while loop cannot",
         "There is no difference — they are interchangeable",
       ],
-      answer: 0,
+      answer: 1,
       explanation: "Use for when you know how many repetitions you need; use while when you loop until something changes.",
     },
     {
       question: "In the right-hand rule algorithm, what does the robot check FIRST at each step?",
       options: [
-        "if has_path_right() — is there a clear path to the right?",
         "Move forward immediately",
         "Turn left first",
         "Check if it has reached the goal",
+        "if has_path_right() — is there a clear path to the right?",
       ],
-      answer: 0,
+      answer: 3,
       explanation: "The right-hand rule always checks has_path_right() first — if the path is clear to the right, turn and move that way.",
     },
   ],
