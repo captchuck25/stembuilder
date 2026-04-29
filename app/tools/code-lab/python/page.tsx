@@ -239,6 +239,7 @@ function transpilePython(src: string): string {
   const lines = src.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const out: string[] = [];
   let i = 0;
+  let whileCount = 0;
   while (i < lines.length) {
     const line = lines[i];
     const stripped = line.trimStart();
@@ -251,7 +252,11 @@ function transpilePython(src: string): string {
     const forM = stripped.match(/^for\s+(\w+)\s+in\s+range\((\d+)\)\s*:/);
     if (forM) { out.push(`${ind}for(let ${forM[1]}=0;${forM[1]}<${forM[2]};${forM[1]}++){`); i++; continue; }
     const whileM = stripped.match(/^while\s+(.+?)\s*:/);
-    if (whileM) { out.push(`${ind}while(${tc(whileM[1])}){`); i++; continue; }
+    if (whileM) {
+      const gv = `__g${whileCount++}`;
+      out.push(`${ind}for(let ${gv}=0;${gv}<20000&&(${tc(whileM[1])});${gv}++){`);
+      i++; continue;
+    }
     const ifM = stripped.match(/^if\s+(.+?)\s*:/);
     if (ifM) { out.push(`${ind}if(${tc(ifM[1])}){`); i++; continue; }
     const elifM = stripped.match(/^elif\s+(.+?)\s*:/);
