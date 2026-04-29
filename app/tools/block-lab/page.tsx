@@ -5,20 +5,21 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '@/app/components/SiteHeader';
 import { UNITS, chalKey, countCompleted, BlockUnit } from './units';
-import { blocksForLevel, BLOCK_MAP, BlockDef } from './engine/blocks';
-import { ScriptNode, appendNode, deleteNode, updateParam, moveNode, MazeRuntime } from './engine/runtime';
+import { blocksForLevel, BLOCK_MAP } from './engine/blocks';
+import { ScriptNode } from './engine/runtime';
 import { THEMES } from './engine/themes';
 import MazeBoard, { MazeBoardHandle } from './components/MazeBoard';
+import BlocklyWorkspace, { BlocklyWorkspaceHandle } from './components/BlocklyWorkspace';
 
 // ─── Progress ─────────────────────────────────────────────────────────────────
 
 interface Progress {
   completedChallenges: Record<string, boolean>;
   completedUnits: Record<number, boolean>;
-  savedScripts: Record<string, ScriptNode[]>;
+  savedXml: Record<string, string>;
 }
 function emptyProgress(): Progress {
-  return { completedChallenges: {}, completedUnits: {}, savedScripts: {} };
+  return { completedChallenges: {}, completedUnits: {}, savedXml: {} };
 }
 const STORAGE_KEY = 'block_lab_progress';
 function loadProgress(): Progress {
@@ -31,13 +32,13 @@ function loadProgress(): Progress {
 function saveProgress(p: Progress) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
 }
-async function syncToCloud(_userId: string, ui: number, ci: number | null, completed: boolean, savedScript?: ScriptNode[]) {
+async function syncToCloud(_userId: string, ui: number, ci: number | null, completed: boolean, savedXml?: string) {
   await fetch('/api/progress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tool: 'block-lab', level_idx: ui, challenge_idx: ci ?? -1,
-      completed, saved_code: savedScript ? JSON.stringify(savedScript) : null,
+      completed, saved_code: savedXml ?? null,
     }),
   });
 }
@@ -49,7 +50,7 @@ async function loadFromCloud(_userId: string): Promise<Progress> {
     if (row.challenge_idx !== null && row.challenge_idx >= 0) {
       const key = chalKey(row.level_idx, row.challenge_idx);
       if (row.completed) p.completedChallenges[key] = true;
-      if (row.saved_code) { try { p.savedScripts[key] = JSON.parse(row.saved_code); } catch { /* ignore */ } }
+      if (row.saved_code?.startsWith('<xml')) p.savedXml[key] = row.saved_code;
     } else if (row.completed) {
       p.completedUnits[row.level_idx] = true;
     }
@@ -220,14 +221,6 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
   );
 }
 
-// ─── Script helpers ───────────────────────────────────────────────────────────
-
-function nodeId() { return Math.random().toString(36).slice(2, 9); }
-
-function flatNodes(node: ScriptNode): ScriptNode[] {
-  return [node, ...(node.children ?? []).flatMap(flatNodes)];
-}
-
 // ─── Challenge view ───────────────────────────────────────────────────────────
 
 function ChallengeView({
@@ -235,11 +228,11 @@ function ChallengeView({
   onSolve, onNext, onFinish, onBack, onJump,
 }: {
   ui: number; ci: number; progress: Progress; lockedCis?: Set<number>;
-  onSolve: (script: ScriptNode[]) => void;
-  onNext: (script: ScriptNode[]) => void;
-  onFinish: (script: ScriptNode[]) => void;
+  onSolve: (xml: string) => void;
+  onNext: (xml: string) => void;
+  onFinish: (xml: string) => void;
   onBack: () => void;
-  onJump: (ci: number, script: ScriptNode[]) => void;
+  onJump: (ci: number, xml: string) => void;
 }) {
   const unit = UNITS[ui];
   const levelLocked = lockedCis?.has(-1) ?? false;
@@ -250,45 +243,18 @@ function ChallengeView({
   const theme = THEMES[unit.theme];
 
   const [leftTab, setLeftTab] = useState<'script' | 'notes'>('script');
-  const [script, setScript] = useState<ScriptNode[]>(() => progress.savedScripts[chalKey(ui, ci)] ?? []);
-  const [insertTargetId, setInsertTargetId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [solved, setSolved] = useState(progress.completedChallenges[chalKey(ui, ci)] ?? false);
   const [bumpFlash, setBumpFlash] = useState(false);
 
   const boardRef = useRef<MazeBoardHandle>(null);
-  const scriptRef = useRef(script);
-  useEffect(() => { scriptRef.current = script; }, [script]);
-
-  // Reset when challenge changes
-  useEffect(() => {
-    setScript(progress.savedScripts[chalKey(ui, ci)] ?? []);
-    setInsertTargetId(null);
-    setRunning(false);
-    setSolved(progress.completedChallenges[chalKey(ui, ci)] ?? false);
-    setBumpFlash(false);
-    setLeftTab('script');
-  }, [ui, ci]);
-
-  const handleAddBlock = useCallback((blockId: string, params: Record<string, number | string>) => {
-    const def = availableBlocks.find(b => b.id === blockId);
-    const newNode: ScriptNode = {
-      id: nodeId(), blockId, params,
-      children: def?.hasBody ? [] : undefined,
-    };
-    setScript(prev => {
-      const next = appendNode(prev, insertTargetId, newNode);
-      scriptRef.current = next;
-      return next;
-    });
-    if (def?.hasBody) setInsertTargetId(newNode.id);
-  }, [insertTargetId, availableBlocks]);
+  const editorRef = useRef<BlocklyWorkspaceHandle>(null);
 
   const handleRun = useCallback(() => {
     if (running) return;
     setRunning(true);
     setBumpFlash(false);
-    boardRef.current?.run(scriptRef.current);
+    boardRef.current?.run(editorRef.current?.getScript() ?? []);
   }, [running]);
 
   const handleStop = useCallback(() => {
@@ -304,15 +270,13 @@ function ChallengeView({
 
   const handleClear = useCallback(() => {
     handleReset();
-    setScript([]);
-    setInsertTargetId(null);
-    scriptRef.current = [];
+    editorRef.current?.clear();
   }, [handleReset]);
 
   const handleWin = useCallback(() => {
     setRunning(false);
     setSolved(true);
-    onSolve(scriptRef.current);
+    onSolve(editorRef.current?.getXml() ?? '');
   }, [onSolve]);
 
   const handleBump = useCallback(() => {
@@ -325,16 +289,6 @@ function ChallengeView({
     borderBottom: active ? `3px solid ${unit.color}` : '3px solid transparent',
     background: 'transparent', color: active ? unit.color : '#64748b', transition: 'color 120ms',
   });
-
-  const insertLabel = insertTargetId
-    ? `Inside: ${BLOCK_MAP[flatNodes({ id: '', blockId: '', params: {}, children: script } as ScriptNode).find(n => n.id === insertTargetId)?.blockId ?? '']?.label ?? '…'}`
-    : 'Main script';
-
-  // Grouped blocks
-  const grouped = availableBlocks.reduce<Record<string, BlockDef[]>>((acc, b) => {
-    (acc[b.category] ??= []).push(b); return acc;
-  }, {});
-  const CAT_LABELS: Record<string, string> = { motion: 'Motion', control: 'Control' };
 
   if (isLocked) return (
     <SiteChrome>
@@ -375,7 +329,7 @@ function ChallengeView({
             const dotLocked = levelLocked || (lockedCis?.has(idx) ?? false);
             return (
               <div key={idx}
-                onClick={() => !dotLocked && onJump(idx, scriptRef.current)}
+                onClick={() => !dotLocked && onJump(idx, editorRef.current?.getXml() ?? '')}
                 title={dotLocked ? 'Locked by teacher' : undefined}
                 style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 700,
                   cursor: dotLocked ? 'not-allowed' : 'pointer',
@@ -404,52 +358,22 @@ function ChallengeView({
             {/* Script tab */}
             <div style={{ flex: 1, display: leftTab === 'script' ? 'flex' : 'none', flexDirection: 'column', overflow: 'hidden' }}>
 
-              {/* Block palette */}
-              <div style={{ padding: '10px 12px 6px', borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 6 }}>Add Blocks</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                  {Object.entries(grouped).map(([cat, defs]) => (
-                    <div key={cat} style={{ display: 'contents' }}>
-                      {defs.map(b => (
-                        <button key={b.id} disabled={running}
-                          onClick={() => handleAddBlock(b.id, Object.fromEntries((b.params ?? []).map(p => [p.key, p.default])))}
-                          style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 8, border: 'none', color: '#fff', background: b.color, cursor: 'pointer', opacity: running ? 0.45 : 1, transition: 'all 100ms' }}
-                        >{b.label}{b.hasBody ? ' {…}' : ''}</button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
+              {/* Blockly workspace */}
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <BlocklyWorkspace
+                  key={chalKey(ui, ci)}
+                  ref={editorRef}
+                  availableBlocks={availableBlocks}
+                  initialXml={progress.savedXml[chalKey(ui, ci)]}
+                  disabled={running}
+                />
               </div>
 
-              {/* Insertion indicator */}
-              <div style={{ padding: '4px 12px', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>Adding to: <strong style={{ color: '#e2e8f0' }}>{insertLabel}</strong></span>
-                {insertTargetId && (
-                  <button onClick={() => setInsertTargetId(null)} style={{ fontSize: 11, color: unit.color, background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}>↑ Back to main</button>
-                )}
-              </div>
-
-              {/* Script list */}
-              <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                {script.length === 0 ? (
-                  <div style={{ color: '#4a5568', fontSize: 13, fontStyle: 'italic', textAlign: 'center', marginTop: 32, padding: '0 16px' }}>
-                    Click a block above to add it here
-                  </div>
-                ) : (
-                  script.map(node => (
-                    <ScriptNodeRow key={node.id} node={node} script={script} onChange={setScript}
-                      onMove={(id, dir) => setScript(prev => moveNode(prev, id, dir))}
-                      insertTargetId={insertTargetId} onSetInsert={setInsertTargetId}
-                      running={running} unitColor={unit.color} depth={0} />
-                  ))
-                )}
-              </div>
-
-              {/* Run / Stop / Clear */}
+              {/* Run / Stop / Reset / Clear */}
               <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', flexShrink: 0, display: 'flex', gap: 8 }}>
                 {!running ? (
-                  <button onClick={handleRun} disabled={script.length === 0}
-                    style={{ flex: 1, padding: '9px 20px', borderRadius: 10, fontWeight: 800, fontSize: 14, background: script.length === 0 ? '#94a3b8' : '#22c55e', color: '#fff', border: 'none', cursor: script.length === 0 ? 'not-allowed' : 'pointer' }}>
+                  <button onClick={handleRun}
+                    style={{ flex: 1, padding: '9px 20px', borderRadius: 10, fontWeight: 800, fontSize: 14, background: '#22c55e', color: '#fff', border: 'none', cursor: 'pointer' }}>
                     ▶  Run
                   </button>
                 ) : (
@@ -505,12 +429,12 @@ function ChallengeView({
                   <div style={{ fontSize: 13, color: '#86efac' }}>{isLast ? 'All challenges done — take the quiz!' : 'Ready for the next one?'}</div>
                 </div>
                 {isLast ? (
-                  <button onClick={() => onFinish(scriptRef.current)}
+                  <button onClick={() => onFinish(editorRef.current?.getXml() ?? '')}
                     style={{ padding: '10px 22px', background: unit.color, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
                     Take Quiz →
                   </button>
                 ) : (
-                  <button onClick={() => onNext(scriptRef.current)}
+                  <button onClick={() => onNext(editorRef.current?.getXml() ?? '')}
                     style={{ padding: '10px 22px', background: unit.color, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
                     Next →
                   </button>
@@ -521,79 +445,6 @@ function ChallengeView({
         </div>
       </div>
     </SiteChrome>
-  );
-}
-
-// ─── Script node renderer ─────────────────────────────────────────────────────
-
-function ScriptNodeRow({ node, script, onChange, onMove, insertTargetId, onSetInsert, running, unitColor, depth }: {
-  node: ScriptNode; script: ScriptNode[]; onChange: (s: ScriptNode[]) => void;
-  onMove: (id: string, dir: 'up' | 'down') => void;
-  insertTargetId: string | null; onSetInsert: (id: string | null) => void;
-  running: boolean; unitColor: string; depth: number;
-}) {
-  const def: BlockDef | undefined = BLOCK_MAP[node.blockId];
-  if (!def) return null;
-  const isTarget = insertTargetId === node.id;
-
-  if (def.hasBody) {
-    return (
-      <div style={{ marginLeft: depth * 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: '10px 10px 0 0', padding: '6px 10px', background: def.color, color: '#fff', fontSize: 12, fontWeight: 700, outline: isTarget ? '2px solid white' : 'none', outlineOffset: 1 }}>
-          <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-            {def.label}
-            {node.blockId === 'repeat' && (
-              <input type="number" min={1} max={20} disabled={running}
-                value={node.params.times ?? 3}
-                onChange={e => onChange(updateParam(script, node.id, 'times', Math.max(1, Math.min(20, Number(e.target.value) || 1))))}
-                onClick={e => e.stopPropagation()}
-                style={{ width: 36, textAlign: 'center', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,0.25)', color: '#fff', fontWeight: 800, fontSize: 12, padding: '1px 0' }}
-              />
-            )}
-            {node.blockId === 'repeat' && <span style={{ opacity: 0.75, fontSize: 11 }}>times</span>}
-          </span>
-          {depth === 0 && <>
-            <button disabled={running} onClick={() => onMove(node.id, 'up')}
-              style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↑</button>
-            <button disabled={running} onClick={() => onMove(node.id, 'down')}
-              style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↓</button>
-          </>}
-          <button disabled={running} onClick={() => onSetInsert(isTarget ? null : node.id)}
-            style={{ fontSize: 10, background: 'rgba(255,255,255,0.2)', border: 'none', borderRadius: 6, color: '#fff', padding: '2px 6px', cursor: 'pointer', fontWeight: 700 }}>
-            {isTarget ? '✓ here' : '+ in'}
-          </button>
-          <button disabled={running} onClick={() => onChange(deleteNode(script, node.id))}
-            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
-        </div>
-        <div style={{ borderLeft: `3px solid ${def.color}60`, marginLeft: 8, paddingLeft: 6, paddingTop: 3, paddingBottom: 3, background: def.color + '10' }}>
-          {(node.children ?? []).length === 0
-            ? <div style={{ fontSize: 11, color: def.color + 'AA', fontStyle: 'italic', padding: '4px 6px' }}>empty — click &quot;+ in&quot;</div>
-            : (node.children ?? []).map(child => (
-              <ScriptNodeRow key={child.id} node={child} script={script} onChange={onChange} onMove={onMove}
-                insertTargetId={insertTargetId} onSetInsert={onSetInsert}
-                running={running} unitColor={unitColor} depth={0} />
-            ))
-          }
-        </div>
-        <div style={{ borderRadius: '0 0 10px 10px', padding: '2px 10px', background: def.color + 'BB', fontSize: 10, color: 'rgba(255,255,255,0.65)', fontWeight: 600 }}>
-          end {def.label.toLowerCase()}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: depth * 14, borderRadius: 10, padding: '6px 10px', background: def.color, color: '#fff', fontSize: 12, fontWeight: 700 }}>
-      <span style={{ flex: 1 }}>{def.label}</span>
-      {depth === 0 && <>
-        <button disabled={running} onClick={() => onMove(node.id, 'up')}
-          style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↑</button>
-        <button disabled={running} onClick={() => onMove(node.id, 'down')}
-          style={{ background: 'rgba(255,255,255,0.18)', border: 'none', borderRadius: 5, color: '#fff', padding: '1px 5px', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}>↓</button>
-      </>}
-      <button disabled={running} onClick={() => onChange(deleteNode(script, node.id))}
-        style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.65)', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
-    </div>
   );
 }
 
@@ -733,7 +584,7 @@ export default function BlockLabPage() {
         const merged: Progress = {
           completedChallenges: { ...local.completedChallenges, ...cloud.completedChallenges },
           completedUnits: { ...local.completedUnits, ...cloud.completedUnits },
-          savedScripts: { ...local.savedScripts, ...cloud.savedScripts },
+          savedXml: { ...local.savedXml, ...cloud.savedXml },
         };
         setProgress(merged);
         progressRef.current = merged;
@@ -760,14 +611,14 @@ export default function BlockLabPage() {
     return next;
   }, []);
 
-  const handleSolve = useCallback((ui: number, ci: number, script: ScriptNode[]) => {
+  const handleSolve = useCallback((ui: number, ci: number, xml: string) => {
     const key = chalKey(ui, ci);
     const next = updateProgress(p => ({
       ...p,
       completedChallenges: { ...p.completedChallenges, [key]: true },
-      savedScripts: { ...p.savedScripts, [key]: script },
+      savedXml: { ...p.savedXml, [key]: xml },
     }));
-    if (userId) syncToCloud(userId, ui, ci, true, script);
+    if (userId) syncToCloud(userId, ui, ci, true, xml);
     return next;
   }, [updateProgress, userId]);
 
@@ -788,18 +639,18 @@ export default function BlockLabPage() {
     return (
       <ChallengeView
         ui={ui} ci={ci} progress={progress} lockedCis={lockedCis}
-        onSolve={script => handleSolve(ui, ci, script)}
-        onNext={script => {
-          handleSolve(ui, ci, script);
+        onSolve={xml => handleSolve(ui, ci, xml)}
+        onNext={xml => {
+          handleSolve(ui, ci, xml);
           setPhase({ tag: 'challenge', ui, ci: ci + 1 });
         }}
-        onFinish={script => {
-          handleSolve(ui, ci, script);
+        onFinish={xml => {
+          handleSolve(ui, ci, xml);
           setPhase({ tag: 'quiz', ui });
         }}
         onBack={() => setPhase({ tag: 'overview' })}
-        onJump={(newCi, script) => {
-          updateProgress(p => ({ ...p, savedScripts: { ...p.savedScripts, [chalKey(ui, ci)]: script } }));
+        onJump={(newCi, xml) => {
+          updateProgress(p => ({ ...p, savedXml: { ...p.savedXml, [chalKey(ui, ci)]: xml } }));
           setPhase({ tag: 'challenge', ui, ci: newCi });
         }}
       />
