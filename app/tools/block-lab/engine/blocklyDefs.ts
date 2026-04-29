@@ -109,31 +109,28 @@ export function buildToolbox(availableBlocks: BlockDef[]) {
   const contents: object[] = [];
 
   if (motion.length > 0) {
-    contents.push({
-      kind: 'category', name: 'Motion', colour: '#2563EB',
-      contents: motion.map(b => ({ kind: 'block', type: b.id })),
-    });
+    contents.push({ kind: 'label', text: '— Motion —' });
+    contents.push(...motion.map(b => ({ kind: 'block', type: b.id })));
   }
 
   if (loops.length > 0) {
-    contents.push({
-      kind: 'category', name: 'Loops', colour: '#D97706',
-      contents: loops.map(b =>
-        b.id === 'repeat'
-          ? { kind: 'block', type: 'repeat', fields: { TIMES: 3 } }
-          : { kind: 'block', type: b.id }
-      ),
-    });
+    contents.push({ kind: 'sep' });
+    contents.push({ kind: 'label', text: '— Loops —' });
+    contents.push(...loops.map(b =>
+      b.id === 'repeat'
+        ? { kind: 'block', type: 'repeat', fields: { TIMES: 3 } }
+        : { kind: 'block', type: b.id }
+    ));
   }
 
   if (conditionals.length > 0) {
-    contents.push({
-      kind: 'category', name: 'Conditions', colour: '#7C3AED',
-      contents: conditionals.map(b => ({ kind: 'block', type: b.id })),
-    });
+    contents.push({ kind: 'sep' });
+    contents.push({ kind: 'label', text: '— Conditions —' });
+    contents.push(...conditionals.map(b => ({ kind: 'block', type: b.id })));
   }
 
-  return { kind: 'categoryToolbox', contents };
+  // flyoutToolbox: all blocks always visible — no clicking to expand categories
+  return { kind: 'flyoutToolbox', contents };
 }
 
 // ─── Workspace → ScriptNode[] ─────────────────────────────────────────────────
