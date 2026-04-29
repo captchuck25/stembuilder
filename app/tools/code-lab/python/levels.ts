@@ -1585,17 +1585,23 @@ while not at_goal():
 `,
     },
     {
-      title: "The Winding Path",
-      hint: "A winding maze — the chain handles every twist without you counting steps.",
+      title: "Order Matters — Exit A",
+      hint: "The exit is at the TOP-RIGHT corner. Run the starter code and watch the robot's path, then try swapping right and forward to see if it reaches the exit more directly.",
       grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,0,0,1],
-        [1,1,1,0,1,0,1,0,1],
-        [1,1,1,0,0,0,1,0,0],
-        [1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,1,0,0,0,1,0,0,0,1,0,0],
+        [1,0,1,0,1,0,1,0,1,0,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,0,0,1],
+        [1,1,1,0,1,1,1,0,1,1,1,1,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,1],
+        [1,0,1,1,1,0,1,0,1,1,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:3,
-      starterCode: `# A winding path — one clean chain navigates it all.
+      startX:0, startY:1, startDir:1, exitX:12, exitY:1,
+      starterCode: `# Exit A is at the TOP-RIGHT corner.
+# Run this and watch the robot's path.
+# Then try putting forward before right — does it take a more direct route?
 
 while not at_goal():
     if has_path_right():
@@ -1608,55 +1614,8 @@ while not at_goal():
 `,
     },
     {
-      title: "Dead-End Handler",
-      hint: "Some paths lead nowhere. The else branch turns you around automatically.",
-      grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,0,1,0],
-        [1,1,0,1,0,1,0,1,0],
-        [1,1,0,0,0,1,0,0,0],
-        [1,1,1,1,1,1,1,1,1],
-      ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:3,
-      starterCode: `# Dead ends are handled by the else — no special code needed.
-
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
-`,
-    },
-    {
-      title: "Left-Hand Priority",
-      hint: "Try switching the priority: check left first, then forward, then right. Does it still reach the goal?",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,0,0,1,0,0],
-        [1,1,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,0,0,1,0,0,0,1],
-        [1,0,1,1,1,1,1,1,1,1,1],
-        [1,0,0,0,0,0,0,0,0,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:10, exitY:5,
-      starterCode: `# Switch to left-hand priority — same structure, different order.
-
-while not at_goal():
-    if has_path_left():
-        turn_left()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_right()
-`,
-    },
-    {
-      title: "Your Best Logic",
-      hint: "A complex maze. Choose your priority order — right, left, or forward first. Experiment to find what works.",
+      title: "Order Matters — Exit B",
+      hint: "The exit is at the BOTTOM-RIGHT corner. The right-hand rule navigates here naturally — watch how checking right first steers the robot downward.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1,1,1],
         [0,0,1,0,0,0,1,0,0,0,1,0,0],
@@ -1669,9 +1628,67 @@ while not at_goal():
         [1,1,1,1,1,1,1,1,1,1,1,1,1],
       ],
       startX:0, startY:1, startDir:1, exitX:12, exitY:7,
-      starterCode: `# Choose your priority order and experiment.
-# Right-hand rule: right → forward → left
-# Left-hand rule:  left → forward → right
+      starterCode: `# Exit B is at the BOTTOM-RIGHT corner.
+# The right-hand rule works well here — notice how priority order
+# steers the robot toward the bottom of the maze.
+
+while not at_goal():
+    if has_path_right():
+        turn_right()
+        forward()
+    elif has_path_forward():
+        forward()
+    else:
+        turn_left()
+`,
+    },
+    {
+      title: "Order Matters — Exit C",
+      hint: "The exit is at the BOTTOM-LEFT corner. The right-hand rule will get there eventually — but try left-hand priority to see if it finds a more direct path.",
+      grid: [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,1,0,0,0,1,0,0,0,1,0,0],
+        [1,0,1,0,1,0,1,0,1,0,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,0,0,1],
+        [1,1,1,0,1,1,1,0,1,1,1,1,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,1],
+        [1,0,1,1,1,0,1,0,1,1,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:1, exitY:7,
+      starterCode: `# Exit C is at the BOTTOM-LEFT corner.
+# Try switching to left-hand priority — does it reach the exit faster?
+# Left-hand rule: left → forward → right
+
+while not at_goal():
+    if has_path_right():
+        turn_right()
+        forward()
+    elif has_path_forward():
+        forward()
+    else:
+        turn_left()
+`,
+    },
+    {
+      title: "Order Matters — Exit D",
+      hint: "The exit is in the BOTTOM-MIDDLE. Experiment with all three priority orders — right, forward, and left first. Which one takes the most direct path?",
+      grid: [
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,1,0,0,0,1,0,0,0,1,0,0],
+        [1,0,1,0,1,0,1,0,1,0,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,0,0,1],
+        [1,1,1,0,1,1,1,0,1,1,1,1,1],
+        [1,0,0,0,0,0,1,0,0,0,0,0,1],
+        [1,0,1,1,1,0,1,0,1,1,1,0,1],
+        [1,0,0,0,1,0,0,0,1,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:7, exitY:7,
+      starterCode: `# Exit D is at the BOTTOM-MIDDLE of the maze.
+# Experiment: try right-first, then forward-first, then left-first.
+# Which priority order takes the most direct route to this exit?
 
 while not at_goal():
     if has_path_right():
