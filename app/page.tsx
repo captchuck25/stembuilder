@@ -1,6 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import SiteHeader from "./components/SiteHeader";
+import { auth } from "@/auth";
+import { adminDb } from "@/lib/db.server";
 
 import styles from "./page.module.css";
 
@@ -22,15 +24,29 @@ const tiles = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const session = await auth();
+  let isTeacher = false;
+  if (session?.user?.id) {
+    const { data } = await adminDb()
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .single();
+    isTeacher = data?.role === "teacher";
+  }
+  const showTeachersBtn = !session?.user || isTeacher;
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <SiteHeader>
-        <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
-          borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
-          letterSpacing: "0.2px", background: "transparent" }}>
-          Teachers
-        </Link>
+        {showTeachersBtn && (
+          <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
+            letterSpacing: "0.2px", background: "transparent" }}>
+            Teachers
+          </Link>
+        )}
       </SiteHeader>
       <main
         style={{
