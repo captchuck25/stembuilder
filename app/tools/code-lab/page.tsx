@@ -84,15 +84,6 @@ export default async function CodeLabPage() {
               </div>
             </Link>
 
-            {/* Robot Lab */}
-            <Link href="/tools/robot-lab" style={{ textDecoration: "none" }}>
-              <div style={{ ...TILE_STYLE, background: "linear-gradient(135deg, #1c1917 0%, #292524 55%, #44403c 100%)" }}>
-                <span style={{ fontSize: 40, lineHeight: 1 }}>🤖</span>
-                <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: "0.3px" }}>Robot Lab</span>
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", fontWeight: 700 }}>Sensor & Logic Coding</span>
-              </div>
-            </Link>
-
           </div>
         </div>
       </main>
