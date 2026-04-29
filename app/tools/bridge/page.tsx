@@ -1878,6 +1878,7 @@ function BridgeToolPage() {
 
 
   const riskyBays = useMemo(() => findNonTriangulatedBays(), [nodes, members]);
+  const crossingMembers = useMemo(() => findCrossingMembersWithoutJunction(), [nodes, members]);
   const unstableJointIds = useMemo(() => {
     const ids = new Set<string>();
     const supportIds = new Set([SUPPORT_A_ID, SUPPORT_B_ID]);
@@ -2078,6 +2079,7 @@ function BridgeToolPage() {
     !supportAOk ? "Left support must connect to at least 2 members." : null,
     !supportBOk ? "Right support must connect to at least 2 members." : null,
     riskyBays.length > 0 ? "Non-triangulated bays present." : null,
+    crossingMembers.length > 0 ? "Members intersect without a junction joint. Add a joint where members cross." : null,
     unstableJointsFail
       ? "Unstable joint present. Do not place a joint in the middle of a single member unless another member also connects there."
       : null,
@@ -2104,6 +2106,7 @@ function BridgeToolPage() {
     supportAOk &&
     supportBOk &&
     riskyBays.length === 0 &&
+    crossingMembers.length === 0 &&
     !unstableJointsFail &&
     !longMembersFail &&
     topChordPass &&
@@ -3265,6 +3268,42 @@ function BridgeToolPage() {
     return risky;
   }
 
+  function findCrossingMembersWithoutJunction(): { pt: { x: number; y: number }; m1: string; m2: string }[] {
+    const crossings: { pt: { x: number; y: number }; m1: string; m2: string }[] = [];
+    const nodeSet = new Set(nodes.map(n => `${Math.round(n.x)},${Math.round(n.y)}`));
+    for (let i = 0; i < members.length; i++) {
+      const ma = members[i];
+      const a1 = nodeById.get(ma.a);
+      const b1 = nodeById.get(ma.b);
+      if (!a1 || !b1) continue;
+      for (let j = i + 1; j < members.length; j++) {
+        const mb = members[j];
+        // Skip members that share an endpoint (they always "meet" at the shared node)
+        if (mb.a === ma.a || mb.a === ma.b || mb.b === ma.a || mb.b === ma.b) continue;
+        const a2 = nodeById.get(mb.a);
+        const b2 = nodeById.get(mb.b);
+        if (!a2 || !b2) continue;
+        const pt = segmentIntersectionPoint(a1.x, a1.y, b1.x, b1.y, a2.x, a2.y, b2.x, b2.y);
+        if (!pt) continue;
+        // Ignore if the crossing is at/near an endpoint (t≈0 or t≈1 means endpoint intersection — already covered by shared-endpoint check above, but guard with distance)
+        const nearEndpoint =
+          Math.hypot(pt.x - a1.x, pt.y - a1.y) < 3 ||
+          Math.hypot(pt.x - b1.x, pt.y - b1.y) < 3 ||
+          Math.hypot(pt.x - a2.x, pt.y - a2.y) < 3 ||
+          Math.hypot(pt.x - b2.x, pt.y - b2.y) < 3;
+        if (nearEndpoint) continue;
+        // If a node already exists at this crossing, it's properly joined — not a problem
+        const key = `${Math.round(pt.x)},${Math.round(pt.y)}`;
+        if (nodeSet.has(key)) continue;
+        // Check neighbourhood: any node within 6px counts as a junction
+        const hasNearbyNode = nodes.some(n => Math.hypot(n.x - pt.x, n.y - pt.y) < 6);
+        if (hasNearbyNode) continue;
+        crossings.push({ pt, m1: ma.id, m2: mb.id });
+      }
+    }
+    return crossings;
+  }
+
   function renderScene() {
     return (
       <defs>
@@ -4365,6 +4404,19 @@ function BridgeToolPage() {
               : null}
             </g>
 
+
+          {/* A3: highlight crossing members without junction */}
+          {inspectionHasRun && crossingMembers.length > 0 ? (
+            <g pointerEvents="none">
+              {crossingMembers.map((c, idx) => (
+                <g key={`crossing-${idx}`}>
+                  <circle cx={c.pt.x} cy={c.pt.y} r={10} fill="none" stroke="#f97316" strokeWidth={2.5} />
+                  <line x1={c.pt.x - 6} y1={c.pt.y} x2={c.pt.x + 6} y2={c.pt.y} stroke="#f97316" strokeWidth={2.5} strokeLinecap="round" />
+                  <line x1={c.pt.x} y1={c.pt.y - 6} x2={c.pt.x} y2={c.pt.y + 6} stroke="#f97316" strokeWidth={2.5} strokeLinecap="round" />
+                </g>
+              ))}
+            </g>
+          ) : null}
 
           {/* Members */}
           <g opacity={0.95}>
