@@ -32,7 +32,7 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
         scrollbars: true,
         trashcan: true,
         sounds: false,
-        zoom: { controls: true, wheel: true, startScale: 0.9, maxScale: 2, minScale: 0.4, scaleSpeed: 1.1 },
+        zoom: { controls: true, wheel: true, startScale: 1.1, maxScale: 3, minScale: 0.3, scaleSpeed: 1.2 },
         grid: { spacing: 20, length: 3, colour: '#e8e8e8', snap: false },
       });
 

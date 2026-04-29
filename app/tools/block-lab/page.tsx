@@ -347,7 +347,7 @@ function ChallengeView({
         <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
           {/* Left panel: Script / Notes */}
-          <div style={{ ...CARD, flex: '0 0 460px', minWidth: 300, display: 'flex', flexDirection: 'column', height: 620, overflow: 'hidden' }}>
+          <div style={{ ...CARD, flex: '0 0 620px', minWidth: 400, display: 'flex', flexDirection: 'column', height: 660, overflow: 'hidden' }}>
 
             {/* Tabs */}
             <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)', flexShrink: 0 }}>
