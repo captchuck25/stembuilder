@@ -28,8 +28,8 @@ export async function GET(req: Request) {
     .eq('tool', tool)
     .in('class_id', classIds);
 
-  // Teacher hasn't configured this tool → no restriction
-  if (!assignments?.length) return NextResponse.json(null);
+  // Teacher hasn't assigned anything → all units locked by default for enrolled students
+  if (!assignments?.length) return NextResponse.json([]);
 
   const levelIds = [...new Set(assignments.map((a: { level_id: number }) => a.level_id))];
   return NextResponse.json(levelIds);
