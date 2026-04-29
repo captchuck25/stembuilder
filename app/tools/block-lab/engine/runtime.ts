@@ -26,6 +26,8 @@ export class MazeRuntime {
   private animator: STEMBotAnimator;
   private cb: RuntimeCallbacks;
   private _running = false;
+  private _stopped = false;
+  private _bumped = false;
   private readonly stepGap = 55;
 
   constructor(
@@ -58,12 +60,18 @@ export class MazeRuntime {
 
   stop() {
     this._running = false;
+    this._stopped = true;
   }
 
   async run(script: ScriptNode[]) {
     this._running = true;
+    this._stopped = false;
+    this._bumped = false;
     await this.execMany(script);
     this._running = false;
+    if (!this._stopped && this.atGoal() && !this._bumped) {
+      this.cb.onWin();
+    }
   }
 
   private isPath(x: number, y: number) {
@@ -127,12 +135,9 @@ export class MazeRuntime {
           }
           await this.animator.waitForMove();
           await this.gap();
-          if (this.atGoal()) {
-            this._running = false;
-            this.cb.onWin();
-          }
         } else {
           this.animator.bump();
+          this._bumped = true;
           this.cb.onBump();
           await this.gap(3);
         }
