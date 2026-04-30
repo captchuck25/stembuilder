@@ -26,6 +26,11 @@ export default function TeacherDashboard() {
   const [newClassName, setNewClassName] = useState("");
   const [creating, setCreating] = useState(false);
 
+  interface OverallRow { rank: number; student_id: string; name: string; email: string; cost: number; assignment_title: string; }
+  const [overallLeaderboard, setOverallLeaderboard] = useState<OverallRow[] | null>(null);
+  const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) { router.push("/"); return; }
@@ -47,6 +52,13 @@ export default function TeacherDashboard() {
     for (const c of classList) counts[c.id] = c.studentCount ?? 0;
     setStudentCounts(counts);
     setLoading(false);
+  }
+
+  async function loadOverallLeaderboard() {
+    setLoadingLeaderboard(true);
+    const res = await fetch("/api/teacher/bridge-overall-leaderboard");
+    if (res.ok) setOverallLeaderboard(await res.json());
+    setLoadingLeaderboard(false);
   }
 
   async function createClass() {
@@ -201,6 +213,80 @@ export default function TeacherDashboard() {
               ))}
             </div>
           )}
+          {/* Overall Bridge Leaderboard */}
+          {classes.length > 0 && (
+            <div style={{ ...CARD, marginTop: 32, padding: "24px 28px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showLeaderboard ? 20 : 0 }}>
+                <div>
+                  <h2 style={{ fontSize: 20, fontWeight: 900, color: "#111", margin: 0 }}>
+                    🌉 Bridge Leaderboard — All Classes
+                  </h2>
+                  <p style={{ fontSize: 13, color: "#555", margin: "4px 0 0" }}>
+                    Each student's best passing bridge design, ranked by lowest cost.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!showLeaderboard && overallLeaderboard === null) loadOverallLeaderboard();
+                    setShowLeaderboard(v => !v);
+                  }}
+                  style={{ padding: "9px 20px", borderRadius: 99, border: "2px solid #1f1f1f",
+                    background: showLeaderboard ? "#1f1f1f" : "#fff",
+                    color: showLeaderboard ? "#fff" : "#111",
+                    fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+                  {showLeaderboard ? "Hide" : "Show Leaderboard"}
+                </button>
+              </div>
+
+              {showLeaderboard && (
+                loadingLeaderboard ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#888", fontWeight: 600 }}>Loading…</div>
+                ) : !overallLeaderboard || overallLeaderboard.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
+                    No passing bridge submissions yet.
+                  </div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr>
+                          {["Rank", "Student", "Best Cost", "Challenge"].map(h => (
+                            <th key={h} style={{ padding: "8px 14px", fontWeight: 800, fontSize: 12,
+                              color: "#555", textTransform: "uppercase", letterSpacing: "0.4px",
+                              background: "#f9fafb", borderBottom: "2px solid #e5e7eb",
+                              textAlign: h === "Rank" ? "center" : "left", whiteSpace: "nowrap" }}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {overallLeaderboard.map(row => (
+                          <tr key={row.student_id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                            <td style={{ padding: "10px 14px", textAlign: "center", fontWeight: 800, fontSize: 15 }}>
+                              {row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : row.rank}
+                            </td>
+                            <td style={{ padding: "10px 14px" }}>
+                              <div style={{ fontWeight: 700, fontSize: 14, color: "#111" }}>{row.name}</div>
+                              <div style={{ fontSize: 11, color: "#888" }}>{row.email}</div>
+                            </td>
+                            <td style={{ padding: "10px 14px", fontWeight: 800, fontSize: 14,
+                              color: row.rank <= 3 ? "#16a34a" : "#111" }}>
+                              ${row.cost.toLocaleString()}
+                            </td>
+                            <td style={{ padding: "10px 14px", fontSize: 13, color: "#555" }}>
+                              {row.assignment_title}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
         </div>
       </main>
 
