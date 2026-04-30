@@ -1512,6 +1512,11 @@ function BridgeToolPage() {
       : raw;
     const { x, y } = clampToRulerBounds(snapped);
 
+    // Don't place a joint on top of an existing one
+    const duplicateThreshold = 8;
+    const tooClose = nodes.some(n => Math.hypot(n.x - x, n.y - y) <= duplicateThreshold);
+    if (tooClose) return;
+
     const splitThreshold = 10;
     const endpointThreshold = 10;
     const intersectingMembers: Member[] = [];
