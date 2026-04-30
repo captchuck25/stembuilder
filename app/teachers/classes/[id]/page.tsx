@@ -198,7 +198,7 @@ export default function ClassDetailPage() {
     const allClassesRes = await fetch("/api/teacher/classes");
     if (allClassesRes.ok) {
       const allClasses: Class[] = await allClassesRes.json();
-      setOtherClasses(allClasses.filter(c => c.id !== classId));
+      setOtherClasses(allClasses.filter(c => c.id !== data.class.id));
     }
     setLoading(false);
   }
@@ -1354,7 +1354,7 @@ export default function ClassDetailPage() {
           display: "flex", alignItems: "center", justifyContent: "center" }}>
           <div style={{ ...CARD, padding: 32, minWidth: 360, maxWidth: 480, width: "90%" }}>
             <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800 }}>Assign to other classes?</h3>
-            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#555" }}>
+            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#1f2937" }}>
               You just assigned{" "}
               <strong>
                 {multiAssignModal.tool === "code-lab" ? "Code Lab" : multiAssignModal.tool === "block-lab" ? "Block Lab" : multiAssignModal.tool.charAt(0).toUpperCase() + multiAssignModal.tool.slice(1)}
