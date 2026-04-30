@@ -3192,32 +3192,6 @@ function BridgeToolPage() {
       return false;
     }
 
-    function areParallel(a: Node, b: Node, c: Node, d: Node) {
-      const abx = b.x - a.x;
-      const aby = b.y - a.y;
-      const cdx = d.x - c.x;
-      const cdy = d.y - c.y;
-      const abLen = Math.hypot(abx, aby);
-      const cdLen = Math.hypot(cdx, cdy);
-      if (abLen === 0 || cdLen === 0) return false;
-      const cross = Math.abs(abx * cdy - aby * cdx);
-      const sinTheta = cross / (abLen * cdLen);
-      return sinTheta <= 0.1;
-    }
-
-    function cornerAngleDeg(prev: Node, curr: Node, next: Node) {
-      const v1x = prev.x - curr.x;
-      const v1y = prev.y - curr.y;
-      const v2x = next.x - curr.x;
-      const v2y = next.y - curr.y;
-      const d1 = Math.hypot(v1x, v1y);
-      const d2 = Math.hypot(v2x, v2y);
-      if (d1 === 0 || d2 === 0) return 0;
-      const cos = (v1x * v2x + v1y * v2y) / (d1 * d2);
-      const clamped = Math.max(-1, Math.min(1, cos));
-      return (Math.acos(clamped) * 180) / Math.PI;
-    }
-
     for (const A of ids) {
       for (const B of neighbors(A)) {
         if (B === A) continue;
@@ -3231,30 +3205,13 @@ function BridgeToolPage() {
             // Close the cycle
             if (!areConnected(D, A)) continue;
 
-            // Must NOT have a diagonal to be "non-triangulated"
+            // Any 4-node cycle without a diagonal is non-triangulated
             const hasDiagonal =
               hasDiagonalConnection(A, C) ||
               hasDiagonalConnection(B, D) ||
               hasDiagonalIntersection(A, C) ||
               hasDiagonalIntersection(B, D);
             if (hasDiagonal) continue;
-
-            const aNode = nodeById.get(A);
-            const bNode = nodeById.get(B);
-            const cNode = nodeById.get(C);
-            const dNode = nodeById.get(D);
-            if (!aNode || !bNode || !cNode || !dNode) continue;
-            const isParallelogram =
-              areParallel(aNode, bNode, cNode, dNode) &&
-              areParallel(bNode, cNode, dNode, aNode);
-            if (!isParallelogram) continue;
-            const angles = [
-              cornerAngleDeg(dNode, aNode, bNode),
-              cornerAngleDeg(aNode, bNode, cNode),
-              cornerAngleDeg(bNode, cNode, dNode),
-              cornerAngleDeg(cNode, dNode, aNode),
-            ];
-            if (!angles.every((ang) => ang >= 60 && ang <= 120)) continue;
 
             const cycle: [string, string, string, string] = [A, B, C, D];
             const k = keyOf(cycle);
