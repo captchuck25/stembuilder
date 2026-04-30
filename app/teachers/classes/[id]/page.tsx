@@ -137,6 +137,12 @@ export default function ClassDetailPage() {
   const [deletingClass, setDeletingClass] = useState(false);
   const [removingStudentId, setRemovingStudentId] = useState<string | null>(null);
 
+  // Multi-class assignment
+  const [otherClasses, setOtherClasses] = useState<Class[]>([]);
+  const [multiAssignModal, setMultiAssignModal] = useState<{ tool: string; levelId: number } | null>(null);
+  const [multiAssignSelected, setMultiAssignSelected] = useState<Set<string>>(new Set());
+  const [multiAssigning, setMultiAssigning] = useState(false);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) { router.push("/"); return; }
@@ -189,6 +195,11 @@ export default function ClassDetailPage() {
     }
     const bridgeRes = await fetch(`/api/teacher/bridge-assignments?classId=${classId}`);
     if (bridgeRes.ok) setBridgeAssignments(await bridgeRes.json());
+    const allClassesRes = await fetch("/api/teacher/classes");
+    if (allClassesRes.ok) {
+      const allClasses: Class[] = await allClassesRes.json();
+      setOtherClasses(allClasses.filter(c => c.id !== classId));
+    }
     setLoading(false);
   }
 
@@ -340,11 +351,32 @@ export default function ClassDetailPage() {
           await fetch(`/api/teacher/locks?id=${existingLock.id}`, { method: "DELETE" });
           setLocks(prev => prev.filter(l => l.id !== existingLock.id));
         }
+        if (otherClasses.length > 0) {
+          setMultiAssignSelected(new Set(otherClasses.map(c => c.id)));
+          setMultiAssignModal({ tool, levelId });
+        }
       }
     }
     fetchedRef.current.delete(tool);
     setGrades(prev => { const n = { ...prev }; delete n[tool]; return n; });
     setSaving(false);
+  }
+
+  async function handleMultiAssign() {
+    if (!multiAssignModal || multiAssignSelected.size === 0) { setMultiAssignModal(null); return; }
+    setMultiAssigning(true);
+    const { tool, levelId } = multiAssignModal;
+    await Promise.all(
+      [...multiAssignSelected].map(cid =>
+        fetch("/api/teacher/assignments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classId: cid, tool, levelId }),
+        }),
+      ),
+    );
+    setMultiAssigning(false);
+    setMultiAssignModal(null);
   }
 
   async function toggleLevelLock(tool: string, levelIdx: number) {
@@ -1316,6 +1348,55 @@ export default function ClassDetailPage() {
 
         </div>
       </main>
+
+      {multiAssignModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ ...CARD, padding: 32, minWidth: 360, maxWidth: 480, width: "90%" }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800 }}>Assign to other classes?</h3>
+            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#555" }}>
+              You just assigned{" "}
+              <strong>
+                {multiAssignModal.tool === "code-lab" ? "Code Lab" : multiAssignModal.tool === "block-lab" ? "Block Lab" : multiAssignModal.tool.charAt(0).toUpperCase() + multiAssignModal.tool.slice(1)}
+                {" — "}
+                {multiAssignModal.tool === "block-lab" ? "Unit" : "Level"} {multiAssignModal.levelId + 1}
+              </strong>{" "}
+              to <strong>{cls?.name}</strong>. Select other classes to assign it to as well.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+              {otherClasses.map(c => (
+                <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
+                  background: multiAssignSelected.has(c.id) ? "#eff6ff" : "#f9fafb",
+                  cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+                  <input type="checkbox" checked={multiAssignSelected.has(c.id)}
+                    onChange={() => setMultiAssignSelected(prev => {
+                      const next = new Set(prev);
+                      next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                      return next;
+                    })}
+                    style={{ width: 16, height: 16, accentColor: "#2563eb", cursor: "pointer" }} />
+                  {c.name}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setMultiAssignModal(null)} disabled={multiAssigning}
+                style={{ padding: "10px 20px", borderRadius: 99, border: "2px solid #d1d5db",
+                  background: "#fff", color: "#374151", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                Skip
+              </button>
+              <button onClick={handleMultiAssign} disabled={multiAssigning || multiAssignSelected.size === 0}
+                style={{ padding: "10px 20px", borderRadius: 99, border: "none",
+                  background: multiAssignSelected.size === 0 ? "#d1d5db" : "#2563eb",
+                  color: "#fff", fontWeight: 700, fontSize: 14,
+                  cursor: multiAssignSelected.size === 0 ? "not-allowed" : "pointer" }}>
+                {multiAssigning ? "Assigning…" : `Assign to ${multiAssignSelected.size} class${multiAssignSelected.size === 1 ? "" : "es"}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer style={{ height: 40, width: "100%", backgroundImage: "url('/ui/footer-metal.png')",
         backgroundSize: "cover", backgroundPosition: "center" }} />
