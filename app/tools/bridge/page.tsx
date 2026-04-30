@@ -3213,6 +3213,23 @@ function BridgeToolPage() {
               hasDiagonalIntersection(B, D);
             if (hasDiagonal) continue;
 
+            // Only flag bays that contain at least one chord-like edge (within 20° of horizontal).
+            // This lets Warren truss diamonds (~45° edges) pass while catching rectangular/trapezoidal bays.
+            const cycleNodes = [A, B, C, D];
+            const hasChordEdge = cycleNodes.some((id, i) => {
+              const nextId = cycleNodes[(i + 1) % 4];
+              const na = nodeById.get(id);
+              const nb = nodeById.get(nextId);
+              if (!na || !nb) return false;
+              const dx = nb.x - na.x;
+              const dy = nb.y - na.y;
+              const len = Math.hypot(dx, dy);
+              if (len === 0) return false;
+              const angleDeg = Math.abs(Math.asin(Math.abs(dy) / len) * 180 / Math.PI);
+              return angleDeg <= 20;
+            });
+            if (!hasChordEdge) continue;
+
             const cycle: [string, string, string, string] = [A, B, C, D];
             const k = keyOf(cycle);
             const already = risky.some((r) => keyOf(r.cycle) === k);
