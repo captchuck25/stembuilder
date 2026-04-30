@@ -1352,9 +1352,9 @@ export default function ClassDetailPage() {
       {multiAssignModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1000,
           display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <div style={{ ...CARD, padding: 32, minWidth: 360, maxWidth: 480, width: "90%" }}>
-            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800 }}>Assign to other classes?</h3>
-            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#1f2937" }}>
+          <div style={{ ...CARD, padding: 32, minWidth: 360, maxWidth: 480, width: "90%", color: "#111" }}>
+            <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 800, color: "#111" }}>Assign to other classes?</h3>
+            <p style={{ margin: "0 0 20px", fontSize: 14, color: "#111" }}>
               You just assigned{" "}
               <strong>
                 {multiAssignModal.tool === "code-lab" ? "Code Lab" : multiAssignModal.tool === "block-lab" ? "Block Lab" : multiAssignModal.tool.charAt(0).toUpperCase() + multiAssignModal.tool.slice(1)}
@@ -1368,7 +1368,7 @@ export default function ClassDetailPage() {
                 <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10,
                   padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
                   background: multiAssignSelected.has(c.id) ? "#eff6ff" : "#f9fafb",
-                  cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+                  cursor: "pointer", fontWeight: 600, fontSize: 14, color: "#111" }}>
                   <input type="checkbox" checked={multiAssignSelected.has(c.id)}
                     onChange={() => setMultiAssignSelected(prev => {
                       const next = new Set(prev);
