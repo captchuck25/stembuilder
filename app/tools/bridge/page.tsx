@@ -1945,16 +1945,8 @@ function BridgeToolPage() {
     const aboveIds = new Set(aboveRoadway.map((n) => n.id));
     const adjacency = new Map<string, string[]>();
     for (const n of nodes) adjacency.set(n.id, []);
-    const isTopChordEdge = (a: Node, b: Node) => {
-      const aAbove = a.y < ROADWAY_Y - TOP_CHORD_Y_TOL;
-      const bAbove = b.y < ROADWAY_Y - TOP_CHORD_Y_TOL;
-      if (aAbove && bAbove) return true;
-      if (aAbove || bAbove) {
-        const midY = (a.y + b.y) / 2;
-        return midY < ROADWAY_Y - TOP_CHORD_Y_TOL;
-      }
-      return false;
-    };
+    const isTopChordEdge = (a: Node, b: Node) =>
+      a.y < ROADWAY_Y - TOP_CHORD_Y_TOL && b.y < ROADWAY_Y - TOP_CHORD_Y_TOL;
     for (const m of members) {
       const a = nodeById.get(m.a);
       const b = nodeById.get(m.b);
