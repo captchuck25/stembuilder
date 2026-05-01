@@ -2063,6 +2063,9 @@ function BridgeToolPage() {
   }
   const supportAOk = isSimpleBeam || degree(SUPPORT_A_ID) >= 2;
   const supportBOk = isSimpleBeam || degree(SUPPORT_B_ID) >= 2;
+  const floatingNodes = nodes.filter(
+    n => n.id !== SUPPORT_A_ID && n.id !== SUPPORT_B_ID && degree(n.id) === 0,
+  );
   const isTrussDesign = members.length > 1 && riskyBays.length === 0;
   const hasSupportToSupportMember = members.some(
     (m) =>
@@ -2072,6 +2075,7 @@ function BridgeToolPage() {
   const longMembersFail = longMembersCount > 0;
   const unstableJointsFail = unstableJointIds.size > 0;
   const inspectionFailReasons = [
+    floatingNodes.length > 0 ? `Unconnected joint${floatingNodes.length > 1 ? "s" : ""} present. Every joint must connect to at least one member.` : null,
     !spanConnectivity ? "Connectivity: left support not connected to right support." : null,
     !supportAOk ? "Left support must connect to at least 2 members." : null,
     !supportBOk ? "Right support must connect to at least 2 members." : null,
@@ -2099,6 +2103,7 @@ function BridgeToolPage() {
       Boolean(warning)
   );
   const inspectionPassRaw =
+    floatingNodes.length === 0 &&
     spanConnectivity &&
     supportAOk &&
     supportBOk &&
@@ -3036,6 +3041,38 @@ function BridgeToolPage() {
 
   function endDrag() {
     if (!dragNodeId) return;
+
+    // Snap dragged node onto a nearby member and split it
+    const draggedNode = nodes.find(n => n.id === dragNodeId);
+    if (draggedNode) {
+      const SNAP_THRESHOLD = 14;
+      let bestMemberId: string | null = null;
+      let bestDist = SNAP_THRESHOLD;
+      let bestPt: { x: number; y: number } | null = null;
+      for (const m of members) {
+        if (m.a === dragNodeId || m.b === dragNodeId) continue;
+        const a = nodeById.get(m.a);
+        const b = nodeById.get(m.b);
+        if (!a || !b) continue;
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const abLenSq = abx * abx + aby * aby;
+        if (abLenSq === 0) continue;
+        const t = Math.max(0, Math.min(1, ((draggedNode.x - a.x) * abx + (draggedNode.y - a.y) * aby) / abLenSq));
+        const cx = a.x + abx * t, cy = a.y + aby * t;
+        const d = Math.hypot(draggedNode.x - cx, draggedNode.y - cy);
+        if (d < bestDist) { bestDist = d; bestMemberId = m.id; bestPt = { x: cx, y: cy }; }
+      }
+      if (bestMemberId && bestPt) {
+        const target = members.find(m => m.id === bestMemberId)!;
+        setNodes(prev => prev.map(n => n.id === dragNodeId ? { ...n, ...bestPt! } : n));
+        setMembers(prev => [
+          ...prev.filter(m => m.id !== bestMemberId),
+          { id: crypto.randomUUID(), a: target.a, b: dragNodeId, type: target.type, grade: target.grade },
+          { id: crypto.randomUUID(), a: dragNodeId, b: target.b, type: target.type, grade: target.grade },
+        ]);
+      }
+    }
+
     setDragNodeId(null);
     dragUndoArmedRef.current = false;
   }
