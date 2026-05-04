@@ -73,6 +73,7 @@ export default async function Home() {
                     width={420}
                     height={140}
                     className={styles.image}
+                    style={{ width: "100%", height: "100%", objectFit: "fill" }}
                     priority
                     unoptimized
                   />
