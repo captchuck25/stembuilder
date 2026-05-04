@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# STEM Sketch — keep local only
+/public/stem-sketch/
+/app/tools/stem-sketch/*.htm
+/app/tools/stem-sketch/*.HTM
+/app/tools/stem-sketch/*.html
+/app/tools/stem-sketch/*.md
+/app/tools/stem-sketch/*.js
+/app/tools/stem-sketch/*.tgz
