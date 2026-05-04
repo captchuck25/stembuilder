@@ -24,7 +24,7 @@ const tiles = [
   {
     label: "STEM Sketch",
     href: "/tools/stem-sketch",
-    src: "/ui/stem_sketch.png",
+    src: "/ui/stem-sketch.png",
   },
 ];
 
