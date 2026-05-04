@@ -22,6 +22,11 @@ const tiles = [
     href: "/tools/measurement-lab",
     src: "/ui/measurement-button.png",
   },
+  {
+    label: "STEM Sketch",
+    href: "/tools/stem-sketch",
+    src: "/ui/stem_sketch.png",
+  },
 ];
 
 export default async function Home() {
