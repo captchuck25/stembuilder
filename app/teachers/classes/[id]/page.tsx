@@ -103,7 +103,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "bridge" | "turtle">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "bridge" | "turtle" | "stem-sketch">("code-lab");
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
   const [grades, setGrades] = useState<Record<string, GradebookData | null>>({});
   const [loadingGrades, setLoadingGrades] = useState(false);
@@ -127,6 +127,12 @@ export default function ClassDetailPage() {
   const [bridgeSubmissionMap, setBridgeSubmissionMap] = useState<Record<string, Record<string, BridgeSubmissionCell>>>({});
   const [loadingBridgeGradebook, setLoadingBridgeGradebook] = useState(false);
   const bridgeGradebookLoadedRef = useRef(false);
+
+  // STEM Sketch
+  interface StemSketchRow { id: string; user_id: string; name: string; units: string; updated_at: string; student_name: string; student_email: string; }
+  const [stemSketchDesigns, setStemSketchDesigns] = useState<StemSketchRow[]>([]);
+  const [loadingStemSketch, setLoadingStemSketch] = useState(false);
+  const stemSketchLoadedRef = useRef(false);
 
   // Class settings state
   const [showSettings, setShowSettings] = useState(false);
@@ -187,6 +193,16 @@ export default function ClassDetailPage() {
         setBridgeSubmissionMap(map);
       })
       .finally(() => setLoadingBridgeGradebook(false));
+  }, [selectedTool, cls]);
+
+  useEffect(() => {
+    if (!cls || selectedTool !== "stem-sketch" || stemSketchLoadedRef.current) return;
+    stemSketchLoadedRef.current = true;
+    setLoadingStemSketch(true);
+    fetch(`/api/teacher/stem-sketch-designs?classId=${classId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setStemSketchDesigns)
+      .finally(() => setLoadingStemSketch(false));
   }, [selectedTool, cls]);
 
   async function loadClass() {
@@ -925,10 +941,11 @@ export default function ClassDetailPage() {
           {/* Tool selector */}
           <div style={{ display: "flex", gap: 14, marginBottom: 28, flexWrap: "wrap" }}>
             {([
-              { id: "code-lab"  as const, label: "Python Code Lab",  icon: "🐍", color: "#2563eb", desc: "Maze challenges" },
-              { id: "block-lab" as const, label: "Block Lab",         icon: "🧩", color: "#7c3aed", desc: "Visual block coding" },
-              { id: "bridge"    as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
-              { id: "turtle"    as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
+              { id: "code-lab"    as const, label: "Python Code Lab",  icon: "🐍", color: "#2563eb", desc: "Maze challenges" },
+              { id: "block-lab"  as const, label: "Block Lab",         icon: "🧩", color: "#7c3aed", desc: "Visual block coding" },
+              { id: "bridge"     as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
+              { id: "turtle"     as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
+              { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
             ] as const).map(tool => {
               const active = selectedTool === tool.id;
               const hasLockControl = tool.id === "code-lab" || tool.id === "block-lab" || tool.id === "turtle";
@@ -1454,6 +1471,49 @@ export default function ClassDetailPage() {
                     </div>
                   );
                 })()
+              )}
+            </div>
+          )}
+
+          {/* ── STEM Sketch panel ──────────────────────────────────────────────────── */}
+          {selectedTool === "stem-sketch" && (
+            <div style={{ ...CARD, padding: "26px 28px" }}>
+              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0891b2", marginBottom: 6 }}>STEM Sketch Designs</h2>
+              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                All designs saved by students in this class.
+              </p>
+              {loadingStemSketch ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
+              ) : stemSketchDesigns.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
+                  No designs saved yet.
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto", borderRadius: 12, border: "2px solid #e5e7eb" }}>
+                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                    <thead>
+                      <tr>
+                        <th style={TH}>Student</th>
+                        <th style={TH}>Design Name</th>
+                        <th style={TH}>Units</th>
+                        <th style={TH}>Last Saved</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stemSketchDesigns.map((d, i) => (
+                        <tr key={d.id} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+                          <td style={TD}>
+                            <div style={{ fontWeight: 700, color: "#111" }}>{d.student_name}</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>{d.student_email}</div>
+                          </td>
+                          <td style={{ ...TD, fontWeight: 600 }}>{d.name}</td>
+                          <td style={{ ...TD, color: "#555" }}>{d.units}</td>
+                          <td style={{ ...TD, color: "#555" }}>{new Date(d.updated_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}

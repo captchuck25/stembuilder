@@ -1,3 +1,21 @@
+export interface StemSketchDesign {
+  id: string;
+  name: string;
+  units: string;
+  updated_at: string;
+  created_at: string;
+}
+
+export async function fetchStemSketchDesigns(): Promise<StemSketchDesign[]> {
+  const res = await fetch('/api/stem-sketch/designs')
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function deleteStemSketchDesign(id: string): Promise<void> {
+  await fetch(`/api/stem-sketch/designs/${id}`, { method: 'DELETE' })
+}
+
 export interface BridgeDesign {
   id: string;
   user_id: string;

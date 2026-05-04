@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
-import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission } from "@/lib/achievements";
+import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign } from "@/lib/achievements";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 
 // ─── Static metadata ──────────────────────────────────────────────────────────
@@ -531,6 +531,55 @@ function TurtleSection({ completedIds, submissions }: { completedIds: Set<string
   );
 }
 
+// ─── STEM Sketch section ──────────────────────────────────────────────────────
+
+function StemSketchSection({ designs, onDeleted }: {
+  designs: StemSketchDesign[];
+  onDeleted: (id: string) => void;
+}) {
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function handleDelete(id: string) {
+    setDeleting(id);
+    await deleteStemSketchDesign(id);
+    onDeleted(id);
+    setDeleting(null);
+  }
+
+  return (
+    <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
+      <SectionHeader icon="✏️" title="STEM Sketch" href="/tools/stem-sketch" linkLabel="Open STEM Sketch" />
+      {designs.length === 0 ? (
+        <p style={{ fontSize: 14, color: "#888", margin: 0 }}>
+          No saved designs yet. Open STEM Sketch and save your first design!
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {designs.map(d => (
+            <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "12px 16px", borderRadius: 10, border: "2px solid #e5e7eb", background: "#f9fafb" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#111" }}>{d.name}</div>
+                <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
+                  {d.units} · saved {new Date(d.updated_at).toLocaleDateString()}
+                </div>
+              </div>
+              <button
+                onClick={() => handleDelete(d.id)}
+                disabled={deleting === d.id}
+                style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #fca5a5",
+                  background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
+                  cursor: deleting === d.id ? "not-allowed" : "pointer", opacity: deleting === d.id ? 0.5 : 1 }}>
+                {deleting === d.id ? "…" : "Delete"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AchievementsPage() {
@@ -539,6 +588,7 @@ export default function AchievementsPage() {
   const [blockLabRows,   setBlockLabRows]   = useState<ProgressRow[]>([]);
   const [measScores,     setMeasScores]     = useState<ScoreRow[]>([]);
   const [bridgeDesigns,  setBridgeDesigns]  = useState<BridgeDesign[]>([]);
+  const [sketchDesigns,  setSketchDesigns]  = useState<StemSketchDesign[]>([]);
   const [dataLoading,    setDataLoading]    = useState(true);
   const [turtleCompleted,    setTurtleCompleted]    = useState<Set<string>>(new Set());
   const [turtleSubmissions,  setTurtleSubmissions]  = useState<TurtleSubmission[]>([]);
@@ -560,12 +610,14 @@ export default function AchievementsPage() {
       fetchToolScores(uid),
       fetchBridgeDesigns(uid),
       fetchTurtleSubmissions(uid),
-    ]).then(([cl, bl, ms, bd, ts]) => {
+      fetchStemSketchDesigns(),
+    ]).then(([cl, bl, ms, bd, ts, sk]) => {
       setCodeLabRows(cl);
       setBlockLabRows(bl);
       setMeasScores(ms);
       setBridgeDesigns(bd);
       setTurtleSubmissions(ts);
+      setSketchDesigns(sk);
       setDataLoading(false);
     });
   }, [status, session?.user?.id]);
@@ -621,6 +673,10 @@ export default function AchievementsPage() {
               <BridgeSection
                 designs={bridgeDesigns}
                 onDeleted={id => setBridgeDesigns(prev => prev.filter(d => d.id !== id))}
+              />
+              <StemSketchSection
+                designs={sketchDesigns}
+                onDeleted={id => setSketchDesigns(prev => prev.filter(d => d.id !== id))}
               />
               <MeasurementSection scores={measScores} />
             </>
