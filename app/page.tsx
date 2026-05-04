@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import SiteHeader from "./components/SiteHeader";
 import { auth } from "@/auth";
@@ -66,15 +65,9 @@ export default async function Home() {
           <div className={styles.container}>
             <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
               {tiles.map((tile) => (
-                <Link key={tile.label} href={tile.href} className={styles.tile} style={{ position: "relative" }}>
-                  <Image
-                    src={tile.src}
-                    alt={tile.label}
-                    fill
-                    style={{ objectFit: "fill" }}
-                    priority
-                    unoptimized
-                  />
+                <Link key={tile.label} href={tile.href} className={styles.tile}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={tile.src} alt={tile.label} style={{ width: "432px", height: "140px", display: "block", objectFit: "fill" }} />
                 </Link>
               ))}
             </div>
