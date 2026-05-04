@@ -66,14 +66,12 @@ export default async function Home() {
           <div className={styles.container}>
             <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
               {tiles.map((tile) => (
-                <Link key={tile.label} href={tile.href} className={styles.tile}>
+                <Link key={tile.label} href={tile.href} className={styles.tile} style={{ position: "relative" }}>
                   <Image
                     src={tile.src}
                     alt={tile.label}
-                    width={420}
-                    height={140}
-                    className={styles.image}
-                    style={{ width: "100%", height: "100%", objectFit: "fill" }}
+                    fill
+                    style={{ objectFit: "fill" }}
                     priority
                     unoptimized
                   />
