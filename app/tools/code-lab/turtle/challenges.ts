@@ -153,14 +153,14 @@ for i in range(5):
     right(144)
 end_fill()`,
     starterCode: `# A 5-pointed star — the turn angle is the secret!
-# Hint: try right(144)
+# Hint: try right() somewhere between 130-150 degrees
 
 pensize(2)
 color("black")
-fillcolor("gold")
+fillcolor("?????")
 
 begin_fill()
-for i in range(5):
+for i in range(?):
     forward(120)
     right(???)
 end_fill()
