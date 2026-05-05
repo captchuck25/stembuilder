@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
 
   const { data: designs } = await db
     .from('stem_sketch_designs')
-    .select('id, user_id, name, units, updated_at')
+    .select('id, user_id, name, units, thumbnail, updated_at')
     .in('user_id', studentIds)
     .order('updated_at', { ascending: false })
 
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     profileMap[e.user_id] = p ?? { name: 'Unknown', email: '' }
   }
 
-  type DesignRow = { id: string; user_id: string; name: string; units: string; updated_at: string }
+  type DesignRow = { id: string; user_id: string; name: string; units: string; thumbnail: string | null; updated_at: string }
   return NextResponse.json(
     (designs ?? [] as DesignRow[]).map((d: DesignRow) => ({
       ...d,

@@ -129,7 +129,7 @@ export default function ClassDetailPage() {
   const bridgeGradebookLoadedRef = useRef(false);
 
   // STEM Sketch
-  interface StemSketchRow { id: string; user_id: string; name: string; units: string; updated_at: string; student_name: string; student_email: string; }
+  interface StemSketchRow { id: string; user_id: string; name: string; units: string; thumbnail: string | null; updated_at: string; student_name: string; student_email: string; }
   const [stemSketchDesigns, setStemSketchDesigns] = useState<StemSketchRow[]>([]);
   const [loadingStemSketch, setLoadingStemSketch] = useState(false);
   const stemSketchLoadedRef = useRef(false);
@@ -1489,30 +1489,34 @@ export default function ClassDetailPage() {
                   No designs saved yet.
                 </div>
               ) : (
-                <div style={{ overflowX: "auto", borderRadius: 12, border: "2px solid #e5e7eb" }}>
-                  <table style={{ borderCollapse: "collapse", width: "100%" }}>
-                    <thead>
-                      <tr>
-                        <th style={TH}>Student</th>
-                        <th style={TH}>Design Name</th>
-                        <th style={TH}>Units</th>
-                        <th style={TH}>Last Saved</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stemSketchDesigns.map((d, i) => (
-                        <tr key={d.id} style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
-                          <td style={TD}>
-                            <div style={{ fontWeight: 700, color: "#111" }}>{d.student_name}</div>
-                            <div style={{ fontSize: 11, color: "#888" }}>{d.student_email}</div>
-                          </td>
-                          <td style={{ ...TD, fontWeight: 600 }}>{d.name}</td>
-                          <td style={{ ...TD, color: "#555" }}>{d.units}</td>
-                          <td style={{ ...TD, color: "#555" }}>{new Date(d.updated_at).toLocaleDateString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                  {stemSketchDesigns.map(d => (
+                    <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e0f2fe",
+                      background: "#f0f9ff", overflow: "hidden", width: 190, flexShrink: 0 }}>
+                      {/* Thumbnail */}
+                      <div style={{ width: "100%", height: 120, background: "#bae6fd", overflow: "hidden",
+                        display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {d.thumbnail ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={d.thumbnail} alt={d.name}
+                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                        ) : (
+                          <span style={{ fontSize: 32, opacity: 0.3 }}>✏️</span>
+                        )}
+                      </div>
+                      {/* Info */}
+                      <div style={{ padding: "10px 12px" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0891b2", marginTop: 2 }}>
+                          {d.student_name}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                          {d.units} · {new Date(d.updated_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

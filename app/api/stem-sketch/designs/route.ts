@@ -8,7 +8,7 @@ export async function GET() {
 
   const { data } = await adminDb()
     .from('stem_sketch_designs')
-    .select('id, name, units, updated_at, created_at')
+    .select('id, name, units, thumbnail, updated_at, created_at')
     .eq('user_id', session.user.id)
     .order('updated_at', { ascending: false })
 
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { name, docJson, units } = body
+  const { name, docJson, units, thumbnail } = body
   if (!name || !docJson) return NextResponse.json({ error: 'Missing name or docJson' }, { status: 400 })
 
   const { error } = await adminDb()
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
         name: name.trim().slice(0, 80) || 'Untitled',
         doc_json: docJson,
         units: units ?? 'mm',
+        thumbnail: thumbnail ?? null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id,name' }

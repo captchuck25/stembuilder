@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
@@ -8,9 +8,19 @@ import SiteHeader from "@/app/components/SiteHeader";
 export default function StemSketchClient() {
   const { data: session } = useSession();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const dirtyRef = useRef(false);
 
   const postToSketch = useCallback((msg: object) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
+  }, []);
+
+  // Warn before leaving the page when there are unsaved changes
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
   useEffect(() => {
@@ -18,8 +28,11 @@ export default function StemSketchClient() {
       const { type } = (e.data ?? {}) as { type?: string };
       if (!type?.startsWith("STEMSKETCH_")) return;
 
-      if (type === "STEMSKETCH_SAVE") {
-        const { name, docJson, units } = e.data as { name: string; docJson: object; units: string };
+      if (type === "STEMSKETCH_DIRTY") {
+        dirtyRef.current = (e.data as { dirty: boolean }).dirty;
+
+      } else if (type === "STEMSKETCH_SAVE") {
+        const { name, docJson, units, thumbnail } = e.data as { name: string; docJson: object; units: string; thumbnail: string | null };
         if (!session?.user?.id) {
           postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: "Sign in to save" });
           return;
@@ -27,9 +40,10 @@ export default function StemSketchClient() {
         const res = await fetch("/api/stem-sketch/designs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, docJson, units }),
+          body: JSON.stringify({ name, docJson, units, thumbnail }),
         });
         if (res.ok) {
+          dirtyRef.current = false;
           postToSketch({ type: "STEMSKETCH_SAVE_OK" });
         } else {
           const err = await res.json().catch(() => ({ error: "unknown error" }));
@@ -62,8 +76,16 @@ export default function StemSketchClient() {
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
       <SiteHeader>
-        <Link href="/" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
-          borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
+        <Link
+          href="/"
+          onClick={(e) => {
+            if (dirtyRef.current) {
+              const ok = window.confirm("You have unsaved changes. Leave without saving?");
+              if (!ok) e.preventDefault();
+            }
+          }}
+          style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
           ← Home
         </Link>
       </SiteHeader>

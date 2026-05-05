@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
@@ -538,8 +538,18 @@ function StemSketchSection({ designs, onDeleted }: {
   onDeleted: (id: string) => void;
 }) {
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function requestDelete(id: string) {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmId(id);
+    confirmTimerRef.current = setTimeout(() => setConfirmId(null), 3000);
+  }
 
   async function handleDelete(id: string) {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmId(null);
     setDeleting(id);
     await deleteStemSketchDesign(id);
     onDeleted(id);
@@ -554,24 +564,51 @@ function StemSketchSection({ designs, onDeleted }: {
           No saved designs yet. Open STEM Sketch and save your first design!
         </p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
           {designs.map(d => (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-              padding: "12px 16px", borderRadius: 10, border: "2px solid #e5e7eb", background: "#f9fafb" }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "#111" }}>{d.name}</div>
-                <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
-                  {d.units} · saved {new Date(d.updated_at).toLocaleDateString()}
-                </div>
+            <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e5e7eb", background: "#f9fafb",
+              overflow: "hidden", width: 200, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+              {/* Thumbnail */}
+              <div style={{ width: "100%", height: 130, background: "#eef0f6", overflow: "hidden",
+                display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {d.thumbnail ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={d.thumbnail} alt={d.name}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                ) : (
+                  <span style={{ fontSize: 36, opacity: 0.25 }}>✏️</span>
+                )}
               </div>
-              <button
-                onClick={() => handleDelete(d.id)}
-                disabled={deleting === d.id}
-                style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #fca5a5",
-                  background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
-                  cursor: deleting === d.id ? "not-allowed" : "pointer", opacity: deleting === d.id ? 0.5 : 1 }}>
-                {deleting === d.id ? "…" : "Delete"}
-              </button>
+              {/* Info + delete */}
+              <div style={{ padding: "10px 12px", display: "flex", alignItems: "flex-start",
+                justifyContent: "space-between", gap: 6 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                    {d.units} · {new Date(d.updated_at).toLocaleDateString()}
+                  </div>
+                </div>
+                {confirmId === d.id ? (
+                  <button
+                    onClick={() => handleDelete(d.id)}
+                    disabled={deleting === d.id}
+                    style={{ padding: "4px 10px", borderRadius: 6, border: "2px solid #dc2626",
+                      background: "#dc2626", color: "#fff", fontWeight: 800, fontSize: 11, flexShrink: 0,
+                      cursor: "pointer", whiteSpace: "nowrap" }}>
+                    Sure?
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => requestDelete(d.id)}
+                    disabled={deleting === d.id}
+                    style={{ padding: "4px 10px", borderRadius: 6, border: "2px solid #e5e7eb",
+                      background: "#fff", color: "#888", fontWeight: 700, fontSize: 11, flexShrink: 0,
+                      cursor: deleting === d.id ? "not-allowed" : "pointer", opacity: deleting === d.id ? 0.5 : 1 }}>
+                    {deleting === d.id ? "…" : "✕"}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

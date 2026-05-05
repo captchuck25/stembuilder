@@ -2,6 +2,7 @@ export interface StemSketchDesign {
   id: string;
   name: string;
   units: string;
+  thumbnail: string | null;
   updated_at: string;
   created_at: string;
 }
