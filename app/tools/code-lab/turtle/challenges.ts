@@ -137,6 +137,7 @@ for i in range(3):
   },
 
   // ── CHALLENGES ─────────────────────────────────────────────────────────────
+  // Order: star, bullseye, olympic-rings, house, school-bus
   {
     id: "star",
     category: "challenge",
@@ -164,6 +165,97 @@ for i in range(?):
     forward(120)
     right(???)
 end_fill()
+`,
+  },
+  {
+    id: "bullseye",
+    category: "challenge",
+    title: "Bull's-Eye",
+    description: "Draw concentric filled rings to make a bull's-eye target. Biggest ring first, stack smaller ones on top.",
+    hint: "Draw the largest circle first, then smaller ones on top. goto(0, -r) centers each circle.",
+    previewLines: 8,
+    solutionCode: `colors = ["red", "white", "red", "white", "red"]
+radii  = [100, 80, 60, 40, 20]
+pensize(1)
+for i in range(5):
+    color("black")
+    fillcolor(colors[i])
+    begin_fill()
+    penup()
+    goto(0, -radii[i])
+    pendown()
+    circle(radii[i])
+    end_fill()`,
+    starterCode: `# Bull's-Eye — draw biggest ring first, then stack smaller ones on top
+
+colors = ["red", "white", "red", "white", "red"]
+radii  = [100, 80, 60, 40, 20]
+
+pensize(1)
+
+for i in range(5):
+    color("black")
+    fillcolor(colors[i])
+    begin_fill()
+    penup()
+    goto(0, -radii[i])
+    pendown()
+    circle(radii[i])
+    end_fill()
+`,
+  },
+  {
+    id: "olympic-rings",
+    category: "challenge",
+    title: "Olympic Rings",
+    description: "Draw the 5 Olympic rings in the correct colors: Blue, Yellow, Black, Green, Red.",
+    hint: "goto(x, y - 45) puts the turtle at the bottom of a circle centered at (x, y). Use pensize(5) for thick rings.",
+    previewLines: 12,
+    solutionCode: `pensize(5)
+color("blue")
+penup()
+goto(-80, -20)
+pendown()
+circle(45)
+color("gold")
+penup()
+goto(-40, -70)
+pendown()
+circle(45)
+color("black")
+penup()
+goto(0, -20)
+pendown()
+circle(45)
+color("green")
+penup()
+goto(40, -70)
+pendown()
+circle(45)
+color("red")
+penup()
+goto(80, -20)
+pendown()
+circle(45)`,
+    starterCode: `# Olympic Rings
+# 5 interlocking circles — Blue, Yellow, Black, Green, Red
+
+pensize(5)
+
+# ── Blue ring (center: -80, 25) ─────────────────
+color("blue")
+penup()
+goto(-80, -20)
+pendown()
+circle(45)
+
+# ── Now add the other four rings! ───────────────
+# Pattern: color → penup → goto(cx, cy-45) → pendown → circle(45)
+#
+# Yellow center: (-40, -25)  →  goto(-40, -70)
+# Black center:  (  0,  25)  →  goto(  0, -20)
+# Green center:  ( 40, -25)  →  goto( 40, -70)
+# Red center:    ( 80,  25)  →  goto( 80, -20)
 `,
   },
   {
@@ -312,97 +404,6 @@ end_fill()
 
 # ── TODO: Any extra details? ────────────────────
 # Ideas: door, headlight, black bumper strip, roof details
-`,
-  },
-  {
-    id: "olympic-rings",
-    category: "challenge",
-    title: "Olympic Rings",
-    description: "Draw the 5 Olympic rings in the correct colors: Blue, Yellow, Black, Green, Red.",
-    hint: "goto(x, y - 45) puts the turtle at the bottom of a circle centered at (x, y). Use pensize(5) for thick rings.",
-    previewLines: 12,
-    solutionCode: `pensize(5)
-color("blue")
-penup()
-goto(-80, -20)
-pendown()
-circle(45)
-color("gold")
-penup()
-goto(-40, -70)
-pendown()
-circle(45)
-color("black")
-penup()
-goto(0, -20)
-pendown()
-circle(45)
-color("green")
-penup()
-goto(40, -70)
-pendown()
-circle(45)
-color("red")
-penup()
-goto(80, -20)
-pendown()
-circle(45)`,
-    starterCode: `# Olympic Rings
-# 5 interlocking circles — Blue, Yellow, Black, Green, Red
-
-pensize(5)
-
-# ── Blue ring (center: -80, 25) ─────────────────
-color("blue")
-penup()
-goto(-80, -20)
-pendown()
-circle(45)
-
-# ── Now add the other four rings! ───────────────
-# Pattern: color → penup → goto(cx, cy-45) → pendown → circle(45)
-#
-# Yellow center: (-40, -25)  →  goto(-40, -70)
-# Black center:  (  0,  25)  →  goto(  0, -20)
-# Green center:  ( 40, -25)  →  goto( 40, -70)
-# Red center:    ( 80,  25)  →  goto( 80, -20)
-`,
-  },
-  {
-    id: "bullseye",
-    category: "challenge",
-    title: "Bull's-Eye",
-    description: "Draw concentric filled rings to make a bull's-eye target. Biggest ring first, stack smaller ones on top.",
-    hint: "Draw the largest circle first, then smaller ones on top. goto(0, -r) centers each circle.",
-    previewLines: 8,
-    solutionCode: `colors = ["red", "white", "red", "white", "red"]
-radii  = [100, 80, 60, 40, 20]
-pensize(1)
-for i in range(5):
-    color("black")
-    fillcolor(colors[i])
-    begin_fill()
-    penup()
-    goto(0, -radii[i])
-    pendown()
-    circle(radii[i])
-    end_fill()`,
-    starterCode: `# Bull's-Eye — draw biggest ring first, then stack smaller ones on top
-
-colors = ["red", "white", "red", "white", "red"]
-radii  = [100, 80, 60, 40, 20]
-
-pensize(1)
-
-for i in range(5):
-    color("black")
-    fillcolor(colors[i])
-    begin_fill()
-    penup()
-    goto(0, -radii[i])
-    pendown()
-    circle(radii[i])
-    end_fill()
 `,
   },
 ];
