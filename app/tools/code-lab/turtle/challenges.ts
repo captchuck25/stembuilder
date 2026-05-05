@@ -136,8 +136,48 @@ for i in range(3):
 `,
   },
 
+  {
+    id: "ladder",
+    category: "tutorial",
+    title: "6. Goto & the Grid",
+    description: "Use goto() to jump anywhere on the canvas grid. Draw a rainbow ladder of colored lines.",
+    hint: "penup() lifts the pen so goto() moves without drawing. pendown() starts drawing again.",
+    notes: `The canvas has a hidden grid — (0, 0) is the center.
+Positive x goes right, negative x goes left.
+Positive y goes up, negative y goes down.
+
+\`goto(x, y)\` jumps the turtle instantly to any point on the grid.
+
+Pair it with \`penup()\` and \`pendown()\` to draw shapes anywhere without a line trailing behind:
+
+\`penup()\` — lift the pen (move without drawing)
+\`goto(x, y)\` — jump to a new spot
+\`pendown()\` — put the pen back down
+
+In this tutorial you'll draw a rainbow ladder — one colored rung at each height.`,
+    example: `color("red")
+penup()
+goto(-80, 0)
+pendown()
+goto(80, 0)`,
+    starterCode: `# Rainbow Ladder — draw 5 colored lines at different heights!
+# goto(x, y) jumps to a grid coordinate. (0, 0) is the center.
+pensize(4)
+
+# Bottom rung
+color("red")
+penup()
+goto(-100, -80)
+pendown()
+goto(100, -80)
+
+# Add more rungs above!
+# Try orange, yellow, green, blue — each 40 higher (y = -40, 0, 40, 80)
+`,
+  },
+
   // ── CHALLENGES ─────────────────────────────────────────────────────────────
-  // Order: star, bullseye, olympic-rings, house, school-bus
+  // Order: star, circles, olympic-rings, house, school-bus
   {
     id: "star",
     category: "challenge",
@@ -168,40 +208,59 @@ end_fill()
 `,
   },
   {
-    id: "bullseye",
+    id: "circles",
     category: "challenge",
-    title: "Bull's-Eye",
-    description: "Draw concentric filled rings to make a bull's-eye target. Biggest ring first, stack smaller ones on top.",
-    hint: "Draw the largest circle first, then smaller ones on top. goto(0, -r) centers each circle.",
-    previewLines: 8,
-    solutionCode: `colors = ["red", "white", "red", "white", "red"]
-radii  = [100, 80, 60, 40, 20]
-pensize(1)
-for i in range(5):
-    color("black")
-    fillcolor(colors[i])
-    begin_fill()
-    penup()
-    goto(0, -radii[i])
-    pendown()
-    circle(radii[i])
-    end_fill()`,
-    starterCode: `# Bull's-Eye — draw biggest ring first, then stack smaller ones on top
+    title: "Three Circles",
+    description: "Place three circles on the grid using goto(). Fill the center circle for extra style!",
+    hint: "penup() before goto() moves without drawing. goto(x, cy - r) centers a circle of radius r at height cy.",
+    previewLines: 11,
+    solutionCode: `pensize(5)
+color("blue")
+penup()
+goto(-110, -40)
+pendown()
+circle(40)
+color("black")
+fillcolor("crimson")
+penup()
+goto(0, -55)
+pendown()
+begin_fill()
+circle(55)
+end_fill()
+color("seagreen")
+penup()
+goto(100, -30)
+pendown()
+circle(30)`,
+    starterCode: `# Three Circles — use the grid to place each one!
+# goto(x, y) moves to a coordinate. Use penup/pendown to avoid stray lines.
 
-colors = ["red", "white", "red", "white", "red"]
-radii  = [100, 80, 60, 40, 20]
+pensize(5)
 
-pensize(1)
+# Left circle
+color("blue")
+penup()
+goto(-110, -40)
+pendown()
+circle(40)
 
-for i in range(5):
-    color("black")
-    fillcolor(colors[i])
-    begin_fill()
-    penup()
-    goto(0, -radii[i])
-    pendown()
-    circle(radii[i])
-    end_fill()
+# Center circle — try filling it!
+color(???)
+fillcolor(???)
+penup()
+goto(???, ???)
+pendown()
+begin_fill()
+circle(???)
+end_fill()
+
+# Right circle
+color(???)
+penup()
+goto(???, ???)
+pendown()
+circle(???)
 `,
   },
   {

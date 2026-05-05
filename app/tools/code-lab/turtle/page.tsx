@@ -223,6 +223,7 @@ function checkTutorialSuccess(id: string, cmds: Cmd[], code: string): boolean {
     case "square":  return draws >= 4;
     case "colors":  return draws >= 1 && (/\bcolor\s*\(/.test(code) || /\bpensize\s*\(/.test(code) || /\bwidth\s*\(/.test(code));
     case "fill":    return fills >= 1;
+    case "ladder":  return draws >= 10 && (code.match(/goto\(/g) || []).length >= 4;
     default:        return false;
   }
 }
