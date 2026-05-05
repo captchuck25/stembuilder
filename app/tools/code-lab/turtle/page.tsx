@@ -570,6 +570,10 @@ export default function TurtlePage() {
   }
 
   function runCode() {
+    // Auto-save tutorial code on every run so it persists when navigating away
+    if (activeChallenge?.category === "tutorial" && session?.user && userId) {
+      saveTurtleWork(userId, activeId, code, captureCanvas());
+    }
     stopAnim(); resetBg(); setError(null); setPrints([]); setJustCompleted(false);
     const { cmds, prints: p, error: err } = runTurtle(code);
     setPrints(p);
@@ -603,8 +607,8 @@ export default function TurtlePage() {
     setCode(ch.starterCode); setActiveId(ch.id);
     setLeftTab("task");
     setView((ch.category === "tutorial" && ch.notes) || ch.previewLines ? "notes" : "editor");
-    // Load previously saved code for challenges
-    if (session?.user && userId && ch.category === "challenge") {
+    // Load previously saved code for any challenge type (tutorials and challenges)
+    if (session?.user && userId) {
       fetchTurtleSubmission(userId, ch.id).then(saved => {
         if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
       });
@@ -618,7 +622,7 @@ export default function TurtlePage() {
     setCode(ch.starterCode); setActiveId(ch.id);
     setLeftTab("task");
     setView("editor");
-    if (session?.user && userId && ch.category === "challenge") {
+    if (session?.user && userId) {
       fetchTurtleSubmission(userId, ch.id).then(saved => {
         if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
       });
