@@ -167,33 +167,6 @@ end_fill()
 `,
   },
   {
-    id: "spiral",
-    category: "challenge",
-    title: "Growing Spiral",
-    description: "Draw a spiral by increasing the step length a little each time around the loop.",
-    hint: "Increase `size` by a small amount each loop. Try different turn angles too!",
-    previewLines: 9,
-    solutionCode: `pensize(2)
-color("teal")
-size = 5
-for i in range(60):
-    forward(size)
-    right(30)
-    size = size + 3`,
-    starterCode: `# Increase size a little each step to get a spiral.
-# Try changing the turn angle and how much size grows!
-
-pensize(2)
-color("teal")
-
-size = 5
-for i in range(60):
-    forward(size)
-    right(30)
-    size = size + ???
-`,
-  },
-  {
     id: "house",
     category: "challenge",
     title: "Draw a House",
