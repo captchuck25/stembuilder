@@ -405,39 +405,4 @@ for i in range(5):
     end_fill()
 `,
   },
-  {
-    id: "snowflake",
-    category: "challenge",
-    title: "Snowflake",
-    description: "Use a function and a loop to draw a snowflake with 6 symmetric branches.",
-    hint: "Define a branch() function, then call it 6 times turning 60° between each one.",
-    previewLines: 10,
-    solutionCode: `pensize(2)
-color("deepskyblue")
-def branch(length):
-    for i in range(3):
-        forward(length)
-        backward(length)
-        right(45)
-    left(135)
-for i in range(6):
-    branch(80)
-    right(60)`,
-    starterCode: `# Snowflake — a loop calling a function 6 times
-
-pensize(2)
-color("deepskyblue")
-
-def branch(length):
-    for i in range(3):
-        forward(length)
-        backward(length)
-        right(45)
-    left(135)
-
-for i in range(6):
-    branch(80)
-    right(60)
-`,
-  },
 ];
