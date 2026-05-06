@@ -158,32 +158,40 @@ Use it with \`penup()\` and \`pendown()\` so you can start drawing from anywhere
 In the example, each rung starts at x = -100 and a different y height.
 \`forward(200)\` draws 200 steps to the right, landing at x = 100.
 The result is a rainbow ladder of 5 horizontal lines across the center of the canvas.`,
-    example: `pensize(4)
+    previewLines: 15,
+    example: `# Rainbow Ladder — draw 5 colored lines at different heights!
+# goto(x, y) jumps to a grid coordinate. (0, 0) is the center.
+pensize(4)
 
+# Bottom rung
 color("red")
 penup()
 goto(-100, -80)
 pendown()
 forward(200)
 
+# 2nd rung
 color("blue")
 penup()
 goto(-100, -40)
 pendown()
 forward(200)
 
+# 3rd rung
 color("yellow")
 penup()
 goto(-100, 0)
 pendown()
 forward(200)
 
+# 4th rung
 color("orange")
 penup()
 goto(-100, 40)
 pendown()
 forward(200)
 
+# 5th rung
 color("black")
 penup()
 goto(-100, 80)

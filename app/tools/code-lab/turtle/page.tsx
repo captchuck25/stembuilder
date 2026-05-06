@@ -803,6 +803,11 @@ export default function TurtlePage() {
     const visibleCode = codeLines.slice(0, ch.previewLines ?? codeLines.length).join("\n");
     const blurredCode = ch.previewLines ? codeLines.slice(ch.previewLines).join("\n") : "";
 
+    // For tutorials: split example code into visible + blurred portions
+    const exLines    = (ch.example ?? "").trimEnd().split("\n");
+    const visExCode  = exLines.slice(0, ch.previewLines ?? exLines.length).join("\n");
+    const blurExCode = ch.previewLines ? exLines.slice(ch.previewLines).join("\n") : "";
+
     return (
       <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", fontFamily:"system-ui, sans-serif" }}>
         <SiteHeader>
@@ -932,11 +937,17 @@ export default function TurtlePage() {
                     {isTut ? "Example" : "Goal"}
                   </div>
                   {isTut && ch.example && (
-                    <pre style={{ background:"#1e1e2e", color:"#e2e8f0", borderRadius:10,
+                    <pre style={{ background:"#1e1e2e", borderRadius:10,
                       padding:"14px 16px", fontSize:12, fontFamily:"'Courier New', monospace",
-                      lineHeight:1.65, margin:"0 0 16px", overflowX:"auto",
-                      border:"2px solid #3a3a5e", whiteSpace:"pre-wrap" }}>
-                      {ch.example}
+                      lineHeight:1.65, margin:"0 0 16px", overflowX:"hidden",
+                      border:"2px solid #3a3a5e", whiteSpace:"pre-wrap", userSelect:"none" }}>
+                      <span style={{ color:"#e2e8f0" }}>{visExCode}</span>
+                      {blurExCode && (
+                        <span style={{ display:"block", color:"#e2e8f0",
+                          filter:"blur(4px)", pointerEvents:"none" }}>
+                          {blurExCode}
+                        </span>
+                      )}
                     </pre>
                   )}
                   <div style={{ fontSize:11, fontWeight:700, color:"#6b7280", marginBottom:8 }}>
@@ -1187,11 +1198,20 @@ export default function TurtlePage() {
                             textTransform:"uppercase", margin:"14px 0 8px" }}>
                             Example
                           </div>
-                          <pre style={{ background:"#1e1e2e", color:"#e2e8f0", borderRadius:8,
+                          <pre style={{ background:"#1e1e2e", borderRadius:8,
                             padding:"10px 12px", fontSize:11, fontFamily:"'Courier New', monospace",
-                            lineHeight:1.6, margin:0, overflowX:"auto",
-                            border:"1px solid #3a3a5e", whiteSpace:"pre-wrap" }}>
-                            {activeChallenge.example}
+                            lineHeight:1.6, margin:0, overflowX:"hidden",
+                            border:"1px solid #3a3a5e", whiteSpace:"pre-wrap", userSelect:"none" }}>
+                            {(() => {
+                              const el = activeChallenge.example!.trimEnd().split("\n");
+                              const vis = el.slice(0, activeChallenge.previewLines ?? el.length).join("\n");
+                              const blr = activeChallenge.previewLines ? el.slice(activeChallenge.previewLines).join("\n") : "";
+                              return (<>
+                                <span style={{ color:"#e2e8f0" }}>{vis}</span>
+                                {blr && <span style={{ display:"block", color:"#e2e8f0",
+                                  filter:"blur(4px)", pointerEvents:"none" }}>{blr}</span>}
+                              </>);
+                            })()}
                           </pre>
                         </>
                       )}
