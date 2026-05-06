@@ -46,6 +46,7 @@ Try changing the number — what happens with 50? With 200?`,
 Angles are measured in degrees. \`right(90)\` is a quarter-turn right. \`right(180)\` is a U-turn.
 
 You can chain as many \`forward()\` and turn commands as you want to build any path!`,
+    previewLines: 2,
     example: `forward(100)
 right(90)
 forward(80)
@@ -71,6 +72,7 @@ A square has 4 equal sides and 4 corners. Each corner turns 90°.
 (360° ÷ 4 sides = 90° per corner)
 
 The indented lines inside the loop run on every repeat.`,
+    previewLines: 1,
     example: `for i in range(4):
     forward(100)
     right(90)`,
