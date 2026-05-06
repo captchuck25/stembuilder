@@ -141,25 +141,54 @@ for i in range(3):
     category: "tutorial",
     title: "6. Goto & the Grid",
     description: "Use goto() to jump anywhere on the canvas grid. Draw a rainbow ladder of colored lines.",
-    hint: "penup() lifts the pen so goto() moves without drawing. pendown() starts drawing again.",
+    hint: "penup() before goto() lifts the pen so you move without drawing. Then pendown() and forward(200) draws the rung.",
     notes: `The canvas has a hidden grid — (0, 0) is the center.
 Positive x goes right, negative x goes left.
 Positive y goes up, negative y goes down.
 
-\`goto(x, y)\` jumps the turtle instantly to any point on the grid.
+\`goto(x, y)\` jumps the turtle to any point on the grid instantly.
 
-Pair it with \`penup()\` and \`pendown()\` to draw shapes anywhere without a line trailing behind:
+Use it with \`penup()\` and \`pendown()\` so you can start drawing from anywhere:
 
-\`penup()\` — lift the pen (move without drawing)
-\`goto(x, y)\` — jump to a new spot
-\`pendown()\` — put the pen back down
+\`penup()\` — lift the pen (travel without drawing)
+\`goto(x, y)\` — jump to a new grid position
+\`pendown()\` — lower the pen, ready to draw
+\`forward(200)\` — draw a line 200 steps to the right
 
-In this tutorial you'll draw a rainbow ladder — one colored rung at each height.`,
-    example: `color("red")
+In the example, each rung starts at x = -100 and a different y height.
+\`forward(200)\` draws 200 steps to the right, landing at x = 100.
+The result is a rainbow ladder of 5 horizontal lines across the center of the canvas.`,
+    example: `pensize(4)
+
+color("red")
 penup()
-goto(-80, 0)
+goto(-100, -80)
 pendown()
-goto(80, 0)`,
+forward(200)
+
+color("blue")
+penup()
+goto(-100, -40)
+pendown()
+forward(200)
+
+color("yellow")
+penup()
+goto(-100, 0)
+pendown()
+forward(200)
+
+color("orange")
+penup()
+goto(-100, 40)
+pendown()
+forward(200)
+
+color("black")
+penup()
+goto(-100, 80)
+pendown()
+forward(200)`,
     starterCode: `# Rainbow Ladder — draw 5 colored lines at different heights!
 # goto(x, y) jumps to a grid coordinate. (0, 0) is the center.
 pensize(4)
@@ -169,10 +198,10 @@ color("red")
 penup()
 goto(-100, -80)
 pendown()
-goto(100, -80)
+forward(200)
 
 # Add more rungs above!
-# Try orange, yellow, green, blue — each 40 higher (y = -40, 0, 40, 80)
+# Try blue, yellow, orange, black — each 40 higher (y = -40, 0, 40, 80)
 `,
   },
 

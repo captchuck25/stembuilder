@@ -333,6 +333,68 @@ function applyCmd(
   }
 }
 
+// ─── Animated canvas (looping preview for notes view) ────────────────────────
+function AnimatedCanvas({ code, size = 300 }: { code: string; size?: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const ctx = canvas.getContext("2d")!;
+    const scale = size / CS;
+
+    const bg = document.createElement("canvas");
+    bg.width = CS; bg.height = CS;
+    const bgCtx = bg.getContext("2d")!;
+
+    const tvRef      = { current: { x: CX, y: CY, h: 0, v: true } };
+    const bgColorRef = { current: "#ffffff" };
+
+    const { cmds } = runTurtle(code);
+    if (!cmds.length) return;
+
+    let idx = 0;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    function resetState() {
+      bgCtx.fillStyle = "#ffffff"; bgCtx.fillRect(0, 0, CS, CS);
+      tvRef.current = { x: CX, y: CY, h: 0, v: true };
+      bgColorRef.current = "#ffffff";
+      idx = 0;
+    }
+
+    function drawFrame() {
+      ctx.drawImage(bg, 0, 0, CS, CS, 0, 0, size, size);
+      drawTurtleSprite(ctx, {
+        ...tvRef.current,
+        x: tvRef.current.x * scale,
+        y: tvRef.current.y * scale,
+      });
+    }
+
+    function tick() {
+      if (cancelled) return;
+      for (let b = 0; b < 4 && idx < cmds.length; b++) {
+        applyCmd(bgCtx, cmds[idx], tvRef, bgColorRef); idx++;
+      }
+      drawFrame();
+      if (idx >= cmds.length) {
+        timerId = setTimeout(() => { if (!cancelled) { resetState(); tick(); } }, 2000);
+        return;
+      }
+      timerId = setTimeout(tick, 25);
+    }
+
+    resetState(); tick();
+    return () => { cancelled = true; if (timerId) clearTimeout(timerId); };
+  }, [code, size]);
+
+  return (
+    <canvas ref={canvasRef} width={size} height={size}
+      style={{ display: "block", borderRadius: 10, border: "2px solid #e5e7eb" }} />
+  );
+}
+
 // ─── Example canvas (static, instant render) ─────────────────────────────────
 function ExampleCanvas({ code, size = 300 }: { code: string; size?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -880,7 +942,7 @@ export default function TurtlePage() {
                   <div style={{ fontSize:11, fontWeight:700, color:"#6b7280", marginBottom:8 }}>
                     {isTut ? "Output:" : "What you're building:"}
                   </div>
-                  <ExampleCanvas code={(isTut ? ch.example : ch.solutionCode) ?? ""} size={292} />
+                  <AnimatedCanvas code={(isTut ? ch.example : ch.solutionCode) ?? ""} size={292} />
                 </div>
               )}
 
