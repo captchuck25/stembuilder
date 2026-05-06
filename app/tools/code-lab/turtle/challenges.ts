@@ -216,7 +216,7 @@ forward(200)
   },
 
   // ── CHALLENGES ─────────────────────────────────────────────────────────────
-  // Order: star, circles, olympic-rings, house, school-bus
+  // Order: star, bullseye, olympic-rings, house, school-bus
   {
     id: "star",
     category: "challenge",
@@ -247,59 +247,75 @@ end_fill()
 `,
   },
   {
-    id: "circles",
+    id: "bullseye",
     category: "challenge",
-    title: "Three Circles",
-    description: "Place three circles on the grid using goto(). Fill the center circle for extra style!",
-    hint: "penup() before goto() moves without drawing. goto(x, cy - r) centers a circle of radius r at height cy.",
+    title: "Bull's-Eye",
+    description: "Draw a bull's-eye target with three concentric rings. Each ring is built from 180 tiny forward steps — shrink the step size to shrink the ring.",
+    hint: "Each ring uses the same loop: forward(step) + left(2) × 180. Halve the step to halve the radius. For the innermost ring, use begin_fill() and end_fill() to fill it solid!",
     previewLines: 11,
-    solutionCode: `pensize(5)
-color("blue")
+    solutionCode: `color("red")
+pensize(10)
 penup()
-goto(-110, -40)
+goto(0,-150)
 pendown()
-circle(40)
-color("black")
-fillcolor("crimson")
+for i in range(180):
+    forward(5)
+    left(2)
+color("red")
+pensize(10)
 penup()
-goto(0, -55)
+goto(0,-90)
+pendown()
+for i in range(180):
+    forward(3)
+    left(2)
+color("red")
+fillcolor("red")
+pensize(10)
+penup()
+goto(0,-45)
 pendown()
 begin_fill()
-circle(55)
-end_fill()
-color("seagreen")
+for i in range(180):
+    forward(1.5)
+    left(2)
+end_fill()`,
+    starterCode: `# Bull's-Eye — three rings, each drawn with forward() + left()
+# Each ring: goto(0, -radius) to start, then loop forward(step) + left(2) x 180
+
+# Outer ring
+color("red")
+pensize(10)
 penup()
-goto(100, -30)
+goto(0, -150)
 pendown()
-circle(30)`,
-    starterCode: `# Three Circles — use the grid to place each one!
-# goto(x, y) moves to a coordinate. Use penup/pendown to avoid stray lines.
+for i in range(180):
+    forward(5)
+    left(2)
 
-pensize(5)
-
-# Left circle
-color("blue")
+# Middle ring — use a smaller forward() step and a closer goto()
+color("red")
+pensize(10)
 penup()
-goto(-110, -40)
+goto(???, ???)
 pendown()
-circle(40)
+for i in range(180):
+    forward(???)
+    left(2)
 
-# Center circle — try filling it!
-color(???)
-fillcolor(???)
+# Bull's-eye — same idea, but fill it solid!
+# Hint: wrap the loop in begin_fill() ... end_fill()
+color("red")
+fillcolor("red")
+pensize(10)
 penup()
 goto(???, ???)
 pendown()
 begin_fill()
-circle(???)
+for i in range(180):
+    forward(???)
+    left(2)
 end_fill()
-
-# Right circle
-color(???)
-penup()
-goto(???, ???)
-pendown()
-circle(???)
 `,
   },
   {
