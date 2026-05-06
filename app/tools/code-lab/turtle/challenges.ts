@@ -305,54 +305,75 @@ for i in range(180):
     id: "olympic-rings",
     category: "challenge",
     title: "Olympic Rings",
-    description: "Draw the 5 Olympic rings in the correct colors: Blue, Yellow, Black, Green, Red.",
-    hint: "goto(x, y - 45) puts the turtle at the bottom of a circle centered at (x, y). Use pensize(5) for thick rings.",
-    previewLines: 12,
-    solutionCode: `pensize(5)
+    description: "Draw the 5 Olympic rings in the correct colors and positions: Blue, Black, Red on top — Yellow, Green on the bottom.",
+    hint: "Each ring is the same loop as the bull's-eye: forward(2) + left(2) × 180. Just change the color and the goto() position for each ring. Top row y = -20, bottom row y = -100.",
+    previewLines: 11,
+    solutionCode: `pensize(3)
+
+# Blue ring
 color("blue")
 penup()
-goto(-80, -20)
+goto(-120, -20)
 pendown()
-circle(45)
-color("gold")
-penup()
-goto(-40, -70)
-pendown()
-circle(45)
+for i in range(180):
+    forward(2)
+    left(2)
+
+# Back ring
 color("black")
 penup()
-goto(0, -20)
+goto(-20, -20)
 pendown()
-circle(45)
-color("green")
-penup()
-goto(40, -70)
-pendown()
-circle(45)
+for i in range(180):
+    forward(2)
+    left(2)
+
+# Red ring
 color("red")
 penup()
 goto(80, -20)
 pendown()
-circle(45)`,
+for i in range(180):
+    forward(2)
+    left(2)
+
+# Yellow ring
+color("yellow")
+penup()
+goto(-70, -100)
+pendown()
+for i in range(180):
+    forward(2)
+    left(2)
+
+# Green ring
+color("green")
+penup()
+goto(30, -100)
+pendown()
+for i in range(180):
+    forward(2)
+    left(2)`,
     starterCode: `# Olympic Rings
-# 5 interlocking circles — Blue, Yellow, Black, Green, Red
+# 5 interlocking circles — Blue, Black, Red on top, Yellow & Green on bottom
+# Each ring uses the same loop as the bull's-eye: forward(2) + left(2) x 180
 
-pensize(5)
+pensize(3)
 
-# ── Blue ring (center: -80, 25) ─────────────────
+# Blue ring (top-left)
 color("blue")
 penup()
-goto(-80, -20)
+goto(-120, -20)
 pendown()
-circle(45)
+for i in range(180):
+    forward(2)
+    left(2)
 
-# ── Now add the other four rings! ───────────────
-# Pattern: color → penup → goto(cx, cy-45) → pendown → circle(45)
+# ── Now add the other four rings ─────────────────
+# Pattern: color → penup → goto(x, y) → pendown → loop forward(2) + left(2) x 180
 #
-# Yellow center: (-40, -25)  →  goto(-40, -70)
-# Black center:  (  0,  25)  →  goto(  0, -20)
-# Green center:  ( 40, -25)  →  goto( 40, -70)
-# Red center:    ( 80,  25)  →  goto( 80, -20)
+# Top row    (y = -20):  Black at x = -20,  Red at x = 80
+# Bottom row (y = -100): Yellow at x = -70, Green at x = 30
 `,
   },
   {
