@@ -294,28 +294,11 @@ for i in range(180):
     left(2)
 
 # Middle ring — use a smaller forward() step and a closer goto()
-color("red")
-pensize(10)
-penup()
-goto(???, ???)
-pendown()
-for i in range(180):
-    forward(???)
-    left(2)
+
+
 
 # Bull's-eye — same idea, but fill it solid!
-# Hint: wrap the loop in begin_fill() ... end_fill()
-color("red")
-fillcolor("red")
-pensize(10)
-penup()
-goto(???, ???)
-pendown()
-begin_fill()
-for i in range(180):
-    forward(???)
-    left(2)
-end_fill()
+# Hint: add begin_fill() ... end_fill() to complete the bullseye
 `,
   },
   {
