@@ -521,6 +521,8 @@ export default function TurtlePage() {
   const idxRef     = useRef(0);
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runningRef = useRef(false);
+  const baseCodeRef = useRef<string>(CHALLENGES[0].starterCode);
+  const [navGuard, setNavGuard] = useState<{ onLeave: () => void } | null>(null);
 
   useEffect(() => {
     try {
@@ -537,6 +539,17 @@ export default function TurtlePage() {
       .then(d => setIsEnrolled(d.enrolled ?? false));
   }, [userId]);
 
+  // Warn browser on tab close / external navigation when code is dirty
+  useEffect(() => {
+    function handler(e: BeforeUnloadEvent) {
+      if (view === "editor" && code !== baseCodeRef.current) {
+        e.preventDefault(); e.returnValue = "";
+      }
+    }
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [view, code]);
+
   // Handle ?challenge= param from My Work page (load saved code)
   useEffect(() => {
     if (!session?.user) return;
@@ -546,7 +559,9 @@ export default function TurtlePage() {
     const ch = CHALLENGES.find(c => c.id === challengeId);
     if (!ch || !userId) return;
     fetchTurtleSubmission(userId, challengeId).then(saved => {
-      setCode(saved?.code ?? ch.starterCode);
+      const loadedCode = saved?.code ?? ch.starterCode;
+      setCode(loadedCode);
+      baseCodeRef.current = loadedCode;
       setActiveId(ch.id);
       setIsSaved(!!saved?.code);
       setIsSubmitted(!!saved?.submitted_at);
@@ -621,7 +636,7 @@ export default function TurtlePage() {
     setSaving(true);
     const err = await saveTurtleWork(userId, activeId, code, captureCanvas());
     setSaving(false);
-    if (err) { setError("Save failed: " + err); } else { setIsSaved(true); }
+    if (err) { setError("Save failed: " + err); } else { baseCodeRef.current = code; setIsSaved(true); }
   }
 
   async function handleSubmit() {
@@ -629,13 +644,14 @@ export default function TurtlePage() {
     setSubmitting(true);
     const err = await submitTurtleWork(userId, activeId, code, captureCanvas());
     setSubmitting(false);
-    if (err) { setError("Submit failed: " + err); } else { setIsSubmitted(true); setIsSaved(true); }
+    if (err) { setError("Submit failed: " + err); } else { baseCodeRef.current = code; setIsSubmitted(true); setIsSaved(true); }
   }
 
   function runCode() {
     // Auto-save tutorial code on every run so it persists when navigating away
     if (activeChallenge?.category === "tutorial" && session?.user && userId) {
       saveTurtleWork(userId, activeId, code, captureCanvas());
+      baseCodeRef.current = code;
     }
     stopAnim(); resetBg(); setError(null); setPrints([]); setJustCompleted(false);
     const { cmds, prints: p, error: err } = runTurtle(code);
@@ -667,13 +683,14 @@ export default function TurtlePage() {
     stopAnim();
     setError(null); setPrints([]); setJustCompleted(false);
     setHasRunOnce(false); setIsSaved(false); setIsSubmitted(false);
-    setCode(ch.starterCode); setActiveId(ch.id);
+    setCode(ch.starterCode); baseCodeRef.current = ch.starterCode;
+    setActiveId(ch.id);
     setLeftTab("task");
     setView((ch.category === "tutorial" && ch.notes) || ch.previewLines ? "notes" : "editor");
     // Load previously saved code for any challenge type (tutorials and challenges)
     if (session?.user && userId) {
       fetchTurtleSubmission(userId, ch.id).then(saved => {
-        if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
+        if (saved?.code) { setCode(saved.code); baseCodeRef.current = saved.code; setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
       });
     }
   }
@@ -682,14 +699,20 @@ export default function TurtlePage() {
     stopAnim();
     setError(null); setPrints([]); setJustCompleted(false);
     setHasRunOnce(false); setIsSaved(false); setIsSubmitted(false);
-    setCode(ch.starterCode); setActiveId(ch.id);
+    setCode(ch.starterCode); baseCodeRef.current = ch.starterCode;
+    setActiveId(ch.id);
     setLeftTab("task");
     setView("editor");
     if (session?.user && userId) {
       fetchTurtleSubmission(userId, ch.id).then(saved => {
-        if (saved?.code) { setCode(saved.code); setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
+        if (saved?.code) { setCode(saved.code); baseCodeRef.current = saved.code; setIsSaved(true); setIsSubmitted(!!saved.submitted_at); }
       });
     }
+  }
+
+  function guardNav(action: () => void) {
+    if (view !== "editor" || code === baseCodeRef.current) { action(); return; }
+    setNavGuard({ onLeave: action });
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -706,6 +729,7 @@ export default function TurtlePage() {
   const tutorials       = CHALLENGES.filter(c => c.category === "tutorial");
   const challenges      = CHALLENGES.filter(c => c.category === "challenge");
   const activeChallenge = CHALLENGES.find(c => c.id === activeId);
+  const isTutorial      = activeChallenge?.category === "tutorial";
   const activeTutIndex  = tutorials.findIndex(t => t.id === activeId);
   const nextTutorial    = activeTutIndex >= 0 && activeTutIndex < tutorials.length - 1
     ? tutorials[activeTutIndex + 1] : null;
@@ -979,7 +1003,6 @@ export default function TurtlePage() {
   }
 
   // ── Editor view ───────────────────────────────────────────────────────────
-  const isTutorial = activeChallenge?.category === "tutorial";
   const hasNotes   = isTutorial ? !!activeChallenge?.notes : !!activeChallenge?.previewLines;
   const editorTabs = [
     { key: "task",      label: "Task" },
@@ -995,7 +1018,7 @@ export default function TurtlePage() {
   return (
     <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", fontFamily:"system-ui, sans-serif" }}>
       <SiteHeader>
-        <button onClick={() => { stopAnim(); setView(isTutorial && activeChallenge?.notes ? "notes" : "hub"); setJustCompleted(false); }}
+        <button onClick={() => guardNav(() => { stopAnim(); setView(isTutorial && activeChallenge?.notes ? "notes" : "hub"); setJustCompleted(false); })}
           style={{ border:"1px solid rgba(255,255,255,0.6)", color:"white", background:"transparent",
             padding:"7px 14px", borderRadius:999, fontWeight:600, fontSize:13, cursor:"pointer" }}>
           ← {isTutorial ? "Notes" : "Tutorials"}
@@ -1034,7 +1057,7 @@ export default function TurtlePage() {
             const act  = activeId === tut.id;
             const lock = i > 0 && !completedIds.has(tutorials[i-1].id);
             return (
-              <button key={tut.id} onClick={lock ? undefined : () => jumpToEditor(tut)}
+              <button key={tut.id} onClick={lock ? undefined : () => guardNav(() => jumpToEditor(tut))}
                 style={{ padding:"4px 12px", borderRadius:14, fontSize:12, fontWeight:700,
                   cursor:lock?"default":"pointer", flexShrink:0, border:"none",
                   background:act?"#3b82f6":done?"rgba(74,222,128,0.15)":"rgba(255,255,255,0.05)",
@@ -1052,7 +1075,7 @@ export default function TurtlePage() {
             const act  = activeId === chalItem.id;
             const lock = !tutorials.every(t => completedIds.has(t.id));
             return (
-              <button key={chalItem.id} onClick={lock ? undefined : () => jumpToEditor(chalItem)}
+              <button key={chalItem.id} onClick={lock ? undefined : () => guardNav(() => jumpToEditor(chalItem))}
                 style={{ padding:"4px 12px", borderRadius:14, fontSize:12, fontWeight:700,
                   cursor:lock?"default":"pointer", flexShrink:0, border:"none",
                   background:act?"#8b5cf6":"rgba(255,255,255,0.05)",
@@ -1075,13 +1098,13 @@ export default function TurtlePage() {
             </span>
             <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
               {nextTutorial && (
-                <button onClick={() => handleChallengeSelect(nextTutorial)}
+                <button onClick={() => guardNav(() => handleChallengeSelect(nextTutorial))}
                   style={{ background:"white", color:"#065f46", border:"none",
                     borderRadius:8, padding:"7px 16px", fontWeight:800, fontSize:13, cursor:"pointer" }}>
                   Next: {nextTutorial.title} →
                 </button>
               )}
-              <button onClick={() => { stopAnim(); setView("hub"); setJustCompleted(false); }}
+              <button onClick={() => guardNav(() => { stopAnim(); setView("hub"); setJustCompleted(false); })}
                 style={{ background:"rgba(255,255,255,0.2)", color:"white",
                   border:"1.5px solid rgba(255,255,255,0.5)", borderRadius:8,
                   padding:"7px 16px", fontWeight:700, fontSize:13, cursor:"pointer" }}>
@@ -1134,7 +1157,7 @@ export default function TurtlePage() {
                         ✅ Completed! Keep experimenting or go back to the hub.
                       </div>
                       {nextTutorial && (
-                        <button onClick={() => handleChallengeSelect(nextTutorial)}
+                        <button onClick={() => guardNav(() => handleChallengeSelect(nextTutorial))}
                           style={{ width:"100%", background:"#10b981", color:"white",
                             border:"none", borderRadius:8, padding:"9px 0",
                             fontSize:12, fontWeight:800, cursor:"pointer", marginTop:4 }}>
@@ -1173,7 +1196,7 @@ export default function TurtlePage() {
                       )}
                     </div>
                   )}
-                  <button onClick={() => { stopAnim(); setView("hub"); setJustCompleted(false); }}
+                  <button onClick={() => guardNav(() => { stopAnim(); setView("hub"); setJustCompleted(false); })}
                     style={{ marginTop:10, width:"100%", background:"transparent",
                       border:"1px solid rgba(255,255,255,0.15)", borderRadius:8, padding:"8px 0",
                       fontSize:12, fontWeight:700, color:"#94a3b8", cursor:"pointer" }}>
@@ -1356,6 +1379,44 @@ export default function TurtlePage() {
 
         </div>
       </main>
+
+      {/* ── Unsaved-changes guard modal ───────────────────────────────────── */}
+      {navGuard && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:9999,
+          display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"#1a2540", border:"1px solid rgba(99,179,237,0.2)",
+            borderRadius:20, boxShadow:"0 12px 40px rgba(0,0,0,0.6)",
+            padding:"28px 32px", maxWidth:380, width:"90%" }}>
+            <h2 style={{ color:"#e2e8f0", fontSize:18, fontWeight:900, margin:"0 0 10px" }}>
+              Unsaved Changes
+            </h2>
+            <p style={{ color:"#94a3b8", fontSize:13, margin:"0 0 24px", lineHeight:1.65 }}>
+              You have unsaved changes that will be lost if you leave this challenge.
+            </p>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {!isTutorial && (
+                <button onClick={async () => { await handleSave(); navGuard.onLeave(); setNavGuard(null); }}
+                  style={{ background:"#10b981", color:"white", border:"none",
+                    borderRadius:10, padding:"11px 0", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                  💾 Save & Leave
+                </button>
+              )}
+              <button onClick={() => { navGuard.onLeave(); setNavGuard(null); }}
+                style={{ background:"rgba(239,68,68,0.12)", color:"#fca5a5",
+                  border:"1px solid rgba(239,68,68,0.3)", borderRadius:10,
+                  padding:"11px 0", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                Leave Without Saving
+              </button>
+              <button onClick={() => setNavGuard(null)}
+                style={{ background:"rgba(255,255,255,0.06)", color:"#94a3b8",
+                  border:"1px solid rgba(255,255,255,0.12)", borderRadius:10,
+                  padding:"11px 0", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                Stay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
