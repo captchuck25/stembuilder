@@ -380,47 +380,108 @@ for i in range(180):
     id: "house",
     category: "challenge",
     title: "Draw a House",
-    description: "Draw a house with a square body and a triangle roof. Two shapes, one picture!",
-    hint: "Draw the square first, then use penup() and goto() to position at a top corner for the roof.",
+    description: "Build a house piece by piece — square walls, a peaked roof, two windows, a door, and a door knob.",
+    hint: "Use penup() + goto() to jump between parts. Square walls/windows are a 4-step for loop. The roof is two long lines turned 45° / 90°. The door knob is the bull's-eye trick: forward(.1) + right(2) × 180.",
     previewLines: 11,
     solutionCode: `pensize(2)
-color("black")
-fillcolor("tomato")
-begin_fill()
-for i in range(4):
-    forward(120)
-    right(90)
-end_fill()
-fillcolor("saddlebrown")
-penup()
-goto(0, 120)
-pendown()
-begin_fill()
-for i in range(3):
-    forward(120)
-    left(120)
-end_fill()`,
-    starterCode: `# Draw a house: square walls + triangle roof
-pensize(2)
-color("black")
 
 # Walls (square)
-fillcolor("tomato")
-begin_fill()
-for i in range(4):
-    forward(120)
-    right(90)
-end_fill()
-
-# Roof (triangle on top)
-# Hint: move to the top-left corner of the square first
-fillcolor("saddlebrown")
 penup()
-goto(0, 120)
+goto(-100, 0)
 pendown()
-begin_fill()
-# Now draw the triangle roof!
-# Each side is 120 long, turning left 120° at each peak
+color("blue")
+for i in range(4):
+    forward(200)
+    right(90)
+
+# Roof
+color("purple")
+left(45)
+forward(142)
+right(90)
+forward(142)
+
+# Window left (square)
+penup()
+goto(-70, -50)
+pendown()
+color("red")
+left(45)
+for i in range(4):
+    forward(40)
+    right(90)
+
+# Window right (square)
+penup()
+goto(30, -50)
+pendown()
+color("red")
+for i in range(4):
+    forward(40)
+    right(90)
+
+# Door
+penup()
+goto(-15, -200)
+pendown()
+color("red")
+left(90)
+forward(80)
+right(90)
+forward(30)
+right(90)
+forward(80)
+
+# Door knob
+penup()
+goto(10, -160)
+pendown()
+color("black")
+for i in range(180):
+    forward(.1)
+    right(2)
+
+penup()
+goto(100,100)`,
+    starterCode: `# Draw a house: walls, roof, windows, door, and a knob!
+
+pensize(2)
+
+# Walls (square) — 200 x 200, top-left corner at (-100, 0)
+penup()
+goto(-100, 0)
+pendown()
+color("blue")
+for i in range(4):
+    forward(200)
+    right(90)
+
+# ── Roof ────────────────────────────────────────
+# After the walls, the turtle is back at (-100, 0).
+# Turn left 45°, draw 142 forward, right 90°, draw 142 again.
+color("purple")
+
+
+
+# ── Window left (square) ────────────────────────
+# goto(-70, -50), then a 4-side loop with forward(40)
+# Try left(45) before the loop to make it a diamond!
+
+
+
+# ── Window right (square) ───────────────────────
+# goto(30, -50), then a normal 4-side square with forward(40)
+
+
+
+# ── Door ────────────────────────────────────────
+# goto(-15, -200). Draw a tall thin rectangle (80 high x 30 wide).
+
+
+
+# ── Door knob (tiny circle) ─────────────────────
+# Use the bull's-eye trick: forward(.1) + right(2) x 180
+
 `,
   },
   {
