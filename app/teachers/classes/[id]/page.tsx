@@ -9,7 +9,7 @@ import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { UNITS } from "@/app/tools/block-lab/units";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
-import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, type TurtleSubmission } from "@/lib/achievements";
+import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, fetchTurtleAssignments, assignTurtleChallenge, unassignTurtleChallenge, type TurtleSubmission } from "@/lib/achievements";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const CARD: React.CSSProperties = {
@@ -105,6 +105,8 @@ export default function ClassDetailPage() {
   const [saving, setSaving] = useState(false);
   const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "bridge" | "turtle" | "stem-sketch">("code-lab");
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
+  const [turtleAssigned, setTurtleAssigned] = useState<Set<string>>(new Set());
+  const [turtleAssignSaving, setTurtleAssignSaving] = useState<string | null>(null);
   const [grades, setGrades] = useState<Record<string, GradebookData | null>>({});
   const [loadingGrades, setLoadingGrades] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
@@ -217,6 +219,8 @@ export default function ClassDetailPage() {
       const subs = await fetchTurtleSubmissionsForStudents(data.studentIds);
       setTurtleSubs(subs);
     }
+    const turtleAssn = await fetchTurtleAssignments(classId);
+    setTurtleAssigned(new Set(turtleAssn));
     const bridgeRes = await fetch(`/api/teacher/bridge-assignments?classId=${classId}`);
     if (bridgeRes.ok) setBridgeAssignments(await bridgeRes.json());
     const allClassesRes = await fetch("/api/teacher/classes");
@@ -283,6 +287,23 @@ export default function ClassDetailPage() {
     const res = await fetch(`/api/teacher/bridge-submissions?assignmentId=${id}`);
     if (res.ok) { const data = await res.json(); setBridgeLeaderboards(prev => ({ ...prev, [id]: data })); }
     setLoadingLeaderboardId(null);
+  }
+
+  async function toggleTurtleAssignment(challengeId: string) {
+    if (turtleAssignSaving) return;
+    setTurtleAssignSaving(challengeId);
+    const isAssigned = turtleAssigned.has(challengeId);
+    const ok = isAssigned
+      ? await unassignTurtleChallenge(classId, challengeId)
+      : await assignTurtleChallenge(classId, challengeId);
+    if (ok) {
+      setTurtleAssigned(prev => {
+        const next = new Set(prev);
+        if (isAssigned) next.delete(challengeId); else next.add(challengeId);
+        return next;
+      });
+    }
+    setTurtleAssignSaving(null);
   }
 
   async function handleApprove(id: string, approved: boolean | null) {
@@ -1062,14 +1083,21 @@ export default function ClassDetailPage() {
 
           {/* ── Turtle panel ───────────────────────────────────────────────────────── */}
           {selectedTool === "turtle" && (() => {
+            const tutorials = TURTLE_CHALLENGES.filter(c => c.category === "tutorial");
             const challenges = TURTLE_CHALLENGES.filter(c => c.category === "challenge");
             const sortedStudents = [...students].sort((a, b) => a.name.localeCompare(b.name));
 
             function exportTurtleCSV() {
-              const header = ["Student", "Email", ...challenges.map(c => `${c.title} — Status`)];
+              const header = ["Student", "Email",
+                ...tutorials.map(c => `${c.title}`),
+                ...challenges.map(c => `${c.title} — Status`)];
               const rows: string[][] = [header];
               for (const s of sortedStudents) {
                 const row = [s.name, s.email];
+                for (const ch of tutorials) {
+                  const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
+                  row.push(sub ? "Completed" : "—");
+                }
                 for (const ch of challenges) {
                   const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
                   row.push(
@@ -1081,27 +1109,74 @@ export default function ClassDetailPage() {
                 }
                 rows.push(row);
               }
-              downloadCSV(rows, `${cls!.name} — Turtle Challenges.csv`);
+              downloadCSV(rows, `${cls!.name} — Turtle.csv`);
             }
+
+            const ChipRow = ({ items, color }: { items: typeof tutorials; color: string }) => (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {items.map(ch => {
+                  const isAssigned = turtleAssigned.has(ch.id);
+                  const isSaving = turtleAssignSaving === ch.id;
+                  return (
+                    <button key={ch.id} onClick={() => toggleTurtleAssignment(ch.id)} disabled={isSaving}
+                      style={{
+                        padding: "6px 12px", borderRadius: 999,
+                        border: `2px solid ${isAssigned ? color : "#e5e7eb"}`,
+                        background: isAssigned ? color : "#fff",
+                        color: isAssigned ? "#fff" : "#374151",
+                        fontWeight: 700, fontSize: 12, cursor: isSaving ? "wait" : "pointer",
+                        opacity: isSaving ? 0.6 : 1, whiteSpace: "nowrap",
+                      }}>
+                      {isAssigned ? "✓ " : "+ "}{ch.title}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+
+            const assignedTutorials = tutorials.filter(c => turtleAssigned.has(c.id));
+            const assignedChallenges = challenges.filter(c => turtleAssigned.has(c.id));
+            const anyAssigned = assignedTutorials.length + assignedChallenges.length > 0;
 
             return (
               <div style={{ ...CARD, padding: "26px 28px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                   marginBottom: 6, flexWrap: "wrap", gap: 12 }}>
-                  <h2 style={{ fontSize: 18, fontWeight: 900, color: "#059669" }}>Turtle Creative Challenges</h2>
+                  <h2 style={{ fontSize: 18, fontWeight: 900, color: "#059669" }}>Python Turtle</h2>
                   <button onClick={exportTurtleCSV}
                     style={{ padding: "8px 18px", borderRadius: 10, border: "2px solid #059669",
                       background: "#ecfdf5", color: "#059669", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
                     ↓ Export CSV
                   </button>
                 </div>
-                <p style={{ fontSize: 13, color: "#666", marginBottom: 24 }}>
-                  Rows = students (alphabetical). Click ✓ to approve or ✗ to send back for revision.
+                <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                  Click a chip to assign a tutorial or creative challenge to this class. Assigned items appear in the gradebook below.
                 </p>
+
+                {/* Assignment chips */}
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#3b82f6",
+                    textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+                    Tutorials
+                  </div>
+                  <ChipRow items={tutorials} color="#3b82f6" />
+                </div>
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: "#8b5cf6",
+                    textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>
+                    Creative Challenges
+                  </div>
+                  <ChipRow items={challenges} color="#8b5cf6" />
+                </div>
 
                 {students.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
                     No students enrolled yet.
+                  </div>
+                ) : !anyAssigned ? (
+                  <div style={{ textAlign: "center", padding: "32px 16px", color: "#888", fontSize: 13,
+                    background: "#f9fafb", borderRadius: 12, border: "2px dashed #e5e7eb" }}>
+                    Assign at least one tutorial or challenge above to see student progress.
                   </div>
                 ) : (
                   <div style={{ overflowX: "auto", borderRadius: 12, border: "2px solid #e5e7eb" }}>
@@ -1109,8 +1184,34 @@ export default function ClassDetailPage() {
                       <thead>
                         <tr>
                           <th style={{ ...TH, ...NAME_TD, background: "#f9fafb", zIndex: 2 }}>Student</th>
-                          {challenges.map(ch => (
-                            <th key={ch.id} style={{ ...TH, textAlign: "center", minWidth: 148 }}>
+                          {assignedTutorials.length > 0 && (
+                            <th colSpan={assignedTutorials.length}
+                              style={{ ...TH, borderLeft: "4px solid #3b82f6", textAlign: "center",
+                                background: "#eff6ff", color: "#1e40af" }}>
+                              Tutorials
+                            </th>
+                          )}
+                          {assignedChallenges.length > 0 && (
+                            <th colSpan={assignedChallenges.length}
+                              style={{ ...TH, borderLeft: "4px solid #8b5cf6", textAlign: "center",
+                                background: "#f5f3ff", color: "#5b21b6" }}>
+                              Creative Challenges
+                            </th>
+                          )}
+                        </tr>
+                        <tr>
+                          <th style={{ ...TH, ...NAME_TD, background: "#f9fafb", zIndex: 2 }} />
+                          {assignedTutorials.map((ch, i) => (
+                            <th key={ch.id} style={{ ...TH, textAlign: "center", minWidth: 90,
+                              borderLeft: i === 0 ? "4px solid #3b82f6" : undefined,
+                              background: "#eff6ff05" }}>
+                              {ch.title.replace(/^\d+\.\s*/, "")}
+                            </th>
+                          ))}
+                          {assignedChallenges.map((ch, i) => (
+                            <th key={ch.id} style={{ ...TH, textAlign: "center", minWidth: 148,
+                              borderLeft: i === 0 ? "4px solid #8b5cf6" : undefined,
+                              background: "#f5f3ff05" }}>
                               {ch.title}
                             </th>
                           ))}
@@ -1123,11 +1224,28 @@ export default function ClassDetailPage() {
                               <div style={{ fontWeight: 700, color: "#111" }}>{s.name}</div>
                               <div style={{ fontSize: 11, color: "#888" }}>{s.email}</div>
                             </td>
-                            {challenges.map(ch => {
+                            {assignedTutorials.map((ch, i) => {
+                              const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
+                              return (
+                                <td key={ch.id} style={{ ...TD, textAlign: "center", verticalAlign: "middle",
+                                  borderLeft: i === 0 ? "4px solid #3b82f6" : undefined }}>
+                                  {sub ? (
+                                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999,
+                                      background: "#dcfce7", color: "#166534", fontWeight: 800, fontSize: 12 }}>
+                                      ✓ Done
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            {assignedChallenges.map((ch, i) => {
                               const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
                               if (!sub) {
                                 return (
-                                  <td key={ch.id} style={{ ...TD, textAlign: "center", verticalAlign: "middle", color: "#ccc" }}>
+                                  <td key={ch.id} style={{ ...TD, textAlign: "center", verticalAlign: "middle", color: "#ccc",
+                                    borderLeft: i === 0 ? "4px solid #8b5cf6" : undefined }}>
                                     —
                                   </td>
                                 );
@@ -1141,10 +1259,12 @@ export default function ClassDetailPage() {
                               const statusBg = sub.approved === true ? "#dcfce7"
                                 : sub.approved === false ? "#fee2e2" : "#fef9c3";
                               return (
-                                <td key={ch.id} style={{ ...TD, textAlign: "center", verticalAlign: "middle" }}>
+                                <td key={ch.id} style={{ ...TD, textAlign: "center", verticalAlign: "middle",
+                                  borderLeft: i === 0 ? "4px solid #8b5cf6" : undefined }}>
                                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
                                     <div style={{ border: `3px solid ${borderColor}`, borderRadius: 8, overflow: "hidden",
                                       boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
                                       <img src={sub.image_data} alt={s.name} width={108} height={108} style={{ display: "block" }} />
                                     </div>
                                     <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px",

@@ -195,3 +195,27 @@ export async function approveTurtleSubmission(id: string, approved: boolean | nu
     body: JSON.stringify({ id, approved }),
   })
 }
+
+// ─── Turtle assignments (teacher-side) ────────────────────────────────────────
+
+export async function fetchTurtleAssignments(classId: string): Promise<string[]> {
+  const res = await fetch(`/api/teacher/turtle-assignments?classId=${classId}`)
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function assignTurtleChallenge(classId: string, challengeId: string): Promise<boolean> {
+  const res = await fetch('/api/teacher/turtle-assignments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ classId, challengeId }),
+  })
+  return res.ok
+}
+
+export async function unassignTurtleChallenge(classId: string, challengeId: string): Promise<boolean> {
+  const res = await fetch(`/api/teacher/turtle-assignments?classId=${classId}&challengeId=${encodeURIComponent(challengeId)}`, {
+    method: 'DELETE',
+  })
+  return res.ok
+}
