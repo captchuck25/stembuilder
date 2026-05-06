@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { CHALLENGES, type TurtleChallenge } from "./challenges";
@@ -495,6 +496,7 @@ const CMD_REF = [
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function TurtlePage() {
   const { data: session } = useSession();
+  const router = useRouter();
   const userId = session?.user?.id ?? null;
   const [view,          setView]          = useState<"hub" | "notes" | "editor">("hub");
   const [code,          setCode]          = useState(CHALLENGES[0].starterCode);
@@ -549,6 +551,31 @@ export default function TurtlePage() {
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [view, code]);
+
+  // Intercept any anchor click on the page (SiteHeader, etc) when code is dirty.
+  // Catches Next.js <Link> navigation which beforeunload misses.
+  useEffect(() => {
+    if (view !== "editor") return;
+    function onClick(e: MouseEvent) {
+      if (code === baseCodeRef.current) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      const a = (e.target as HTMLElement | null)?.closest?.("a");
+      if (!a) return;
+      const href = a.getAttribute("href");
+      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) return;
+      const tgt = a.getAttribute("target");
+      if (tgt && tgt !== "" && tgt !== "_self") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const isInternal = href.startsWith("/") && !href.startsWith("//");
+      setNavGuard({ onLeave: () => {
+        if (isInternal) router.push(href);
+        else window.location.href = href;
+      } });
+    }
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [view, code, router]);
 
   // Handle ?challenge= param from My Work page (load saved code)
   useEffect(() => {
