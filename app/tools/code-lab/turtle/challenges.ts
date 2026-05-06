@@ -371,9 +371,6 @@ for i in range(180):
 
 # ── Now add the other four rings ─────────────────
 # Pattern: color → penup → goto(x, y) → pendown → loop forward(2) + left(2) x 180
-#
-# Top row    (y = -20):  Black at x = -20,  Red at x = 80
-# Bottom row (y = -100): Yellow at x = -70, Green at x = 30
 `,
   },
   {
