@@ -3477,14 +3477,50 @@ function BridgeToolPage() {
     await performCloudSave(name);
   }
 
+  // Rasterize the bridge SVG to a small JPEG data URL for use as a thumbnail
+  // in My Work cards and the teacher gradebook. Returns null if rendering fails.
+  async function captureBridgeThumbnail(): Promise<string | null> {
+    if (!members.length) return null;
+    try {
+      const svgMarkup = buildBridgeOnlyExportSvgMarkup();
+      const blob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const i = new window.Image();
+          i.onload = () => resolve(i);
+          i.onerror = () => reject(new Error("thumb render failed"));
+          i.src = url;
+        });
+        const W = 240, H = 140;
+        const canvas = document.createElement("canvas");
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+        const srcW = img.naturalWidth || 1, srcH = img.naturalHeight || 1;
+        const scale = Math.min(W / srcW, H / srcH);
+        const dw = srcW * scale, dh = srcH * scale;
+        ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+        return canvas.toDataURL("image/jpeg", 0.78);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch {
+      return null;
+    }
+  }
+
   async function performCloudSave(name: string) {
     if (!session?.user || !userId) return;
     setSaveStatus("saving");
     // Don't overwrite the display name when saving under the internal asgn_ key
     if (!name.startsWith('asgn_') && name !== bridgeName) setBridgeName(name);
+    const thumbnail = await captureBridgeThumbnail();
     try {
       await upsertBridgeDesign(userId, {
         name,
+        thumbnail,
         spanFeet,
         loadLb,
         designerName,
@@ -3510,9 +3546,11 @@ function BridgeToolPage() {
 
     // Save the design first — the name asgn_<id> is the key for reloading on reopen
     const saveKey = `asgn_${assignmentConfig.id}`;
+    const thumbnail = await captureBridgeThumbnail();
     try {
       await upsertBridgeDesign(userId, {
         name: saveKey,
+        thumbnail,
         spanFeet,
         loadLb,
         designerName,

@@ -122,7 +122,7 @@ export default function ClassDetailPage() {
   const [expandedBridgeId, setExpandedBridgeId] = useState<string | null>(null);
   const [bridgeLeaderboards, setBridgeLeaderboards] = useState<Record<string, BridgeSubmissionRow[]>>({});
   const [loadingLeaderboardId, setLoadingLeaderboardId] = useState<string | null>(null);
-  interface BridgeSubmissionCell { cost: number; passed: boolean; }
+  interface BridgeSubmissionCell { cost: number; passed: boolean; thumbnail: string | null; }
   // submissionMap[student_id][assignment_id] = cell
   const [bridgeSubmissionMap, setBridgeSubmissionMap] = useState<Record<string, Record<string, BridgeSubmissionCell>>>({});
   const [loadingBridgeGradebook, setLoadingBridgeGradebook] = useState(false);
@@ -184,11 +184,11 @@ export default function ClassDetailPage() {
     setLoadingBridgeGradebook(true);
     fetch(`/api/teacher/bridge-gradebook?classId=${classId}`)
       .then(r => r.ok ? r.json() : [])
-      .then((rows: Array<{ assignment_id: string; student_id: string; cost: number; passed: boolean }>) => {
+      .then((rows: Array<{ assignment_id: string; student_id: string; cost: number; passed: boolean; thumbnail: string | null }>) => {
         const map: Record<string, Record<string, BridgeSubmissionCell>> = {};
         for (const row of rows) {
           if (!map[row.student_id]) map[row.student_id] = {};
-          map[row.student_id][row.assignment_id] = { cost: row.cost, passed: row.passed };
+          map[row.student_id][row.assignment_id] = { cost: row.cost, passed: row.passed, thumbnail: row.thumbnail };
         }
         setBridgeSubmissionMap(map);
       })
@@ -692,7 +692,7 @@ export default function ClassDetailPage() {
               <tr>
                 <th style={{ ...TH, ...NAME_TD, background: "#fef9c3", zIndex: 2 }}>Student</th>
                 {bridgeAssignments.map(a => (
-                  <th key={a.id} colSpan={2}
+                  <th key={a.id} colSpan={3}
                     style={{ ...TH, borderLeft: "4px solid #d97706", textAlign: "center", paddingLeft: 16, background: "#fef9c308" }}>
                     <div style={{ color: "#92400e", fontWeight: 900 }}>{a.title || "Bridge Assignment"}</div>
                     <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginTop: 2 }}>
@@ -705,6 +705,7 @@ export default function ClassDetailPage() {
                 <th style={{ ...TH, ...NAME_TD, background: "#fef9c3", zIndex: 2 }} />
                 {bridgeAssignments.map(a => [
                   <th key={`${a.id}-pass`} style={{ ...TH, borderLeft: "4px solid #d97706" + "30", color: "#666", fontWeight: 700, background: "#fef9c305", textAlign: "center" }}>Result</th>,
+                  <th key={`${a.id}-design`} style={{ ...TH, color: "#666", fontWeight: 700, background: "#fef9c305", textAlign: "center" }}>Design</th>,
                   <th key={`${a.id}-cost`} style={{ ...TH, color: "#666", fontWeight: 700, background: "#fef9c305", textAlign: "right" }}>Cost</th>,
                 ])}
               </tr>
@@ -729,6 +730,18 @@ export default function ClassDetailPage() {
                           }}>
                             {cell.passed ? "✓ Pass" : "✗ Fail"}
                           </span>
+                        ) : (
+                          <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
+                        )}
+                      </td>,
+                      <td key={`${a.id}-design`} style={{ ...TD, textAlign: "center" }}>
+                        {cell?.thumbnail ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={cell.thumbnail} alt="Bridge design"
+                            style={{ width: 96, height: 56, objectFit: "contain", display: "inline-block",
+                              borderRadius: 4, border: "1px solid #fde68a", background: "#fff" }} />
+                        ) : cell ? (
+                          <span style={{ color: "#ccc", fontSize: 11, fontStyle: "italic" }}>no preview</span>
                         ) : (
                           <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
                         )}

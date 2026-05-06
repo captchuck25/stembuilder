@@ -28,6 +28,7 @@ export interface BridgeDesign {
   members: unknown[];
   passed: boolean | null;
   cost: number | null;
+  thumbnail: string | null;
   assignment_id: string | null;
   created_at: string;
   updated_at: string;
@@ -50,6 +51,7 @@ export async function upsertBridgeDesign(
     members: unknown[];
     passed: boolean | null;
     cost: number | null;
+    thumbnail?: string | null;
   }
 ): Promise<void> {
   const res = await fetch('/api/bridge', {

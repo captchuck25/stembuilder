@@ -303,7 +303,16 @@ function BridgeSection({ designs, onDeleted }: { designs: BridgeDesign[]; onDele
               borderRadius: 12, padding: "14px 18px", transition: "border-color 150ms" }}
               onMouseEnter={e => (e.currentTarget.style.borderColor = isAssignment ? "#d97706" : "#7c3aed")}
               onMouseLeave={e => (e.currentTarget.style.borderColor = isAssignment ? "#fde68a" : "#e5e7eb")}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
+                {d.thumbnail && (
+                  <Link href={`/tools/bridge?id=${d.id}`} style={{ flexShrink: 0 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={d.thumbnail} alt={displayName}
+                      style={{ width: 120, height: 70, objectFit: "contain",
+                        borderRadius: 8, border: `1px solid ${isAssignment ? "#fde68a" : "#e5e7eb"}`,
+                        background: "#fff", display: "block" }} />
+                  </Link>
+                )}
                 <Link href={`/tools/bridge?id=${d.id}`} style={{ textDecoration: "none", flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 15, fontWeight: 900, color: "#111", marginBottom: 6 }}>
                     {displayName}

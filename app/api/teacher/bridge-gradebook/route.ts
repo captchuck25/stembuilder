@@ -38,5 +38,25 @@ export async function GET(req: NextRequest) {
     .select('assignment_id, student_id, cost, passed, submitted_at')
     .in('assignment_id', assignmentIds)
 
-  return NextResponse.json(submissions ?? [])
+  // Join thumbnails from bridge_designs (saved under name = `asgn_<assignment_id>`)
+  type Sub = { assignment_id: string; student_id: string; cost: number; passed: boolean; submitted_at: string }
+  const subs = (submissions ?? []) as Sub[]
+  const designNames = assignmentIds.map(id => `asgn_${id}`)
+  const studentIds = Array.from(new Set(subs.map(s => s.student_id)))
+  const thumbMap: Record<string, string> = {}
+  if (subs.length > 0) {
+    const { data: designs } = await db
+      .from('bridge_designs')
+      .select('user_id, name, thumbnail')
+      .in('user_id', studentIds)
+      .in('name', designNames)
+    for (const d of (designs ?? []) as Array<{ user_id: string; name: string; thumbnail: string | null }>) {
+      if (!d.thumbnail) continue
+      const aid = d.name.startsWith('asgn_') ? d.name.slice(5) : d.name
+      thumbMap[`${d.user_id}:${aid}`] = d.thumbnail
+    }
+  }
+
+  const result = subs.map(s => ({ ...s, thumbnail: thumbMap[`${s.student_id}:${s.assignment_id}`] ?? null }))
+  return NextResponse.json(result)
 }
