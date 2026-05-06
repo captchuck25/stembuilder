@@ -218,12 +218,12 @@ function checkTutorialSuccess(id: string, cmds: Cmd[], code: string): boolean {
   const draws = cmds.filter(c => c.t === "DRAW").length;
   const fills = cmds.filter(c => c.t === "F").length;
   switch (id) {
-    case "line":    return draws >= 1;
-    case "turns":   return draws >= 2 && (/\bright\b|\brt\b/.test(code) || /\bleft\b|\blt\b/.test(code));
-    case "square":  return draws >= 4;
+    case "line":    return draws >= 1 && /\bforward\(|\bfd\(/.test(code);
+    case "turns":   return draws >= 2 && /\bforward\(|\bfd\(/.test(code) && (/\bright\(|\brt\(/.test(code) || /\bleft\(|\blt\(/.test(code));
+    case "square":  return draws >= 1 && /\bfor\b/.test(code) && /\bforward\(|\bfd\(/.test(code) && (/\bright\(|\brt\(/.test(code) || /\bleft\(|\blt\(/.test(code));
     case "colors":  return draws >= 1 && (/\bcolor\s*\(/.test(code) || /\bpensize\s*\(/.test(code) || /\bwidth\s*\(/.test(code));
     case "fill":    return fills >= 1;
-    case "ladder":  return draws >= 10 && (code.match(/goto\(/g) || []).length >= 4;
+    case "ladder":  return draws >= 1 && (code.match(/\bgoto\(/g) || []).length >= 4;
     default:        return false;
   }
 }
