@@ -374,15 +374,15 @@ function AnimatedCanvas({ code, size = 300 }: { code: string; size?: number }) {
 
     function tick() {
       if (cancelled) return;
-      for (let b = 0; b < 4 && idx < cmds.length; b++) {
+      for (let b = 0; b < 2 && idx < cmds.length; b++) {
         applyCmd(bgCtx, cmds[idx], tvRef, bgColorRef); idx++;
       }
       drawFrame();
       if (idx >= cmds.length) {
-        timerId = setTimeout(() => { if (!cancelled) { resetState(); tick(); } }, 2000);
+        timerId = setTimeout(() => { if (!cancelled) { resetState(); tick(); } }, 2500);
         return;
       }
-      timerId = setTimeout(tick, 25);
+      timerId = setTimeout(tick, 45);
     }
 
     resetState(); tick();
@@ -1200,7 +1200,7 @@ export default function TurtlePage() {
                           </div>
                           <pre style={{ background:"#1e1e2e", borderRadius:8,
                             padding:"10px 12px", fontSize:11, fontFamily:"'Courier New', monospace",
-                            lineHeight:1.6, margin:0, overflowX:"hidden",
+                            lineHeight:1.6, margin:"0 0 12px", overflowX:"hidden",
                             border:"1px solid #3a3a5e", whiteSpace:"pre-wrap", userSelect:"none" }}>
                             {(() => {
                               const el = activeChallenge.example!.trimEnd().split("\n");
@@ -1213,6 +1213,11 @@ export default function TurtlePage() {
                               </>);
                             })()}
                           </pre>
+                          <div style={{ fontSize:10, fontWeight:800, color:"#4ade80", letterSpacing:"0.8px",
+                            textTransform:"uppercase", marginBottom:8 }}>
+                            Output
+                          </div>
+                          <AnimatedCanvas code={activeChallenge.example} size={238} />
                         </>
                       )}
                     </>
