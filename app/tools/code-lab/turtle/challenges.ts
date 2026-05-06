@@ -485,56 +485,114 @@ color("purple")
     id: "school-bus",
     category: "challenge",
     title: "School Bus",
-    description: "Build a school bus! The body is done — add windows, wheels, and any details you like.",
-    hint: "Use goto(x, y) to position, then begin_fill() / end_fill() for each colored shape. Wheels use circle(r).",
-    previewLines: 16,
-    solutionCode: `color("black")
+    description: "Build a school bus! The yellow body is done — add wheels and windows to finish it.",
+    hint: "Wheels are filled circles drawn with forward(1) + left(4) x 90. Windows are filled squares — same 4-step square loop you used in tutorial 3.",
+    previewLines: 24,
+    solutionCode: `# School Bus
+color("black")
 pensize(2)
+
+# Bus body
 fillcolor("gold")
 begin_fill()
 penup()
-goto(-110, -20)
+goto(-125, -20)
 pendown()
-goto(100, -20)
-goto(100, 55)
-goto(-110, 55)
-goto(-110, -20)
+forward(250)
+left(90)
+forward(40)
+left(90)
+forward(40)
+right(90)
+forward(40)
+left(90)
+forward(210)
+left(90)
+forward(80)
 end_fill()
-fillcolor("orange")
-begin_fill()
+
+# Wheels
 penup()
-goto(100, -20)
-pendown()
-goto(130, -20)
-goto(130, 35)
-goto(100, 35)
-goto(100, -20)
-end_fill()
-fillcolor("lightblue")
-for i in range(3):
-    begin_fill()
-    penup()
-    goto(-95 + i*62, 8)
-    pendown()
-    goto(-60 + i*62, 8)
-    goto(-60 + i*62, 36)
-    goto(-95 + i*62, 36)
-    goto(-95 + i*62, 8)
-    end_fill()
 color("black")
 fillcolor("black")
-penup()
-goto(-65, -38)
-pendown()
 begin_fill()
-circle(18)
+goto(-100,-20)
+pendown()
+for i in range(90):
+    forward(1)
+    left(4)
 end_fill()
 penup()
-goto(55, -38)
+
+color("black")
+fillcolor("black")
+begin_fill()
+goto(80,-20)
+pendown()
+for i in range(90):
+    forward(1)
+    left(4)
+end_fill()
+penup()
+
+# Windows
+penup()
+color("black")
+fillcolor("black")
+goto(-100,50)
 pendown()
 begin_fill()
-circle(18)
-end_fill()`,
+for i in range(4):
+    forward(20)
+    left(90)
+end_fill()
+
+penup()
+color("black")
+fillcolor("black")
+goto(-60,50)
+pendown()
+begin_fill()
+for i in range(4):
+    forward(20)
+    left(90)
+end_fill()
+
+penup()
+color("black")
+fillcolor("black")
+goto(-20,50)
+pendown()
+begin_fill()
+for i in range(4):
+    forward(20)
+    left(90)
+end_fill()
+
+penup()
+color("black")
+fillcolor("black")
+goto(20,50)
+pendown()
+begin_fill()
+for i in range(4):
+    forward(20)
+    left(90)
+end_fill()
+
+penup()
+color("black")
+fillcolor("black")
+goto(60,50)
+pendown()
+begin_fill()
+for i in range(4):
+    forward(20)
+    left(90)
+end_fill()
+
+penup()
+goto(100,100)`,
     starterCode: `# School Bus
 color("black")
 pensize(2)
@@ -543,43 +601,30 @@ pensize(2)
 fillcolor("gold")
 begin_fill()
 penup()
-goto(-110, -20)
+goto(-125, -20)
 pendown()
-goto(100, -20)
-goto(100, 55)
-goto(-110, 55)
-goto(-110, -20)
+forward(250)
+left(90)
+forward(40)
+left(90)
+forward(40)
+right(90)
+forward(40)
+left(90)
+forward(210)
+left(90)
+forward(80)
 end_fill()
-
-# ── Front hood ──────────────────────────────────
-fillcolor("orange")
-begin_fill()
-penup()
-goto(100, -20)
-pendown()
-goto(130, -20)
-goto(130, 35)
-goto(100, 35)
-goto(100, -20)
-end_fill()
-
-# ── TODO: Add 3 windows ─────────────────────────
-# Each window is about 35 wide and 28 tall
-# Use fillcolor("lightblue")
-# First window hint: starts near (-95, 8)
-# Try a loop with goto(-95 + i*62, 8) for i in range(3)
-
-
 
 # ── TODO: Add 2 wheels ──────────────────────────
-# Use circle(18) for each wheel
-# goto(x, y - 18) positions turtle at bottom of a circle centered at (x, y)
-# Try wheel centers at (-65, -20) and (55, -20)
+# Each wheel is a filled circle drawn with forward(1) + left(4) x 90
+# Use fillcolor("black") and wrap the loop in begin_fill() / end_fill()
 
 
 
-# ── TODO: Any extra details? ────────────────────
-# Ideas: door, headlight, black bumper strip, roof details
+# ── TODO: Add windows along the top of the bus ──
+# Each window is a filled 20x20 square (4-side loop, forward 20 left 90)
+# Use fillcolor("black") and start near y = 50
 `,
   },
 ];
