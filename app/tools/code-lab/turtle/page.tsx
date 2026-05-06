@@ -1252,7 +1252,7 @@ export default function TurtlePage() {
                             textTransform:"uppercase", marginBottom:8 }}>
                             Goal
                           </div>
-                          <ExampleCanvas code={activeChallenge.solutionCode} size={238} />
+                          <AnimatedCanvas code={activeChallenge.solutionCode!} size={238} />
                         </>
                       )}
                     </>

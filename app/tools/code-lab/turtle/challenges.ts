@@ -222,7 +222,7 @@ forward(200)
     category: "challenge",
     title: "5-Pointed Star",
     description: "Draw a classic 5-pointed star with a filled center. The secret is the turn angle — it's not 72°!",
-    hint: "A 5-pointed star turns right 144° at each point — not 72°. Try it!",
+    hint: "Each point of the star needs a big turn — experiment between 130° and 150° to find the one that closes perfectly.",
     previewLines: 9,
     solutionCode: `pensize(2)
 color("black")
