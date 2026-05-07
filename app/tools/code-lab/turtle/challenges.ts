@@ -454,30 +454,23 @@ for i in range(4):
     right(90)
 
 # ── Roof ────────────────────────────────────────
-# After the walls, the turtle is back at (-100, 0).
-# Turn left 45°, draw 142 forward, right 90°, draw 142 again.
 color("purple")
 
 
 
 # ── Window left (square) ────────────────────────
-# goto(-70, -50), then a 4-side loop with forward(40)
-# Try left(45) before the loop to make it a diamond!
 
 
 
 # ── Window right (square) ───────────────────────
-# goto(30, -50), then a normal 4-side square with forward(40)
 
 
 
 # ── Door ────────────────────────────────────────
-# goto(-15, -200). Draw a tall thin rectangle (80 high x 30 wide).
 
 
 
 # ── Door knob (tiny circle) ─────────────────────
-# Use the bull's-eye trick: forward(.1) + right(2) x 180
 
 `,
   },
@@ -617,14 +610,10 @@ forward(80)
 end_fill()
 
 # ── TODO: Add 2 wheels ──────────────────────────
-# Each wheel is a filled circle drawn with forward(1) + left(4) x 90
-# Use fillcolor("black") and wrap the loop in begin_fill() / end_fill()
 
 
 
 # ── TODO: Add windows along the top of the bus ──
-# Each window is a filled 20x20 square (4-side loop, forward 20 left 90)
-# Use fillcolor("black") and start near y = 50
 `,
   },
 ];
