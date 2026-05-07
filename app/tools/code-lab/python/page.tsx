@@ -64,7 +64,7 @@ async function syncProgressToCloud(
   });
 }
 
-async function syncCodeToCloud(userId: string, li: number, ci: number, code: string) {
+async function syncCodeToCloud(userId: string, li: number, ci: number, code: string, completed: boolean) {
   await fetch("/api/progress", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -72,7 +72,7 @@ async function syncCodeToCloud(userId: string, li: number, ci: number, code: str
       tool: "code-lab-python",
       level_idx: li,
       challenge_idx: ci,
-      completed: false,
+      completed,
       saved_code: code,
     }),
   });
@@ -1097,9 +1097,10 @@ export default function PythonMazePage() {
 
   function saveCodeOnly(li: number, ci: number, code: string) {
     // Use progressRef.current so we never clobber a completion that just fired
+    const wasCompleted = !!progressRef.current.completedChallenges[chalKey(li, ci)];
     const p = { ...progressRef.current, savedCode: { ...progressRef.current.savedCode, [chalKey(li,ci)]: code } };
     updateProgress(p);
-    if (userId) syncCodeToCloud(userId, li, ci, code);
+    if (userId) syncCodeToCloud(userId, li, ci, code, wasCompleted);
   }
 
   const lockedLevels = new Set(lockedChallenges.filter(lc => lc.challenge_idx === -1).map(lc => lc.level_idx));
