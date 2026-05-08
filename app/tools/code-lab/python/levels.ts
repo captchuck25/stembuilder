@@ -2,6 +2,15 @@
 
 export type Dir = 0 | 1 | 2 | 3; // N=0  E=1  S=2  W=3
 
+export interface ChallengeImage {
+  src: string;       // public path, e.g. "/python-maze/1-1.png"
+  width: number;     // natural pixel width
+  height: number;    // natural pixel height
+  cellPx: number;    // size of one logical grid cell in image pixels
+  originX: number;   // pixel x of grid cell (0,0) top-left
+  originY: number;   // pixel y of grid cell (0,0) top-left
+}
+
 export interface Challenge {
   title: string;
   hint: string;
@@ -12,6 +21,7 @@ export interface Challenge {
   exitX: number;
   exitY: number;
   starterCode: string;
+  image?: ChallengeImage; // when set, renders this PNG instead of procedural cells
 }
 
 export interface QuizQ {
@@ -88,19 +98,31 @@ Start with Challenge 1 and work your way through. The mazes get longer and more 
       hint: "The exit is 3 steps to your right. Call move_forward() three times.",
       grid: [[1,1,1,1],[0,0,0,0],[1,1,1,1]],
       startX:0, startY:1, startDir:1, exitX:3, exitY:1,
+      image: {
+        src: "/python-maze/python_1-1.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 157.5, originY: 105,  // grid (0,0) top-left in image px
+      },
       starterCode: `# Move forward to reach the exit!
 
 move_forward()
 `,
     },
     {
-      // ████████
-      // S......E
-      // ████████
+      // █████████
+      // S.......E
+      // █████████
       title: "Keep Going",
-      hint: "Six steps forward. Add more move_forward() calls.",
-      grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,0,0],[1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:1,
+      hint: "Seven steps forward. Add more move_forward() calls.",
+      grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:1, exitX:7, exitY:1,
+      image: {
+        src: "/python-maze/python_1-2.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 57.5, originY: 105,
+      },
       starterCode: `# The corridor is longer this time.
 
 move_forward()
@@ -109,151 +131,242 @@ move_forward()
     },
     {
       // █████
-      // S..██
-      // ███.█
-      // ███.E
+      // SXXXX     S = start (left), then 3 forwards to the corner
+      // ████X     turn right (south), then forward
+      // ████E     forward → gear
       title: "First Corner",
-      hint: "Go forward twice, turn right, go forward twice, turn left, go forward twice.",
+      hint: "Go forward to the end of the hallway, then turn right and head down to the gear.",
       grid: [
-        [1,1,1,1,1],
-        [0,0,0,1,1],
-        [1,1,0,1,1],
-        [1,1,0,0,0],
+        [1,1,1,1],
+        [0,0,0,0],
+        [1,1,1,0],
+        [1,1,1,0],
+        [1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:4, exitY:3,
-      starterCode: `# The path turns! Use turn_right() or turn_left().
+      startX:0, startY:1, startDir:1, exitX:3, exitY:3,
+      image: {
+        src: "/python-maze/python_1-3.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 107.5, originY: 54.5,
+      },
+      starterCode: `# The path turns! Go forward across the top, then turn_right() and go down.
 
 move_forward()
 move_forward()
-# what comes next?
-`,
-    },
-    {
-      // ████
-      // ██.E
-      // ██.█
-      // S..█
-      title: "Going North",
-      hint: "Go right to the corner, turn left (to face North), go up, then turn right and step to the exit.",
-      grid: [
-        [1,1,0,0],
-        [1,1,0,1],
-        [1,1,0,1],
-        [0,0,0,1],
-      ],
-      startX:0, startY:3, startDir:1, exitX:3, exitY:0,
-      starterCode: `# This time the exit is above you.
-# turn_left() from East faces you North.
-
-`,
-    },
-    {
-      // ███████
-      // S..████
-      // ██..███
-      // ████..E
-      title: "The S-Curve",
-      hint: "The path steps down twice. Each step is: forward, turn right, forward, turn left.",
-      grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,1,1,1],
-        [1,1,0,0,1,1,1],
-        [1,1,1,0,0,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# Spot the repeating pattern: forward, turn right, forward, turn left
-
+move_forward()
+# now turn and keep going to the gear
 `,
     },
     {
       // ██████
-      // S....█
-      // ████.█
-      // E....█  (exit at left end)
+      // SXXX██
+      // ███X██
+      // ███X██
+      // ███XXE
+      title: "The S-Curve",
+      hint: "This time you will need to use turn_left() and turn_right()",
+      grid: [
+        [1,1,1,1,1,1,1],
+        [0,0,0,0,1,1,1],
+        [1,1,1,0,1,1,1],
+        [1,1,1,0,1,1,1],
+        [1,1,1,0,0,0,0],
+        [1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:6, exitY:4,
+      image: {
+        src: "/python-maze/python_1-4.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 107.5, originY: 54.5,
+      },
+      starterCode: `# This time you will need to use turn_left() and turn_right()
+
+move_forward()
+move_forward()
+move_forward()
+turn_right()
+`,
+    },
+    {
+      // ███████
+      // SXXXX██
+      // ████X██
+      // ████X██
+      // EXXXXX█
       title: "U-Turn",
-      hint: "Go right, turn south, go down, turn again to face west, go back the other way.",
+      hint: "Be sure to count your moves while using different commands.",
       grid: [
         [1,1,1,1,1,1],
         [0,0,0,0,0,1],
         [1,1,1,1,0,1],
+        [1,1,1,1,0,1],
         [0,0,0,0,0,1],
+        [1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:0, exitY:3,
-      starterCode: `# You will need to turn right twice on this one.
+      startX:0, startY:1, startDir:1, exitX:0, exitY:4,
+      image: {
+        src: "/python-maze/python_1-5.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 107.5, originY: 54.5,
+      },
+      starterCode: `# Be sure to count your moves while using different commands.
 
+move_forward()
+move_forward()
+move_forward()
+move_forward()
+turn_right()
+`,
+    },
+    {
+      // █████
+      // SX███
+      // █XX██
+      // ██XE█
+      title: "Stairstep",
+      hint: "Things are getting a little repetative here!",
+      grid: [
+        [1,1,1,1],
+        [0,0,1,1],
+        [1,0,0,1],
+        [1,1,0,0],
+        [1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:3, exitY:3,
+      image: {
+        src: "/python-maze/python_1-6.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 157.5, originY: 54.5,
+      },
+      starterCode: `# Things are getting a little repetative here!
+
+move_forward()
+turn_right()
+move_forward()
+turn_left()
 `,
     },
     {
       // ████████
-      // S....███
-      // █████.██
-      // █████..E
-      title: "Stair Step",
-      hint: "Two right turns and two left turns. Plan the sequence on paper first.",
+      // SXXXX███
+      // ████XX██
+      // █████XE█
+      title: "Down the Stairs",
+      hint: "Work your way down the staircase!",
       grid: [
         [1,1,1,1,1,1,1,1],
         [0,0,0,0,0,1,1,1],
         [1,1,1,1,0,0,1,1],
         [1,1,1,1,1,0,0,0],
+        [1,1,1,1,1,1,1,1],
       ],
       startX:0, startY:1, startDir:1, exitX:7, exitY:3,
-      starterCode: `# Three segments connected by two right turns.
-# Count the steps in each segment carefully.
-
-`,
-    },
-    {
-      // ███████████████
-      // S.............E   (13 steps!)
-      // ███████████████
-      title: "The Long Hall",
-      hint: "Count the open cells — that's how many move_forward() calls you need. This is going to feel repetitive…",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-      ],
-      startX:0, startY:1, startDir:1, exitX:14, exitY:1,
-      starterCode: `# 14 cells to cross. Type them all out — for now.
-# (Notice how long this code is getting!)
+      image: {
+        src: "/python-maze/python_1-7.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 57.5, originY: 54.5,
+      },
+      starterCode: `# Work your way down the staircase!
 
 move_forward()
+move_forward()
+move_forward()
+move_forward()
+turn_right()
 `,
     },
     {
-      // Long winding path requiring ~22 commands
-      title: "The Marathon",
-      hint: "Six segments connected by four turns. Label each segment length before you start coding.",
+      // ████████
+      // SXXXX███   long hall — but it's a TRAP, you can't reach the gear from the right end
+      // ████X███
+      // ████X███
+      // ████X███
+      // ████XE██   gear is below the middle of the hall, not at the right
+      title: "The Trap",
+      hint: "Be sure not to overshoot your path.",
       grid: [
         [1,1,1,1,1,1,1,1],
         [0,0,0,0,0,0,0,1],
-        [1,1,1,1,1,1,0,1],
-        [1,0,0,0,0,0,0,1],
-        [1,0,1,1,1,1,1,1],
-        [1,0,0,0,0,0,0,0],
+        [1,1,1,0,1,1,1,1],
+        [1,1,1,0,1,1,1,1],
+        [1,1,1,0,1,1,1,1],
+        [1,1,1,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
-      starterCode: `# A long winding path.
-# Trace the route first, then write the commands.
+      startX:0, startY:1, startDir:1, exitX:5, exitY:5,
+      image: {
+        src: "/python-maze/python_1-8.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 57.5, originY: 4.5,
+      },
+      starterCode: `# Be sure not to overshoot your path.
 
+move_forward()
+move_forward()
+move_forward()
+turn_right()
 `,
     },
     {
-      // Staircase — clear repeating pattern
-      title: "The Gauntlet",
-      hint: "Look carefully — the path repeats the SAME pattern over and over. Count how many times. There must be a better way to write this…",
+      // serpentine: 7 across, drop 1, 7 back left, drop 1, 5 right with gear
+      title: "The Marathon",
+      hint: "Snakes top-to-bottom: across, drop, back across, drop, across again. Count each segment.",
       grid: [
-        [1,1,1,1,1,1,1,1],
-        [0,0,1,1,1,1,1,1],
-        [1,0,0,1,1,1,1,1],
-        [1,1,0,0,1,1,1,1],
-        [1,1,1,0,0,1,1,1],
-        [1,1,1,1,0,0,1,1],
-        [1,1,1,1,1,0,0,0],
+        [1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,0],
+        [1,0,0,0,0,0,0],
+        [1,0,1,1,1,1,1],
+        [1,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:6,
-      starterCode: `# The staircase pattern repeats: forward, turn right, forward, turn left
-# Write it out the long way for now — then think about Level 2!
+      startX:0, startY:1, startDir:1, exitX:5, exitY:5,
+      image: {
+        src: "/python-maze/python_1-9.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 57.5, originY: 4.5,
+      },
+      starterCode: `# A long winding path. Plan each segment before you write it.
+
+move_forward()
+move_forward()
+move_forward()
+move_forward()
+move_forward()
+move_forward()
+turn_right()
+# drop down, then turn right and head back the other way…
+`,
+    },
+    {
+      // winding maze with gear up top — path snakes around and ends back near the top
+      title: "The Gauntlet",
+      hint: "Use all you have learned on this long journey :)",
+      grid: [
+        [1,1,1,1,1,1,1],
+        [0,0,1,1,1,0,0],
+        [1,0,0,0,1,1,0],
+        [1,1,1,0,1,1,0],
+        [1,1,1,0,1,1,0],
+        [1,1,1,0,0,0,0],
+        [1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:5, exitY:1,
+      image: {
+        src: "/python-maze/python_1-10.png",
+        width: 510, height: 360,
+        cellPx: 50,
+        originX: 57.5, originY: 4.5,
+      },
+      starterCode: `# Use all you have learned on this long journey :)
+# Notice: this is getting LONG. Level 2 will show you how to repeat with a loop!
 
 `,
     },

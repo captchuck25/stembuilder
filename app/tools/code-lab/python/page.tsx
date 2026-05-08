@@ -30,13 +30,33 @@ interface Progress {
   completedChallenges: Record<string, boolean>; // "levelIdx_chalIdx"
   completedLevels: Record<number, boolean>;
   savedCode: Record<string, string>;           // "levelIdx_chalIdx" → last code
+  migrationVersion?: number;                   // bump to invalidate stale savedCode
 }
+
+const CURRENT_MIGRATION_VERSION = 1;
+
+// Bump CURRENT_MIGRATION_VERSION whenever you ship new starterCode that should
+// replace whatever students have saved. Each step here runs once per browser.
+function applyMigrations(p: Progress): Progress {
+  const v = p.migrationVersion ?? 0;
+  if (v < 1) {
+    // L1 starter code overhaul (May 2026): wipe saved code for level_idx 0,
+    // challenges 0–9. Completion checkmarks and quiz scores are untouched.
+    const newSaved: Record<string, string> = {};
+    for (const k of Object.keys(p.savedCode)) {
+      if (!k.startsWith("0_")) newSaved[k] = p.savedCode[k];
+    }
+    p = { ...p, savedCode: newSaved };
+  }
+  return { ...p, migrationVersion: CURRENT_MIGRATION_VERSION };
+}
+
 function loadProgress(): Progress {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { savedCode: {}, ...JSON.parse(raw) };
+    if (raw) return applyMigrations({ savedCode: {}, ...JSON.parse(raw) });
   } catch { /* ignore */ }
-  return { completedChallenges: {}, completedLevels: {}, savedCode: {} };
+  return { completedChallenges: {}, completedLevels: {}, savedCode: {}, migrationVersion: CURRENT_MIGRATION_VERSION };
 }
 function saveProgress(p: Progress) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
@@ -315,6 +335,54 @@ function closeBlocks(code: string): string {
 const GUTTER = 14; // dark-navy strip around all maze edges
 
 function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; px: number; py: number; pdir: Dir; solved: boolean; robotFlash?: boolean }) {
+  // ── Image-backed renderer ──────────────────────────────────────────────
+  if (ch.image) {
+    const img = ch.image;
+    const W = img.width, H = img.height;
+    const cellSize = img.cellPx;
+    const cx2 = img.originX + px * cellSize + cellSize / 2;
+    const cy2 = img.originY + py * cellSize + cellSize / 2;
+    const r = cellSize * 0.36;
+    const angle = [Math.PI*1.5, 0, Math.PI*0.5, Math.PI][pdir];
+    const tip  = [cx2+Math.cos(angle)*r,   cy2+Math.sin(angle)*r];
+    const lp   = [cx2+Math.cos(angle+2.4)*r*0.6, cy2+Math.sin(angle+2.4)*r*0.6];
+    const rp   = [cx2+Math.cos(angle-2.4)*r*0.6, cy2+Math.sin(angle-2.4)*r*0.6];
+    const arrow = `M${tip[0]},${tip[1]} L${lp[0]},${lp[1]} L${cx2},${cy2} L${rp[0]},${rp[1]} Z`;
+    const showGrid = false; // toggle to false once positioning is dialed in
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
+        style={{ display:"block", borderRadius:12, maxWidth:"100%", height:"auto" }}>
+        <image href={img.src} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
+        {showGrid && (() => {
+          // Authoring template grid: 8 cols × 5 rows, 50px cells starting at (57.5, 54.5).
+          // Labels show (col,row) in template coords so you can say "start should be at (3,2)".
+          const TPL_X0 = 57.5, TPL_Y0 = 54.5, TPL = 50;
+          const cells: React.ReactNode[] = [];
+          for (let row = 0; row < 5; row++) {
+            for (let col = 0; col < 8; col++) {
+              const x = TPL_X0 + col * TPL;
+              const y = TPL_Y0 + row * TPL;
+              cells.push(
+                <g key={`tpl-${row}-${col}`}>
+                  <rect x={x} y={y} width={TPL} height={TPL}
+                    fill="none" stroke="#ff00ff" strokeWidth={1} strokeDasharray="3 2" />
+                  <text x={x + 3} y={y + 11} fill="#ff00ff"
+                    fontSize={9} fontWeight={700} fontFamily="monospace">
+                    {col},{row}
+                  </text>
+                </g>
+              );
+            }
+          }
+          return cells;
+        })()}
+        <circle cx={cx2} cy={cy2} r={r} fill={solved ? "#22c55e" : robotFlash ? "#dc2626" : "#3b82f6"}/>
+        <path d={arrow} fill="white"/>
+      </svg>
+    );
+  }
+
+  // ── Procedural renderer (existing) ─────────────────────────────────────
   const rows = ch.grid.length, cols = ch.grid[0].length;
   const W = cols*CELL + GUTTER*2, H = rows*CELL + GUTTER*2;
   const angle = [Math.PI*1.5, 0, Math.PI*0.5, Math.PI][pdir];
@@ -1045,6 +1113,7 @@ export default function PythonMazePage() {
           completedChallenges: { ...cloudP.completedChallenges, ...localP.completedChallenges },
           completedLevels:     { ...cloudP.completedLevels,     ...localP.completedLevels },
           savedCode:           { ...cloudP.savedCode,           ...localP.savedCode },
+          migrationVersion:    localP.migrationVersion,
         };
         progressRef.current = merged;
         setProgress(merged);
