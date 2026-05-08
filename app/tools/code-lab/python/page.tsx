@@ -204,10 +204,13 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
   } catch(e: unknown) {
     error = e instanceof Error ? e.message : String(e);
   }
-  // Solved = reached exit AND no actions ran after landing there (no extra loop iterations).
+  // Solved = reached exit AND no further movement happened (turns at the exit are OK).
   // !error catches straight corridors where extra steps hit the boundary wall.
-  // moves.length === exitReachedMoveCount catches conditional loops that turn in place at exit.
-  solved = !error && exitReachedMoveCount !== null && moves.length === exitReachedMoveCount;
+  // For loops often end with a trailing turn after the final forward — that's harmless,
+  // so we allow any number of turn-only moves after exitReachedMoveCount.
+  const trailingMovesAllOk = exitReachedMoveCount !== null
+    && moves.slice(exitReachedMoveCount).every(m => m.type === "turn");
+  solved = !error && exitReachedMoveCount !== null && trailingMovesAllOk;
   return { moves, error, solved };
 }
 
@@ -354,12 +357,18 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; p
         style={{ display:"block", borderRadius:12, maxWidth:"100%", height:"auto" }}>
         <image href={img.src} x={0} y={0} width={W} height={H} preserveAspectRatio="none" />
         {showGrid && (() => {
-          // Authoring template grid: 8 cols × 5 rows, 50px cells starting at (57.5, 54.5).
-          // Labels show (col,row) in template coords so you can say "start should be at (3,2)".
-          const TPL_X0 = 57.5, TPL_Y0 = 54.5, TPL = 50;
+          // Authoring template grid in (col,row) coords. L1 mazes use the legacy
+          // 8×5 template at (57.5, 54.5); L2+ mazes use 12×8 at (55, 55) — clean
+          // 1-cell padding inside a 5px image border.
+          const isL2Plus = W >= 700;
+          const TPL_X0 = isL2Plus ? 55 : 57.5;
+          const TPL_Y0 = isL2Plus ? 55 : 54.5;
+          const TPL = 50;
+          const COLS = isL2Plus ? 12 : 8;
+          const ROWS = isL2Plus ? 8 : 5;
           const cells: React.ReactNode[] = [];
-          for (let row = 0; row < 5; row++) {
-            for (let col = 0; col < 8; col++) {
+          for (let row = 0; row < ROWS; row++) {
+            for (let col = 0; col < COLS; col++) {
               const x = TPL_X0 + col * TPL;
               const y = TPL_Y0 + row * TPL;
               cells.push(
@@ -769,7 +778,7 @@ function ChallengeView({
           indentUnit.of("    "),
           keymap.of([{ key: "Enter", run: pythonEnter }]),
           EditorView.updateListener.of(u => { if (u.docChanged) codeRef.current = u.state.doc.toString(); }),
-          EditorView.theme({ "&":{ height:"100%", fontSize:"13px" }, ".cm-scroller":{ fontFamily:"'JetBrains Mono','Fira Code',monospace" } }),
+          EditorView.theme({ "&":{ height:"100%", fontSize:"13px" }, ".cm-scroller":{ fontFamily:"'JetBrains Mono','Fira Code',monospace" }, ".cm-selectionMatch":{ backgroundColor:"transparent" }, ".cm-matchingBracket, .cm-nonmatchingBracket":{ backgroundColor:"transparent", outline:"none" } }),
         ],
       }),
       parent: editorRef.current,

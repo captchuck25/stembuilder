@@ -509,16 +509,22 @@ Before writing a loop, ask: *"Am I doing the same thing multiple times in a row?
   challenges: [
     {
       title: "Loop Warm-Up",
-      hint: "Replace 8 repeated move_forward() calls with a for loop.",
+      hint: "6 Steps forward! Use aloop to keep your coding task short...",
       grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1],
+        [0,0,0,0,0,0],
+        [1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:1,
-      starterCode: `# 8 steps forward — write a for loop instead of 8 calls.
+      startX:0, startY:1, startDir:1, exitX:5, exitY:1,
+      image: {
+        src: "/python-maze/python_2-1.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 205, originY: 205,
+      },
+      starterCode: `#6 Steps forward! Use aloop to keep your coding task short...
 
-for i in range(8):
+for i in range(6):
     move_forward()
 `,
     },
@@ -526,11 +532,17 @@ for i in range(8):
       title: "Longer Corridor",
       hint: "How many steps to the exit? Put that number in range().",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:12, exitY:1,
+      startX:0, startY:1, startDir:1, exitX:11, exitY:1,
+      image: {
+        src: "/python-maze/python_2-2.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 205,
+      },
       starterCode: `# Count the cells, then loop.
 
 `,
@@ -539,19 +551,23 @@ for i in range(8):
       title: "Staircase Return",
       hint: "The staircase from Level 1! Each step is: forward, turn right, forward, turn left. Loop it.",
       grid: [
-        [1,1,1,1,1,1,1,1],
-        [0,0,1,1,1,1,1,1],
-        [1,0,0,1,1,1,1,1],
-        [1,1,0,0,1,1,1,1],
-        [1,1,1,0,0,1,1,1],
-        [1,1,1,1,0,0,1,1],
-        [1,1,1,1,1,0,0,0],
+        [1,1,1,1],
+        [0,0,1,1],
+        [1,0,0,1],
+        [1,1,0,0],
+        [1,1,1,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:6,
+      startX:0, startY:1, startDir:1, exitX:3, exitY:4,
+      image: {
+        src: "/python-maze/python_2-3.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 255, originY: 105,
+      },
       starterCode: `# Same maze as Level 1 — but this time use a loop.
-# Pattern: forward, right, forward, left — repeat 5 times, then forward twice.
+# Pattern: forward, right, forward, left.
 
-for i in range(5):
+for i in range(3):
     move_forward()
     turn_right()
     move_forward()
@@ -560,126 +576,170 @@ for i in range(5):
     },
     {
       title: "Longer Staircase",
-      hint: "Same pattern, more steps. Just change the number in range().",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,1,1,1,1,1,1,1],
-        [1,0,0,1,1,1,1,1,1,1],
-        [1,1,0,0,1,1,1,1,1,1],
-        [1,1,1,0,0,1,1,1,1,1],
-        [1,1,1,1,0,0,1,1,1,1],
-        [1,1,1,1,1,0,0,1,1,1],
-        [1,1,1,1,1,1,0,0,1,1],
-        [1,1,1,1,1,1,1,0,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:9, exitY:8,
-      starterCode: `# How many steps in this staircase?
-# Adjust the loop accordingly.
-
-`,
-    },
-    {
-      title: "Two Corridors",
-      hint: "Two long straight sections connected by a turn. Use a separate loop for each section.",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,1],
-        [1,1,1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,1,1,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:9, exitY:6,
-      starterCode: `# Two loops — one for each corridor.
-
-for i in range(8):
-    move_forward()
-turn_right()
-`,
-    },
-    {
-      title: "The U-Turn Returns",
-      hint: "U-turn from Level 1. Use a loop for each straight section.",
+      hint: "Staircase and a little more... After using a loop you will need to add some individual commands.",
       grid: [
         [1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,1],
-        [1,1,1,1,1,1,0,1],
-        [0,0,0,0,0,0,0,1],
+        [0,0,1,1,1,1,1,1],
+        [1,0,0,1,1,1,1,1],
+        [1,1,0,0,1,1,1,1],
+        [1,1,1,0,0,1,1,1],
+        [1,1,1,1,0,0,0,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:0, exitY:3,
-      starterCode: `# Three sections. A loop makes each one clean.
+      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
+      image: {
+        src: "/python-maze/python_2-4.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 155, originY: 55,
+      },
+      starterCode: `#Staircase and a little more...
+#After using a loop you will need to add some individual commands.
 
 `,
     },
     {
-      title: "Square Spiral",
-      hint: "Four steps right, four down, three left, two down, four right to the exit. Use a for loop for each section.",
+      title: "Steps Away",
+      hint: "Looks like we need to do a little walking before our staircase this time.",
       grid: [
-        [1,1,1,1,1,1],
-        [0,0,0,0,0,1],
-        [1,1,1,1,0,1],
-        [1,1,1,1,0,1],
-        [1,1,1,1,0,1],
-        [1,0,0,0,0,1],
-        [1,0,1,1,1,1],
-        [1,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1],
+        [0,0,0,0,1,1,1,1],
+        [1,1,1,0,0,1,1,1],
+        [1,1,1,1,0,0,1,1],
+        [1,1,1,1,1,0,0,1],
+        [1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:5, exitY:7,
-      starterCode: `# The path winds: right, down, left, down, right.
-# Use a for loop for each straight section.
+      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
+      image: {
+        src: "/python-maze/python_2-5.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 155, originY: 105,
+      },
+      starterCode: `#Looks like we need to do a little walking before our staircase this time.
 
-for i in range(4):
-    move_forward()
-turn_right()
 `,
     },
     {
-      title: "Three Loops",
+      title: "Two Loop Sandwhich",
+      hint: "Two loops and a command sandwhich. This challenge require a single command between 2 loops.",
+      grid: [
+        [1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:9, exitY:7,
+      image: {
+        src: "/python-maze/python_2-6.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 105, originY: 55,
+      },
+      starterCode: `#Two loops and a command sandwhich.
+#This challenge require a single command between 2 loops.
+
+`,
+    },
+    {
+      title: "Loopy Horse Shoe",
+      hint: "Spot the areas that a loop will save you time.",
+      grid: [
+        [1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,0],
+        [0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:1, startDir:1, exitX:0, exitY:4,
+      image: {
+        src: "/python-maze/python_2-7.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 105, originY: 105,
+      },
+      starterCode: `#Spot the areas that a loop will save you time.
+
+`,
+    },
+    {
+      title: "5 Loops",
       hint: "Three long corridors separated by two turns. Use a separate for loop for each corridor.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,1,1,1,1,1],
-        [1,1,1,1,1,1,0,1,1,1,1,1],
-        [1,1,1,1,1,1,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,1,1],
+        [1,1,1,1,1,0,1,1,1,1],
+        [0,0,0,0,0,0,1,1,1,1],
+        [1,0,1,1,1,1,1,1,1,0],
+        [1,0,1,1,1,1,1,1,1,0],
+        [1,0,1,1,1,1,1,1,1,0],
+        [1,0,1,1,1,1,1,1,1,0],
+        [1,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:11, exitY:3,
+      startX:0, startY:1, startDir:1, exitX:9, exitY:5,
+      image: {
+        src: "/python-maze/python_2-8.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 5,
+      },
       starterCode: `# Three corridors, two turns.
 # Use a for loop for each long straight section.
 
 `,
     },
     {
-      title: "Loop Sandwich",
-      hint: "A few literal commands, then a loop, then a few more literal commands.",
+      title: "Double Case",
+      hint: "Be sure to reverse your second loop.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,1,1,1,1,1,1,1],
-        [1,1,0,0,0,0,0,0,0,1],
-        [1,1,1,1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,1,1,1,1,1,1,1,1,0,0],
+        [1,0,0,1,1,1,1,1,1,0,0,1],
+        [1,1,0,0,1,1,1,1,0,0,1,1],
+        [1,1,1,0,0,1,1,0,0,1,1,1],
+        [1,1,1,1,0,0,0,0,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:9, exitY:3,
-      starterCode: `# Not everything needs to be in a loop.
-# Some moves come before, some after.
+      startX:0, startY:1, startDir:1, exitX:11, exitY:1,
+      image: {
+        src: "/python-maze/python_2-9.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `#Be sure to reverse your second loop.
 
-move_forward()
-move_forward()
-turn_right()
 `,
     },
     {
       title: "The Big One",
       hint: "Combine everything: multiple loops, multiple turns, different step counts.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [1,0,0,1,1,1,1,1,1,1,1,1,1,1,1],
-        [1,1,0,0,1,1,1,1,1,1,1,1,1,1,1],
-        [1,1,1,0,0,1,1,1,1,1,1,1,1,1,1],
-        [1,1,1,1,0,0,1,1,1,1,1,1,1,1,1],
-        [1,1,1,1,1,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,1,1,1,1,1],
+        [1,1,1,1,1,1,0,0,1,1,1,1],
+        [0,0,1,1,1,1,1,0,0,1,1,1],
+        [1,0,0,1,1,1,1,1,0,0,1,1],
+        [1,1,0,0,1,1,1,1,1,0,0,1],
+        [1,1,1,0,0,1,1,1,1,1,0,0],
+        [1,1,1,1,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:14, exitY:6,
+      startX:0, startY:1, startDir:1, exitX:0, exitY:3,
+      image: {
+        src: "/python-maze/python_2-10.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 5,
+      },
       starterCode: `# Staircase, then a long corridor to the exit.
 # Use a loop for the staircase and another for the corridor.
 
