@@ -22,6 +22,7 @@ export interface Challenge {
   exitY: number;
   starterCode: string;
   image?: ChallengeImage; // when set, renders this PNG instead of procedural cells
+  blackHoles?: { x: number; y: number }[]; // code grid coords; sprite landing here = failure
 }
 
 export interface QuizQ {
@@ -889,218 +890,307 @@ The loop runs 8 times — each step the robot decides: move forward or turn. Tha
 
   challenges: [
     {
+      title: "Straight Shot",
+      hint: "Just walk forward to the gear! Use a for loop to repeat move_forward().",
+      grid: [
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+      ],
+      startX:0, startY:4, startDir:1, exitX:11, exitY:4,
+      image: {
+        src: "/python-maze/python_3-1.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Walk forward to reach the gear. How many cells away is it?
+# Count the cells and put that number in range().
+
+for i in range(0):  # change 0 to the right count
+    move_forward()
+`,
+    },
+    {
       title: "One Right Turn",
-      hint: "Move forward until you can't, turn right, then keep going to the exit. Put an if statement inside a for loop!",
+      hint: "Walk east, then turn right when the path runs out and head south to the gear. Use if/else!",
       grid: [
-        [1,1,1,1,1,1],
-        [0,0,0,0,0,1],
-        [1,1,1,1,0,1],
-        [1,1,1,1,0,1],
-        [1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:5, exitY:4,
-      starterCode: `# Go forward along the top, turn when blocked, reach the exit.
-# Try putting an if statement inside a for loop!
+      startX:1, startY:1, startDir:1, exitX:8, exitY:5,
+      image: {
+        src: "/python-maze/python_3-2.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Walk east, then turn right when the path is blocked.
+# The "if" branch is done — finish the "else" branch!
 
-for i in range(7):
+for i in range(15):
     if has_path_ahead():
         forward()
     else:
-        turn_right()
+        # which way should the robot turn?
+        pass
 `,
     },
     {
-      title: "Check Before You Move",
-      hint: "Use if has_path_ahead() to decide whether to move or turn at each step.",
+      title: "Two Corners",
+      hint: "Two right turns in this maze. Walk east, drop south, walk east, drop south to the gear.",
       grid: [
-        [1,1,1,1,1,1],
-        [0,0,0,1,1,1],
-        [1,1,0,0,0,1],
-        [1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1],
+        [1,1,0,0,0,0,1,1,1],
+        [1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,0,0,0,0],
+        [1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:5, exitY:3,
-      starterCode: `# At each corner: if path ahead, move. Otherwise turn right.
+      startX:2, startY:1, startDir:1, exitX:8, exitY:6,
+      image: {
+        src: "/python-maze/python_3-3.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Two right turns this time — the same pattern as before still works!
+# Fill in the branches.
 
-for i in range(6):
+for i in range(15):
     if has_path_ahead():
-        forward()
+        # move forward
+        pass
     else:
-        turn_right()
+        # turn the right direction
+        pass
 `,
     },
     {
-      title: "The Fork",
-      hint: "Two right turns in this maze. Use if has_path_ahead() to detect each corner.",
+      title: "U-Turn",
+      hint: "The path makes a U-shape: east, south, east, then north back up to the gear. Use if/elif/else for both turn types.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,1,1,1],
-        [1,1,0,0,0,1,1],
-        [1,1,1,1,0,0,0],
+        [1,1,1,1,1,1,1,1,1],
+        [1,1,0,0,0,0,1,1,1],
+        [1,1,1,1,1,0,1,1,0],
+        [1,1,1,1,1,0,1,1,0],
+        [1,1,1,1,1,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# Two turns in this maze.
-# Use if has_path_ahead() to detect when to turn.
+      startX:2, startY:1, startDir:1, exitX:8, exitY:2,
+      image: {
+        src: "/python-maze/python_3-4.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# U-shape: turn right going down, then left going back up.
+# Fill in all three branches!
 
-for i in range(8):
+for i in range(15):
     if has_path_ahead():
-        forward()
-    else:
-        turn_right()
-`,
-    },
-    {
-      title: "Path on the Side",
-      hint: "The path turns down then right. Use if/elif/else with has_path_right() to navigate.",
-      grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,1],
-        [1,0,1,1,1,0,1],
-        [1,0,0,0,0,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# Hint: if has_path_right(): turn right — use elif, not a second if!
-
-for i in range(12):
-    if has_path_ahead():
-        forward()
+        # move forward
+        pass
     elif has_path_right():
-        turn_right()
+        # what happens at the right corners?
+        pass
     else:
-        turn_left()
+        # what happens at the final left corner?
+        pass
 `,
     },
     {
       title: "Left Turn Ahead",
-      hint: "This maze needs a LEFT turn. Use has_path_left() inside an elif to catch it.",
+      hint: "Walk east, then turn LEFT to head north, then LEFT again to reach the gear. Use has_path_left() in an elif!",
       grid: [
-        [1,1,0,0,0],
-        [1,1,1,1,0],
-        [0,0,0,0,0],
+        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1],
+        [1,1,1,0,0,0,0],
+        [1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,0],
+        [1,1,0,0,0,0,0],
+        [1,1,1,1,1,1,1],
       ],
-      startX:0, startY:2, startDir:1, exitX:4, exitY:0,
-      starterCode: `# Go east, then the path turns left (north).
-# Add an elif that checks has_path_left().
+      startX:2, startY:6, startDir:1, exitX:4, exitY:3,
+      image: {
+        src: "/python-maze/python_3-5.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# This maze needs LEFT turns. Build the elif using has_path_left().
 
-for i in range(7):
+for i in range(15):
     if has_path_ahead():
         forward()
     elif has_path_left():
-        turn_left()
+        # turn the right way
+        pass
+    else:
+        pass
 `,
     },
     {
       title: "Right or Left?",
-      hint: "At different points the path turns right and then left. Use if/elif/else to handle both.",
+      hint: "This maze turns both directions! Use if/elif/else with has_path_right() to navigate every corner.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,1],
-        [1,1,0,1,0,1,1],
-        [1,1,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,0,0,0,1,1],
+        [1,1,0,0,0,1,1,0,1,0,1,1],
+        [1,1,0,1,0,1,1,0,1,0,0,0],
+        [1,1,0,1,0,0,0,0,1,1,1,1],
+        [0,0,0,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# The path turns right at one corner and needs a left turn later.
-# Use all three branches: if / elif / else
+      startX:0, startY:6, startDir:1, exitX:10, exitY:4,
+      image: {
+        src: "/python-maze/python_3-6.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# This maze turns both directions.
+# Build your own if/elif/else chain to handle every corner.
 
-for i in range(10):
-    if has_path_ahead():
-        forward()
-    elif has_path_right():
-        turn_right()
-    else:
-        turn_left()
+for i in range(30):
+    # your logic here
+    pass
 `,
     },
     {
-      title: "Three-Way Decision",
-      hint: "Use if / elif / else to handle right, forward, and left cases. Find the EXACT range — too many steps and you'll overshoot the finish!",
+      title: "Black Hole Trap",
+      hint: "WATCH OUT — a black hole waits if you take the wrong turn! Choose your branches carefully so you don't get sucked in.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1,0,0,1],
-        [1,0,1,0,1,0,1,0,1,1],
-        [1,0,0,0,1,0,0,0,1,1],
-        [1,1,1,0,1,1,1,1,1,1],
-        [1,0,0,0,0,0,0,0,0,0],
+        [1,1,0,1,1,1,1,1,1,1],
+        [1,1,0,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,1,1,1,1],
+        [1,1,1,1,1,0,1,1,1,1],
+        [1,1,1,1,1,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:5,
-      starterCode: `# Each step: try right first, then ahead, then left.
-# Find the EXACT range — too many steps overshoots the finish!
+      startX:0, startY:3, startDir:1, exitX:8, exitY:5,
+      image: {
+        src: "/python-maze/python_3-7.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      blackHoles: [{ x: 2, y: 1 }],
+      starterCode: `# A black hole hides down a wrong turn!
+# Pick the branch ORDER carefully so you never step the wrong way.
 
-for i in range(19):
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_ahead():
-        forward()
-    else:
-        turn_left()
+for i in range(15):
+    # your code here
+    pass
 `,
     },
     {
-      title: "Longer Decision Path",
-      hint: "Same right-hand strategy, bigger maze. Adjust the range to cover all the steps.",
+      title: "The Rectangle",
+      hint: "Three black holes scattered around this maze! The right-hand rule keeps you safe along the outer wall.",
       grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,0,1,0],
-        [1,1,0,1,0,1,0,1,0],
-        [1,1,0,0,0,1,0,0,0],
+        [0,1,1,1,1,1,1,1,1,1,1,1],
+        [0,1,1,1,1,1,1,1,0,1,1,1],
+        [0,1,0,0,0,0,0,0,0,1,1,1],
+        [0,1,1,1,1,1,1,1,0,1,1,1],
+        [0,1,1,1,1,1,1,1,0,1,1,1],
+        [0,1,1,1,1,1,1,1,0,1,1,1],
+        [0,1,1,1,1,1,1,1,0,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:3,
-      starterCode: `# Right-hand rule in a wider maze.
+      startX:2, startY:2, startDir:1, exitX:0, exitY:1,
+      image: {
+        src: "/python-maze/python_3-8.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      blackHoles: [{ x: 8, y: 1 }, { x: 0, y: 0 }, { x: 9, y: 7 }],
+      starterCode: `# Three black holes scattered around. Hug the outer wall using the RIGHT-hand rule:
+#   1. first check has_path_right()
+#   2. then has_path_ahead()
+#   3. else turn left
+# Build the if/elif/else chain.
 
-for i in range(25):
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_ahead():
-        forward()
-    else:
-        turn_left()
+for i in range(40):
+    # your code here
+    pass
 `,
     },
     {
       title: "Left-Hand Rule",
-      hint: "This time try turning LEFT first instead of right. Which direction leads you through?",
+      hint: "Try the LEFT-hand rule this time! A black hole waits one step past the gear — don't overshoot.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,1],
-        [1,1,0,1,0,1,1],
-        [1,1,0,0,0,0,0],
+        [1,1,1,1,1,1,1,0,0,0,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,0,0,0,0,1,1,0,1,1,1],
+        [1,1,0,1,1,0,1,1,0,1,1,1],
+        [1,1,0,1,1,0,0,0,0,1,1,1],
+        [0,0,0,1,1,0,1,1,0,1,1,1],
+        [1,1,1,1,1,0,0,0,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# Try the left-hand rule: if has_path_left: turn left, elif has_path_ahead: forward, else: turn right
+      startX:0, startY:5, startDir:1, exitX:7, exitY:0,
+      image: {
+        src: "/python-maze/python_3-9.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      blackHoles: [{ x: 9, y: 0 }],
+      starterCode: `# A black hole waits past the gear! Try the LEFT-hand rule:
+#   1. first check has_path_left()
+#   2. then has_path_ahead()
+#   3. else turn right
+# Build the if/elif/else chain.
 
-for i in range(12):
-    if has_path_left():
-        turn_left()
-        forward()
-    elif has_path_ahead():
-        forward()
-    else:
-        turn_right()
+for i in range(30):
+    # your code here
+    pass
 `,
     },
     {
-      title: "Your Decision",
-      hint: "Design your own if/elif/else logic to get through. Experiment — there's more than one solution!",
+      title: "Five Black Holes",
+      hint: "FIVE black holes wait in this maze! Design your own if/elif/else logic carefully to reach the gear at the top.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,0,0,1,0,0],
-        [1,1,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,0,0,1,0,0,0,1],
-        [1,0,1,1,1,1,1,1,1,1,1],
-        [1,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,0,0,0,0],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,0,1,1,1,1,1,0,1,1,1],
+        [1,1,0,1,1,1,1,1,0,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,1,1],
+        [1,1,0,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:10, exitY:5,
-      starterCode: `# Write your own decision logic using if, elif, and else.
-# Try right-hand rule, left-hand rule, or invent something new.
+      startX:1, startY:4, startDir:1, exitX:10, exitY:0,
+      image: {
+        src: "/python-maze/python_3-10.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      blackHoles: [{ x: 2, y: 2 }, { x: 2, y: 5 }, { x: 8, y: 5 }, { x: 9, y: 4 }, { x: 11, y: 0 }],
+      starterCode: `# FIVE black holes wait in this maze!
+# Design your own if/elif/else strategy. Right-hand rule? Left-hand? Something new?
 
-for i in range(50):
-    if has_path_ahead():
-        forward()
-    elif has_path_right():
-        turn_right()
-    else:
-        turn_left()
+for i in range(30):
+    # your code here
+    pass
 `,
     },
   ],

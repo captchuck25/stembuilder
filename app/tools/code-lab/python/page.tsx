@@ -159,6 +159,9 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
       if (isWall(nx,ny)) throw new Error(`Wall to the ${DIR_LABEL[dir]}! Can't move forward.`);
       x=nx; y=ny;
       moves.push({ type:"move", x, y, dir });
+      if (ch.blackHoles?.some(h => h.x === x && h.y === y)) {
+        throw new Error("Sucked into a black hole — your code took a wrong turn. Reset and try again.");
+      }
       if (x === ch.exitX && y === ch.exitY && exitReachedMoveCount === null) {
         exitReachedMoveCount = moves.length;
       }
@@ -385,6 +388,20 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; p
           }
           return cells;
         })()}
+        {ch.blackHoles?.map((h, i) => {
+          const hx = img.originX + h.x * img.cellPx;
+          const hy = img.originY + h.y * img.cellPx;
+          const half = img.cellPx / 2;
+          return (
+            <g key={`bh-${i}`} transform={`translate(${hx + half} ${hy + half})`}>
+              <image href="/python-maze/black_hole.png"
+                x={-half} y={-half} width={img.cellPx} height={img.cellPx}>
+                <animateTransform attributeName="transform" attributeType="XML" type="rotate"
+                  from="0" to="360" dur="6s" repeatCount="indefinite"/>
+              </image>
+            </g>
+          );
+        })}
         <circle cx={cx2} cy={cy2} r={r} fill={solved ? "#22c55e" : robotFlash ? "#dc2626" : "#3b82f6"}/>
         <path d={arrow} fill="white"/>
       </svg>
@@ -416,6 +433,19 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; p
           </g>
         );
       }))}
+      {ch.blackHoles?.map((h, i) => {
+        const hx = h.x * CELL + GUTTER, hy = h.y * CELL + GUTTER;
+        const half = CELL / 2;
+        return (
+          <g key={`bh-${i}`} transform={`translate(${hx + half} ${hy + half})`}>
+            <image href="/python-maze/black_hole.png"
+              x={-half} y={-half} width={CELL} height={CELL}>
+              <animateTransform attributeName="transform" attributeType="XML" type="rotate"
+                from="0" to="360" dur="6s" repeatCount="indefinite"/>
+            </image>
+          </g>
+        );
+      })}
       <circle cx={cx2} cy={cy2} r={r} fill={solved ? "#22c55e" : robotFlash ? "#dc2626" : "#3b82f6"}/>
       <path d={arrow} fill="white"/>
       {/* Uniform frame drawn on top — covers cell edges so border is always even */}
