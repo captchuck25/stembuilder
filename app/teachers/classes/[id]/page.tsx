@@ -78,6 +78,15 @@ interface GradebookData {
   assignedLevelIds: number[];
 }
 
+function lastNameKey(name: string): string {
+  const parts = (name || "").trim().split(/\s+/);
+  return (parts[parts.length - 1] || "").toLowerCase();
+}
+
+function compareByLastName(a: { name: string }, b: { name: string }): number {
+  return lastNameKey(a.name).localeCompare(lastNameKey(b.name)) || a.name.localeCompare(b.name);
+}
+
 function downloadCSV(rows: string[][], filename: string) {
   const csv = "﻿" + rows
     .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(","))
@@ -539,7 +548,8 @@ export default function ClassDetailPage() {
       );
     }
 
-    const { students: gbStudents, assignedLevelIds } = data;
+    const { assignedLevelIds } = data;
+    const gbStudents = [...data.students].sort(compareByLastName);
 
     function exportCSV() {
       const header = ["Student", "Email"];
@@ -667,7 +677,7 @@ export default function ClassDetailPage() {
     }
     if (bridgeAssignments.length === 0) return null;
 
-    const sorted = [...students].sort((a, b) => a.name.localeCompare(b.name));
+    const sorted = [...students].sort(compareByLastName);
     if (sorted.length === 0) {
       return (
         <div style={{ padding: "40px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
@@ -805,17 +815,32 @@ export default function ClassDetailPage() {
           const bg = isLevelLocked ? "#dcfce7" : assigned ? `${item.color}18` : "#f9fafb";
           const color = isLevelLocked ? "#166534" : assigned ? item.color : "#6b7280";
           return (
-            <button key={idx}
-              onClick={() => { if (assigned && isLevelLocked) toggleLevelLock(tool, idx); else toggleLevel(tool, idx); }}
-              disabled={saving}
-              title={isLevelLocked ? "Unlock for students" : assigned ? "Click to unassign" : "Click to assign"}
-              style={{ padding: "8px 16px", borderRadius: 99, border: `2px solid ${borderColor}`,
-                background: bg, color, fontWeight: 800, fontSize: 13,
-                cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6,
-                opacity: saving ? 0.6 : 1, transition: "all 120ms" }}>
-              <span>{isLevelLocked ? "🔒" : assigned ? "✓" : "+"}</span>
-              {label} {item.id} — {item.title}
-            </button>
+            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button
+                onClick={() => { if (assigned && isLevelLocked) toggleLevelLock(tool, idx); else toggleLevel(tool, idx); }}
+                disabled={saving}
+                title={isLevelLocked ? "Unlock for students" : assigned ? "Click to unassign" : "Click to assign"}
+                style={{ padding: "8px 16px", borderRadius: 99, border: `2px solid ${borderColor}`,
+                  background: bg, color, fontWeight: 800, fontSize: 13,
+                  cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6,
+                  opacity: saving ? 0.6 : 1, transition: "all 120ms" }}>
+                <span>{isLevelLocked ? "🔒" : assigned ? "✓" : "+"}</span>
+                {label} {item.id} — {item.title}
+              </button>
+              <button
+                onClick={() => toggleLevelLock(tool, idx)}
+                disabled={saving}
+                title={isLevelLocked ? `Unlock ${label} ${item.id} for students` : `Lock ${label} ${item.id} — students cannot access`}
+                aria-label={isLevelLocked ? `Unlock ${label} ${item.id}` : `Lock ${label} ${item.id}`}
+                style={{ padding: "6px 10px", borderRadius: 99,
+                  border: `2px solid ${isLevelLocked ? "#16a34a" : "#d1d5db"}`,
+                  background: isLevelLocked ? "#dcfce7" : "#fff",
+                  fontSize: 14, lineHeight: 1,
+                  cursor: saving ? "not-allowed" : "pointer",
+                  opacity: saving ? 0.6 : 1, transition: "all 120ms" }}>
+                {isLevelLocked ? "🔓" : "🔒"}
+              </button>
+            </div>
           );
         })}
       </div>
@@ -913,7 +938,7 @@ export default function ClassDetailPage() {
                     <div style={{ fontSize: 13, color: "#aaa", fontStyle: "italic" }}>No students enrolled yet.</div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 560 }}>
-                      {students.map(s => (
+                      {[...students].sort(compareByLastName).map(s => (
                         <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                           padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb", background: "#fafafa" }}>
                           <div>
@@ -1037,7 +1062,7 @@ export default function ClassDetailPage() {
                   <div>
                     <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: 0 }}>Assign Levels</h2>
                     <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
-                      Click to assign · Use <strong>🔒 Lock All</strong> on the tab to restrict access
+                      Click chip to assign · Click <strong>🔒</strong> next to a level to lock it · Use <strong>🔒 Lock All</strong> on the tab for every level
                     </p>
                   </div>
                 </div>
@@ -1063,7 +1088,7 @@ export default function ClassDetailPage() {
                   <div>
                     <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: 0 }}>Assign Units</h2>
                     <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
-                      Click to assign · Use <strong>🔒 Lock All</strong> on the tab to restrict access
+                      Click chip to assign · Click <strong>🔒</strong> next to a unit to lock it · Use <strong>🔒 Lock All</strong> on the tab for every unit
                     </p>
                   </div>
                 </div>
@@ -1085,7 +1110,7 @@ export default function ClassDetailPage() {
           {selectedTool === "turtle" && (() => {
             const tutorials = TURTLE_CHALLENGES.filter(c => c.category === "tutorial");
             const challenges = TURTLE_CHALLENGES.filter(c => c.category === "challenge");
-            const sortedStudents = [...students].sort((a, b) => a.name.localeCompare(b.name));
+            const sortedStudents = [...students].sort(compareByLastName);
 
             function exportTurtleCSV() {
               const header = ["Student", "Email",
