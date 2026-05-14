@@ -37,7 +37,7 @@
   /* ===== Layout ===== */
   .app {
     display: grid;
-    grid-template-rows: 46px 1fr 36px;
+    grid-template-rows: auto 1fr 36px;
     grid-template-columns: 240px 1fr;
     grid-template-areas:
       "topbar topbar"
@@ -63,12 +63,24 @@
     background: var(--panel);
     border-bottom: 1px solid var(--line);
     display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+  .topbar-row {
+    display: flex;
     align-items: center;
     padding: 0 12px;
     gap: 6px;
     flex-wrap: nowrap;
-    height: 46px;
     box-sizing: border-box;
+  }
+  .topbar-row.actions {
+    height: 46px;
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar-row.tools-row {
+    min-height: 58px;
+    padding: 3px 8px;
   }
   .brand { display: flex; align-items: center; gap: 6px; margin-right: 4px; }
   .brand-mark {
@@ -107,23 +119,34 @@
     box-shadow: var(--shadow);
   }
 
-  .tools { display: flex; gap: 1px; align-items: center; flex-wrap: nowrap; }
+  .tools {
+    display: flex;
+    gap: 1px;
+    align-items: center;
+    flex-wrap: nowrap;
+    /* Note: do NOT set overflow here — overflow-x: auto forces overflow-y
+       to also clip, which hides the primitive/shape dropdown menus. The
+       row instead overflows naturally; flex-shrink: 0 on .tool keeps each
+       button at its full width even when there's not enough room. */
+    min-width: 0;
+  }
   .tool {
-    height: 38px;
-    min-width: 38px;
-    padding: 0 7px;
+    height: 50px;
+    min-width: 44px;
+    padding: 3px 4px;
     border: 1px solid transparent;
     background: transparent;
-    border-radius: 7px;
+    border-radius: 6px;
     font: inherit;
-    font-size: 19px;
     color: var(--ink-soft);
     cursor: pointer;
     display: inline-flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 2px;
     line-height: 1;
+    flex-shrink: 0;
   }
   .tool:hover { background: var(--bg); color: var(--ink); }
   .tool.active {
@@ -134,14 +157,36 @@
   .tool[disabled] { opacity: 0.35; cursor: not-allowed; }
   .node-btn { opacity: 0.4; }
   .node-btn.node-ready { opacity: 1; }
-  .tool .ico { font-size: 20px; line-height: 1; }
-  .tool .arrow { font-size: 11px; opacity: 0.6; }
+  /* Tool icon: explicit pixel size so the SVG doesn't fall back to its
+     intrinsic 300x150 default — that was stretching buttons huge. */
+  .tool > .ico,
+  .tool > svg.ico {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    display: block;
+    color: inherit;
+  }
+  .tool-label {
+    font-size: 9.5px;
+    font-weight: 500;
+    line-height: 1.05;
+    letter-spacing: 0;
+    text-align: center;
+    color: inherit;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .tool .arrow { font-size: 9px; opacity: 0.6; margin-left: 2px; }
+  /* Dropdown trigger: icon + label + tiny down chevron */
+  .tool.has-dropdown .tool-label::after { content: ' ▾'; font-size: 8px; opacity: 0.6; }
   .tool-sep {
     width: 1px;
-    height: 26px;
+    height: 30px;
     background: var(--line-strong);
-    margin: 0 5px;
+    margin: 0 3px;
     display: inline-block;
+    flex-shrink: 0;
   }
   .dropdown { position: relative; display: inline-block; }
   .dropdown-menu {
@@ -471,6 +516,20 @@
   }
   .extrude-tooltip .extrude-done:hover { background: rgba(79, 195, 110, 1); }
   .extrude-tooltip .extrude-cancel:hover { background: rgba(255, 255, 255, 0.32); }
+  .extrude-tooltip .extrude-through {
+    background: rgba(229, 62, 62, 0.6);
+    color: white;
+    border: none;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    pointer-events: auto;
+    margin-left: 4px;
+  }
+  .extrude-tooltip .extrude-through:hover { background: rgba(229, 62, 62, 0.85); }
   .dim-label-3d {
     position: absolute;
     color: #1f2540;
@@ -634,132 +693,201 @@
   }
   .snap-marker { fill: none; stroke: var(--warm); stroke-width: 1.6; }
   .snap-guide { stroke: var(--warm); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+  /* Hidden lines — edges of the body that lie BEHIND the visible face.
+     Orthographic convention: dashed and noticeably faded, but still readable. */
   .body-outline {
-    stroke: #b9bdd0;
-    stroke-width: 1;
-    stroke-dasharray: 4 3;
-    opacity: 0.5;
+    stroke: #6b7a96;
+    stroke-width: 1.2;
+    stroke-dasharray: 5 4;
+    opacity: 0.75;
     fill: none;
     pointer-events: none;
   }
+  /* Visible (in-plane) lines — edges that lie ON the sketch face. Drawn
+     solid blue so the user clearly sees what's on the surface they're
+     drawing on. */
   .body-outline.in-plane {
-    stroke: #4f7cff;
+    stroke: #2f5fe0;
     stroke-dasharray: none;
-    opacity: 0.55;
-    stroke-width: 1.4;
+    opacity: 0.95;
+    stroke-width: 1.8;
   }
-  /* x-ray of cuts/holes inside the body — dashed in red so they read as
-     "removed material" rather than the solid silhouette outline. */
+  /* Cuts / holes — material that's been removed. Red dashed so they read
+     as "negative space" rather than a regular outline. Takes precedence
+     over both the default (hidden) and in-plane styles. */
   .body-outline.cut {
     stroke: #c0392b;
     stroke-dasharray: 6 4;
-    opacity: 0.55;
-    stroke-width: 1.1;
+    opacity: 0.85;
+    stroke-width: 1.4;
+  }
+  .body-outline.cut.in-plane {
+    stroke: #c0392b;
+    stroke-dasharray: none;
+    opacity: 0.95;
+    stroke-width: 1.8;
   }
 </style>
 </head>
 <body>
+
+<!-- SVG icon sprite — all toolbar icons defined as <symbol>s and referenced
+     elsewhere via <svg class="ico"><use href="#i-name"/></svg>. Stroke uses
+     currentColor so each icon inherits the button's color (including the
+     accent color when .tool.active). -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <defs>
+    <g id="icon-defaults" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></g>
+  </defs>
+  <symbol id="i-select" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M5 3l4 16 3-7 7-3z"/></symbol>
+  <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-line" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 20L20 4"/><circle cx="4" cy="20" r="1.6" fill="currentColor"/><circle cx="20" cy="4" r="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-arc" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 19C 7 5, 17 5, 21 19"/></symbol>
+  <symbol id="i-construction" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3" d="M3 12L21 12"/></symbol>
+  <symbol id="i-dimension" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7L5 17 M19 7L19 17 M5 12L19 12"/><path d="M5 12L8 10 M5 12L8 14 M19 12L16 10 M19 12L16 14"/></g></symbol>
+  <symbol id="i-auto-dim" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 6L21 6 M3 12L21 12 M3 18L21 18"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="18" cy="18" r="1" fill="currentColor"/></g></symbol>
+  <symbol id="i-hexagon" viewBox="0 0 24 24"><path d="M12 3L20 8 L20 16 L12 21 L4 16 L4 8 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+  <symbol id="i-eraser" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M14 4l6 6-10 10H4v-6z"/><path d="M9 9l6 6"/></g></symbol>
+  <symbol id="i-mirror" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2 2"/><path d="M4 7L4 17L10 17L10 7Z"/><path d="M20 7L20 17L14 17L14 7Z"/></g></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></g></symbol>
+  <symbol id="i-paste" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="5" y="6" width="14" height="15" rx="1.5"/><rect x="8" y="3" width="8" height="4" rx="1"/></g></symbol>
+  <symbol id="i-fillet" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M5 21V13 A 8 8 0 0 1 13 5 L 21 5"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 4L9 9 M4 4L4 8 M4 4L8 4"/><path d="M20 4L15 9 M20 4L20 8 M20 4L16 4"/><path d="M4 20L9 15 M4 20L4 16 M4 20L8 20"/><path d="M20 20L15 15 M20 20L20 16 M20 20L16 20"/></g></symbol>
+  <symbol id="i-array" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="2" y="9" width="5" height="6"/><rect x="9.5" y="9" width="5" height="6"/><rect x="17" y="9" width="5" height="6"/></g></symbol>
+  <symbol id="i-offset" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1" stroke-dasharray="3 2"/><rect x="7" y="7" width="10" height="10" rx="1"/></g></symbol>
+  <symbol id="i-group" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/><path d="M11 11L13 13" stroke-linecap="round"/></g></symbol>
+  <symbol id="i-ungroup" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/><path d="M9 13L15 7 M9 7L15 13" stroke-linecap="round" stroke-width="1.4"/></g></symbol>
+  <symbol id="i-trim" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M9 8L21 18 M9 16L21 6" stroke-linecap="round"/></g></symbol>
+  <symbol id="i-node-add" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="12" r="3"/><path d="M16 8L22 8 M19 5L19 11"/></g></symbol>
+  <symbol id="i-node-del" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="12" r="3"/><path d="M16 9L22 15 M22 9L16 15"/></g></symbol>
+  <symbol id="i-node-curve" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 17 C 8 5, 16 5, 21 17"/><circle cx="12" cy="9" r="2" fill="currentColor" stroke="none"/></g></symbol>
+  <symbol id="i-node-rmin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 12L11 12 M7 8L3 12L7 16"/><path d="M14 8L22 16 M22 8L14 16" stroke-width="1.4"/></g></symbol>
+  <symbol id="i-node-rmout" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13 12L21 12 M17 8L21 12L17 16"/><path d="M2 8L10 16 M10 8L2 16" stroke-width="1.4"/></g></symbol>
+
+  <symbol id="i-orbit" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12 C 4 8, 20 8, 20 12" stroke-dasharray="2 2"/><path d="M17 9L20 12L17 15"/></g></symbol>
+  <symbol id="i-pan" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L12 21 M3 12L21 12"/><path d="M12 3L9 6 M12 3L15 6 M12 21L9 18 M12 21L15 18 M3 12L6 9 M3 12L6 15 M21 12L18 9 M21 12L18 15"/></g></symbol>
+  <symbol id="i-extrude" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M5 17L5 11L12 8L19 11L19 17L12 20Z"/><path d="M5 11L12 14L19 11 M12 14L12 20"/><path d="M12 6L12 2 M9 4L12 1L15 4"/></g></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 7L12 3L20 7L20 17L12 21L4 17Z"/><path d="M4 7L12 11L20 7 M12 11L12 21"/></g></symbol>
+  <symbol id="i-fastener" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3L16 3L16 7L8 7Z"/><path d="M10 7L10 21 M14 7L14 21"/><path d="M10 10L14 10 M10 13L14 13 M10 16L14 16 M10 19L14 19"/></g></symbol>
+  <symbol id="i-boolean-cut" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="12" r="6"/><circle cx="16" cy="12" r="6" stroke-dasharray="2 2"/></g></symbol>
+  <symbol id="i-align" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 6L21 6"/><rect x="5" y="9" width="6" height="10"/><rect x="13" y="11" width="6" height="8"/></g></symbol>
+  <symbol id="i-mirror-3d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3L12 21" stroke-dasharray="2 2"/><path d="M4 8L4 16L10 16L10 8Z M4 8L7 5L10 8"/><path d="M20 8L20 16L14 16L14 8Z M20 8L17 5L14 8"/></g></symbol>
+  <symbol id="i-sketch-on-face" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M3 8L11 4L19 8L19 16L11 20L3 16Z"/><path d="M3 8L11 12L19 8 M11 12L11 20"/><path d="M14 6L20 12L17 15L11 9Z" fill="var(--panel)"/></g></symbol>
+  <symbol id="i-fillet-3d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 8L4 18L14 21L20 17L20 9L11 5L4 8Z"/><path d="M4 8L11 11L20 9 M11 11L11 21"/><path d="M11 5 Q 17 5 20 9" stroke-width="2.2"/></g></symbol>
+  <symbol id="i-revolve" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L12 21" stroke-dasharray="2 2"/><ellipse cx="12" cy="12" rx="6" ry="3"/><path d="M15 4L18 5L17 8"/></g></symbol>
+</svg>
+
 <div class="app">
   <header class="topbar">
-    <div class="brand">
-      <div class="brand-mark">S</div>
-      <div>
-        <div class="brand-name">STEM Sketch</div>
-        <div class="brand-sub">design · sketch · print</div>
-      </div>
-    </div>
-
-    <div class="topbar-history">
-      <button class="action" id="undo-btn" title="Undo (Ctrl+Z)" style="font-size:14px;padding:5px 10px">↶</button>
-      <button class="action" id="redo-btn" title="Redo (Ctrl+Y)" style="font-size:14px;padding:5px 10px">↷</button>
-    </div>
-
-    <button class="action" id="back-to-3d-btn" title="Finish editing this sketch and return to 3D" style="font-size:12px;display:none">← Done</button>
-    <button class="action" id="new-sketch-btn" title="New sketch on a reference plane (Top/Front/Right)" style="font-size:12px">+ Sketch</button>
-
-    <div class="tools" id="tools-2d" style="display:none">
-      <button class="tool" data-tool="select" title="Select (V)">↖</button>
-      <span class="tool-sep"></span>
-      <button class="tool active" data-tool="rect" title="Rectangle (R)">▭</button>
-      <button class="tool" data-tool="circle" title="Circle (C)">◯</button>
-      <button class="tool" data-tool="line" title="Line / Polyline (L)">／</button>
-      <button class="tool" data-tool="arc" title="Arc (A)">⌒</button>
-      <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported">┄</button>
-      <button class="tool" data-tool="dimension" title="Dimension (D) — click two points to label the distance between them">📏</button>
-      <button class="tool" data-action="auto-dim" title="Auto-dimension — add engineering dimensions to all shapes in the sketch (overall size, radii, segment lengths)" style="font-size:11px;font-weight:700">⊞</button>
-      <div class="dropdown" id="shape2d-dropdown">
-        <button class="tool" data-action="shape2d-menu" title="Insert a pre-made shape into the sketch">⬡ <span class="arrow">▾</span></button>
-        <div class="dropdown-menu">
-          <button data-shape2d="hexagon"><span class="ico">⬡</span> Hexagon</button>
-          <button data-shape2d="pentagon"><span class="ico">⬠</span> Pentagon</button>
-          <button data-shape2d="octagon"><span class="ico">⯃</span> Octagon</button>
-          <button data-shape2d="star"><span class="ico">★</span> Star</button>
-          <button data-shape2d="heart"><span class="ico">♥</span> Heart</button>
-          <button data-shape2d="teardrop"><span class="ico">💧</span> Teardrop</button>
+    <!-- Row 1: brand · history · sketch actions · spacer · filename · save/load · export -->
+    <div class="topbar-row actions">
+      <div class="brand">
+        <div class="brand-mark">S</div>
+        <div>
+          <div class="brand-name">STEM Sketch</div>
+          <div class="brand-sub">design · sketch · print</div>
         </div>
       </div>
-      <span class="tool-sep"></span>
-      <button class="tool" data-tool="eraser" title="Eraser (E) — click a shape to delete">⌫</button>
-      <button class="tool" data-action="mirror-2d" title="Mirror selected shape across an axis">↔</button>
-      <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)">⎘</button>
-      <button class="tool" data-action="paste" title="Paste (Ctrl+V)">＋</button>
-      <button class="tool" data-action="fillet-2d" title="Fillet — round a polyline corner">⌐</button>
-      <button class="tool" data-action="array-2d" title="Array along a line">⋮⋮</button>
-      <button class="tool" data-action="offset-2d" title="Offset — duplicate the selected shape by a typed X or Y distance">⇉</button>
-      <button class="tool" data-action="group" title="Group (Ctrl+G) — Shift-click to add shapes to selection first" style="font-size:10px;font-weight:600">G</button>
-      <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)" style="font-size:10px;font-weight:600">Ug</button>
-      <button class="tool" data-action="trim" title="Trim line — click any polyline segment to remove it (closed polylines open up; open ones split into two)">✂</button>
-      <span class="tool-sep"></span>
-      <button class="tool node-btn" id="tb-node-add"   title="Insert node — select a node first, then click to insert a new node at the midpoint after it" style="font-size:10px;font-weight:700">N+</button>
-      <button class="tool node-btn" id="tb-node-del"   title="Delete node — select a node first, then click to remove it" style="font-size:10px;font-weight:700">N✕</button>
-      <button class="tool node-btn" id="tb-node-curve" title="Toggle smooth / sharp — select a node first, then click to add or remove curve handles">⌒</button>
-      <button class="tool node-btn" id="tb-node-rmin"  title="Remove incoming handle — make the entry side of this node straight" style="font-size:10px;color:#d97419;display:none">✕←</button>
-      <button class="tool node-btn" id="tb-node-rmout" title="Remove outgoing handle — make the exit side of this node straight" style="font-size:10px;color:#d97419;display:none">→✕</button>
-    </div>
 
-    <div class="tools" id="tools-3d">
-      <button class="tool" data-action="orbit-mode" title="Orbit toggle — when on, drag rotates the view. Or temporarily orbit by holding Ctrl/⌘ / Space / Alt while dragging, or use right-mouse drag.">⟲</button>
-      <button class="tool" data-action="pan-mode" title="Pan toggle — when on, drag slides the view (middle-mouse drag also pans)">✥</button>
-      <span class="tool-sep"></span>
-      <button class="tool" data-action="extrude" title="Extrude the current sketch">⇪</button>
-      <div class="dropdown" id="prim-dropdown">
-        <button class="tool" data-action="prim-menu" title="Add a primitive shape">▣ <span class="arrow">▾</span></button>
-        <div class="dropdown-menu">
-          <button data-prim="cube"><span class="ico">▣</span> Cube</button>
-          <button data-prim="sphere"><span class="ico">●</span> Sphere</button>
-          <button data-prim="cylinder"><span class="ico">⬭</span> Cylinder</button>
-          <button data-prim="cone"><span class="ico">▲</span> Cone</button>
-          <button data-prim="torus"><span class="ico">◯</span> Torus</button>
-          <button data-prim="pyramid"><span class="ico">◭</span> Pyramid</button>
-          <div class="dropdown-sep"></div>
-          <button data-prim="hexagon"><span class="ico">⬡</span> Hexagon</button>
-          <button data-prim="pentagon"><span class="ico">⬠</span> Pentagon</button>
-          <button data-prim="octagon"><span class="ico">⯃</span> Octagon</button>
-          <button data-prim="star"><span class="ico">★</span> Star</button>
-          <button data-prim="heart"><span class="ico">♥</span> Heart</button>
-          <button data-prim="teardrop"><span class="ico">💧</span> Teardrop</button>
-        </div>
+      <div class="topbar-history">
+        <button class="action" id="undo-btn" title="Undo (Ctrl+Z)" style="font-size:14px;padding:5px 10px">↶</button>
+        <button class="action" id="redo-btn" title="Redo (Ctrl+Y)" style="font-size:14px;padding:5px 10px">↷</button>
       </div>
-      <button class="tool" data-action="add-fastener" title="Add a threaded fastener (hex bolt, Phillips screw, socket cap, flat head)">🔩</button>
-      <span class="tool-sep"></span>
-      <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)">⎘</button>
-      <button class="tool" data-action="paste" title="Paste (Ctrl+V)">＋</button>
-      <button class="tool" data-action="group" title="Group bodies (Ctrl+G) — Shift-click bodies first" style="font-size:10px;font-weight:600">G</button>
-      <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)" style="font-size:10px;font-weight:600">Ug</button>
-      <button class="tool" data-action="align" title="Align — Shift-click 2+ bodies first, then click a colored axis handle to align them">⊟</button>
-      <button class="tool" data-action="mirror-3d" title="Mirror body across XY/YZ/XZ plane">↔</button>
-      <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face">⊞</button>
-      <button class="tool" data-action="fillet-3d" title="Fillet — round all 12 edges of a selected cube with a typed radius">⌐</button>
-      <button class="tool" data-action="revolve" title="Revolve / Lathe — spin a polyline profile around the sketch's Y axis">⟳</button>
+
+      <button class="action" id="back-to-3d-btn" title="Finish editing this sketch and return to 3D" style="font-size:12px;display:none">← Done</button>
+      <button class="action" id="new-sketch-btn" title="New sketch on a reference plane (Top/Front/Right)" style="font-size:12px">+ Sketch</button>
+
+      <div class="spacer"></div>
+
+      <div class="actions">
+        <input type="text" id="project-filename" class="filename-input" placeholder="Untitled" title="Project name — used as the saved filename"/>
+        <button class="action" id="cloud-load-btn" title="Load a saved design" style="font-size:14px;padding:0 8px">📂</button>
+        <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
+        <button class="action primary" id="export-btn">Export ▾</button>
+      </div>
     </div>
 
-    <div class="spacer"></div>
+    <!-- Row 2: current-mode toolbar (2D or 3D) with icon + label buttons -->
+    <div class="topbar-row tools-row">
+      <div class="tools" id="tools-2d" style="display:none">
+        <button class="tool" data-tool="select" title="Select (V)"><svg class="ico"><use href="#i-select"/></svg><span class="tool-label">Select</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool active" data-tool="rect" title="Rectangle (R)"><svg class="ico"><use href="#i-rect"/></svg><span class="tool-label">Rect</span></button>
+        <button class="tool" data-tool="circle" title="Circle (C)"><svg class="ico"><use href="#i-circle"/></svg><span class="tool-label">Circle</span></button>
+        <button class="tool" data-tool="line" title="Line / Polyline (L)"><svg class="ico"><use href="#i-line"/></svg><span class="tool-label">Line</span></button>
+        <button class="tool" data-tool="arc" title="Arc (A) — 3-point arc"><svg class="ico"><use href="#i-arc"/></svg><span class="tool-label">Arc</span></button>
+        <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
+        <button class="tool" data-tool="dimension" title="Dimension (D) — click two points to label the distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
+        <button class="tool" data-action="auto-dim" title="Auto-dimension — add engineering dimensions to all shapes"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
+        <div class="dropdown" id="shape2d-dropdown">
+          <button class="tool has-dropdown" data-action="shape2d-menu" title="Insert a pre-made shape into the sketch"><svg class="ico"><use href="#i-hexagon"/></svg><span class="tool-label">Shape</span></button>
+          <div class="dropdown-menu">
+            <button data-shape2d="hexagon"><span class="ico">⬡</span> Hexagon</button>
+            <button data-shape2d="pentagon"><span class="ico">⬠</span> Pentagon</button>
+            <button data-shape2d="octagon"><span class="ico">⯃</span> Octagon</button>
+            <button data-shape2d="star"><span class="ico">★</span> Star</button>
+            <button data-shape2d="heart"><span class="ico">♥</span> Heart</button>
+            <button data-shape2d="teardrop"><span class="ico">💧</span> Teardrop</button>
+          </div>
+        </div>
+        <span class="tool-sep"></span>
+        <button class="tool" data-tool="eraser" title="Eraser (E) — click a shape to delete"><svg class="ico"><use href="#i-eraser"/></svg><span class="tool-label">Erase</span></button>
+        <button class="tool" data-action="mirror-2d" title="Mirror selected shape across an axis"><svg class="ico"><use href="#i-mirror"/></svg><span class="tool-label">Mirror</span></button>
+        <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)"><svg class="ico"><use href="#i-copy"/></svg><span class="tool-label">Copy</span></button>
+        <button class="tool" data-action="paste" title="Paste (Ctrl+V)"><svg class="ico"><use href="#i-paste"/></svg><span class="tool-label">Paste</span></button>
+        <button class="tool" data-action="fillet-2d" title="Fillet — round a polyline corner"><svg class="ico"><use href="#i-fillet"/></svg><span class="tool-label">Fillet</span></button>
+        <button class="tool" data-action="scale-2d" title="Scale — resize selected shape(s) by a typed factor"><svg class="ico"><use href="#i-scale"/></svg><span class="tool-label">Scale</span></button>
+        <button class="tool" data-action="array-2d" title="Array along a line"><svg class="ico"><use href="#i-array"/></svg><span class="tool-label">Array</span></button>
+        <button class="tool" data-action="offset-2d" title="Offset — duplicate the selected shape by a typed distance"><svg class="ico"><use href="#i-offset"/></svg><span class="tool-label">Offset</span></button>
+        <button class="tool" data-action="group" title="Group (Ctrl+G) — Shift-click to add shapes to selection first"><svg class="ico"><use href="#i-group"/></svg><span class="tool-label">Group</span></button>
+        <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)"><svg class="ico"><use href="#i-ungroup"/></svg><span class="tool-label">Ungroup</span></button>
+        <button class="tool" data-action="trim" title="Trim line — click any polyline segment to remove it"><svg class="ico"><use href="#i-trim"/></svg><span class="tool-label">Trim</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool node-btn" id="tb-node-add"   title="Insert node — select a node first, then click to insert a new node after it"><svg class="ico"><use href="#i-node-add"/></svg><span class="tool-label">Add Node</span></button>
+        <button class="tool node-btn" id="tb-node-del"   title="Delete node — select a node first, then click to remove it"><svg class="ico"><use href="#i-node-del"/></svg><span class="tool-label">Del Node</span></button>
+        <button class="tool node-btn" id="tb-node-curve" title="Toggle smooth / sharp — select a node first, then click to add or remove curve handles"><svg class="ico"><use href="#i-node-curve"/></svg><span class="tool-label">Smooth</span></button>
+        <button class="tool node-btn" id="tb-node-rmin"  title="Remove incoming handle — make the entry side straight" style="display:none"><svg class="ico"><use href="#i-node-rmin"/></svg><span class="tool-label">Sharp In</span></button>
+        <button class="tool node-btn" id="tb-node-rmout" title="Remove outgoing handle — make the exit side straight" style="display:none"><svg class="ico"><use href="#i-node-rmout"/></svg><span class="tool-label">Sharp Out</span></button>
+      </div>
 
-    <div class="actions">
-      <input type="text" id="project-filename" class="filename-input" placeholder="Untitled" title="Project name — used as the saved filename"/>
-      <button class="action" id="cloud-load-btn" title="Load a saved design" style="font-size:14px;padding:0 8px">📂</button>
-      <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
-      <button class="action primary" id="export-btn">Export ▾</button>
+      <div class="tools" id="tools-3d">
+        <button class="tool" data-action="orbit-mode" title="Orbit toggle — drag rotates the view. Also: hold Ctrl/⌘/Space/Alt or right-drag."><svg class="ico"><use href="#i-orbit"/></svg><span class="tool-label">Orbit</span></button>
+        <button class="tool" data-action="pan-mode" title="Pan toggle — drag slides the view (middle-drag also pans)"><svg class="ico"><use href="#i-pan"/></svg><span class="tool-label">Pan</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool" data-action="extrude" title="Extrude the current sketch"><svg class="ico"><use href="#i-extrude"/></svg><span class="tool-label">Extrude</span></button>
+        <div class="dropdown" id="prim-dropdown">
+          <button class="tool has-dropdown" data-action="prim-menu" title="Add a primitive shape"><svg class="ico"><use href="#i-cube"/></svg><span class="tool-label">Primitive</span></button>
+          <div class="dropdown-menu">
+            <button data-prim="cube"><span class="ico">▣</span> Cube</button>
+            <button data-prim="sphere"><span class="ico">●</span> Sphere</button>
+            <button data-prim="cylinder"><span class="ico">⬭</span> Cylinder</button>
+            <button data-prim="cone"><span class="ico">▲</span> Cone</button>
+            <button data-prim="torus"><span class="ico">◯</span> Torus</button>
+            <button data-prim="pyramid"><span class="ico">◭</span> Pyramid</button>
+            <div class="dropdown-sep"></div>
+            <button data-prim="hexagon"><span class="ico">⬡</span> Hexagon</button>
+            <button data-prim="pentagon"><span class="ico">⬠</span> Pentagon</button>
+            <button data-prim="octagon"><span class="ico">⯃</span> Octagon</button>
+            <button data-prim="star"><span class="ico">★</span> Star</button>
+            <button data-prim="heart"><span class="ico">♥</span> Heart</button>
+            <button data-prim="teardrop"><span class="ico">💧</span> Teardrop</button>
+          </div>
+        </div>
+        <button class="tool" data-action="add-fastener" title="Add a threaded fastener (hex bolt, Phillips screw, socket cap, flat head)"><svg class="ico"><use href="#i-fastener"/></svg><span class="tool-label">Fastener</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)"><svg class="ico"><use href="#i-copy"/></svg><span class="tool-label">Copy</span></button>
+        <button class="tool" data-action="paste" title="Paste (Ctrl+V)"><svg class="ico"><use href="#i-paste"/></svg><span class="tool-label">Paste</span></button>
+        <button class="tool" data-action="group" title="Group bodies (Ctrl+G) — Shift-click bodies first"><svg class="ico"><use href="#i-group"/></svg><span class="tool-label">Group</span></button>
+        <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)"><svg class="ico"><use href="#i-ungroup"/></svg><span class="tool-label">Ungroup</span></button>
+        <button class="tool" data-action="boolean-cut" title="Cut — click a target body, then a tool body to subtract from it"><svg class="ico"><use href="#i-boolean-cut"/></svg><span class="tool-label">Cut</span></button>
+        <button class="tool" data-action="align" title="Align — Shift-click 2+ bodies first, then click a colored axis handle"><svg class="ico"><use href="#i-align"/></svg><span class="tool-label">Align</span></button>
+        <button class="tool" data-action="mirror-3d" title="Mirror body across XY/YZ/XZ plane"><svg class="ico"><use href="#i-mirror-3d"/></svg><span class="tool-label">Mirror</span></button>
+        <span class="tool-sep"></span>
+        <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
+        <button class="tool" data-action="fillet-3d" title="Fillet — round all 12 edges of a selected cube with a typed radius"><svg class="ico"><use href="#i-fillet-3d"/></svg><span class="tool-label">Fillet</span></button>
+        <button class="tool" data-action="revolve" title="Revolve / Lathe — spin a polyline profile around the sketch's Y axis"><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
+      </div>
     </div>
   </header>
 
@@ -788,6 +916,7 @@
         <button type="button" data-op="add" class="active">＋ Add</button>
         <button type="button" data-op="subtract">－ Cut</button>
       </span>
+      <button type="button" id="extrude-through-btn" class="extrude-through" title="Cut all the way through the body" style="display:none">⇣ Through</button>
       <button type="button" id="extrude-done-btn" class="extrude-done" title="Commit extrude (Enter)">Done</button>
       <button type="button" id="extrude-cancel-btn" class="extrude-cancel" title="Cancel (Esc)">×</button>
     </div>
@@ -813,8 +942,8 @@
       <label><input type="checkbox" id="grid-snap"/> Snap</label>
       <label>Size <select id="grid-size"></select></label>
       <span class="units-toggle" id="units-toggle" style="margin-left:6px">
-        <button class="active" data-units="mm">mm</button>
-        <button data-units="in">in</button>
+        <button data-units="mm">mm</button>
+        <button class="active" data-units="in">in</button>
       </span>
     </div>
     <span id="zoom-display">100%</span>
@@ -854,8 +983,8 @@ const GROUND_PLANE = {
 
 const doc = {
   mode: '3d',
-  units: 'mm', // 'mm' | 'in' — internal storage is always mm
-  grid: { spacing: 5, snap: true, size: 200 }, // workplane size in mm (square, ±size/2)
+  units: 'in', // 'mm' | 'in' — internal storage is always mm; display defaults to inches
+  grid: { spacing: 25.4 / 4, snap: true, size: 8 * 25.4 }, // 1/4" spacing on an 8" workplane
   sketches: [], // populated below; each = {id, plane, entities, nextId, name}
   activeSketchId: null,
   nextSketchId: 1,
@@ -869,6 +998,7 @@ const doc = {
   selectedRegions: [],
   clipboard: null,
   faceMode: false, // when true, next 3D click picks a face for new sketch
+  cutMode: null,   // { stage: 'target'|'tool', targetId } during interactive Cut
   curvedPickBody: null, // body id when 6-face bbox picker is active for a curved body
   orbitMode: false, // toggle: when true, plain left-drag in 3D orbits instead of selecting
   panMode: false,   // toggle: when true, plain left-drag in 3D pans the view
@@ -2569,6 +2699,69 @@ function projectBodiesOntoPlane(plane) {
       }
       return;
     }
+    // Cylinder / cone — primitives with circular cross-section along Y.
+    // Project the top and bottom rims as ellipses (orthogonal projection of a
+    // circle onto an arbitrary plane is an ellipse) plus two silhouette
+    // tangent lines along the side. Without this, a cylindrical cut would
+    // fall back to the generic bbox projection — a misleading rectangle.
+    if (child.type === 'cylinder' || child.type === 'cone') {
+      const halfH = (child.h || 0) / 2;
+      const cx_w = (child.x || 0) + (parentOffset?.x || 0);
+      const cy_w = halfH + (child.y || 0) + (parentOffset?.y || 0);
+      const cz_w = (child.z || 0) + (parentOffset?.z || 0);
+      const halfW = (child.w || 0) / 2;
+      const halfD = (child.d || 0) / 2;
+      const projWorld = (v) => {
+        const s = v.clone().applyMatrix4(planeMInv);
+        return { x: s.x, y: s.y, z: s.z };
+      };
+      const N = 48;
+      const yBot = cy_w - halfH;
+      const yTop = cy_w + halfH;
+      // For a cone, top radius collapses to ~0
+      const rBotW = halfW, rBotD = halfD;
+      const rTopW = child.type === 'cone' ? 0 : halfW;
+      const rTopD = child.type === 'cone' ? 0 : halfD;
+      const ring = (yLevel, rW, rD) => {
+        const pts = [];
+        for (let i = 0; i < N; i++) {
+          const t = (i / N) * 2 * Math.PI;
+          pts.push(new THREE.Vector3(cx_w + Math.cos(t) * rW, yLevel, cz_w + Math.sin(t) * rD));
+        }
+        return pts;
+      };
+      const bot = ring(yBot, rBotW, rBotD).map(projWorld);
+      const top = ring(yTop, rTopW, rTopD).map(projWorld);
+      for (let i = 0; i < N; i++) {
+        const a = bot[i], b = bot[(i + 1) % N];
+        segments.push({ p1: a, p2: b, dz1: a.z, dz2: b.z });
+        if (child.type !== 'cone') {
+          const c = top[i], d = top[(i + 1) % N];
+          segments.push({ p1: c, p2: d, dz1: c.z, dz2: d.z });
+        }
+      }
+      // Silhouette tangents — perpendicular to view, along the cylinder axis
+      const viewN = new THREE.Vector3(...plane.n);
+      const axis = new THREE.Vector3(0, 1, 0);
+      const tangent = new THREE.Vector3().crossVectors(axis, viewN);
+      if (tangent.lengthSq() > 1e-6) {
+        tangent.normalize();
+        // Scale by avg radius
+        const rAvg = (halfW + halfD) / 2;
+        tangent.multiplyScalar(rAvg);
+        for (const sgn of [+1, -1]) {
+          const sw = new THREE.Vector3(cx_w + sgn * tangent.x, yBot, cz_w + sgn * tangent.z);
+          const ew = new THREE.Vector3(
+            cx_w + (child.type === 'cone' ? 0 : sgn * tangent.x),
+            yTop,
+            cz_w + (child.type === 'cone' ? 0 : sgn * tangent.z),
+          );
+          const sa = projWorld(sw), sb = projWorld(ew);
+          segments.push({ p1: sa, p2: sb, dz1: sa.z, dz2: sb.z });
+        }
+      }
+      return;
+    }
     // Extrude bodies (the most common cut shape from the gizmo) — build the
     // prism geometry on the fly and project its edges. Without this the cut
     // tunnels were invisible in the 2D view, hiding "what's been removed".
@@ -3081,6 +3274,31 @@ class Viewer3D {
         doc.faceMode = false;
         this.canvas.style.cursor = '';
         setStatus('Sketch on Face cancelled.');
+        return;
+      }
+      // Boolean cut mode — pick target body, then tool body to subtract
+      if (doc.cutMode && e.button === 0) {
+        this.raycaster.setFromCamera(ndc(e), this.camera);
+        const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
+        if (!hits.length) return;
+        const pickedId = hits[0].object.userData.bodyId;
+        if (doc.cutMode.stage === 'target') {
+          doc.cutMode.targetId = pickedId;
+          doc.cutMode.stage = 'tool';
+          doc.selection = { kind: 'body', id: pickedId };
+          doc.multiSelectedBodies = [pickedId];
+          renderTree(); renderProps();
+          setStatus('Cut — now click the TOOL body (what to subtract). Esc to cancel.');
+          return;
+        }
+        if (doc.cutMode.stage === 'tool') {
+          if (pickedId === doc.cutMode.targetId) {
+            showHint('Pick a DIFFERENT body to subtract from the target.');
+            return;
+          }
+          performBooleanCut(doc.cutMode.targetId, pickedId);
+          return;
+        }
         return;
       }
       // Face-pick mode (Sketch on Face workflow)
@@ -5026,6 +5244,7 @@ function setMode(mode) {
     hideDimLabels();
     hideExtrudeTooltip();
     if (doc.alignMode) exitAlignMode();
+    if (doc.cutMode) exitBooleanCut();
     // Defer by one frame so the SVG has been laid out with non-zero dimensions.
     // The iframe's viewport isn't resolved until the parent page finishes flex layout.
     requestAnimationFrame(() => sketchEng.render());
@@ -5055,6 +5274,16 @@ function setExtrudeTooltipOp(op) {
       b.classList.toggle('active', b.dataset.op === extrudeTooltipOp);
     });
   }
+  // Show the Through button only when (a) op is Cut, AND (b) the active
+  // sketch was started on a body face (so we have a target body to cut
+  // through). For free-floating sketches there's nothing to cut "through".
+  const thBtn = document.getElementById('extrude-through-btn');
+  if (thBtn) {
+    const st = viewer?.extrudeState;
+    const hasTarget = !!(st?.sketch?.sourceBodyId &&
+      doc.bodies.find(b => b.id === st.sketch.sourceBodyId));
+    thBtn.style.display = (extrudeTooltipOp === 'subtract' && hasTarget) ? '' : 'none';
+  }
   // Refresh live preview if a drag/click is active
   const st = viewer?.extrudeState;
   if (st && st.region && viewer) {
@@ -5062,6 +5291,38 @@ function setExtrudeTooltipOp(op) {
     const len = inp && inp.value ? fromUnit(parseFloat(inp.value)) : (st.length || 0);
     if (len > 0) viewer.updateExtrudePreview(len, st.direction || 1);
   }
+}
+
+// Distance from the sketch plane to the far side of the body that the
+// sketch was started on, in the −normal direction (i.e. how deep a cut
+// needs to be to fully poke through). Adds a small epsilon so the CSG
+// boolean cleanly exits the far face instead of leaving a thin shell.
+function computeThroughDepth(sketch) {
+  if (!sketch?.sourceBodyId || !viewer) return 0;
+  const body = doc.bodies.find(b => b.id === sketch.sourceBodyId);
+  if (!body?.mesh) return 0;
+  viewer.scene.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(body.mesh);
+  if (bb.isEmpty()) return 0;
+  const o = new THREE.Vector3(...sketch.plane.origin);
+  const n = new THREE.Vector3(...sketch.plane.n);
+  const cutDir = n.clone().negate();
+  const corners = [
+    new THREE.Vector3(bb.min.x, bb.min.y, bb.min.z),
+    new THREE.Vector3(bb.max.x, bb.min.y, bb.min.z),
+    new THREE.Vector3(bb.min.x, bb.max.y, bb.min.z),
+    new THREE.Vector3(bb.max.x, bb.max.y, bb.min.z),
+    new THREE.Vector3(bb.min.x, bb.min.y, bb.max.z),
+    new THREE.Vector3(bb.max.x, bb.min.y, bb.max.z),
+    new THREE.Vector3(bb.min.x, bb.max.y, bb.max.z),
+    new THREE.Vector3(bb.max.x, bb.max.y, bb.max.z),
+  ];
+  let maxDepth = 0;
+  for (const c of corners) {
+    const d = c.sub(o).dot(cutDir);
+    if (d > maxDepth) maxDepth = d;
+  }
+  return maxDepth + 0.5; // epsilon for clean CSG exit
 }
 function showExtrudeTooltip() {
   const t = document.getElementById('extrude-tooltip');
@@ -5290,6 +5551,24 @@ function commitExtrudeFromGizmo(region, sketch, lengthMm, direction, opOverride)
         const st = viewer?.extrudeState;
         if (!st || !st.region) return;
         commitExtrudeFromGizmo(st.region, st.sketch, lenMm, st.direction || 1);
+      });
+    }
+    // Through — set length to "all the way through the target body" and commit
+    const throughBtn = document.getElementById('extrude-through-btn');
+    if (throughBtn) {
+      throughBtn.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const st = viewer?.extrudeState;
+        if (!st || !st.region || !st.sketch) return;
+        const depth = computeThroughDepth(st.sketch);
+        if (!(depth > 0)) {
+          showHint('Could not compute through-depth — no target body found.');
+          return;
+        }
+        // Force op to subtract so commitExtrudeFromGizmo doesn't fall back.
+        setExtrudeTooltipOp('subtract');
+        commitExtrudeFromGizmo(st.region, st.sketch, depth, -1, 'subtract');
       });
     }
     // Cancel — close tooltip without creating a body
@@ -6746,6 +7025,69 @@ function combineBodies() {
   }
 }
 
+// Boolean Cut (⊖) — interactive: click target body, then click tool body.
+// The tool is subtracted from the target; both inputs are consumed and replaced
+// by a single 'combined' body. Op flags (positive/negative) are ignored — the
+// cut direction is explicit from the pick order.
+function startBooleanCut() {
+  if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
+  if (doc.bodies.length < 2) { showHint('Need at least two bodies. Add another, then try Cut.'); return; }
+  if (doc.mode !== '3d') setMode('3d');
+  doc.cutMode = { stage: 'target', targetId: null };
+  if (viewer) viewer.canvas.style.cursor = 'crosshair';
+  document.querySelectorAll('[data-action="boolean-cut"]').forEach(b => b.classList.add('active'));
+  setStatus('Cut — click the TARGET body (what to keep). Esc to cancel.');
+}
+function exitBooleanCut(msg) {
+  doc.cutMode = null;
+  if (viewer) viewer.canvas.style.cursor = '';
+  document.querySelectorAll('[data-action="boolean-cut"]').forEach(b => b.classList.remove('active'));
+  if (msg) setStatus(msg);
+}
+function performBooleanCut(targetId, toolId) {
+  const target = doc.bodies.find(b => b.id === targetId);
+  const tool = doc.bodies.find(b => b.id === toolId);
+  if (!target || !tool) { exitBooleanCut('Cut cancelled — body missing.'); return; }
+  pushUndo();
+  setStatus('Computing cut…');
+  try {
+    viewer.scene.updateMatrixWorld(true);
+    const result = CSG.subtract(getCSGMesh(target), getCSGMesh(tool));
+    result.updateMatrixWorld(true);
+    const baked = result.geometry.clone();
+    baked.applyMatrix4(result.matrixWorld);
+    baked.computeVertexNormals();
+    // Store target + tool as children of a group body so the sketch-overlay
+    // projection (which walks children and draws cuts as red dashed lines)
+    // can render the cut features cleanly. Mark the tool as 'subtract' so
+    // it's drawn as a cut, regardless of its original op flag. Ungroup
+    // restores both originals.
+    const targetCopy = JSON.parse(JSON.stringify(target));
+    delete targetCopy.mesh;
+    targetCopy.op = 'add';
+    const toolCopy = JSON.parse(JSON.stringify(tool));
+    delete toolCopy.mesh;
+    toolCopy.op = 'subtract';
+    const cutBody = {
+      id: doc.nextBodyId++, type: 'group',
+      children: [targetCopy, toolCopy],
+      geometry: baked, op: 'add',
+      x: 0, y: 0, z: 0,
+    };
+    doc.bodies = doc.bodies.filter(b => b.id !== targetId && b.id !== toolId);
+    doc.bodies.push(cutBody);
+    doc.selection = { kind: 'body', id: cutBody.id };
+    doc.multiSelectedBodies = [cutBody.id];
+    viewer.rebuildBodies();
+    renderTree(); renderProps();
+    exitBooleanCut('Cut complete — Ungroup (Ctrl+Shift+G) to restore both bodies');
+  } catch (err) {
+    console.error('Cut failed:', err);
+    showHint('Cut failed — geometry too complex or non-manifold. Check console.');
+    exitBooleanCut('Cut cancelled');
+  }
+}
+
 function copySelection() {
   let items = [];
   let kind = null;
@@ -7599,6 +7941,115 @@ function openOffsetDialog() {
   });
 }
 
+// 2D Scale — resize selected entities by a typed factor around their combined
+// centroid. Supports rect / circle / polyline (incl. curve handles) / dimension.
+// Non-uniform: independent X / Y factors revealed via "lock aspect" checkbox.
+function scaleSketchEntity(ent, pivot, sx, sy) {
+  const sp = (x, y) => ({
+    x: pivot.x + (x - pivot.x) * sx,
+    y: pivot.y + (y - pivot.y) * sy,
+  });
+  if (ent.type === 'rect') {
+    const c = sp(ent.x, ent.y);
+    ent.x = c.x; ent.y = c.y;
+    ent.w *= sx; ent.h *= sy;
+  } else if (ent.type === 'circle') {
+    const c = sp(ent.cx, ent.cy);
+    ent.cx = c.x; ent.cy = c.y;
+    ent.r *= (sx + sy) / 2;
+  } else if (ent.type === 'polyline') {
+    ent.points = ent.points.map(p => {
+      const np = sp(p.x, p.y);
+      const r = { x: np.x, y: np.y };
+      if (p.cpIn)  r.cpIn  = { x: p.cpIn.x  * sx, y: p.cpIn.y  * sy };
+      if (p.cpOut) r.cpOut = { x: p.cpOut.x * sx, y: p.cpOut.y * sy };
+      return r;
+    });
+  } else if (ent.type === 'dimension') {
+    const a = sp(ent.p1.x, ent.p1.y);
+    const b = sp(ent.p2.x, ent.p2.y);
+    ent.p1 = a; ent.p2 = b;
+    if (ent.off != null) ent.off *= (sx + sy) / 2;
+  }
+}
+
+function entitiesCentroid(ents) {
+  let sx = 0, sy = 0, n = 0;
+  for (const ent of ents) {
+    if (ent.type === 'rect') {
+      sx += ent.x + ent.w / 2; sy += ent.y + ent.h / 2; n++;
+    } else if (ent.type === 'circle') {
+      sx += ent.cx; sy += ent.cy; n++;
+    } else if (ent.type === 'polyline') {
+      for (const p of ent.points) { sx += p.x; sy += p.y; n++; }
+    } else if (ent.type === 'dimension') {
+      sx += (ent.p1.x + ent.p2.x) / 2; sy += (ent.p1.y + ent.p2.y) / 2; n++;
+    }
+  }
+  if (!n) return { x: 0, y: 0 };
+  return { x: sx / n, y: sy / n };
+}
+
+function openScaleDialog() {
+  const ids = (doc.multiSelectedSketch?.length ? doc.multiSelectedSketch :
+              (doc.selection?.kind === 'sketch' ? [doc.selection.id] : []));
+  if (!ids.length) { showHint('Select a 2D shape first (Shift-click to multi-select).'); return; }
+  const ents = ids.map(id => doc.sketch.entities.find(e => e.id === id)).filter(Boolean);
+  if (!ents.length) return;
+  openModal({
+    title: 'Scale',
+    body: `<p>Resize the selected shape${ents.length > 1 ? 's together' : ''} by a factor. The centroid stays put.</p>
+           <div class="field"><label>Scale</label><input id="sc-f" type="number" value="1" step="0.1" min="0.01" autofocus/></div>
+           <div class="field" style="display:flex;align-items:center;gap:8px;margin-top:6px">
+             <input type="checkbox" id="sc-lock" checked style="width:auto;margin:0"/>
+             <label for="sc-lock" style="margin:0;cursor:pointer">Lock aspect (X = Y)</label>
+           </div>
+           <div id="sc-xy" style="display:none;margin-top:6px">
+             <div class="field"><label>Scale X</label><input id="sc-fx" type="number" value="1" step="0.1" min="0.01"/></div>
+             <div class="field"><label>Scale Y</label><input id="sc-fy" type="number" value="1" step="0.1" min="0.01"/></div>
+           </div>
+           <div class="hint" style="margin-top:6px">Tip: 0.5 makes it half the size; 2 doubles it.</div>`,
+    custom: () => {
+      const lock = document.getElementById('sc-lock');
+      const xy = document.getElementById('sc-xy');
+      const single = document.getElementById('sc-f');
+      lock.addEventListener('change', () => {
+        const locked = lock.checked;
+        xy.style.display = locked ? 'none' : '';
+        single.parentElement.style.display = locked ? '' : 'none';
+        if (!locked) {
+          document.getElementById('sc-fx').value = single.value;
+          document.getElementById('sc-fy').value = single.value;
+        } else {
+          single.value = document.getElementById('sc-fx').value;
+        }
+      });
+    },
+    onConfirm: () => {
+      const locked = document.getElementById('sc-lock').checked;
+      let fx, fy;
+      if (locked) {
+        const f = parseFloat(document.getElementById('sc-f').value);
+        fx = fy = f;
+      } else {
+        fx = parseFloat(document.getElementById('sc-fx').value);
+        fy = parseFloat(document.getElementById('sc-fy').value);
+      }
+      if (!isFinite(fx) || fx <= 0 || !isFinite(fy) || fy <= 0) {
+        showHint('Enter positive scale factor(s).'); return;
+      }
+      if (Math.abs(fx - 1) < 1e-9 && Math.abs(fy - 1) < 1e-9) return;
+      pushUndo();
+      const pivot = entitiesCentroid(ents);
+      for (const ent of ents) scaleSketchEntity(ent, pivot, fx, fy);
+      sketchEng.render(); renderTree(); renderProps();
+      setStatus(locked
+        ? `Scaled ${ents.length} shape${ents.length === 1 ? '' : 's'} by ×${fx}`
+        : `Scaled ${ents.length} shape${ents.length === 1 ? '' : 's'} by X×${fx}, Y×${fy}`);
+    },
+  });
+}
+
 function openArrayDialog() {
   const sel = doc.selection;
   if (!sel || sel.kind !== 'sketch') { showHint('Select a 2D shape first.'); return; }
@@ -8001,12 +8452,14 @@ function init() {
       case 'mirror-2d': openMirrorDialog(); break;
       case 'mirror-3d': openMirror3DDialog(); break;
       case 'sketch-on-face': startSketchOnFace(); break;
+      case 'boolean-cut': startBooleanCut(); break;
       case 'add-fastener': openFastenerDialog(); break;
       case 'new-sketch': openNewSketchDialog(); break;
       case 'fillet-2d': openFilletDialog(); break;
       case 'fillet-3d': openFillet3DDialog(); break;
       case 'revolve': revolveCurrentSketch(); break;
       case 'array-2d': openArrayDialog(); break;
+      case 'scale-2d': openScaleDialog(); break;
       case 'offset-2d': openOffsetDialog(); break;
       case 'auto-dim': autoAddDimensions(); break;
       case 'group': groupSelected(); break;
@@ -8199,6 +8652,10 @@ function init() {
     if (e.key === 'Escape' && doc.alignMode) {
       exitAlignMode();
       setStatus('Align cancelled');
+    }
+    // Cancel boolean cut mode
+    if (e.key === 'Escape' && doc.cutMode) {
+      exitBooleanCut('Cut cancelled');
     }
     // Cancel an in-progress drag-to-extrude (or just close the typing tooltip)
     if (e.key === 'Escape' && doc.mode === '3d') {
