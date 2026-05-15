@@ -1610,51 +1610,198 @@ class SketchEngine {
       return;
     }
 
-    // Trim — remove the clicked segment from a polyline (split it if interior)
+    // Trim — AutoCAD-style trim for any entity (line/polyline/rect/circle).
+    //
+    // Algorithm: convert the clicked entity to a "simple polyline" view (rect
+    // → 4-point closed, circle → 64-point closed, curved polyline → tessellated
+    // to lines). Find every intersection of that polyline with other entities,
+    // mapped to an arc-length parameter s along the whole polyline. Bracket
+    // the click s value with the nearest intersections on each side and remove
+    // the bracketed arc. For closed polylines, brackets wrap circularly. For
+    // open polylines, missing brackets fall back to the polyline endpoints.
+    //
+    // Result is one or more open polylines (a closed polyline always opens on
+    // trim). Rect / circle origins are replaced by their trimmed polyline
+    // forms — they lose their parametric type, same trade-off as Fillet.
     if (this.tool === 'trim') {
       const tolMm = 5 / this.view.pxPerMm;
-      let trimmed = false;
+      // 1. Find clicked entity + segment + parameter t (closest entity wins).
+      let clickedOrig = null, simplePoly = null, clickedSegIdx = -1, clickedT = 0;
+      let bestD = tolMm;
       for (const ent of doc.sketch.entities) {
-        if (ent.type !== 'polyline' || ent.points.length < 2) continue;
-        const n = ent.points.length;
-        const segCount = ent.closed ? n : n - 1;
+        if (ent.construction) continue;
+        const poly = convertToSimplePolyline(ent);
+        if (!poly || poly.points.length < 2) continue;
+        const n = poly.points.length;
+        const segCount = poly.closed ? n : n - 1;
         for (let i = 0; i < segCount; i++) {
-          const a = ent.points[i];
-          const b = ent.points[(i + 1) % n];
-          if (pointSegDist(wx, wy, a.x, a.y, b.x, b.y) < tolMm) {
-            // Remove segment i — splits the polyline at this point
-            if (ent.closed) {
-              // Closed: open it by removing this segment, points reorder so the kept ones are contiguous
-              ent.points = ent.points.slice(i + 1).concat(ent.points.slice(0, i + 1));
-              ent.closed = false;
-              trimmed = true;
-            } else {
-              // Open: split into two new polylines (or just one if at the end)
-              const left = ent.points.slice(0, i + 1);
-              const right = ent.points.slice(i + 1);
-              const idx = doc.sketch.entities.indexOf(ent);
-              doc.sketch.entities.splice(idx, 1);
-              if (left.length >= 2) {
-                doc.sketch.entities.push({ ...JSON.parse(JSON.stringify(ent)), id: doc.sketch.nextId++, points: left, closed: false });
-              }
-              if (right.length >= 2) {
-                doc.sketch.entities.push({ ...JSON.parse(JSON.stringify(ent)), id: doc.sketch.nextId++, points: right, closed: false });
-              }
-              trimmed = true;
-            }
-            break;
+          const a = poly.points[i], b = poly.points[(i + 1) % n];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const L2 = dx * dx + dy * dy;
+          if (L2 === 0) continue;
+          const t = Math.max(0, Math.min(1, ((wx - a.x) * dx + (wy - a.y) * dy) / L2));
+          const px = a.x + t * dx, py = a.y + t * dy;
+          const d = Math.hypot(wx - px, wy - py);
+          if (d < bestD) {
+            bestD = d; clickedOrig = ent; simplePoly = poly;
+            clickedSegIdx = i; clickedT = t;
           }
         }
-        if (trimmed) break;
       }
-      if (trimmed) {
-        doc.selection = null;
-        doc.multiSelectedSketch = [];
-        renderTree(); renderProps(); this.render();
-        setStatus('Trimmed segment');
+      if (!clickedOrig) {
+        showHint('Click directly on a line, rect edge, or circle to trim it.');
+        return;
+      }
+
+      // 2. Compute cumulative arc-length parameters along the simple polyline.
+      const n = simplePoly.points.length;
+      const segCount = simplePoly.closed ? n : n - 1;
+      const segLens = [];
+      for (let i = 0; i < segCount; i++) {
+        const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
+        segLens.push(Math.hypot(b.x - a.x, b.y - a.y));
+      }
+      const cumLens = [0];
+      for (let i = 0; i < segCount; i++) cumLens.push(cumLens[i] + segLens[i]);
+      const totalLen = cumLens[segCount];
+      if (totalLen < 1e-6) {
+        showHint('Entity too small to trim.');
+        return;
+      }
+      const clickedS = cumLens[clickedSegIdx] + clickedT * segLens[clickedSegIdx];
+
+      // 3. Find intersections of the whole polyline with all OTHER entities.
+      const intersections = []; // each: { s, x, y }
+      for (const other of doc.sketch.entities) {
+        if (other.id === clickedOrig.id || other.construction) continue;
+        const oSegs = entityToSegments(other);
+        if (!oSegs.length) continue;
+        for (let i = 0; i < segCount; i++) {
+          const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
+          for (const os of oSegs) {
+            const hit = segmentIntersection(a, b, os.a, os.b);
+            if (!hit) continue;
+            const s = cumLens[i] + hit.t * segLens[i];
+            // Skip an intersection that sits exactly at the click point
+            if (Math.abs(s - clickedS) < 1e-3) continue;
+            intersections.push({ s, x: hit.x, y: hit.y });
+          }
+        }
+      }
+
+      pushUndo();
+
+      if (intersections.length === 0) {
+        // No crossings anywhere. For user-drawn polylines, fall back to the
+        // v1 behavior of removing just the clicked segment so the tool still
+        // does *something* useful for cleanup. For rects/circles, do nothing
+        // — removing a single tessellated micro-segment would just leave a
+        // confusing barely-open shape.
+        if (clickedOrig.type === 'polyline'
+            && clickedOrig.points.length === simplePoly.points.length) {
+          const orig = clickedOrig;
+          const clone = (pts) => ({
+            ...JSON.parse(JSON.stringify(orig)),
+            id: doc.sketch.nextId++, points: pts, closed: false,
+          });
+          if (orig.closed) {
+            orig.points = orig.points.slice(clickedSegIdx + 1)
+              .concat(orig.points.slice(0, clickedSegIdx + 1));
+            orig.closed = false;
+          } else {
+            const left = orig.points.slice(0, clickedSegIdx + 1);
+            const right = orig.points.slice(clickedSegIdx + 1);
+            const idx = doc.sketch.entities.indexOf(orig);
+            doc.sketch.entities.splice(idx, 1);
+            if (left.length >= 2) doc.sketch.entities.push(clone(left));
+            if (right.length >= 2) doc.sketch.entities.push(clone(right));
+          }
+          doc.selection = null; doc.multiSelectedSketch = [];
+          renderTree(); renderProps(); this.render();
+          setStatus('Trimmed segment (no crossings found)');
+        } else {
+          showHint('No crossings found — overlap this with another shape, then trim.');
+        }
+        return;
+      }
+
+      // 4. Bracket the click with the nearest intersections on each side.
+      intersections.sort((a, b) => a.s - b.s);
+      let leftInt = null, rightInt = null;
+      for (const it of intersections) {
+        if (it.s < clickedS - 1e-6) leftInt = it;
+        else if (it.s > clickedS + 1e-6 && !rightInt) rightInt = it;
+      }
+      if (simplePoly.closed) {
+        // Circular wrap: if no intersection before/after the click in linear
+        // s-space, use the last/first one (cyclic neighbours).
+        if (!leftInt)  leftInt  = intersections[intersections.length - 1];
+        if (!rightInt) rightInt = intersections[0];
       } else {
-        showHint('Click directly on a polyline segment to trim it.');
+        // Open polyline: missing brackets fall back to the polyline endpoints.
+        if (!leftInt)  leftInt  = { s: 0,        x: simplePoly.points[0].x,     y: simplePoly.points[0].y     };
+        if (!rightInt) rightInt = { s: totalLen, x: simplePoly.points[n - 1].x, y: simplePoly.points[n - 1].y };
       }
+
+      // 5. Build the resulting polyline(s) by removing the bracketed arc.
+      const baseProps = {
+        type: 'polyline',
+        construction: clickedOrig.construction || false,
+        groupId: clickedOrig.groupId,
+      };
+      const cloneWithPoints = (pts, closed) => ({
+        ...baseProps, points: pts, closed, id: doc.sketch.nextId++,
+      });
+      const results = [];
+
+      if (simplePoly.closed) {
+        // Closed → open. Kept arc goes from rightInt forward to leftInt.
+        // If leftInt.s < rightInt.s, the kept arc wraps through totalLen → 0.
+        const keptWraps = leftInt.s < rightInt.s;
+        const inKept = (si) => keptWraps
+          ? (si > rightInt.s + 1e-6 || si < leftInt.s - 1e-6)
+          : (si > rightInt.s + 1e-6 && si < leftInt.s - 1e-6);
+        const vertsKept = [];
+        for (let i = 0; i < n; i++) {
+          const si = cumLens[i];
+          if (!inKept(si)) continue;
+          let dist = si - rightInt.s;
+          if (dist < 0) dist += totalLen;
+          vertsKept.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y, dist });
+        }
+        vertsKept.sort((a, b) => a.dist - b.dist);
+        const pts = [{ x: rightInt.x, y: rightInt.y }];
+        for (const v of vertsKept) pts.push({ x: v.x, y: v.y });
+        pts.push({ x: leftInt.x, y: leftInt.y });
+        if (pts.length >= 2) results.push(cloneWithPoints(pts, false));
+      } else {
+        // Open → up to two open polylines flanking the removed arc.
+        const leftPts = [];
+        for (let i = 0; i < n; i++) {
+          if (cumLens[i] < leftInt.s - 1e-6) {
+            leftPts.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
+          }
+        }
+        if (leftInt.s > 1e-6) leftPts.push({ x: leftInt.x, y: leftInt.y });
+        const rightPts = [];
+        if (rightInt.s < totalLen - 1e-6) rightPts.push({ x: rightInt.x, y: rightInt.y });
+        for (let i = 0; i < n; i++) {
+          if (cumLens[i] > rightInt.s + 1e-6) {
+            rightPts.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
+          }
+        }
+        if (leftPts.length >= 2)  results.push(cloneWithPoints(leftPts, false));
+        if (rightPts.length >= 2) results.push(cloneWithPoints(rightPts, false));
+      }
+
+      // 6. Replace the original entity with the trim result(s).
+      const origIdx = doc.sketch.entities.indexOf(clickedOrig);
+      doc.sketch.entities.splice(origIdx, 1);
+      for (const r of results) doc.sketch.entities.push(r);
+
+      doc.selection = null; doc.multiSelectedSketch = [];
+      renderTree(); renderProps(); this.render();
+      setStatus(`Trimmed at ${intersections.length === 1 ? '1 crossing' : `${intersections.length} crossings`}`);
       return;
     }
 
@@ -4733,6 +4880,74 @@ function entityToSegments(ent) {
     }
   }
   return out;
+}
+
+// Build a simple-polyline representation of any entity (rect, circle, or
+// polyline) — straight-segment points, no curve handles. Used by the trim
+// tool so it can treat every entity type with one unified algorithm.
+// The resulting polyline is a NEW object; the original entity is untouched.
+function convertToSimplePolyline(ent) {
+  if (ent.type === 'rect' && ent.w > 0 && ent.h > 0) {
+    return {
+      type: 'polyline',
+      points: [
+        { x: ent.x,         y: ent.y         },
+        { x: ent.x + ent.w, y: ent.y         },
+        { x: ent.x + ent.w, y: ent.y + ent.h },
+        { x: ent.x,         y: ent.y + ent.h },
+      ],
+      closed: true,
+      construction: ent.construction || false,
+      groupId: ent.groupId,
+    };
+  }
+  if (ent.type === 'circle' && ent.r > 0) {
+    const N = 64;
+    const pts = [];
+    for (let i = 0; i < N; i++) {
+      const t = (i / N) * Math.PI * 2;
+      pts.push({
+        x: ent.cx + Math.cos(t) * ent.r,
+        y: ent.cy + Math.sin(t) * ent.r,
+      });
+    }
+    return {
+      type: 'polyline',
+      points: pts,
+      closed: true,
+      construction: ent.construction || false,
+      groupId: ent.groupId,
+    };
+  }
+  if (ent.type === 'polyline' && ent.points && ent.points.length >= 2) {
+    const hasCurve = ent.points.some(p => p.cpOut || p.cpIn);
+    if (!hasCurve) {
+      return {
+        type: 'polyline',
+        points: ent.points.map(p => ({ x: p.x, y: p.y })),
+        closed: !!ent.closed,
+        construction: ent.construction || false,
+        groupId: ent.groupId,
+      };
+    }
+    // Has curve handles → tessellate beziers into straight segments
+    const segs = entityToSegments(ent);
+    if (!segs.length) return null;
+    const pts = [{ x: segs[0].a.x, y: segs[0].a.y }];
+    for (const s of segs) pts.push({ x: s.b.x, y: s.b.y });
+    if (ent.closed && pts.length > 1) {
+      const f = pts[0], l = pts[pts.length - 1];
+      if (Math.hypot(f.x - l.x, f.y - l.y) < 1e-6) pts.pop();
+    }
+    return {
+      type: 'polyline',
+      points: pts,
+      closed: !!ent.closed,
+      construction: ent.construction || false,
+      groupId: ent.groupId,
+    };
+  }
+  return null;
 }
 
 // Strict interior intersection of two segments. Returns {x, y, t, u} where
