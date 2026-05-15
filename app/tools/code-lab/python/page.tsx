@@ -130,7 +130,7 @@ type Phase =
 
 // ─── Maze execution engine ────────────────────────────────────────────────────
 
-interface MoveRecord { type: string; x: number; y: number; dir: Dir; }
+interface MoveRecord { type: string; x: number; y: number; dir: Dir; targetX?: number; targetY?: number; }
 
 function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: string | null; solved: boolean } {
   const indentErr = validateIndentation(code);
@@ -151,12 +151,17 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
     return grid[ny][nx] === 1;
   }
 
+  // Live alien set — starts with all aliens from challenge, removed when shot.
+  const liveAliens = new Set<string>((ch.aliens ?? []).map(a => `${a.x},${a.y}`));
+  const cellHasAlien = (cx: number, cy: number) => liveAliens.has(`${cx},${cy}`);
+
   const api = {
     move_forward: () => {
       if (moves.length >= MAX) throw new Error("Move limit reached — check for infinite loops.");
       const [dx,dy] = DIR_DELTA[dir];
       const nx = x+dx, ny = y+dy;
       if (isWall(nx,ny)) throw new Error(`Wall to the ${DIR_LABEL[dir]}! Can't move forward.`);
+      if (cellHasAlien(nx,ny)) throw new Error("Eaten by the alien! Shoot it before walking into it.");
       x=nx; y=ny;
       moves.push({ type:"move", x, y, dir });
       if (ch.blackHoles?.some(h => h.x === x && h.y === y)) {
@@ -169,6 +174,37 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
     turn_left:    () => { dir=((dir+3)%4) as Dir; moves.push({type:"turn",x,y,dir}); },
     turn_right:   () => { dir=((dir+1)%4) as Dir; moves.push({type:"turn",x,y,dir}); },
     turn_around:  () => { dir=((dir+2)%4) as Dir; moves.push({type:"turn",x,y,dir}); },
+    shoot: () => {
+      if (moves.length >= MAX) throw new Error("Move limit reached — check for infinite loops.");
+      const [dx,dy] = DIR_DELTA[dir];
+      // Trace plasma path until it hits an alien or a wall.
+      let tx = x+dx, ty = y+dy;
+      let endX = x, endY = y;  // if wall right ahead, plasma never travels
+      let hitAlien = false;
+      while (!isWall(tx, ty)) {
+        endX = tx; endY = ty;
+        if (cellHasAlien(tx, ty)) {
+          hitAlien = true;
+          liveAliens.delete(`${tx},${ty}`);
+          break;
+        }
+        tx += dx; ty += dy;
+      }
+      moves.push({
+        type: hitAlien ? "shoot" : "shoot-miss",
+        x, y, dir,
+        targetX: endX, targetY: endY,
+      });
+    },
+    has_alien_ahead: () => {
+      const [dx,dy] = DIR_DELTA[dir];
+      let tx = x+dx, ty = y+dy;
+      while (!isWall(tx, ty)) {
+        if (cellHasAlien(tx, ty)) return true;
+        tx += dx; ty += dy;
+      }
+      return false;
+    },
     // path_* — renamed; these throw a helpful error so students update their code
     path_ahead:  () => { throw new Error("path_ahead() is not recognized. Use has_path_ahead() instead."); },
     path_left:   () => { throw new Error("path_left() is not recognized. Use has_path_left() instead."); },
@@ -193,12 +229,14 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
       const move_forward=__api.move_forward, forward=__api.move_forward,
             turn_left=__api.turn_left, turn_right=__api.turn_right,
             turn_around=__api.turn_around,
+            shoot=__api.shoot, fire=__api.shoot,
             path_ahead=__api.path_ahead, path_left=__api.path_left,
             path_right=__api.path_right,
             has_path_ahead=__api.has_path_ahead,
             has_path_forward=__api.has_path_forward,
             has_path_left=__api.has_path_left,
             has_path_right=__api.has_path_right,
+            has_alien_ahead=__api.has_alien_ahead, alien_in_sight=__api.has_alien_ahead,
             at_goal=__api.at_goal,
             wall_ahead=__api.wall_ahead, wall_left=__api.wall_left,
             wall_right=__api.wall_right, at_exit=__api.at_exit;
@@ -340,7 +378,9 @@ function closeBlocks(code: string): string {
 
 const GUTTER = 14; // dark-navy strip around all maze edges
 
-function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; px: number; py: number; pdir: Dir; solved: boolean; robotFlash?: boolean }) {
+function MazeCanvas({ ch, px, py, pdir, solved, robotFlash, shotAliens, activePlasma, poofingCells }: { ch: Challenge; px: number; py: number; pdir: Dir; solved: boolean; robotFlash?: boolean; shotAliens?: Set<string>; activePlasma?: { fromX:number; fromY:number; toX:number; toY:number; key:string } | null; poofingCells?: Set<string> }) {
+  const shot = shotAliens ?? new Set<string>();
+  const poofing = poofingCells ?? new Set<string>();
   // ── Image-backed renderer ──────────────────────────────────────────────
   if (ch.image) {
     const img = ch.image;
@@ -402,6 +442,45 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; p
             </g>
           );
         })}
+        {ch.aliens?.filter(a => !shot.has(`${a.x},${a.y}`)).map((a, i) => {
+          const ax = img.originX + a.x * img.cellPx;
+          const ay = img.originY + a.y * img.cellPx;
+          const half = img.cellPx / 2;
+          const frames = "/python-maze/alien-barrier-1.png;/python-maze/alien-barrier-2.png;/python-maze/alien-barrier-3.png;/python-maze/alien-barrier-4.png;/python-maze/alien-barrier-5.png;/python-maze/alien-barrier-6.png";
+          return (
+            <g key={`alien-${i}`} transform={`translate(${ax + half} ${ay + half})`}>
+              <image href="/python-maze/alien-barrier-1.png"
+                x={-half} y={-half} width={img.cellPx} height={img.cellPx}>
+                <animate attributeName="href" values={frames} dur="0.6s" repeatCount="indefinite"/>
+              </image>
+            </g>
+          );
+        })}
+        {activePlasma && (() => {
+          const ap = activePlasma;
+          const fromPx = img.originX + ap.fromX * img.cellPx;
+          const fromPy = img.originY + ap.fromY * img.cellPx;
+          const toPx   = img.originX + ap.toX * img.cellPx;
+          const toPy   = img.originY + ap.toY * img.cellPx;
+          const distance = Math.max(Math.abs(ap.toX - ap.fromX), Math.abs(ap.toY - ap.fromY)) + 1;
+          const travelMs = Math.min(60 * distance, 400);
+          return (
+            <image key={`plasma-${ap.key}`} href="/python-maze/plasma-shot.png"
+              x={fromPx} y={fromPy} width={img.cellPx} height={img.cellPx}>
+              <animate attributeName="x" from={fromPx} to={toPx} dur={`${travelMs}ms`} fill="freeze"/>
+              <animate attributeName="y" from={fromPy} to={toPy} dur={`${travelMs}ms`} fill="freeze"/>
+            </image>
+          );
+        })()}
+        {Array.from(poofing).map(key => {
+          const [cx, cy] = key.split(",").map(Number);
+          const px2 = img.originX + cx * img.cellPx;
+          const py2 = img.originY + cy * img.cellPx;
+          return (
+            <image key={`poof-${key}`} href="/python-maze/alien-poof.png"
+              x={px2} y={py2} width={img.cellPx} height={img.cellPx}/>
+          );
+        })}
         <circle cx={cx2} cy={cy2} r={r} fill={solved ? "#22c55e" : robotFlash ? "#dc2626" : "#3b82f6"}/>
         <path d={arrow} fill="white"/>
       </svg>
@@ -444,6 +523,43 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash }: { ch: Challenge; p
                 from="0" to="360" dur="6s" repeatCount="indefinite"/>
             </image>
           </g>
+        );
+      })}
+      {ch.aliens?.filter(a => !shot.has(`${a.x},${a.y}`)).map((a, i) => {
+        const ax = a.x * CELL + GUTTER, ay = a.y * CELL + GUTTER;
+        const half = CELL / 2;
+        const frames = "/python-maze/alien-barrier-1.png;/python-maze/alien-barrier-2.png;/python-maze/alien-barrier-3.png;/python-maze/alien-barrier-4.png;/python-maze/alien-barrier-5.png;/python-maze/alien-barrier-6.png";
+        return (
+          <g key={`alien-${i}`} transform={`translate(${ax + half} ${ay + half})`}>
+            <image href="/python-maze/alien-barrier-1.png"
+              x={-half} y={-half} width={CELL} height={CELL}>
+              <animate attributeName="href" values={frames} dur="0.6s" repeatCount="indefinite"/>
+            </image>
+          </g>
+        );
+      })}
+      {activePlasma && (() => {
+        const ap = activePlasma;
+        const fromPx = ap.fromX * CELL + GUTTER;
+        const fromPy = ap.fromY * CELL + GUTTER;
+        const toPx   = ap.toX * CELL + GUTTER;
+        const toPy   = ap.toY * CELL + GUTTER;
+        const distance = Math.max(Math.abs(ap.toX - ap.fromX), Math.abs(ap.toY - ap.fromY)) + 1;
+        const travelMs = Math.min(60 * distance, 400);
+        return (
+          <image key={`plasma-${ap.key}`} href="/python-maze/plasma-shot.png"
+            x={fromPx} y={fromPy} width={CELL} height={CELL}>
+            <animate attributeName="x" from={fromPx} to={toPx} dur={`${travelMs}ms`} fill="freeze"/>
+            <animate attributeName="y" from={fromPy} to={toPy} dur={`${travelMs}ms`} fill="freeze"/>
+          </image>
+        );
+      })()}
+      {Array.from(poofing).map(key => {
+        const [cx, cy] = key.split(",").map(Number);
+        const px2 = cx * CELL + GUTTER, py2 = cy * CELL + GUTTER;
+        return (
+          <image key={`poof-${key}`} href="/python-maze/alien-poof.png"
+            x={px2} y={py2} width={CELL} height={CELL}/>
         );
       })}
       <circle cx={cx2} cy={cy2} r={r} fill={solved ? "#22c55e" : robotFlash ? "#dc2626" : "#3b82f6"}/>
@@ -681,12 +797,14 @@ const LEVEL_CMDS = [
     { label: "has_path_forward",  apply: "has_path_forward()",  type: "function", detail: "True if path forward is clear" },
     { label: "at_goal",           apply: "at_goal()",           type: "function", detail: "True if at the goal" },
   ],
-  // Level 4 — elif and else (same as level 3, elif/else already included)
+  // Level 4 — elif and else (same as level 3, elif/else already included) + alien commands
   [
     { label: "move_forward",    apply: "move_forward()",    type: "function", detail: "Move one step forward" },
     { label: "turn_right",      apply: "turn_right()",      type: "function", detail: "Turn 90° clockwise" },
     { label: "turn_left",       apply: "turn_left()",       type: "function", detail: "Turn 90° counter-clockwise" },
     { label: "forward",         apply: "forward()",         type: "function", detail: "Move one step forward" },
+    { label: "fire",            apply: "fire()",            type: "function", detail: "Fire a plasma shot — destroys the alien in line of sight" },
+    { label: "shoot",           apply: "shoot()",           type: "function", detail: "(alias of fire)" },
     { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
     { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
     { label: "in",    type: "keyword",  detail: "Used in for loops" },
@@ -699,6 +817,8 @@ const LEVEL_CMDS = [
     { label: "has_path_left",     apply: "has_path_left()",     type: "function", detail: "True if path left is clear" },
     { label: "has_path_right",    apply: "has_path_right()",    type: "function", detail: "True if path right is clear" },
     { label: "has_path_forward",  apply: "has_path_forward()",  type: "function", detail: "True if path forward is clear" },
+    { label: "alien_in_sight",    apply: "alien_in_sight()",    type: "function", detail: "True if an alien is in line of sight ahead" },
+    { label: "has_alien_ahead",   apply: "has_alien_ahead()",   type: "function", detail: "(alias of alien_in_sight)" },
     { label: "at_goal",           apply: "at_goal()",           type: "function", detail: "True if at the goal" },
   ],
 ];
@@ -740,6 +860,9 @@ function ChallengeView({
   const [pdir, setPdir] = useState<Dir>(ch.startDir);
 
   const [robotFlash, setRobotFlash] = useState(false);
+  const [shotAliens, setShotAliens] = useState<Set<string>>(new Set());
+  const [activePlasma, setActivePlasma] = useState<{ fromX:number; fromY:number; toX:number; toY:number; key:string } | null>(null);
+  const [poofingCells, setPoofingCells] = useState<Set<string>>(new Set());
 
   const editorRef  = useRef<HTMLDivElement>(null);
   const viewRef    = useRef<EditorView|null>(null);
@@ -764,6 +887,7 @@ function ChallengeView({
     stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
     setSolved(false); setOutput([]); setAnimating(false);
     const code = progress.savedCode?.[chalKey(li, ci)] ?? ch.starterCode;
     codeRef.current = code;
@@ -820,6 +944,7 @@ function ChallengeView({
     stopFlash();
     setOutput([]); setSolved(false);
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
     const { moves, error, solved: didSolve } = runMaze(ch, codeRef.current);
     // Syntax/indent errors have no moves — show immediately
     if (error && !moves.length) { setOutput([{text:error,type:"error"}]); return; }
@@ -842,7 +967,31 @@ function ChallengeView({
         }
         return;
       }
-      const m = moves[step]; setPx(m.x); setPy(m.y); setPdir(m.dir as Dir); step++;
+      const m = moves[step]; setPx(m.x); setPy(m.y); setPdir(m.dir as Dir);
+      if ((m.type === "shoot" || m.type === "shoot-miss") && m.targetX !== undefined && m.targetY !== undefined) {
+        // Plasma starts at the cell directly ahead of the sprite and travels to targetX/Y.
+        const [dx, dy] = DIR_DELTA[m.dir as Dir];
+        const fromX = m.x + dx, fromY = m.y + dy;
+        const toX = m.targetX, toY = m.targetY;
+        // No travel if wall is right ahead (toX/Y === sprite pos), skip plasma.
+        if (toX !== m.x || toY !== m.y) {
+          const distance = Math.max(Math.abs(toX - fromX), Math.abs(toY - fromY)) + 1;
+          const travelMs = Math.min(60 * distance, 400);
+          const key = `${toX},${toY}`;
+          setActivePlasma({ fromX, fromY, toX, toY, key });
+          setTimeout(() => {
+            setActivePlasma(null);
+            if (m.type === "shoot") {
+              setShotAliens(prev => { const n = new Set(prev); n.add(key); return n; });
+              setPoofingCells(prev => { const n = new Set(prev); n.add(key); return n; });
+              setTimeout(() => {
+                setPoofingCells(prev => { const n = new Set(prev); n.delete(key); return n; });
+              }, 400);
+            }
+          }, travelMs);
+        }
+      }
+      step++;
     }, 120);
   }, [ch, animating]);
 
@@ -850,6 +999,7 @@ function ChallengeView({
     stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
     setOutput([{text:"Stopped.", type:"info"}]);
   }, [ch, stopAnimation]);
 
@@ -857,6 +1007,7 @@ function ChallengeView({
     stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
     setSolved(false); setOutput([]);
   }, [ch, stopAnimation]);
 
@@ -963,7 +1114,7 @@ function ChallengeView({
               <div style={{fontSize:13,color:"#94a3b8",marginTop:3}}>💡 {ch.hint}</div>
             </div>
             <div style={{...CARD,padding:"10px 14px",display:"flex",justifyContent:"center",overflowX:"auto"}}>
-              <MazeCanvas ch={ch} px={px} py={py} pdir={pdir} solved={solved} robotFlash={robotFlash}/>
+              <MazeCanvas ch={ch} px={px} py={py} pdir={pdir} solved={solved} robotFlash={robotFlash} shotAliens={shotAliens} activePlasma={activePlasma} poofingCells={poofingCells}/>
             </div>
             <div style={{...CARD,padding:"12px 16px",minHeight:64}}>
               <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.7px",color:"#64748b",marginBottom:6}}>Output</div>

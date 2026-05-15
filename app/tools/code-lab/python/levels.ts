@@ -23,6 +23,7 @@ export interface Challenge {
   starterCode: string;
   image?: ChallengeImage; // when set, renders this PNG instead of procedural cells
   blackHoles?: { x: number; y: number }[]; // code grid coords; sprite landing here = failure
+  aliens?: { x: number; y: number }[];      // code grid coords; block forward movement until shot
 }
 
 export interface QuizQ {
@@ -1244,6 +1245,8 @@ const L4: Level = {
     { cmd: "not",              desc: "Flips True to False and False to True." },
     { cmd: "at_goal()",        desc: "Returns True when the robot is standing on the goal tile." },
     { cmd: "has_path_forward()", desc: "Returns True when the path directly ahead is clear." },
+    { cmd: "alien_in_sight()", desc: "Returns True if an alien is in line of sight ahead of the robot." },
+    { cmd: "fire()",           desc: "Fires a plasma shot — destroys the alien in line of sight." },
   ],
   introNotes: `# Level 4 — While Loops
 
@@ -1289,6 +1292,21 @@ while not at_goal():
         forward()
 \`\`\`
 
+## 👽 Aliens Block the Path
+Later challenges in this level add **aliens** — obstacles that block movement. Walking into one ends the run! Detect them with \`alien_in_sight()\` and clear them with \`fire()\`:
+
+\`\`\`python
+while not at_goal():
+    if alien_in_sight():
+        fire()
+    elif has_path_forward():
+        forward()
+    else:
+        turn_right()
+\`\`\`
+
+\`alien_in_sight()\` returns True if there's an alien anywhere in line of sight ahead. \`fire()\` shoots a plasma bolt that travels forward and destroys the first alien it hits. If there's no alien, the shot harmlessly travels to the wall.
+
 ## ⚠️ Infinite Loops
 If the condition **never** becomes False, the loop runs forever. This is called an **infinite loop**.
 
@@ -1304,249 +1322,280 @@ Always make sure something inside the loop can eventually make the condition Fal
   challenges: [
     {
       title: "Straight to the Goal",
-      hint: "Use `while not at_goal():` to keep moving forward — the loop stops itself when you arrive.",
+      hint: "Walk forward until you reach the goal — but you don't need to count steps this time. A `while` loop can run until a condition becomes False.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,0,0,0,0,0,0,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:1,
-      starterCode: `# Keep moving forward until you reach the goal.
+      startX:2, startY:4, startDir:1, exitX:8, exitY:4,
+      image: {
+        src: "/python-maze/python_4-1.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Loop until you arrive at the goal. Use at_goal() in your condition.
 
 while not at_goal():
-    forward()
+    # what should the robot do each step?
+    pass
 `,
     },
     {
       title: "Long Corridor",
-      hint: "The same while loop works no matter how long the hallway is — you never need to count steps.",
+      hint: "A longer hallway, but the same while loop still works. That's the magic — no counting needed!",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:14, exitY:1,
-      starterCode: `# The goal is very far away — let the while loop handle it.
+      startX:0, startY:4, startDir:1, exitX:11, exitY:4,
+      image: {
+        src: "/python-maze/python_4-2.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Same idea as before — the while loop handles any length corridor.
 
 while not at_goal():
-    forward()
+    pass
 `,
     },
     {
       title: "Walk Until Blocked",
-      hint: "Move forward while the path ahead is clear, then turn right and keep going down.",
+      hint: "Walk east as far as you can, then turn at the corner. Use `while has_path_forward():` for the first stretch.",
       grid: [
-        [1,1,1,1,1,1,1,1],
-        [0,0,0,0,0,0,0,1],
-        [1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,0,0],
-        [1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,0,0,0,0,0,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
-      starterCode: `# Walk right while the path is clear, then turn and go down.
+      startX:3, startY:6, startDir:1, exitX:8, exitY:2,
+      image: {
+        src: "/python-maze/python_4-3.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Walk until the wall, turn, walk until the goal.
+# Two while loops with a turn between them.
 
 while has_path_forward():
-    forward()
+    pass
 
-turn_right()
-
-while not at_goal():
-    forward()
+# now what?
 `,
     },
     {
       title: "The S-Curve",
-      hint: "Four straight sections connected by turns — use `while has_path_forward():` for each stretch.",
+      hint: "Same idea — walk until blocked, turn, walk again. Which way does this corner turn?",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,0,1,1,1],
-        [1,1,1,0,1,1,1],
-        [1,1,1,0,0,0,1],
-        [1,1,1,1,1,0,1],
-        [1,1,1,1,1,0,1],
-        [1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,0,0,0,0,0,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:5, exitY:5,
-      starterCode: `# Right → Down → Right → Down. A while loop handles each section.
+      startX:3, startY:1, startDir:1, exitX:8, exitY:5,
+      image: {
+        src: "/python-maze/python_4-4.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# Two while loops, one turn between them.
 
 while has_path_forward():
-    forward()
+    pass
 
-turn_right()
-
-while has_path_forward():
-    forward()
-
-turn_left()
-
-while has_path_forward():
-    forward()
-
-turn_right()
-
-while not at_goal():
-    forward()
+# turn and finish
 `,
     },
     {
       title: "Follow the Left Wall",
-      hint: "If there's space on your left, turn left and move. Otherwise go forward, or turn right.",
+      hint: "An inner-corridor maze. A single while loop with if/elif/else handles every turn — try keeping your hand on the left wall.",
       grid: [
-        [1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,0,1],
-        [1,0,1,0,1,1,0,1],
-        [1,0,1,0,1,1,0,1],
-        [1,0,0,0,1,1,0,1],
-        [1,1,1,1,1,1,0,0],
-        [1,1,1,1,1,1,1,1],
+        [1,0,0,0,0,0,0,0,0,0,0,0],
+        [1,0,1,1,1,1,1,1,1,1,1,0],
+        [1,0,1,0,0,0,0,0,0,0,1,0],
+        [1,0,1,1,1,1,1,1,1,0,1,0],
+        [1,0,1,1,1,1,1,1,1,0,1,0],
+        [1,0,0,0,0,0,0,0,0,0,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,0,0,0,0,0,0,0,0,0,0,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:5,
-      starterCode: `# Left-hand rule: always try to turn left first.
+      startX:0, startY:7, startDir:1, exitX:3, exitY:2,
+      image: {
+        src: "/python-maze/python_4-5.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      starterCode: `# A while loop + if/elif/else. Try a left-hand wall-follow strategy.
 
 while not at_goal():
-    if has_path_left():
-        turn_left()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_right()
+    # your logic here
+    pass
 `,
     },
     {
-      title: "Right-Hand Rule",
-      hint: "Always try to turn right first — hug the right wall all the way to the goal.",
+      title: "First Encounter",
+      hint: "Aliens block your path. Use `alien_in_sight()` to spot them and `fire()` to clear them out.",
       grid: [
+        [1,1,1,1,1,1,1,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,1,1,1,0,0,0,1],
+        [1,1,1,0,0,0,1,1,0,1,1,1],
+        [1,1,1,0,1,0,1,1,0,1,1,1],
+        [1,1,1,0,1,0,0,0,0,1,1,1],
+        [1,0,0,0,1,1,1,1,1,1,1,1],
         [1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,0,0,0,0,0,1],
-        [1,1,0,1,0,1,1,0,1,1,1,1],
-        [1,1,0,0,0,1,1,0,1,1,1,1],
-        [1,1,1,1,1,1,1,0,0,1,1,1],
+      ],
+      startX:1, startY:6, startDir:1, exitX:8, exitY:0,
+      image: {
+        src: "/python-maze/python_4-6.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      aliens: [{ x: 6, y: 5 }, { x: 10, y: 2 }],
+      starterCode: `# Aliens block the path. Add an alien_in_sight() / fire() branch to your logic.
+
+while not at_goal():
+    # your logic here
+    pass
+`,
+    },
+    {
+      title: "Two Paths",
+      hint: "Two routes to the gear — each blocked by an alien. Pick a path and clear what's in the way.",
+      grid: [
+        [0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,0,1,1,1,1,0,1],
+        [1,1,1,1,1,0,1,1,0,0,0,1],
+        [1,1,1,1,1,0,1,1,0,1,1,1],
+        [1,1,1,1,1,0,1,1,0,1,1,1],
+        [1,1,1,1,1,0,0,0,0,1,1,1],
+        [1,1,1,1,1,0,1,1,1,1,1,1],
+        [1,1,1,1,1,0,1,1,1,1,1,1],
+      ],
+      startX:0, startY:0, startDir:1, exitX:7, exitY:5,
+      image: {
+        src: "/python-maze/python_4-7.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      aliens: [{ x: 5, y: 3 }, { x: 9, y: 2 }],
+      starterCode: `# Two paths, two aliens. Plan a route and handle the alien with alien_in_sight() + fire().
+
+while not at_goal():
+    # your logic here
+    pass
+`,
+    },
+    {
+      title: "Alien Gauntlet",
+      hint: "Three aliens! One blocks the only way forward — the others lurk on side paths you can avoid (or destroy).",
+      grid: [
+        [0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,1,0,1],
+        [1,1,1,1,1,0,0,0,0,0,0,1],
+        [1,1,1,1,1,0,1,1,0,1,1,1],
+        [1,1,1,1,1,0,1,1,0,1,1,1],
+        [1,1,1,1,1,0,0,0,0,1,1,1],
+        [1,1,1,1,1,0,1,1,1,1,1,1],
+        [1,1,0,0,0,0,1,1,1,1,1,1],
+      ],
+      startX:0, startY:0, startDir:1, exitX:3, exitY:7,
+      image: {
+        src: "/python-maze/python_4-8.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      aliens: [{ x: 3, y: 0 }, { x: 8, y: 4 }, { x: 6, y: 5 }],
+      starterCode: `# Three aliens — one blocks the only way out. Use alien_in_sight() + fire().
+
+while not at_goal():
+    # your logic here
+    pass
+`,
+    },
+    {
+      title: "The Climb",
+      hint: "Descend the staircase, then climb back up the other side. Watch for the alien up top — it's a wrong turn!",
+      grid: [
+        [1,1,1,1,1,1,1,1,1,1,0,1],
+        [0,0,1,1,1,1,1,1,1,1,0,1],
+        [1,0,0,1,1,1,1,1,1,0,0,0],
+        [1,1,0,0,1,1,1,1,0,0,1,0],
+        [1,1,1,0,0,1,1,0,0,1,1,0],
+        [1,1,1,1,0,0,0,0,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,0,0,0,0],
+      ],
+      startX:0, startY:1, startDir:1, exitX:8, exitY:7,
+      image: {
+        src: "/python-maze/python_4-9.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      aliens: [{ x: 10, y: 0 }],
+      starterCode: `# Down the stair, back up the other side, then down to the gear.
+# An alien hides on a wrong turn — only shoot if you take that path!
+
+while not at_goal():
+    # your logic here
+    pass
+`,
+    },
+    {
+      title: "The Trident",
+      hint: "Three aliens guard three branches. Plan which path you'll take — and which aliens you'll shoot!",
+      grid: [
+        [0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,0,1,1,1,1,1,0,1],
+        [1,1,1,1,0,1,1,1,0,0,0,1],
+        [1,1,1,1,0,1,1,1,0,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1,1,1],
+        [1,1,1,1,0,1,1,1,1,1,1,1],
+        [1,1,1,1,0,1,1,1,1,1,1,1],
         [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:8, exitY:4,
-      starterCode: `# Right-hand rule: always try to turn right first.
+      startX:0, startY:0, startDir:1, exitX:1, exitY:4,
+      image: {
+        src: "/python-maze/python_4-10.png",
+        width: 710, height: 510,
+        cellPx: 50,
+        originX: 55, originY: 55,
+      },
+      aliens: [{ x: 4, y: 1 }, { x: 4, y: 6 }, { x: 10, y: 1 }],
+      starterCode: `# Three aliens, multiple paths. Build your decision logic to find a route to the gear.
 
 while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
-`,
-    },
-    {
-      title: "The Winding Path",
-      hint: "Use while not at_goal() with if/elif/else to handle every twist and turn. Watch out — one corridor goes nowhere!",
-      grid: [
-        [1,1,1,1,1,1,1,1,1],
-        [1,1,1,1,0,0,0,0,1],
-        [1,1,1,1,1,1,0,1,1],
-        [0,0,0,0,1,0,0,0,1],
-        [1,1,1,0,1,0,1,0,1],
-        [1,1,1,0,0,0,1,0,0],
-        [1,1,1,1,1,1,1,1,1],
-      ],
-      startX:0, startY:3, startDir:1, exitX:8, exitY:5,
-      starterCode: `# Navigate the winding path using a single while loop.
-
-while not at_goal():
-    if has_path_forward():
-        forward()
-    elif has_path_right():
-        turn_right()
-        forward()
-    else:
-        turn_left()
-`,
-    },
-    {
-      title: "Right Traps",
-      hint: "The straight path is blocked — you must go through the O-shaped corridor. One dead end inside has only a single cell. The ORDER you check directions determines whether you reach the exit or get lost.",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,1,0,0,0,0],
-        [1,1,1,0,0,0,0,0,1,1,1],
-        [1,1,1,0,1,1,1,0,1,1,1],
-        [1,1,1,0,0,0,0,0,1,1,1],
-        [1,1,1,1,1,1,1,1,1,1,1],
-      ],
-      startX:0, startY:1, startDir:1, exitX:10, exitY:1,
-      starterCode: `# The straight path is blocked — navigate through the O-shaped corridor.
-# Check forward FIRST or you'll detour into the one-block trap inside.
-
-while not at_goal():
-    if has_path_forward():
-        forward()
-    elif has_path_right():
-        turn_right()
-        forward()
-    elif has_path_left():
-        turn_left()
-        forward()
-    else:
-        turn_right()
-        turn_right()
-`,
-    },
-    {
-      title: "The Open Maze",
-      hint: "The exit is at the top-right. Try the left-hand rule — always check left first, then forward, then right.",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,0,0,1,0,0],
-        [1,1,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,0,0,1,0,0,0,1],
-        [1,0,1,1,1,1,1,1,1,1,1],
-        [1,0,0,0,0,0,0,0,0,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:10, exitY:1,
-      starterCode: `# Left-hand rule — always try left first.
-
-while not at_goal():
-    if has_path_left():
-        turn_left()
-        forward()
-    elif has_path_forward():
-        forward()
-    elif has_path_right():
-        turn_right()
-        forward()
-    else:
-        turn_right()
-        turn_right()
-`,
-    },
-    {
-      title: "The Open Maze II",
-      hint: "Same maze — but the exit is now at the bottom-right. The left-hand rule won't get you there. Try right first.",
-      grid: [
-        [1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,0,0,1,0,0],
-        [1,1,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,0,0,1,0,0,0,1],
-        [1,0,1,1,1,1,1,1,1,1,1],
-        [1,0,0,0,0,0,0,0,0,0,0],
-      ],
-      startX:0, startY:1, startDir:1, exitX:10, exitY:5,
-      starterCode: `# Right-hand rule — always try right first.
-
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    elif has_path_left():
-        turn_left()
-        forward()
-    else:
-        turn_right()
-        turn_right()
+    # your logic here
+    pass
 `,
     },
   ],
