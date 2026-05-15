@@ -757,6 +757,7 @@ const LEVEL_CMDS = [
     { label: "move_forward", apply: "move_forward()", type: "function", detail: "Move one step forward" },
     { label: "turn_right",   apply: "turn_right()",   type: "function", detail: "Turn 90° clockwise" },
     { label: "turn_left",    apply: "turn_left()",    type: "function", detail: "Turn 90° counter-clockwise" },
+    { label: "fire",         apply: "fire()",         type: "function", detail: "Fire a plasma shot — destroys an alien in line of sight" },
     { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
     { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
     { label: "in",    type: "keyword",  detail: "Used in for loops" },
@@ -767,6 +768,7 @@ const LEVEL_CMDS = [
     { label: "turn_right",      apply: "turn_right()",      type: "function", detail: "Turn 90° clockwise" },
     { label: "turn_left",       apply: "turn_left()",       type: "function", detail: "Turn 90° counter-clockwise" },
     { label: "forward",         apply: "forward()",         type: "function", detail: "Move one step forward" },
+    { label: "fire",            apply: "fire()",            type: "function", detail: "Fire a plasma shot — destroys an alien in line of sight" },
     { label: "for",   type: "keyword",  detail: "Repeat a block n times" },
     { label: "range", apply: "range()", type: "function", detail: "Generate a number sequence" },
     { label: "in",    type: "keyword",  detail: "Used in for loops" },
@@ -776,6 +778,7 @@ const LEVEL_CMDS = [
     { label: "has_path_ahead",  apply: "has_path_ahead()",  type: "function", detail: "True if path ahead is clear" },
     { label: "has_path_left",   apply: "has_path_left()",   type: "function", detail: "True if path left is clear" },
     { label: "has_path_right",  apply: "has_path_right()",  type: "function", detail: "True if path right is clear" },
+    { label: "alien_in_sight",  apply: "alien_in_sight()",  type: "function", detail: "True if an alien is in line of sight ahead" },
   ],
   // Level 3 — While Loops (cumulative)
   [

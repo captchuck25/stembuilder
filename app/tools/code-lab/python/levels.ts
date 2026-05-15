@@ -448,6 +448,7 @@ const L2: Level = {
   color: "#16a34a",
   newCommands: [
     { cmd: "for i in range(n):", desc: "Repeat the indented block n times. i counts from 0 to n−1." },
+    { cmd: "fire()",              desc: "Fire a plasma shot — destroys the alien in line of sight ahead." },
   ],
   introNotes: `# Level 2 — For Loops
 
@@ -506,7 +507,17 @@ for i in range(5):
 \`\`\`
 
 ## Look for the Pattern
-Before writing a loop, ask: *"Am I doing the same thing multiple times in a row?"* If yes — use a loop.`,
+Before writing a loop, ask: *"Am I doing the same thing multiple times in a row?"* If yes — use a loop.
+
+## 👽 Aliens Show Up
+Halfway through this level, **aliens** appear in the maze. Walking into one ends the run! Use the new \`fire()\` command to destroy any alien in your way:
+
+\`\`\`python
+fire()           # plasma shot travels forward, destroys the first alien it hits
+move_forward()  # now you can safely walk onto that cell
+\`\`\`
+
+The plasma travels along the corridor until it hits an alien or a wall. If there's no alien ahead, the shot just sails out — no harm done, but it still counts as one move. You'll combine \`fire()\` with your loops to clear paths and reach the gear.`,
 
   challenges: [
     {
@@ -600,8 +611,8 @@ for i in range(3):
 `,
     },
     {
-      title: "Steps Away",
-      hint: "Looks like we need to do a little walking before our staircase this time.",
+      title: "First Alien",
+      hint: "An alien blocks your way! Use the new fire() command to destroy it, then count your way to the gear.",
       grid: [
         [1,1,1,1,1,1,1,1],
         [0,0,0,0,1,1,1,1],
@@ -618,7 +629,9 @@ for i in range(3):
         cellPx: 50,
         originX: 155, originY: 105,
       },
-      starterCode: `#Looks like we need to do a little walking before our staircase this time.
+      aliens: [{ x: 1, y: 1 }],
+      starterCode: `# NEW COMMAND: fire() destroys the alien in line of sight.
+# Use it before walking into the alien, then count your loop to the gear.
 
 `,
     },
@@ -650,7 +663,7 @@ for i in range(3):
     },
     {
       title: "Loopy Horse Shoe",
-      hint: "Spot the areas that a loop will save you time.",
+      hint: "Two aliens guard the vertical drop! Fire to clear them, then loop your way to the gear.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1],
         [0,0,0,0,0,0,0,0,0,0],
@@ -666,13 +679,14 @@ for i in range(3):
         cellPx: 50,
         originX: 105, originY: 105,
       },
-      starterCode: `#Spot the areas that a loop will save you time.
+      aliens: [{ x: 9, y: 2 }, { x: 9, y: 4 }],
+      starterCode: `# Two aliens block the way down! Use fire() and loops to get to the gear.
 
 `,
     },
     {
       title: "5 Loops",
-      hint: "Three long corridors separated by two turns. Use a separate for loop for each corridor.",
+      hint: "Long corridors plus TWO aliens to clear along the way! Loop through each section and fire when needed.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1],
         [0,0,0,0,0,0,0,0,1,1],
@@ -692,14 +706,14 @@ for i in range(3):
         cellPx: 50,
         originX: 55, originY: 5,
       },
-      starterCode: `# Three corridors, two turns.
-# Use a for loop for each long straight section.
+      aliens: [{ x: 5, y: 2 }, { x: 9, y: 6 }],
+      starterCode: `# Long corridors plus aliens. Loop through each section and fire when one's in your way.
 
 `,
     },
     {
       title: "Double Case",
-      hint: "Be sure to reverse your second loop.",
+      hint: "Four aliens line the way down! Each descending stair step needs to be cleared. Reverse your loop on the way up.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1,1],
         [0,0,1,1,1,1,1,1,1,1,0,0],
@@ -717,7 +731,8 @@ for i in range(3):
         cellPx: 50,
         originX: 55, originY: 55,
       },
-      starterCode: `#Be sure to reverse your second loop.
+      aliens: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }, { x: 4, y: 4 }],
+      starterCode: `# Four aliens! Each descending step needs a fire() before you move. Then loop back up.
 
 `,
     },
@@ -819,6 +834,7 @@ const L3: Level = {
     { cmd: "has_path_ahead()",   desc: "Returns True when the path ahead is clear (no wall)." },
     { cmd: "has_path_left()",    desc: "Returns True when the path to the left is clear." },
     { cmd: "has_path_right()",   desc: "Returns True when the path to the right is clear." },
+    { cmd: "alien_in_sight()",   desc: "Returns True when an alien is in line of sight ahead." },
     { cmd: "for i in range(n):", desc: "Repeat the indented block n times (review from Level 2)." },
   ],
   introNotes: `# Level 3 — If Statements
@@ -887,7 +903,19 @@ The loop runs 8 times — each step the robot decides: move forward or turn. Tha
 ## not, and, or
 - \`not has_path_ahead()\` → True when the path is **blocked**
 - \`has_path_ahead() and has_path_right()\` → True only when **both** are clear
-- \`has_path_ahead() or has_path_right()\` → True when **either** is clear`,
+- \`has_path_ahead() or has_path_right()\` → True when **either** is clear
+
+## 👽 Spotting Aliens
+You met \`fire()\` in Level 2. Now you can let the robot **decide on its own** whether to fire, using the new sensor:
+
+\`\`\`python
+if alien_in_sight():
+    fire()
+else:
+    forward()
+\`\`\`
+
+\`alien_in_sight()\` returns True when an alien is anywhere in line of sight ahead. Combine it with the path sensors to build smart logic that handles every cell.`,
 
   challenges: [
     {
@@ -1004,7 +1032,7 @@ for i in range(0):  # how many iterations do you need?
     },
     {
       title: "The Vault",
-      hint: "Another maze inside a rectangle — start at the bottom and find the gear hidden in the upper corridors.",
+      hint: "Three aliens are hidden in the corridors! Use alien_in_sight() in your if/elif chain to fire only when needed.",
       grid: [
         [1,0,0,0,0,0,0,0,0,0,0,0],
         [1,0,1,1,1,1,1,1,1,1,1,0],
@@ -1022,7 +1050,12 @@ for i in range(0):  # how many iterations do you need?
         cellPx: 50,
         originX: 55, originY: 55,
       },
-      starterCode: `# Another inner-corridor maze. Build your if/elif/else chain to find the gear!
+      aliens: [{ x: 6, y: 7 }, { x: 11, y: 4 }, { x: 1, y: 1 }],
+      starterCode: `# NEW SENSOR: alien_in_sight() — True when an alien is ahead.
+# The pattern looks like this:
+#     if alien_in_sight():
+#         fire()
+# Add it to your if/elif/else chain so the robot decides on its own.
 
 for i in range(0):  # how many iterations do you need?
     # your logic here
@@ -1059,7 +1092,7 @@ for i in range(0):  # how many iterations do you need?
     },
     {
       title: "The U-Curve",
-      hint: "A U-shape: two turns one way, one turn the other way. Use if/elif/else to handle both directions.",
+      hint: "A U-shape with three aliens guarding the corners. Combine alien_in_sight() with your turn logic.",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1,1],
         [1,1,0,0,0,0,1,1,1,1,1,1],
@@ -1077,7 +1110,12 @@ for i in range(0):  # how many iterations do you need?
         cellPx: 50,
         originX: 55, originY: 55,
       },
-      starterCode: `# A U-shape — two different turn types in this maze.
+      aliens: [{ x: 5, y: 1 }, { x: 5, y: 4 }, { x: 8, y: 4 }],
+      starterCode: `# Three aliens — one at each corner of the U!
+# Pattern reminder:
+#     if alien_in_sight():
+#         fire()
+# Put it at the top of your if/elif chain.
 
 for i in range(0):  # how many iterations do you need?
     # your code here
@@ -1114,7 +1152,7 @@ for i in range(0):  # how many iterations do you need?
     },
     {
       title: "The Valley",
-      hint: "A V-shape! Reach the gear on the far side by navigating down and back up.",
+      hint: "A V-shape with aliens on the way down AND on the way back up. Detect them with alien_in_sight().",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1,1],
         [0,0,1,1,1,1,1,1,1,1,0,0],
@@ -1132,7 +1170,12 @@ for i in range(0):  # how many iterations do you need?
         cellPx: 50,
         originX: 55, originY: 55,
       },
-      starterCode: `# A V-shape. The turns going down are different from the turns going up.
+      aliens: [{ x: 3, y: 3 }, { x: 7, y: 4 }, { x: 10, y: 2 }],
+      starterCode: `# Three aliens along the V — one going down, two on the way up.
+# Pattern reminder:
+#     if alien_in_sight():
+#         fire()
+# Put it at the top of your if/elif chain.
 
 for i in range(0):  # how many iterations do you need?
     # your code here
