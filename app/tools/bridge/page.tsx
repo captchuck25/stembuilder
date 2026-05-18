@@ -371,6 +371,7 @@ function BridgeToolPage() {
   const isDemoMode = !!viewAsStudent;
   const [viewingStudent, setViewingStudent] = useState<{ name: string; email: string } | null>(null);
   const [demoDesignFound, setDemoDesignFound] = useState<boolean | null>(null);
+  const [demoDiagnostic, setDemoDiagnostic] = useState<string>("");
   // Name of the cloud design currently open — saves go back to this record
   const [activeCloudName, setActiveCloudName] = useState<string | null>(null);
   // isDirtyRef drives the pushState intercept (sync); isDirty drives the dialog re-render
@@ -599,10 +600,21 @@ function BridgeToolPage() {
     const designPromise: Promise<DesignRow | null> = viewAsStudent
       ? fetch(`/api/teacher/student-work/bridge?studentId=${encodeURIComponent(viewAsStudent)}&assignmentId=${aid}`)
           .then(r => r.ok ? r.json() : null)
-          .then((payload: { design: DesignRow | null; student: { name: string; email: string } | null } | null) => {
+          .then((payload: { design: (DesignRow & { id?: string }) | null; student: { name: string; email: string } | null } | null) => {
             if (payload?.student) setViewingStudent(payload.student);
             setDemoDesignFound(!!payload?.design);
+            if (payload?.design) {
+              const nodeCount = Array.isArray(payload.design.nodes) ? payload.design.nodes.length : "?";
+              const memberCount = Array.isArray(payload.design.members) ? payload.design.members.length : "?";
+              setDemoDiagnostic(`row "${payload.design.name}" · ${nodeCount} nodes · ${memberCount} members`);
+            } else {
+              setDemoDiagnostic("endpoint returned no design row");
+            }
             return payload?.design ?? null;
+          })
+          .catch(err => {
+            setDemoDiagnostic(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
           })
       : fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null);
     const submissionPromise = viewAsStudent
@@ -649,9 +661,10 @@ function BridgeToolPage() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (isDemoMode) return;
     if (!hasLoadedRef.current || suppressDirtyRef.current) return;
     setIsDirty(true);
-  }, [nodes, members, spanFeet, loadLb, snapStepFeet, snapToGrid, showGrid, bridgeName, designerName]);
+  }, [isDemoMode, nodes, members, spanFeet, loadLb, snapStepFeet, snapToGrid, showGrid, bridgeName, designerName]);
 
   useEffect(() => {
     resetAnalysisState(true);
@@ -3970,12 +3983,21 @@ function BridgeToolPage() {
                 No saved bridge yet for this assignment
               </span>
             )}
+            {demoDiagnostic && (
+              <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: "#92400e", opacity: 0.85 }}>
+                debug: {demoDiagnostic}
+              </div>
+            )}
           </div>
           <button
-            onClick={() => router.back()}
+            onClick={() => {
+              try { window.close(); } catch {}
+              // Fallback if window.close is blocked (tab not opened via JS)
+              setTimeout(() => { window.location.href = "/teachers/dashboard"; }, 50);
+            }}
             style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #92400e",
               background: "#fff", color: "#78350f", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
-            ← Back to class
+            ← Close
           </button>
         </div>
       )}
