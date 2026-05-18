@@ -766,16 +766,28 @@ export default function ClassDetailPage() {
                         )}
                       </td>,
                       <td key={`${a.id}-design`} style={{ ...TD, textAlign: "center" }}>
-                        {cell?.thumbnail ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={cell.thumbnail} alt="Bridge design"
-                            style={{ width: 96, height: 56, objectFit: "contain", display: "inline-block",
-                              borderRadius: 4, border: "1px solid #fde68a", background: "#fff" }} />
-                        ) : cell ? (
-                          <span style={{ color: "#ccc", fontSize: 11, fontStyle: "italic" }}>no preview</span>
-                        ) : (
-                          <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
-                        )}
+                        <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          {cell?.thumbnail ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={cell.thumbnail} alt="Bridge design"
+                              style={{ width: 96, height: 56, objectFit: "contain", display: "inline-block",
+                                borderRadius: 4, border: "1px solid #fde68a", background: "#fff" }} />
+                          ) : cell ? (
+                            <span style={{ color: "#ccc", fontSize: 11, fontStyle: "italic" }}>no preview</span>
+                          ) : (
+                            <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
+                          )}
+                          <Link
+                            href={`/tools/bridge?assignment=${a.id}&asStudent=${s.id}`}
+                            target="_blank"
+                            title={`Open ${s.name}'s work for projection (read-only)`}
+                            style={{ fontSize: 11, fontWeight: 800, color: "#92400e",
+                              textDecoration: "none", padding: "3px 10px",
+                              borderRadius: 999, border: "2px solid #d97706",
+                              background: "#fffbeb", whiteSpace: "nowrap" }}>
+                            👁 Open
+                          </Link>
+                        </div>
                       </td>,
                       <td key={`${a.id}-cost`} style={{ ...TD, textAlign: "right" }}>
                         {cell ? (

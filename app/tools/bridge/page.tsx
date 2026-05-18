@@ -364,6 +364,13 @@ function BridgeToolPage() {
   const userId = session?.user?.id ?? null;
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Teacher demo mode: when ?asStudent=<uuid> is present, the page loads the named
+  // student's saved design read-only — saves, autosave, submit, and the leave guard
+  // all skip so nothing persists back to the student's record.
+  const viewAsStudent = searchParams.get("asStudent");
+  const isDemoMode = !!viewAsStudent;
+  const [viewingStudent, setViewingStudent] = useState<{ name: string; email: string } | null>(null);
+  const [demoDesignFound, setDemoDesignFound] = useState<boolean | null>(null);
   // Name of the cloud design currently open — saves go back to this record
   const [activeCloudName, setActiveCloudName] = useState<string | null>(null);
   // isDirtyRef drives the pushState intercept (sync); isDirty drives the dialog re-render
@@ -588,10 +595,23 @@ function BridgeToolPage() {
   useEffect(() => {
     const aid = searchParams.get("assignment");
     if (!aid) return;
+    type DesignRow = { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null };
+    const designPromise: Promise<DesignRow | null> = viewAsStudent
+      ? fetch(`/api/teacher/student-work/bridge?studentId=${encodeURIComponent(viewAsStudent)}&assignmentId=${aid}`)
+          .then(r => r.ok ? r.json() : null)
+          .then((payload: { design: DesignRow | null; student: { name: string; email: string } | null } | null) => {
+            if (payload?.student) setViewingStudent(payload.student);
+            setDemoDesignFound(!!payload?.design);
+            return payload?.design ?? null;
+          })
+      : fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null);
+    const submissionPromise = viewAsStudent
+      ? Promise.resolve(null)
+      : fetch(`/api/bridge-submissions/mine?assignmentId=${aid}`).then(r => r.ok ? r.json() : null);
     Promise.all([
       fetch(`/api/bridge-assignments/${aid}`).then(r => r.ok ? r.json() : null),
-      fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null),
-      fetch(`/api/bridge-submissions/mine?assignmentId=${aid}`).then(r => r.ok ? r.json() : null),
+      designPromise,
+      submissionPromise,
     ]).then(([config, existingDesign, priorSubmission]: [
       AssignmentConfig | null,
       { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null } | null,
@@ -640,6 +660,7 @@ function BridgeToolPage() {
   // Auto-save in assignment mode so work is always recoverable on reopen
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
+    if (isDemoMode) return;
     if (!isDirty || !assignmentConfig || !activeCloudName || !session?.user) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -647,15 +668,16 @@ function BridgeToolPage() {
     }, 4000);
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirty, nodes, members, assignmentConfig, activeCloudName]);
+  }, [isDirty, nodes, members, assignmentConfig, activeCloudName, isDemoMode]);
 
   // Hard navigation guard (tab close, refresh, browser back to external site)
   useEffect(() => {
+    if (isDemoMode) return;
     if (!isDirty) return;
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
+  }, [isDirty, isDemoMode]);
 
   function safeNavigate(url: string) {
     if (isDirtyRef.current) { setLeaveUrl(url); } else { router.push(url); }
@@ -3452,6 +3474,7 @@ function BridgeToolPage() {
   }
 
   async function onSaveClick() {
+    if (isDemoMode) return;
     if (!session?.user) { window.alert("Sign in to save your design."); return; }
     const name = bridgeName.trim();
 
@@ -3512,6 +3535,7 @@ function BridgeToolPage() {
   }
 
   async function performCloudSave(name: string) {
+    if (isDemoMode) return;
     if (!session?.user || !userId) return;
     setSaveStatus("saving");
     // Don't overwrite the display name when saving under the internal asgn_ key
@@ -3541,6 +3565,7 @@ function BridgeToolPage() {
   }
 
   async function handleSubmitAssignment() {
+    if (isDemoMode) return;
     if (!assignmentConfig || !userId) return;
     setAssignmentSubmitting(true);
 
@@ -3930,6 +3955,30 @@ function BridgeToolPage() {
     <div className={styles.page}>
       <SiteHeader onLogoClick={() => safeNavigate("/")}>
       </SiteHeader>
+
+      {isDemoMode && (
+        <div style={{
+          background: "#fef3c7", borderBottom: "3px solid #f59e0b", color: "#78350f",
+          padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 16, flexWrap: "wrap", fontFamily: "system-ui,sans-serif",
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>
+            👁 Viewing {viewingStudent?.name || "student"}&apos;s work — changes won&apos;t be saved
+            {demoDesignFound === false && (
+              <span style={{ marginLeft: 12, padding: "2px 10px", borderRadius: 999,
+                background: "#fde68a", color: "#7c2d12", fontSize: 12, fontWeight: 800 }}>
+                No saved bridge yet for this assignment
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => router.back()}
+            style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #92400e",
+              background: "#fff", color: "#78350f", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            ← Back to class
+          </button>
+        </div>
+      )}
 
       <main className={styles.main}>
         <div className={styles.frame}>
