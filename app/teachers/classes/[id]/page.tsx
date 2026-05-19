@@ -1711,9 +1711,19 @@ export default function ClassDetailPage() {
                         <div style={{ fontSize: 12, fontWeight: 600, color: "#0891b2", marginTop: 2 }}>
                           {d.student_name}
                         </div>
-                        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 2, marginBottom: 8 }}>
                           {d.units} · {new Date(d.updated_at).toLocaleDateString()}
                         </div>
+                        <Link
+                          href={`/tools/stem-sketch?asStudent=${d.user_id}&id=${d.id}`}
+                          target="_blank"
+                          title={`Open ${d.student_name}'s design for projection (read-only)`}
+                          style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
+                            color: "#0e7490", textDecoration: "none",
+                            padding: "5px 10px", borderRadius: 999,
+                            border: "2px solid #0891b2", background: "#ecfeff" }}>
+                          👁 Open
+                        </Link>
                       </div>
                     </div>
                   ))}
