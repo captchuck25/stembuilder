@@ -1840,13 +1840,13 @@ If you put \`has_path_forward()\` first, the robot would walk into the alien (be
         [1,1,1,0,1,1,1,1,1,1,1,1],
         [0,0,0,0,0,0,1,1,1,0,1,1],
         [1,1,1,1,1,0,1,1,1,0,1,1],
-        [1,1,1,1,1,0,0,0,0,0,0,1],
+        [1,1,1,1,1,0,0,0,0,0,1,1],
         [1,1,1,1,1,1,1,1,1,0,1,1],
         [1,1,1,1,1,1,1,1,1,0,1,1],
       ],
       startX:0, startY:3, startDir:1, exitX:9, exitY:7,
       image: { src: "/python-maze/python_5-3.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
-      blackHoles: [{ x: 10, y: 5 }, { x: 9, y: 3 }, { x: 3, y: 1 }],
+      blackHoles: [{ x: 9, y: 3 }, { x: 3, y: 1 }],
       starterCode: `# Three intersections, each with a trap. There's no single rule that works.
 # Look at the maze and decide each turn one by one.
 
