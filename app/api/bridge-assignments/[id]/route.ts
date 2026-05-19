@@ -19,15 +19,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (error || !data) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Verify student is enrolled in this class
-  const { data: enrollment } = await db
-    .from('enrollments')
-    .select('id')
-    .eq('class_id', data.class_id)
-    .eq('student_id', session.user.id)
-    .single()
+  // Allow access if the caller is either:
+  //   (a) a student enrolled in the class, or
+  //   (b) the teacher who owns the class (needed for the teacher demo-view flow
+  //       where a teacher loads a student's bridge for projection).
+  const [{ data: enrollment }, { data: classRow }] = await Promise.all([
+    db.from('enrollments').select('id')
+      .eq('class_id', data.class_id).eq('student_id', session.user.id).maybeSingle(),
+    db.from('classes').select('teacher_id').eq('id', data.class_id).maybeSingle(),
+  ])
 
-  if (!enrollment) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const isEnrolledStudent = !!enrollment
+  const isOwningTeacher = classRow?.teacher_id === session.user.id
+  if (!isEnrolledStudent && !isOwningTeacher) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   return NextResponse.json(data)
 }
