@@ -637,6 +637,11 @@ function BridgeToolPage() {
       const saveKey = `asgn_${aid}`;
       const displayName = config.title || 'Bridge Assignment';
       if (existingDesign?.nodes?.length) {
+        if (viewAsStudent) {
+          const nLen = Array.isArray(existingDesign.nodes) ? existingDesign.nodes.length : -1;
+          const mLen = Array.isArray(existingDesign.members) ? existingDesign.members.length : -1;
+          setDemoDiagnostic(d => `${d} | applying ${nLen}n/${mLen}m`);
+        }
         applyImportedBridgeState({
           nodes: existingDesign.nodes as Node[],
           members: existingDesign.members as Member[],
@@ -648,6 +653,9 @@ function BridgeToolPage() {
         setActiveCloudName(saveKey);
         setIsDirty(false);
       } else {
+        if (viewAsStudent) {
+          setDemoDiagnostic(d => `${d} | ELSE branch (existingDesign=${existingDesign ? 'truthy' : 'null'}, nodes type=${typeof existingDesign?.nodes})`);
+        }
         setSpanFeet(config.span_feet);
         setLoadLb(config.load_lb);
         setBridgeName(displayName);
