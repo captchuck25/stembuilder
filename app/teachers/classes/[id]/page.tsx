@@ -134,8 +134,11 @@ export default function ClassDetailPage() {
   const [bridgeLeaderboards, setBridgeLeaderboards] = useState<Record<string, BridgeSubmissionRow[]>>({});
   const [loadingLeaderboardId, setLoadingLeaderboardId] = useState<string | null>(null);
   interface BridgeSubmissionCell { cost: number; passed: boolean; thumbnail: string | null; }
-  // submissionMap[student_id][assignment_id] = cell
+  interface BridgeDraftCell { cost: number; thumbnail: string | null; updated_at: string; }
+  // submissionMap[student_id][assignment_id] = cell (only set when the student has submitted)
   const [bridgeSubmissionMap, setBridgeSubmissionMap] = useState<Record<string, Record<string, BridgeSubmissionCell>>>({});
+  // draftMap[student_id][assignment_id] = cell (only set when there's a saved design and no submission yet)
+  const [bridgeDraftMap, setBridgeDraftMap] = useState<Record<string, Record<string, BridgeDraftCell>>>({});
   const [loadingBridgeGradebook, setLoadingBridgeGradebook] = useState(false);
   const bridgeGradebookLoadedRef = useRef(false);
 
@@ -194,14 +197,23 @@ export default function ClassDetailPage() {
     bridgeGradebookLoadedRef.current = true;
     setLoadingBridgeGradebook(true);
     fetch(`/api/teacher/bridge-gradebook?classId=${classId}`)
-      .then(r => r.ok ? r.json() : [])
-      .then((rows: Array<{ assignment_id: string; student_id: string; cost: number; passed: boolean; thumbnail: string | null }>) => {
-        const map: Record<string, Record<string, BridgeSubmissionCell>> = {};
-        for (const row of rows) {
-          if (!map[row.student_id]) map[row.student_id] = {};
-          map[row.student_id][row.assignment_id] = { cost: row.cost, passed: row.passed, thumbnail: row.thumbnail };
+      .then(r => r.ok ? r.json() : { submissions: [], drafts: [] })
+      .then((payload: {
+        submissions: Array<{ assignment_id: string; student_id: string; cost: number; passed: boolean; thumbnail: string | null }>;
+        drafts: Array<{ assignment_id: string; student_id: string; cost: number; thumbnail: string | null; updated_at: string }>;
+      }) => {
+        const subMap: Record<string, Record<string, BridgeSubmissionCell>> = {};
+        for (const row of payload.submissions ?? []) {
+          if (!subMap[row.student_id]) subMap[row.student_id] = {};
+          subMap[row.student_id][row.assignment_id] = { cost: row.cost, passed: row.passed, thumbnail: row.thumbnail };
         }
-        setBridgeSubmissionMap(map);
+        setBridgeSubmissionMap(subMap);
+        const draftMap: Record<string, Record<string, BridgeDraftCell>> = {};
+        for (const row of payload.drafts ?? []) {
+          if (!draftMap[row.student_id]) draftMap[row.student_id] = {};
+          draftMap[row.student_id][row.assignment_id] = { cost: row.cost, thumbnail: row.thumbnail, updated_at: row.updated_at };
+        }
+        setBridgeDraftMap(draftMap);
       })
       .finally(() => setLoadingBridgeGradebook(false));
   }, [selectedTool, cls]);
@@ -688,17 +700,20 @@ export default function ClassDetailPage() {
     }
 
     function exportBridgeCSV() {
-      const header = ["Student", "Email", ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Passed`), ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Cost`)];
+      const header = ["Student", "Email", ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Status`), ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Cost`)];
       const rows: string[][] = [header];
       for (const s of sorted) {
         const row = [s.name, s.email];
         for (const a of bridgeAssignments) {
           const cell = bridgeSubmissionMap[s.id]?.[a.id];
-          row.push(cell ? (cell.passed ? "Yes" : "No") : "—");
+          const draft = !cell ? bridgeDraftMap[s.id]?.[a.id] : undefined;
+          row.push(cell ? (cell.passed ? "Submitted (Pass)" : "Submitted (Fail)") : draft ? "In Progress" : "—");
         }
         for (const a of bridgeAssignments) {
           const cell = bridgeSubmissionMap[s.id]?.[a.id];
-          row.push(cell ? `$${cell.cost.toFixed(2)}` : "—");
+          const draft = !cell ? bridgeDraftMap[s.id]?.[a.id] : undefined;
+          const cost = cell?.cost ?? draft?.cost;
+          row.push(cost !== undefined ? `$${cost.toFixed(2)}` : "—");
         }
         rows.push(row);
       }
@@ -750,6 +765,8 @@ export default function ClassDetailPage() {
                   </td>
                   {bridgeAssignments.map(a => {
                     const cell = bridgeSubmissionMap[s.id]?.[a.id];
+                    const draft = !cell ? bridgeDraftMap[s.id]?.[a.id] : undefined;
+                    const thumbnail = cell?.thumbnail ?? draft?.thumbnail ?? null;
                     return [
                       <td key={`${a.id}-pass`} style={{ ...TD, borderLeft: "4px solid #d97706" + "30", textAlign: "center" }}>
                         {cell ? (
@@ -761,18 +778,26 @@ export default function ClassDetailPage() {
                           }}>
                             {cell.passed ? "✓ Pass" : "✗ Fail"}
                           </span>
+                        ) : draft ? (
+                          <span style={{
+                            display: "inline-block", padding: "2px 10px", borderRadius: 6,
+                            fontWeight: 800, fontSize: 12,
+                            background: "#fef3c7", color: "#92400e",
+                          }} title={`Last saved ${new Date(draft.updated_at).toLocaleString()}`}>
+                            🛠 In Progress
+                          </span>
                         ) : (
                           <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
                         )}
                       </td>,
                       <td key={`${a.id}-design`} style={{ ...TD, textAlign: "center" }}>
                         <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                          {cell?.thumbnail ? (
+                          {thumbnail ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={cell.thumbnail} alt="Bridge design"
+                            <img src={thumbnail} alt="Bridge design"
                               style={{ width: 96, height: 56, objectFit: "contain", display: "inline-block",
-                                borderRadius: 4, border: "1px solid #fde68a", background: "#fff" }} />
-                          ) : cell ? (
+                                borderRadius: 4, border: `1px solid ${draft ? "#fde68a" : "#fde68a"}`, background: "#fff" }} />
+                          ) : (cell || draft) ? (
                             <span style={{ color: "#ccc", fontSize: 11, fontStyle: "italic" }}>no preview</span>
                           ) : (
                             <span style={{ color: "#ccc", fontSize: 13 }}>—</span>
@@ -796,6 +821,11 @@ export default function ClassDetailPage() {
                             color: cell.cost <= Number(a.max_cost) ? "#166534" : "#991b1b",
                           }}>
                             ${cell.cost.toFixed(2)}
+                          </span>
+                        ) : draft ? (
+                          <span style={{ fontWeight: 700, fontSize: 13, color: "#92400e", fontStyle: "italic" }}
+                            title="Running cost of in-progress design">
+                            ${draft.cost.toFixed(2)}
                           </span>
                         ) : (
                           <span style={{ color: "#ccc", fontSize: 13 }}>—</span>

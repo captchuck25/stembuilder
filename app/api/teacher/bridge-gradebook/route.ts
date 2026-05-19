@@ -38,25 +38,43 @@ export async function GET(req: NextRequest) {
     .select('assignment_id, student_id, cost, passed, submitted_at')
     .in('assignment_id', assignmentIds)
 
-  // Join thumbnails from bridge_designs (saved under name = `asgn_<assignment_id>`)
   type Sub = { assignment_id: string; student_id: string; cost: number; passed: boolean; submitted_at: string }
   const subs = (submissions ?? []) as Sub[]
+
+  // Pull every bridge_designs row whose name matches one of this class's assignment save keys.
+  // These are the autosaved / manually-saved in-progress designs.
   const designNames = assignmentIds.map(id => `asgn_${id}`)
-  const studentIds = Array.from(new Set(subs.map(s => s.student_id)))
+  const { data: designs } = await db
+    .from('bridge_designs')
+    .select('user_id, name, cost, passed, thumbnail, updated_at')
+    .in('name', designNames)
+  type Design = { user_id: string; name: string; cost: number | null; passed: boolean | null; thumbnail: string | null; updated_at: string }
+  const designRows = (designs ?? []) as Design[]
+
+  // Thumbnail map (used for both submissions and drafts)
   const thumbMap: Record<string, string> = {}
-  if (subs.length > 0) {
-    const { data: designs } = await db
-      .from('bridge_designs')
-      .select('user_id, name, thumbnail')
-      .in('user_id', studentIds)
-      .in('name', designNames)
-    for (const d of (designs ?? []) as Array<{ user_id: string; name: string; thumbnail: string | null }>) {
-      if (!d.thumbnail) continue
-      const aid = d.name.startsWith('asgn_') ? d.name.slice(5) : d.name
-      thumbMap[`${d.user_id}:${aid}`] = d.thumbnail
-    }
+  for (const d of designRows) {
+    if (!d.thumbnail) continue
+    const aid = d.name.startsWith('asgn_') ? d.name.slice(5) : d.name
+    thumbMap[`${d.user_id}:${aid}`] = d.thumbnail
   }
 
+  // Drafts = designs without a corresponding submission for the same (student, assignment).
+  const submittedKeys = new Set(subs.map(s => `${s.student_id}:${s.assignment_id}`))
+  const drafts = designRows
+    .map(d => {
+      const aid = d.name.startsWith('asgn_') ? d.name.slice(5) : d.name
+      return {
+        assignment_id: aid,
+        student_id: d.user_id,
+        cost: d.cost ?? 0,
+        passed: d.passed ?? false,
+        thumbnail: d.thumbnail ?? null,
+        updated_at: d.updated_at,
+      }
+    })
+    .filter(d => !submittedKeys.has(`${d.student_id}:${d.assignment_id}`))
+
   const result = subs.map(s => ({ ...s, thumbnail: thumbMap[`${s.student_id}:${s.assignment_id}`] ?? null }))
-  return NextResponse.json(result)
+  return NextResponse.json({ submissions: result, drafts })
 }
