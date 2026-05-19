@@ -371,7 +371,6 @@ function BridgeToolPage() {
   const isDemoMode = !!viewAsStudent;
   const [viewingStudent, setViewingStudent] = useState<{ name: string; email: string } | null>(null);
   const [demoDesignFound, setDemoDesignFound] = useState<boolean | null>(null);
-  const [demoDiagnostic, setDemoDiagnostic] = useState<string>("");
   // Name of the cloud design currently open — saves go back to this record
   const [activeCloudName, setActiveCloudName] = useState<string | null>(null);
   // isDirtyRef drives the pushState intercept (sync); isDirty drives the dialog re-render
@@ -603,17 +602,10 @@ function BridgeToolPage() {
           .then((payload: { design: (DesignRow & { id?: string }) | null; student: { name: string; email: string } | null } | null) => {
             if (payload?.student) setViewingStudent(payload.student);
             setDemoDesignFound(!!payload?.design);
-            if (payload?.design) {
-              const nodeCount = Array.isArray(payload.design.nodes) ? payload.design.nodes.length : "?";
-              const memberCount = Array.isArray(payload.design.members) ? payload.design.members.length : "?";
-              setDemoDiagnostic(`row "${payload.design.name}" · ${nodeCount} nodes · ${memberCount} members`);
-            } else {
-              setDemoDiagnostic("endpoint returned no design row");
-            }
             return payload?.design ?? null;
           })
           .catch(err => {
-            setDemoDiagnostic(`fetch error: ${err instanceof Error ? err.message : String(err)}`);
+            console.error("teacher demo-view: design fetch failed", err);
             return null;
           })
       : fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null);
@@ -629,9 +621,6 @@ function BridgeToolPage() {
       { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null } | null,
       { cost: number; passed: boolean } | null,
     ]) => {
-      if (viewAsStudent) {
-        setDemoDiagnostic(d => `${d} | all3=${config ? 'cfg' : 'NO-cfg'}/${existingDesign ? 'dsg' : 'no-dsg'}/${priorSubmission ? 'sub' : 'no-sub'}`);
-      }
       if (!config) return;
       setAssignmentConfig(config);
       if (priorSubmission) setAssignmentSubmitted(true);
@@ -640,11 +629,6 @@ function BridgeToolPage() {
       const saveKey = `asgn_${aid}`;
       const displayName = config.title || 'Bridge Assignment';
       if (existingDesign?.nodes?.length) {
-        if (viewAsStudent) {
-          const nLen = Array.isArray(existingDesign.nodes) ? existingDesign.nodes.length : -1;
-          const mLen = Array.isArray(existingDesign.members) ? existingDesign.members.length : -1;
-          setDemoDiagnostic(d => `${d} | applying ${nLen}n/${mLen}m`);
-        }
         applyImportedBridgeState({
           nodes: existingDesign.nodes as Node[],
           members: existingDesign.members as Member[],
@@ -656,9 +640,6 @@ function BridgeToolPage() {
         setActiveCloudName(saveKey);
         setIsDirty(false);
       } else {
-        if (viewAsStudent) {
-          setDemoDiagnostic(d => `${d} | ELSE branch (existingDesign=${existingDesign ? 'truthy' : 'null'}, nodes type=${typeof existingDesign?.nodes})`);
-        }
         setSpanFeet(config.span_feet);
         setLoadLb(config.load_lb);
         setBridgeName(displayName);
@@ -668,9 +649,7 @@ function BridgeToolPage() {
         suppressDirtyRef.current = false;
       }));
     }).catch(err => {
-      if (viewAsStudent) {
-        setDemoDiagnostic(d => `${d} | Promise.all rejected: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      console.error("bridge assignment load failed", err);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -3998,11 +3977,6 @@ function BridgeToolPage() {
                 No saved bridge yet for this assignment
               </span>
             )}
-            {demoDiagnostic && (
-              <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: "#92400e", opacity: 0.85 }}>
-                debug: {demoDiagnostic}
-              </div>
-            )}
           </div>
           <button
             onClick={() => {
@@ -4023,9 +3997,9 @@ function BridgeToolPage() {
             <div className={styles.toolbarLeft}>
               <div className={styles.toolbarIcons}>
                 {[
-                  { src: "save-file-icon.png", label: "Save Design", disabled: false },
-                  { src: "export-icon.png", label: "Export", disabled: false },
-                ].map((item) => (
+                  { src: "save-file-icon.png", label: "Save Design", disabled: false, hidden: isDemoMode },
+                  { src: "export-icon.png", label: "Export", disabled: false, hidden: false },
+                ].filter(item => !item.hidden).map((item) => (
                   <button
                     key={item.src}
                     onClick={
@@ -4882,36 +4856,44 @@ function BridgeToolPage() {
                         )}
                       </div>
                     </div>
-                    {!assignmentSubmitted && (
-                      assignmentComplete ? (
-                        <button
-                          onClick={handleSubmitAssignment}
-                          disabled={assignmentSubmitting}
-                          style={{ width: "100%", padding: "10px", borderRadius: 8, border: "none",
-                            background: assignmentSubmitting ? "#86efac" : "#16a34a",
-                            color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
-                          {assignmentSubmitting ? "Submitting…" : "Submit Assignment"}
-                        </button>
-                      ) : (
-                        <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
-                          {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : "Over budget — reduce material cost"}
-                        </div>
-                      )
-                    )}
-                    {assignmentSubmitted && (
+                    {isDemoMode ? (
+                      <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
+                        Demo view — submit and save are disabled.
+                      </div>
+                    ) : (
                       <>
-                        <div style={{ fontSize: 12, color: "#166534", fontWeight: 700, marginBottom: nodes.length > 0 ? 0 : 8 }}>
-                          Great work! Your bridge passed and was submitted.
-                        </div>
-                        {nodes.length > 0 && assignmentComplete && (
-                          <button
-                            onClick={handleSubmitAssignment}
-                            disabled={assignmentSubmitting}
-                            style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 8, border: "none",
-                              background: assignmentSubmitting ? "#86efac" : "#15803d",
-                              color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
-                            {assignmentSubmitting ? "Resubmitting…" : "↺ Resubmit Improved Bridge"}
-                          </button>
+                        {!assignmentSubmitted && (
+                          assignmentComplete ? (
+                            <button
+                              onClick={handleSubmitAssignment}
+                              disabled={assignmentSubmitting}
+                              style={{ width: "100%", padding: "10px", borderRadius: 8, border: "none",
+                                background: assignmentSubmitting ? "#86efac" : "#16a34a",
+                                color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
+                              {assignmentSubmitting ? "Submitting…" : "Submit Assignment"}
+                            </button>
+                          ) : (
+                            <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
+                              {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : "Over budget — reduce material cost"}
+                            </div>
+                          )
+                        )}
+                        {assignmentSubmitted && (
+                          <>
+                            <div style={{ fontSize: 12, color: "#166534", fontWeight: 700, marginBottom: nodes.length > 0 ? 0 : 8 }}>
+                              Great work! Your bridge passed and was submitted.
+                            </div>
+                            {nodes.length > 0 && assignmentComplete && (
+                              <button
+                                onClick={handleSubmitAssignment}
+                                disabled={assignmentSubmitting}
+                                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 8, border: "none",
+                                  background: assignmentSubmitting ? "#86efac" : "#15803d",
+                                  color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
+                                {assignmentSubmitting ? "Resubmitting…" : "↺ Resubmit Improved Bridge"}
+                              </button>
+                            )}
+                          </>
                         )}
                       </>
                     )}
