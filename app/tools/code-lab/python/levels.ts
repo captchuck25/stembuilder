@@ -24,6 +24,8 @@ export interface Challenge {
   image?: ChallengeImage; // when set, renders this PNG instead of procedural cells
   blackHoles?: { x: number; y: number }[]; // code grid coords; sprite landing here = failure
   aliens?: { x: number; y: number }[];      // code grid coords; block forward movement until shot
+  plasmaSupply?: number;                    // L5+: max number of times fire() can hit an alien. fire() past this fizzles silently.
+  plasmaPickups?: { x: number; y: number }[]; // L5-10+: walking onto this cell grants +1 plasma (once)
 }
 
 export interface QuizQ {
@@ -971,7 +973,6 @@ for i in range(0):  # how many iterations do you need?
         forward()
     else:
         # which way should the robot turn?
-        pass
 `,
     },
     {
@@ -1027,7 +1028,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your logic here
-    pass
 `,
     },
     {
@@ -1059,7 +1059,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your logic here
-    pass
 `,
     },
     {
@@ -1087,7 +1086,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your logic here
-    pass
 `,
     },
     {
@@ -1119,7 +1117,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your code here
-    pass
 `,
     },
     {
@@ -1147,7 +1144,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your code here
-    pass
 `,
     },
     {
@@ -1179,7 +1175,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your code here
-    pass
 `,
     },
     {
@@ -1206,7 +1201,6 @@ for i in range(0):  # how many iterations do you need?
 
 for i in range(0):  # how many iterations do you need?
     # your code here
-    pass
 `,
     },
   ],
@@ -1387,7 +1381,6 @@ Always make sure something inside the loop can eventually make the condition Fal
 
 while not at_goal():
     # what should the robot do each step?
-    pass
 `,
     },
     {
@@ -1413,7 +1406,7 @@ while not at_goal():
       starterCode: `# Same idea as before — the while loop handles any length corridor.
 
 while not at_goal():
-    pass
+    # what should the robot do each step?
 `,
     },
     {
@@ -1440,7 +1433,7 @@ while not at_goal():
 # Two while loops with a turn between them.
 
 while has_path_forward():
-    pass
+    # fill in the body
 
 # now what?
 `,
@@ -1468,7 +1461,7 @@ while has_path_forward():
       starterCode: `# Two while loops, one turn between them.
 
 while has_path_forward():
-    pass
+    # fill in the body
 
 # turn and finish
 `,
@@ -1497,7 +1490,6 @@ while has_path_forward():
 
 while not at_goal():
     # your logic here
-    pass
 `,
     },
     {
@@ -1525,7 +1517,6 @@ while not at_goal():
 
 while not at_goal():
     # your logic here
-    pass
 `,
     },
     {
@@ -1553,7 +1544,6 @@ while not at_goal():
 
 while not at_goal():
     # your logic here
-    pass
 `,
     },
     {
@@ -1581,7 +1571,6 @@ while not at_goal():
 
 while not at_goal():
     # your logic here
-    pass
 `,
     },
     {
@@ -1610,7 +1599,6 @@ while not at_goal():
 
 while not at_goal():
     # your logic here
-    pass
 `,
     },
     {
@@ -1638,7 +1626,6 @@ while not at_goal():
 
 while not at_goal():
     # your logic here
-    pass
 `,
     },
   ],
@@ -1717,314 +1704,309 @@ while not at_goal():
 
 const L5: Level = {
   id: 5,
-  title: "elif and else",
-  tagline: "Prioritized logic chains for smarter maze solving",
+  title: "Strategy & Plasma",
+  tagline: "Combine every tool — and watch your ammo!",
   color: "#059669",
   newCommands: [
-    { cmd: "elif condition:", desc: "Checked only if every condition above was False — adds a priority branch." },
-    { cmd: "else:",           desc: "Runs only when every condition above was False — the final fallback." },
+    { cmd: "(plasma supply)", desc: "L5 mazes give you a LIMITED number of plasma shots. Pick a path you can actually clear!" },
   ],
-  introNotes: `# Level 5 — elif and else
+  introNotes: `# Level 5 — Strategy & Plasma
 
-## Two Ways to Make Decisions
-In Level 4 you used \`while\` loops with \`if\` statements. Sometimes you wrote code like this:
+## Bring It All Together
+You've learned a lot:
+
+- \`move_forward()\` and turns (Level 1)
+- \`for\` loops to repeat counted actions (Level 2)
+- \`if / elif / else\` to make decisions (Level 3)
+- \`while\` loops to keep going until a condition changes (Level 4)
+- \`fire()\` and \`alien_in_sight()\` to handle aliens
+
+Level 5 is about **choosing the right tool for the moment**.
+
+## Mix and Match
+Real solutions usually combine forms. You might:
+
+- Use a few **individual commands** to position the robot first
+- Then a **for loop** to clear a known number of aliens
+- Then a **while loop** to walk to the goal
+- All decisions inside an **if/elif/else chain**
+
+Example:
 
 \`\`\`python
-if has_path_right():
-    turn_right()
-if has_path_forward():
-    forward()
+move_forward()        # walk past the entrance
+move_forward()
+fire()                # clear the first alien
+forward()
+
+while not at_goal():  # then auto-pilot the rest
+    if alien_in_sight():
+        fire()
+    elif has_path_forward():
+        forward()
+    else:
+        turn_right()
 \`\`\`
 
-This looks fine — but there is a hidden problem. If **both** paths are clear, the robot turns right **and** moves forward in the same step. Two things happen when you only wanted one. The robot's behavior becomes hard to predict.
+There's almost never just **one** right structure. Match the tool to the situation.
 
-## The if / elif / else Chain
-A better structure is a single **decision chain**:
+## ⚫ Black Holes
+Level 5 adds **black holes** — pulsing dark traps scattered through the mazes. Stepping onto one **ends the run immediately**.
+
+Unlike aliens, black holes do **not** block your movement — there's no wall to bump into. The robot will happily walk straight into a black hole if your code tells it to. The only defense is **looking at the maze** and planning turns that avoid every dark cell.
+
+Side branches often lead to black holes — a blind "always turn right" or "always go forward" rule will doom you. Decide each turn deliberately.
+
+## ⚡ Plasma Supply
+Level 5 mazes give you a **limited number of plasma shots** — watch the ⚡ PLASMA badge above the maze.
+
+- Each \`fire()\` uses 1 plasma — whether it hits or misses
+- When plasma hits 0, future \`fire()\` calls fizzle silently (no shot leaves the robot)
+- Walking into an alien you couldn't shoot ends the run
+
+This means **route choice matters**. Some mazes have multiple paths to the goal:
+
+- A short path with 4 aliens — needs at least 4 plasma
+- A longer winding path with 1 alien — works on a small supply
+
+Count the aliens on each path **before you start writing code**. Pick a path your supply can handle.
+
+## ⚡ Plasma Pickups (late-level)
+Some mazes drop **glowing blue plasma pickups** in the corridors. Walk onto one and it's gone — your ⚡ PLASMA badge ticks up by 1 and flashes briefly. Pickups are one-time only and reset when you Run again. Use them when the maze has more aliens than starting plasma.
+
+## Why Order Still Matters
+Inside your \`if / elif / else\` chains, the **first matching branch** is the only one that runs. Use that to your advantage:
 
 \`\`\`python
-if has_path_right():
-    turn_right()
+if alien_in_sight():       # check this first — don't walk into aliens!
+    fire()
 elif has_path_forward():
     forward()
 else:
-    turn_left()
+    turn_right()
 \`\`\`
 
-Python checks top to bottom and runs **exactly one branch** — whichever condition is True first. If none are True, the \`else\` block runs as the fallback. This is called **mutually exclusive** logic.
-
-## Only One Branch Runs
-That is the key rule:
-
-| Structure | How many branches run? |
-|---|---|
-| Multiple \`if\` statements | All whose conditions are True |
-| \`if / elif / else\` chain | Exactly one — the first match |
-
-## Order Is Priority
-Because only the first match runs, the **order** of your conditions controls what the robot prefers:
-
-\`\`\`python
-while not at_goal():
-    if has_path_right():
-        turn_right()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
-\`\`\`
-
-This robot always prefers right. Only if the right is blocked does it go forward. Only if forward is also blocked does it turn left. This is the **right-hand rule** — written cleanly.
-
-## Why It Matters
-Structured chains produce predictable, reliable behavior. Separate \`if\` statements can cause the robot to take two actions at once, skip a step, or behave differently depending on path combinations. Use \`if/elif/else\` whenever each step should result in **one and only one** action.`,
+If you put \`has_path_forward()\` first, the robot would walk into the alien (because forward is technically open until you collide). Order = intent.`,
 
   challenges: [
     {
-      title: "One or the Other",
-      hint: "Use if/elif instead of two separate ifs — only one branch should run per step.",
+      title: "Stay the Course",
+      hint: "⚫ NEW: BLACK HOLES! Stepping on one ends the run. The corridor is straight — ignore the side branches.",
       grid: [
-        [1,1,1,1,1,1],
-        [0,0,0,0,0,1],
-        [1,1,1,1,0,1],
-        [1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,0,1,1,1,1,1,1,1,1,1],
+        [1,1,0,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,1,0,1,1,1,1,1,1],
+        [1,1,1,1,1,0,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:5, exitY:3,
-      starterCode: `# Use if/elif so only ONE action happens per loop step.
+      startX:0, startY:3, startDir:1, exitX:10, exitY:3,
+      image: { src: "/python-maze/python_5-1.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 2, y: 1 }, { x: 5, y: 5 }],
+      starterCode: `# NEW: ⚫ black holes! Walking onto one ends your run instantly.
+# Your code controls every step — turn carefully and stay on the safe path.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
 `,
     },
     {
-      title: "Add the Else",
-      hint: "When neither right nor forward is open, you need a fallback. Add else: turn_left().",
+      title: "Knowing When to Turn",
+      hint: "Only ONE branch leads to the gear — the others dead-end in black holes. Walking past your turn is just as fatal.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,0,0,1],
-        [1,1,0,1,0,1,1],
-        [1,1,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,0,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,0,1,1,1,1,1,1,1,1],
+        [1,1,1,0,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# The path requires a left turn — add else: turn_left() as the fallback.
+      startX:0, startY:3, startDir:1, exitX:8, exitY:1,
+      image: { src: "/python-maze/python_5-2.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 10, y: 3 }, { x: 3, y: 5 }],
+      starterCode: `# One branch leads to the gear — the others end the run.
+# Count cells on the maze before you write your moves.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Right Before Forward",
-      hint: "At some points both right and forward are open. Checking right first gives the correct path.",
+      title: "Three Wrong Turns",
+      hint: "Several decision points, each with one safe turn and at least one black-hole trap. Don't pattern-match — plan every turn.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,1,1,1,1],
-        [1,1,0,0,0,1,1],
-        [1,1,1,1,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,0,1,1,1,1,1,1,1,1],
+        [1,1,1,0,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,1,1,1,0,1,1],
+        [1,1,1,1,1,0,1,1,1,0,1,1],
+        [1,1,1,1,1,0,0,0,0,0,0,1],
+        [1,1,1,1,1,1,1,1,1,0,1,1],
+        [1,1,1,1,1,1,1,1,1,0,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:3,
-      starterCode: `# When both right and forward are open, the order decides which way you go.
-# Right first keeps you on track.
+      startX:0, startY:3, startDir:1, exitX:9, exitY:7,
+      image: { src: "/python-maze/python_5-3.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 10, y: 5 }, { x: 9, y: 3 }, { x: 3, y: 1 }],
+      starterCode: `# Three intersections, each with a trap. There's no single rule that works.
+# Look at the maze and decide each turn one by one.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Two Junctions",
-      hint: "Two decision points in this maze. The same if/elif/else chain handles both.",
+      title: "The Maze With Eyes",
+      hint: "FIVE black holes scattered everywhere. Almost every branch off the main corridor is a trap.",
       grid: [
-        [1,1,1,1,1,1,1,1],
-        [0,0,0,0,1,0,0,1],
-        [1,1,1,0,1,0,1,1],
-        [1,1,1,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,0,0,0,0],
+        [1,0,1,1,1,1,1,1,0,1,1,1],
+        [1,1,0,1,1,1,1,1,0,1,1,1],
+        [1,1,0,1,1,1,1,1,0,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,1,1],
+        [1,1,0,1,1,1,1,1,0,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:3,
-      starterCode: `# The same decision chain works at every junction.
+      startX:0, startY:4, startDir:1, exitX:10, exitY:0,
+      image: { src: "/python-maze/python_5-4.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 11, y: 0 }, { x: 9, y: 4 }, { x: 8, y: 5 }, { x: 2, y: 2 }, { x: 2, y: 5 }],
+      starterCode: `# Five black holes. Only one of the side branches is safe — find it.
+# Count cells carefully; overshooting is just as fatal as wrong-turning.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Staircase Down",
-      hint: "A longer path with many right turns. Your elif/else handles every step without changes.",
+      title: "Aliens Return",
+      hint: "Aliens are back — and now they share the maze with black holes. Three of one, four of the other. Combine fire() with careful turns.",
       grid: [
-        [1,1,1,1,1,1,1],
-        [0,0,0,0,0,1,1],
-        [1,1,1,1,0,0,1],
-        [1,1,1,1,1,0,1],
-        [1,1,1,1,1,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,1,1,1,1,1,1],
+        [1,0,1,1,0,1,1,1,1,1,1,1],
+        [1,0,1,1,0,1,1,1,1,1,1,0],
+        [1,0,1,1,0,0,0,0,0,0,0,0],
+        [1,1,1,1,0,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:6, exitY:4,
-      starterCode: `# A longer path — the same chain carries you all the way through.
+      startX:0, startY:1, startDir:1, exitX:11, exitY:7,
+      image: { src: "/python-maze/python_5-5.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 5, y: 1 }, { x: 1, y: 4 }, { x: 4, y: 5 }, { x: 11, y: 3 }],
+      aliens: [{ x: 2, y: 1 }, { x: 4, y: 3 }, { x: 7, y: 4 }],
+      starterCode: `# Aliens are back — and the maze has black holes too.
+# Shoot what's blocking you, walk around what isn't.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Three-Way Junction",
-      hint: "At some points all three options are checked. The order right → forward → left is critical here.",
+      title: "Make Every Shot Count",
+      hint: "⚡ NEW: limited plasma! Check the ⚡ PLASMA badge above the maze — every fire() ticks it down by 1. When it hits 0, no more shots.",
       grid: [
-        [1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1,0],
-        [1,0,1,0,1,0,1,0],
-        [1,0,0,0,1,0,0,0],
+        [0,0,0,0,0,0,0,0,0,0,0,1],
+        [1,1,1,1,0,1,1,1,1,1,0,1],
+        [1,1,1,1,0,1,1,1,0,0,0,1],
+        [1,1,1,1,0,1,1,1,0,1,1,1],
+        [1,0,0,0,0,0,0,0,0,1,1,1],
+        [1,1,1,1,0,1,1,1,1,1,1,1],
+        [1,1,1,1,0,0,0,0,1,1,1,1],
+        [1,1,1,1,1,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:3,
-      starterCode: `# Keep the same chain — right, forward, then left as fallback.
+      startX:0, startY:0, startDir:1, exitX:7, exitY:6,
+      image: { src: "/python-maze/python_5-6.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 1, y: 4 }, { x: 4, y: 2 }],
+      aliens: [{ x: 3, y: 0 }, { x: 9, y: 2 }, { x: 6, y: 4 }, { x: 6, y: 6 }],
+      plasmaSupply: 4,
+      starterCode: `# ⚡ NEW: limited plasma! The ⚡ PLASMA badge above the maze shows shots left.
+# Every fire() costs 1 — hit or miss. Wasted shots cost runs.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Order Matters — Exit A",
-      hint: "The exit is at the TOP-RIGHT corner. Run the starter code and watch the robot's path, then try swapping right and forward to see if it reaches the exit more directly.",
+      title: "Six Aliens, Two Shots",
+      hint: "More aliens than shots. You can't kill them all — find a route that only forces you past two.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1,0,0,0,1,0,0],
-        [1,0,1,0,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,1],
-        [1,1,1,0,1,1,1,0,1,1,1,1,1],
-        [1,0,0,0,0,0,1,0,0,0,0,0,1],
-        [1,0,1,1,1,0,1,0,1,1,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,1,1,1,1,1],
+        [1,1,1,1,0,1,0,0,0,1,1,1],
+        [1,1,1,1,0,1,1,1,0,0,0,1],
+        [1,1,1,1,0,1,1,1,0,1,0,1],
+        [1,0,0,0,0,0,0,0,0,1,0,1],
+        [1,1,1,1,0,1,1,1,1,1,0,1],
+        [1,1,1,1,0,0,0,0,0,0,0,1],
+        [0,0,0,0,0,1,1,1,1,1,1,1],
       ],
-      startX:0, startY:1, startDir:1, exitX:12, exitY:1,
-      starterCode: `# Exit A is at the TOP-RIGHT corner.
-# Run this and watch the robot's path.
-# Then try putting forward before right — does it take a more direct route?
+      startX:0, startY:0, startDir:1, exitX:1, exitY:7,
+      image: { src: "/python-maze/python_5-7.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 1, y: 4 }],
+      aliens: [{ x: 4, y: 1 }, { x: 4, y: 3 }, { x: 3, y: 7 }, { x: 8, y: 3 }, { x: 10, y: 4 }, { x: 7, y: 6 }],
+      plasmaSupply: 2,
+      starterCode: `# Six aliens, two shots. You can't clear them all.
+# Find a route that only forces you past two.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Order Matters — Exit B",
-      hint: "The exit is at the BOTTOM-RIGHT corner. The right-hand rule navigates here naturally — watch how checking right first steers the robot downward.",
+      title: "The Long Way Around",
+      hint: "Six aliens, two shots. The short paths are traps — find the LONG route that needs only two fires.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1,0,0,0,1,0,0],
-        [1,0,1,0,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,1],
-        [1,1,1,0,1,1,1,0,1,1,1,1,1],
-        [1,0,0,0,0,0,1,0,0,0,0,0,1],
-        [1,0,1,1,1,0,1,0,1,1,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,0,0,0,0,0,0,0,0,0,1,1],
+        [0,1,1,1,1,1,1,1,1,0,1,0],
+        [0,1,1,1,1,0,1,1,0,0,0,0],
+        [0,0,0,0,0,0,1,1,0,1,1,0],
+        [0,1,1,1,1,0,0,0,0,1,1,0],
+        [0,1,1,1,1,0,1,1,1,1,1,0],
+        [0,1,1,1,1,0,1,1,1,0,0,0],
+        [0,0,0,0,0,0,0,1,1,1,1,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:12, exitY:7,
-      starterCode: `# Exit B is at the BOTTOM-RIGHT corner.
-# The right-hand rule works well here — notice how priority order
-# steers the robot toward the bottom of the maze.
+      startX:11, startY:7, startDir:3, exitX:5, exitY:5,
+      image: { src: "/python-maze/python_5-8.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 11, y: 1 }, { x: 6, y: 7 }, { x: 5, y: 2 }, { x: 9, y: 6 }],
+      aliens: [{ x: 8, y: 2 }, { x: 8, y: 4 }, { x: 6, y: 4 }, { x: 7, y: 0 }, { x: 2, y: 3 }, { x: 5, y: 6 }],
+      plasmaSupply: 2,
+      starterCode: `# The shortest-looking routes are traps. Find the long path that costs only 2 fires.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Order Matters — Exit C",
-      hint: "The exit is at the BOTTOM-LEFT corner. The right-hand rule will get there eventually — but try left-hand priority to see if it finds a more direct path.",
+      title: "Walk Around, Don't Shoot",
+      hint: "Not every alien is in your way. Plan a route that walks past the ones you don't need to clear.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1,0,0,0,1,0,0],
-        [1,0,1,0,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,1],
-        [1,1,1,0,1,1,1,0,1,1,1,1,1],
-        [1,0,0,0,0,0,1,0,0,0,0,0,1],
-        [1,0,1,1,1,0,1,0,1,1,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [1,1,1,1,1,1,1,0,0,0,0,1],
+        [0,0,1,1,1,1,1,0,1,1,0,1],
+        [1,0,0,1,1,1,1,0,1,0,0,0],
+        [1,1,0,0,1,1,1,0,0,0,1,0],
+        [1,1,1,0,0,1,1,0,0,1,1,0],
+        [1,1,1,0,0,0,0,0,1,1,1,0],
+        [1,1,1,0,1,1,1,1,1,1,1,0],
+        [1,1,1,0,1,1,1,1,0,0,0,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:1, exitY:7,
-      starterCode: `# Exit C is at the BOTTOM-LEFT corner.
-# Try switching to left-hand priority — does it reach the exit faster?
-# Left-hand rule: left → forward → right
+      startX:0, startY:1, startDir:1, exitX:8, exitY:7,
+      image: { src: "/python-maze/python_5-9.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 3, y: 7 }, { x: 4, y: 4 }, { x: 8, y: 4 }],
+      aliens: [{ x: 3, y: 3 }, { x: 7, y: 3 }, { x: 8, y: 0 }, { x: 10, y: 1 }, { x: 11, y: 5 }, { x: 5, y: 5 }],
+      plasmaSupply: 4,
+      starterCode: `# Some aliens are on the path. Some aren't. Spot the difference before you code.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
     {
-      title: "Order Matters — Exit D",
-      hint: "The exit is in the BOTTOM-MIDDLE. Experiment with all three priority orders — right, forward, and left first. Which one takes the most direct path?",
+      title: "Pick Up the Pieces",
+      hint: "⚡ NEW: plasma pickups! Glowing blue circles on the maze. Walk onto one and your ⚡ PLASMA counter ticks UP by 1. They're one-time only.",
       grid: [
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
-        [0,0,1,0,0,0,1,0,0,0,1,0,0],
-        [1,0,1,0,1,0,1,0,1,0,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,1],
-        [1,1,1,0,1,1,1,0,1,1,1,1,1],
-        [1,0,0,0,0,0,1,0,0,0,0,0,1],
-        [1,0,1,1,1,0,1,0,1,1,1,0,1],
-        [1,0,0,0,1,0,0,0,1,0,0,0,0],
-        [1,1,1,1,1,1,1,1,1,1,1,1,1],
+        [0,1,0,1,0,0,0,0,0,0,0,0],
+        [0,1,0,1,0,1,0,1,1,1,1,0],
+        [0,0,0,0,0,1,0,0,0,0,0,0],
+        [1,1,1,1,1,1,1,1,1,1,1,0],
+        [0,0,0,0,0,1,1,1,0,0,0,0],
+        [0,0,0,1,0,0,1,1,1,1,1,0],
+        [0,0,0,1,1,0,0,1,1,1,1,0],
+        [0,0,0,1,1,1,0,0,0,0,0,0],
       ],
-      startX:0, startY:1, startDir:1, exitX:7, exitY:7,
-      starterCode: `# Exit D is at the BOTTOM-MIDDLE of the maze.
-# Experiment: try right-first, then forward-first, then left-first.
-# Which priority order takes the most direct route to this exit?
+      startX:0, startY:7, startDir:0, exitX:0, exitY:0,
+      image: { src: "/python-maze/python_5-10.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
+      blackHoles: [{ x: 8, y: 4 }, { x: 2, y: 0 }, { x: 1, y: 5 }],
+      aliens: [{ x: 0, y: 4 }, { x: 5, y: 5 }, { x: 8, y: 2 }, { x: 1, y: 2 }, { x: 5, y: 0 }],
+      plasmaPickups: [{ x: 10, y: 4 }, { x: 2, y: 1 }],
+      plasmaSupply: 3,
+      starterCode: `# NEW: ⚡ pickups! Glowing blue cells give +1 plasma when you walk onto them.
+# More aliens than starting shots — plan a route that grabs the plasma you need.
 
-while not at_goal():
-    if has_path_right():
-        turn_right()
-        forward()
-    elif has_path_forward():
-        forward()
-    else:
-        turn_left()
 `,
     },
   ],

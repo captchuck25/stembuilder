@@ -130,7 +130,7 @@ type Phase =
 
 // ─── Maze execution engine ────────────────────────────────────────────────────
 
-interface MoveRecord { type: string; x: number; y: number; dir: Dir; targetX?: number; targetY?: number; }
+interface MoveRecord { type: string; x: number; y: number; dir: Dir; targetX?: number; targetY?: number; pickedUp?: boolean; }
 
 function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: string | null; solved: boolean } {
   const indentErr = validateIndentation(code);
@@ -155,15 +155,36 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
   const liveAliens = new Set<string>((ch.aliens ?? []).map(a => `${a.x},${a.y}`));
   const cellHasAlien = (cx: number, cy: number) => liveAliens.has(`${cx},${cy}`);
 
+  // Plasma supply (L5+ challenges). undefined = unlimited.
+  let plasmaRemaining: number | null =
+    typeof ch.plasmaSupply === "number" ? ch.plasmaSupply : null;
+  let plasmaWasDepleted = false; // set true the first time fire() is called with 0 plasma
+
+  // Plasma pickups (L5-10+) — each cell can only be collected once.
+  const remainingPickups = new Set<string>((ch.plasmaPickups ?? []).map(p => `${p.x},${p.y}`));
+
   const api = {
     move_forward: () => {
       if (moves.length >= MAX) throw new Error("Move limit reached — check for infinite loops.");
       const [dx,dy] = DIR_DELTA[dir];
       const nx = x+dx, ny = y+dy;
       if (isWall(nx,ny)) throw new Error(`Wall to the ${DIR_LABEL[dir]}! Can't move forward.`);
-      if (cellHasAlien(nx,ny)) throw new Error("Eaten by the alien! Shoot it before walking into it.");
+      if (cellHasAlien(nx,ny)) {
+        throw new Error(plasmaWasDepleted
+          ? "Eaten by the alien — you ran out of plasma! Pick a path you can actually clear."
+          : "Eaten by the alien! Shoot it before walking into it.");
+      }
       x=nx; y=ny;
-      moves.push({ type:"move", x, y, dir });
+      const pickupKey = `${x},${y}`;
+      let pickedUp = false;
+      if (remainingPickups.has(pickupKey)) {
+        remainingPickups.delete(pickupKey);
+        // Picking up restores plasma even if depleted — clear the "ran out" flag.
+        if (plasmaRemaining !== null) plasmaRemaining += 1;
+        plasmaWasDepleted = false;
+        pickedUp = true;
+      }
+      moves.push({ type:"move", x, y, dir, pickedUp });
       if (ch.blackHoles?.some(h => h.x === x && h.y === y)) {
         throw new Error("Sucked into a black hole — your code took a wrong turn. Reset and try again.");
       }
@@ -176,6 +197,12 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
     turn_around:  () => { dir=((dir+2)%4) as Dir; moves.push({type:"turn",x,y,dir}); },
     shoot: () => {
       if (moves.length >= MAX) throw new Error("Move limit reached — check for infinite loops.");
+      // Out of plasma? Record a fizzle (no projectile rendered) and bail.
+      if (plasmaRemaining !== null && plasmaRemaining <= 0) {
+        plasmaWasDepleted = true;
+        moves.push({ type:"shoot-fizzle", x, y, dir });
+        return;
+      }
       const [dx,dy] = DIR_DELTA[dir];
       // Trace plasma path until it hits an alien or a wall.
       let tx = x+dx, ty = y+dy;
@@ -190,6 +217,8 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
         }
         tx += dx; ty += dy;
       }
+      // Every fire() that produced a shot costs 1 plasma — including wasted shots.
+      if (plasmaRemaining !== null) plasmaRemaining -= 1;
       moves.push({
         type: hitAlien ? "shoot" : "shoot-miss",
         x, y, dir,
@@ -378,9 +407,10 @@ function closeBlocks(code: string): string {
 
 const GUTTER = 14; // dark-navy strip around all maze edges
 
-function MazeCanvas({ ch, px, py, pdir, solved, robotFlash, shotAliens, activePlasma, poofingCells }: { ch: Challenge; px: number; py: number; pdir: Dir; solved: boolean; robotFlash?: boolean; shotAliens?: Set<string>; activePlasma?: { fromX:number; fromY:number; toX:number; toY:number; key:string } | null; poofingCells?: Set<string> }) {
+function MazeCanvas({ ch, px, py, pdir, solved, robotFlash, shotAliens, activePlasma, poofingCells, collectedPickups }: { ch: Challenge; px: number; py: number; pdir: Dir; solved: boolean; robotFlash?: boolean; shotAliens?: Set<string>; activePlasma?: { fromX:number; fromY:number; toX:number; toY:number; key:string } | null; poofingCells?: Set<string>; collectedPickups?: Set<string> }) {
   const shot = shotAliens ?? new Set<string>();
   const poofing = poofingCells ?? new Set<string>();
+  const gotPickup = collectedPickups ?? new Set<string>();
   // ── Image-backed renderer ──────────────────────────────────────────────
   if (ch.image) {
     const img = ch.image;
@@ -394,7 +424,7 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash, shotAliens, activePl
     const lp   = [cx2+Math.cos(angle+2.4)*r*0.6, cy2+Math.sin(angle+2.4)*r*0.6];
     const rp   = [cx2+Math.cos(angle-2.4)*r*0.6, cy2+Math.sin(angle-2.4)*r*0.6];
     const arrow = `M${tip[0]},${tip[1]} L${lp[0]},${lp[1]} L${cx2},${cy2} L${rp[0]},${rp[1]} Z`;
-    const showGrid = false; // toggle to false once positioning is dialed in
+    const showGrid = false; // toggle to true when calibrating new maze images
     return (
       <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}
         style={{ display:"block", borderRadius:12, maxWidth:"100%", height:"auto" }}>
@@ -453,6 +483,20 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash, shotAliens, activePl
                 x={-half} y={-half} width={img.cellPx} height={img.cellPx}>
                 <animate attributeName="href" values={frames} dur="0.6s" repeatCount="indefinite"/>
               </image>
+            </g>
+          );
+        })}
+        {ch.plasmaPickups?.filter(p => !gotPickup.has(`${p.x},${p.y}`)).map((p, i) => {
+          const px3 = img.originX + p.x * img.cellPx;
+          const py3 = img.originY + p.y * img.cellPx;
+          const half = img.cellPx / 2;
+          return (
+            <g key={`pickup-${i}`} transform={`translate(${px3 + half} ${py3 + half})`}>
+              <circle r={half * 0.8} fill="rgba(56,189,248,0.18)" stroke="rgba(56,189,248,0.55)" strokeWidth={1.5}>
+                <animate attributeName="r" values={`${half*0.7};${half*0.95};${half*0.7}`} dur="1.4s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.6;1;0.6" dur="1.4s" repeatCount="indefinite"/>
+              </circle>
+              <image href="/python-maze/plasma-shot.png" x={-half*0.7} y={-half*0.7} width={half*1.4} height={half*1.4}/>
             </g>
           );
         })}
@@ -535,6 +579,19 @@ function MazeCanvas({ ch, px, py, pdir, solved, robotFlash, shotAliens, activePl
               x={-half} y={-half} width={CELL} height={CELL}>
               <animate attributeName="href" values={frames} dur="0.6s" repeatCount="indefinite"/>
             </image>
+          </g>
+        );
+      })}
+      {ch.plasmaPickups?.filter(p => !gotPickup.has(`${p.x},${p.y}`)).map((p, i) => {
+        const ax = p.x * CELL + GUTTER, ay = p.y * CELL + GUTTER;
+        const half = CELL / 2;
+        return (
+          <g key={`pickup-${i}`} transform={`translate(${ax + half} ${ay + half})`}>
+            <circle r={half * 0.8} fill="rgba(56,189,248,0.18)" stroke="rgba(56,189,248,0.55)" strokeWidth={1.5}>
+              <animate attributeName="r" values={`${half*0.7};${half*0.95};${half*0.7}`} dur="1.4s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.6;1;0.6" dur="1.4s" repeatCount="indefinite"/>
+            </circle>
+            <image href="/python-maze/plasma-shot.png" x={-half*0.7} y={-half*0.7} width={half*1.4} height={half*1.4}/>
           </g>
         );
       })}
@@ -866,6 +923,9 @@ function ChallengeView({
   const [shotAliens, setShotAliens] = useState<Set<string>>(new Set());
   const [activePlasma, setActivePlasma] = useState<{ fromX:number; fromY:number; toX:number; toY:number; key:string } | null>(null);
   const [poofingCells, setPoofingCells] = useState<Set<string>>(new Set());
+  const [plasmaRemaining, setPlasmaRemaining] = useState<number | null>(ch.plasmaSupply ?? null);
+  const [collectedPickups, setCollectedPickups] = useState<Set<string>>(new Set());
+  const [pickupFlash, setPickupFlash] = useState(false);
 
   const editorRef  = useRef<HTMLDivElement>(null);
   const viewRef    = useRef<EditorView|null>(null);
@@ -890,7 +950,7 @@ function ChallengeView({
     stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
-    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set()); setPlasmaRemaining(ch.plasmaSupply ?? null); setCollectedPickups(new Set()); setPickupFlash(false);
     setSolved(false); setOutput([]); setAnimating(false);
     const code = progress.savedCode?.[chalKey(li, ci)] ?? ch.starterCode;
     codeRef.current = code;
@@ -947,7 +1007,7 @@ function ChallengeView({
     stopFlash();
     setOutput([]); setSolved(false);
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
-    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set()); setPlasmaRemaining(ch.plasmaSupply ?? null); setCollectedPickups(new Set()); setPickupFlash(false);
     const { moves, error, solved: didSolve } = runMaze(ch, codeRef.current);
     // Syntax/indent errors have no moves — show immediately
     if (error && !moves.length) { setOutput([{text:error,type:"error"}]); return; }
@@ -971,6 +1031,16 @@ function ChallengeView({
         return;
       }
       const m = moves[step]; setPx(m.x); setPy(m.y); setPdir(m.dir as Dir);
+      if (m.type === "shoot" || m.type === "shoot-miss") {
+        setPlasmaRemaining(prev => prev !== null ? Math.max(0, prev - 1) : null);
+      }
+      if (m.type === "move" && m.pickedUp) {
+        const cellKey = `${m.x},${m.y}`;
+        setCollectedPickups(prev => { const n = new Set(prev); n.add(cellKey); return n; });
+        setPlasmaRemaining(prev => prev !== null ? prev + 1 : null);
+        setPickupFlash(true);
+        setTimeout(() => setPickupFlash(false), 600);
+      }
       if ((m.type === "shoot" || m.type === "shoot-miss") && m.targetX !== undefined && m.targetY !== undefined) {
         // Plasma starts at the cell directly ahead of the sprite and travels to targetX/Y.
         const [dx, dy] = DIR_DELTA[m.dir as Dir];
@@ -1002,7 +1072,7 @@ function ChallengeView({
     stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
-    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set()); setPlasmaRemaining(ch.plasmaSupply ?? null); setCollectedPickups(new Set()); setPickupFlash(false);
     setOutput([{text:"Stopped.", type:"info"}]);
   }, [ch, stopAnimation]);
 
@@ -1010,7 +1080,7 @@ function ChallengeView({
     stopAnimation();
     stopFlash();
     setPx(ch.startX); setPy(ch.startY); setPdir(ch.startDir);
-    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set());
+    setShotAliens(new Set()); setActivePlasma(null); setPoofingCells(new Set()); setPlasmaRemaining(ch.plasmaSupply ?? null); setCollectedPickups(new Set()); setPickupFlash(false);
     setSolved(false); setOutput([]);
   }, [ch, stopAnimation]);
 
@@ -1113,11 +1183,32 @@ function ChallengeView({
           {/* Right: level info + maze + output */}
           <div style={{flex:1,minWidth:300,display:"flex",flexDirection:"column",gap:14}}>
             <div style={{...CARD,padding:"14px 18px"}}>
-              <div style={{fontSize:17,fontWeight:900,color:"#e2e8f0"}}>{ch.title}</div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                <div style={{fontSize:17,fontWeight:900,color:"#e2e8f0"}}>{ch.title}</div>
+                {ch.plasmaSupply !== undefined && (() => {
+                  const current = plasmaRemaining ?? ch.plasmaSupply;
+                  const hasPickups = (ch.plasmaPickups?.length ?? 0) > 0;
+                  const empty = current === 0;
+                  return (
+                    <div style={{
+                      fontSize:12,fontWeight:800,letterSpacing:"0.4px",
+                      padding:"4px 10px",borderRadius:999,
+                      background: pickupFlash ? "rgba(56,189,248,0.45)" : empty ? "rgba(239,68,68,0.18)" : "rgba(56,189,248,0.15)",
+                      color: pickupFlash ? "#fff" : empty ? "#fca5a5" : "#7dd3fc",
+                      border: `1px solid ${pickupFlash ? "rgba(56,189,248,0.9)" : empty ? "rgba(239,68,68,0.3)" : "rgba(56,189,248,0.3)"}`,
+                      boxShadow: pickupFlash ? "0 0 14px rgba(56,189,248,0.7)" : "none",
+                      transform: pickupFlash ? "scale(1.15)" : "scale(1)",
+                      transition: "transform 220ms ease-out, box-shadow 220ms ease-out, background 220ms ease-out",
+                    }}>
+                      {pickupFlash ? "⚡ +1 PLASMA" : hasPickups ? `⚡ PLASMA ${current}` : `⚡ PLASMA ${current} / ${ch.plasmaSupply}`}
+                    </div>
+                  );
+                })()}
+              </div>
               <div style={{fontSize:13,color:"#94a3b8",marginTop:3}}>💡 {ch.hint}</div>
             </div>
             <div style={{...CARD,padding:"10px 14px",display:"flex",justifyContent:"center",overflowX:"auto"}}>
-              <MazeCanvas ch={ch} px={px} py={py} pdir={pdir} solved={solved} robotFlash={robotFlash} shotAliens={shotAliens} activePlasma={activePlasma} poofingCells={poofingCells}/>
+              <MazeCanvas ch={ch} px={px} py={py} pdir={pdir} solved={solved} robotFlash={robotFlash} shotAliens={shotAliens} activePlasma={activePlasma} poofingCells={poofingCells} collectedPickups={collectedPickups}/>
             </div>
             <div style={{...CARD,padding:"12px 16px",minHeight:64}}>
               <div style={{fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:"0.7px",color:"#64748b",marginBottom:6}}>Output</div>
