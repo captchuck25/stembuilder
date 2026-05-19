@@ -629,6 +629,9 @@ function BridgeToolPage() {
       { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null } | null,
       { cost: number; passed: boolean } | null,
     ]) => {
+      if (viewAsStudent) {
+        setDemoDiagnostic(d => `${d} | all3=${config ? 'cfg' : 'NO-cfg'}/${existingDesign ? 'dsg' : 'no-dsg'}/${priorSubmission ? 'sub' : 'no-sub'}`);
+      }
       if (!config) return;
       setAssignmentConfig(config);
       if (priorSubmission) setAssignmentSubmitted(true);
@@ -664,6 +667,10 @@ function BridgeToolPage() {
       window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
         suppressDirtyRef.current = false;
       }));
+    }).catch(err => {
+      if (viewAsStudent) {
+        setDemoDiagnostic(d => `${d} | Promise.all rejected: ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
