@@ -2012,17 +2012,17 @@ if alien_in_sight() or not has_path_forward():
       hint: "Six aliens, two shots. The short paths are traps — find the LONG route that needs only two fires.",
       grid: [
         [0,0,0,0,0,0,0,0,0,0,1,1],
-        [0,1,1,1,1,1,1,1,1,0,1,0],
+        [0,1,1,1,1,1,1,1,1,0,1,1],
         [0,1,1,1,1,0,1,1,0,0,0,0],
         [0,0,0,0,0,0,1,1,0,1,1,0],
         [0,1,1,1,1,0,0,0,0,1,1,0],
         [0,1,1,1,1,0,1,1,1,1,1,0],
         [0,1,1,1,1,0,1,1,1,0,0,0],
-        [0,0,0,0,0,0,0,1,1,1,1,0],
+        [0,0,0,0,0,0,1,1,1,1,1,0],
       ],
       startX:11, startY:7, startDir:3, exitX:5, exitY:5,
       image: { src: "/python-maze/python_5-8.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
-      blackHoles: [{ x: 11, y: 1 }, { x: 6, y: 7 }, { x: 5, y: 2 }, { x: 9, y: 6 }],
+      blackHoles: [{ x: 5, y: 2 }, { x: 9, y: 6 }],
       aliens: [{ x: 8, y: 2 }, { x: 8, y: 4 }, { x: 6, y: 4 }, { x: 7, y: 0 }, { x: 2, y: 3 }, { x: 5, y: 6 }],
       plasmaSupply: 2,
       starterCode: `# The shortest-looking routes are traps. Find the long path that costs only 2 fires.
@@ -2045,7 +2045,7 @@ if alien_in_sight() or not has_path_forward():
       startX:0, startY:1, startDir:1, exitX:8, exitY:7,
       image: { src: "/python-maze/python_5-9.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
       blackHoles: [{ x: 3, y: 7 }, { x: 4, y: 4 }, { x: 8, y: 4 }],
-      aliens: [{ x: 3, y: 3 }, { x: 7, y: 3 }, { x: 8, y: 0 }, { x: 10, y: 1 }, { x: 11, y: 5 }, { x: 5, y: 5 }],
+      aliens: [{ x: 3, y: 3 }, { x: 7, y: 3 }, { x: 9, y: 0 }, { x: 10, y: 2 }, { x: 11, y: 5 }, { x: 5, y: 5 }],
       plasmaSupply: 4,
       starterCode: `# Some aliens are on the path. Some aren't. Spot the difference before you code.
 
