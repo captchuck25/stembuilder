@@ -54,7 +54,7 @@ const L1: Level = {
   tagline: "Give the robot step-by-step instructions",
   color: "#2563eb",
   newCommands: [
-    { cmd: "move_forward()", desc: "Move one cell in the direction you are facing." },
+    { cmd: "forward()", desc: "Move one cell in the direction you are facing." },
     { cmd: "turn_right()",   desc: "Rotate 90° clockwise (right)." },
     { cmd: "turn_left()",    desc: "Rotate 90° counter-clockwise (left)." },
   ],
@@ -67,7 +67,7 @@ In these challenges you control a robot inside a maze. The robot understands thr
 
 | Command | What it does |
 |---|---|
-| \`move_forward()\` | Move one step in the direction you are facing |
+| \`forward()\` | Move one step in the direction you are facing |
 | \`turn_right()\` | Rotate 90° to the right (clockwise) |
 | \`turn_left()\` | Rotate 90° to the left (counter-clockwise) |
 
@@ -75,15 +75,15 @@ In these challenges you control a robot inside a maze. The robot understands thr
 A command name is followed by **parentheses** — that is what tells Python to run it:
 
 \`\`\`python
-move_forward()
+forward()
 turn_right()
-move_forward()
+forward()
 \`\`\`
 
 Python runs each line **top to bottom, one at a time**.
 
 ## Turning Does NOT Move You
-Turning changes the direction you face, but you stay in the same cell. You still need \`move_forward()\` after turning to actually move.
+Turning changes the direction you face, but you stay in the same cell. You still need \`forward()\` after turning to actually move.
 
 ## Errors
 If you try to move into a wall, you will get an error and the run stops. Read the error message — it tells you exactly what went wrong.
@@ -99,7 +99,7 @@ Start with Challenge 1 and work your way through. The mazes get longer and more 
       // S..E
       // ██████
       title: "Baby Steps",
-      hint: "The exit is 3 steps to your right. Call move_forward() three times.",
+      hint: "The exit is 3 steps to your right. Call forward() three times.",
       grid: [[1,1,1,1],[0,0,0,0],[1,1,1,1]],
       startX:0, startY:1, startDir:1, exitX:3, exitY:1,
       image: {
@@ -110,7 +110,7 @@ Start with Challenge 1 and work your way through. The mazes get longer and more 
       },
       starterCode: `# Move forward to reach the exit!
 
-move_forward()
+forward()
 `,
     },
     {
@@ -118,7 +118,7 @@ move_forward()
       // S.......E
       // █████████
       title: "Keep Going",
-      hint: "Seven steps forward. Add more move_forward() calls.",
+      hint: "Seven steps forward. Add more forward() calls.",
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:1, exitX:7, exitY:1,
       image: {
@@ -129,8 +129,8 @@ move_forward()
       },
       starterCode: `# The corridor is longer this time.
 
-move_forward()
-move_forward()
+forward()
+forward()
 `,
     },
     {
@@ -156,9 +156,9 @@ move_forward()
       },
       starterCode: `# The path turns! Go forward across the top, then turn_right() and go down.
 
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
 # now turn and keep going to the gear
 `,
     },
@@ -187,9 +187,9 @@ move_forward()
       },
       starterCode: `# This time you will need to use turn_left() and turn_right()
 
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
 turn_right()
 `,
     },
@@ -218,10 +218,10 @@ turn_right()
       },
       starterCode: `# Be sure to count your moves while using different commands.
 
-move_forward()
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
+forward()
 turn_right()
 `,
     },
@@ -248,9 +248,9 @@ turn_right()
       },
       starterCode: `# Things are getting a little repetative here!
 
-move_forward()
+forward()
 turn_right()
-move_forward()
+forward()
 turn_left()
 `,
     },
@@ -277,10 +277,10 @@ turn_left()
       },
       starterCode: `# Work your way down the staircase!
 
-move_forward()
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
+forward()
 turn_right()
 `,
     },
@@ -311,9 +311,9 @@ turn_right()
       },
       starterCode: `# Be sure not to overshoot your path.
 
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
 turn_right()
 `,
     },
@@ -339,12 +339,12 @@ turn_right()
       },
       starterCode: `# A long winding path. Plan each segment before you write it.
 
-move_forward()
-move_forward()
-move_forward()
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
+forward()
+forward()
+forward()
 turn_right()
 # drop down, then turn right and head back the other way…
 `,
@@ -378,18 +378,18 @@ turn_right()
 
   quiz: [
     {
-      question: "Does it matter if you use capital letters in a command name — for example, typing Move_Forward() instead of move_forward()?",
+      question: "Does it matter if you use capital letters in a command name — for example, typing Forward() instead of forward()?",
       options: [
         "No — Python does not care about uppercase or lowercase",
-        "Yes — Python is case-sensitive, so Move_Forward() will cause an error",
+        "Yes — Python is case-sensitive, so Forward() will cause an error",
         "Only the first letter must be lowercase",
         "Only matters inside a loop",
       ],
       answer: 1,
-      explanation: "Python is case-sensitive. move_forward() and Move_Forward() are completely different names. Only the exact lowercase spelling works.",
+      explanation: "Python is case-sensitive. forward() and Forward() are completely different names. Only the exact lowercase spelling works.",
     },
     {
-      question: "What happens if you misspell a command — for example, you type move_foward() (missing the 'r')?",
+      question: "What happens if you misspell a command — for example, you type forwad() (missing the 'r')?",
       options: [
         "Python guesses what you meant and runs it anyway",
         "The robot moves half a step",
@@ -397,10 +397,10 @@ turn_right()
         "The line is quietly skipped",
       ],
       answer: 2,
-      explanation: "Python only knows names you define exactly. A single typo like move_foward is an unknown name, so Python raises a NameError and the run stops.",
+      explanation: "Python only knows names you define exactly. A single typo like forwad is an unknown name, so Python raises a NameError and the run stops.",
     },
     {
-      question: "What if you forget the parentheses and write move_forward instead of move_forward()?",
+      question: "What if you forget the parentheses and write forward instead of forward()?",
       options: [
         "The robot still moves — Python knows what you mean",
         "The command is referenced but never actually called, so the robot does not move",
@@ -411,7 +411,7 @@ turn_right()
       explanation: "The parentheses are what tell Python to run the command. Without (), you are just naming the function, not calling it — the robot stays still.",
     },
     {
-      question: "What happens when you call move_forward() and there is a wall directly ahead?",
+      question: "What happens when you call forward() and there is a wall directly ahead?",
       options: [
         "The robot stops safely at the wall",
         "The robot turns around automatically",
@@ -419,7 +419,7 @@ turn_right()
         "The wall is removed",
       ],
       answer: 2,
-      explanation: "Moving into a wall raises an error and stops the run. You need to plan your turns before each move_forward().",
+      explanation: "Moving into a wall raises an error and stops the run. You need to plan your turns before each forward().",
     },
     {
       question: "In what order does Python run your commands?",
@@ -433,10 +433,10 @@ turn_right()
       explanation: "Python always reads your code top to bottom, executing one line at a time. The order you write your commands matters.",
     },
     {
-      question: "You need the robot to move 5 steps forward. How many times must you call move_forward()?",
+      question: "You need the robot to move 5 steps forward. How many times must you call forward()?",
       options: ["4", "5", "6", "It depends on which direction you are facing"],
       answer: 1,
-      explanation: "Each call to move_forward() moves the robot exactly one cell, so 5 calls = 5 steps, regardless of direction.",
+      explanation: "Each call to forward() moves the robot exactly one cell, so 5 calls = 5 steps, regardless of direction.",
     },
   ],
 };
@@ -458,14 +458,14 @@ const L2: Level = {
 In Level 1 you probably wrote code like this:
 
 \`\`\`python
-move_forward()
-move_forward()
-move_forward()
-move_forward()
-move_forward()
-move_forward()
-move_forward()
-move_forward()
+forward()
+forward()
+forward()
+forward()
+forward()
+forward()
+forward()
+forward()
 \`\`\`
 
 Eight identical lines. Imagine if the corridor was 100 cells long!
@@ -475,7 +475,7 @@ A **for loop** tells Python to run the same block of code a set number of times:
 
 \`\`\`python
 for i in range(8):
-    move_forward()
+    forward()
 \`\`\`
 
 This does exactly the same thing as the eight lines above — but in just two lines.
@@ -490,7 +490,7 @@ Python uses indentation (spaces) to know what belongs inside the loop:
 
 \`\`\`python
 for i in range(3):
-    move_forward()   # inside the loop — runs 3 times
+    forward()   # inside the loop — runs 3 times
     turn_right()     # also inside — runs 3 times
 turn_left()          # outside the loop — runs only once
 \`\`\`
@@ -502,10 +502,10 @@ You can have more than one loop in your program:
 
 \`\`\`python
 for i in range(5):
-    move_forward()
+    forward()
 turn_right()
 for i in range(5):
-    move_forward()
+    forward()
 \`\`\`
 
 ## Look for the Pattern
@@ -515,8 +515,8 @@ Before writing a loop, ask: *"Am I doing the same thing multiple times in a row?
 Halfway through this level, **aliens** appear in the maze. Walking into one ends the run! Use the new \`fire()\` command to destroy any alien in your way:
 
 \`\`\`python
-fire()           # plasma shot travels forward, destroys the first alien it hits
-move_forward()  # now you can safely walk onto that cell
+fire()       # plasma shot travels forward, destroys the first alien it hits
+forward()    # now you can safely walk onto that cell
 \`\`\`
 
 The plasma travels along the corridor until it hits an alien or a wall. If there's no alien ahead, the shot just sails out — no harm done, but it still counts as one move. You'll combine \`fire()\` with your loops to clear paths and reach the gear.`,
@@ -540,7 +540,7 @@ The plasma travels along the corridor until it hits an alien or a wall. If there
       starterCode: `#6 Steps forward! Use aloop to keep your coding task short...
 
 for i in range(6):
-    move_forward()
+    forward()
 `,
     },
     {
@@ -583,9 +583,9 @@ for i in range(6):
 # Pattern: forward, right, forward, left.
 
 for i in range(3):
-    move_forward()
+    forward()
     turn_right()
-    move_forward()
+    forward()
     turn_left()
 `,
     },
@@ -779,15 +779,15 @@ for i in range(3):
       explanation: "range(5) produces 0,1,2,3,4 — five values — so the loop body runs 5 times.",
     },
     {
-      question: "Which line is INSIDE the loop in this code?\n\nfor i in range(3):\n    move_forward()\nturn_right()",
+      question: "Which line is INSIDE the loop in this code?\n\nfor i in range(3):\n    forward()\nturn_right()",
       options: [
         "turn_right()",
-        "move_forward()",
+        "forward()",
         "for i in range(3):",
-        "Both move_forward() and turn_right()",
+        "Both forward() and turn_right()",
       ],
       answer: 1,
-      explanation: "Only move_forward() is indented under the for statement, so only it runs 3 times. turn_right() runs once, after the loop.",
+      explanation: "Only forward() is indented under the for statement, so only it runs 3 times. turn_right() runs once, after the loop.",
     },
     {
       question: "What is the value of i on the very first iteration of `for i in range(10):`?",
@@ -796,10 +796,10 @@ for i in range(3):
       explanation: "range() always starts at 0 by default, so i is 0 on the first pass.",
     },
     {
-      question: "How many times does move_forward() run here?\n\nfor i in range(4):\n    move_forward()\n    turn_right()",
+      question: "How many times does forward() run here?\n\nfor i in range(4):\n    forward()\n    turn_right()",
       options: ["4", "8", "2", "1"],
       answer: 0,
-      explanation: "The entire loop body (both lines) runs 4 times, so move_forward() runs 4 times.",
+      explanation: "The entire loop body (both lines) runs 4 times, so forward() runs 4 times.",
     },
     {
       question: "You need to move forward 0 times. Which call produces no iterations?",
@@ -844,11 +844,10 @@ const L3: Level = {
 ## Sensing the World
 So far your robot followed a fixed script — the same commands every time. But what if the maze changes? You need code that can **make decisions**.
 
-In Level 3 you get three sensor commands and a new movement shortcut:
+In Level 3 you get three sensor commands you can plug into a decision:
 
 | Command | What it does |
 |---|---|
-| \`forward()\` | Move one cell forward (same as \`move_forward()\`) |
 | \`has_path_ahead()\` | Returns True when the path ahead is **clear** |
 | \`has_path_left()\` | Returns True when the path to the left is **clear** |
 | \`has_path_right()\` | Returns True when the path to the right is **clear** |
@@ -922,7 +921,7 @@ else:
   challenges: [
     {
       title: "Straight Shot",
-      hint: "Just walk forward to the gear! Use a for loop to repeat move_forward().",
+      hint: "Just walk forward to the gear! Use a for loop to repeat forward().",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1,1],
         [1,1,1,1,1,1,1,1,1,1,1,1],
@@ -942,7 +941,7 @@ else:
 # Count the cells and put that number in range().
 
 for i in range(0):  # change 0 to the right count
-    move_forward()
+    forward()
 `,
     },
     {
@@ -1709,19 +1708,21 @@ const L5: Level = {
   color: "#059669",
   newCommands: [
     { cmd: "(plasma supply)", desc: "L5 mazes give you a LIMITED number of plasma shots. Pick a path you can actually clear!" },
+    { cmd: "and / or",        desc: "Combine two conditions: `a and b` is True only when both are True; `a or b` is True when either is True." },
+    { cmd: "(nested loops)",  desc: "Put a loop inside another loop to repeat a repeating pattern. Inner loop runs fully on each outer tick." },
   ],
   introNotes: `# Level 5 — Strategy & Plasma
 
 ## Bring It All Together
 You've learned a lot:
 
-- \`move_forward()\` and turns (Level 1)
+- \`forward()\` and turns (Level 1)
 - \`for\` loops to repeat counted actions (Level 2)
 - \`if / elif / else\` to make decisions (Level 3)
 - \`while\` loops to keep going until a condition changes (Level 4)
 - \`fire()\` and \`alien_in_sight()\` to handle aliens
 
-Level 5 is about **choosing the right tool for the moment**.
+Level 5 adds two more building blocks — **nested loops** (a loop inside a loop) and **\`and\` / \`or\`** (combining two conditions) — and asks you to **choose the right tool for the moment**.
 
 ## Mix and Match
 Real solutions usually combine forms. You might:
@@ -1734,8 +1735,8 @@ Real solutions usually combine forms. You might:
 Example:
 
 \`\`\`python
-move_forward()        # walk past the entrance
-move_forward()
+forward()             # walk past the entrance
+forward()
 fire()                # clear the first alien
 forward()
 
@@ -1749,6 +1750,39 @@ while not at_goal():  # then auto-pilot the rest
 \`\`\`
 
 There's almost never just **one** right structure. Match the tool to the situation.
+
+## Nesting Loops
+Sometimes the same pattern repeats several times — a corridor that needs "fire, then walk" three times in a row, for example. Put a small **loop inside another loop** and your code shrinks dramatically.
+
+\`\`\`python
+# Long version — works, but lots of repetition
+fire()
+forward()
+forward()
+turn_right()
+forward()
+fire()
+forward()
+forward()
+turn_right()
+forward()
+\`\`\`
+
+The exact same path with a nested loop:
+
+\`\`\`python
+# Two segments, each: fire + 2 forwards + a right turn + 1 step
+for segment in range(2):
+    fire()
+    for i in range(2):
+        forward()
+    turn_right()
+    forward()
+\`\`\`
+
+The **outer loop** repeats the whole pattern. The **inner loop** handles the repeated forwards inside one segment. Read it inside-out: "do 2 forwards, then the whole thing 2 times."
+
+Nesting works with any loop combo — \`for\` inside \`for\`, \`for\` inside \`while\`, even \`while\` inside \`while\`. Look for repetition in your own code and ask: "Could a loop do this?"
 
 ## ⚫ Black Holes
 Level 5 adds **black holes** — pulsing dark traps scattered through the mazes. Stepping onto one **ends the run immediately**.
@@ -1786,7 +1820,41 @@ else:
     turn_right()
 \`\`\`
 
-If you put \`has_path_forward()\` first, the robot would walk into the alien (because forward is technically open until you collide). Order = intent.`,
+If you put \`has_path_forward()\` first, the robot would walk into the alien (because forward is technically open until you collide). Order = intent.
+
+## Combining Conditions — \`and\` / \`or\`
+Sometimes one check isn't enough. Python's \`and\` and \`or\` let you combine two conditions into one:
+
+- \`a and b\` is True **only when both** a and b are True
+- \`a or b\` is True when **either** a or b (or both) are True
+
+This is the clean way to express "right AND left both open" — without nesting one if inside another:
+
+\`\`\`python
+# Nested — has the gap we hit on L5-6
+if has_path_right():
+    if has_path_left():       # if this is False, nothing runs
+        turn_left()
+        forward()
+elif has_path_forward():       # never reached when right was True
+
+# Flat with \`and\` — every branch is reachable
+if has_path_right() and has_path_left():
+    turn_left()
+    forward()
+elif has_path_forward():
+    forward()
+\`\`\`
+
+\`or\` shines when several different conditions all deserve the same action:
+
+\`\`\`python
+if alien_in_sight() or not has_path_forward():
+    # do something other than walking forward
+    ...
+\`\`\`
+
+**Rule of thumb:** if you're about to nest \`if X: if Y:\`, ask whether \`if X and Y:\` says the same thing. Usually it does — and the flat version stays inside the elif/else chain, so every branch keeps its fallback.`,
 
   challenges: [
     {
@@ -1868,14 +1936,13 @@ If you put \`has_path_forward()\` first, the robot would walk into the alien (be
       startX:0, startY:4, startDir:1, exitX:10, exitY:0,
       image: { src: "/python-maze/python_5-4.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
       blackHoles: [{ x: 11, y: 0 }, { x: 9, y: 4 }, { x: 8, y: 5 }, { x: 2, y: 2 }, { x: 2, y: 5 }],
-      starterCode: `# Five black holes. Only one of the side branches is safe — find it.
-# Count cells carefully; overshooting is just as fatal as wrong-turning.
+      starterCode: `# Think about some basic commands prior to the while statement...
 
 `,
     },
     {
       title: "Aliens Return",
-      hint: "Aliens are back — and now they share the maze with black holes. Three of one, four of the other. Combine fire() with careful turns.",
+      hint: "Nesting your loops could shorten your code here...",
       grid: [
         [1,1,1,1,1,1,1,1,1,1,1,1],
         [0,0,0,0,0,0,1,1,1,1,1,1],
@@ -1890,8 +1957,7 @@ If you put \`has_path_forward()\` first, the robot would walk into the alien (be
       image: { src: "/python-maze/python_5-5.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
       blackHoles: [{ x: 5, y: 1 }, { x: 1, y: 4 }, { x: 4, y: 5 }, { x: 11, y: 3 }],
       aliens: [{ x: 2, y: 1 }, { x: 4, y: 3 }, { x: 7, y: 4 }],
-      starterCode: `# Aliens are back — and the maze has black holes too.
-# Shoot what's blocking you, walk around what isn't.
+      starterCode: `# Nesting your loops could shorten your code here...
 
 `,
     },

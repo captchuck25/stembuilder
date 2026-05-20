@@ -165,6 +165,14 @@ export default function ClassDetailPage() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardTab, setLeaderboardTab] = useState<"overall" | string>("overall");
 
+  // Python Code Lab L5-6..L5-10 leaderboard (fewest non-blank lines)
+  interface PythonLeaderboardRow { rank: number; student_id: string; name: string; email: string; line_count: number; challenge_title: string; }
+  interface PythonLeaderboardData { overall: PythonLeaderboardRow[]; byChallenge: { ci: number; title: string; rows: PythonLeaderboardRow[] }[] }
+  const [pythonLeaderboardData, setPythonLeaderboardData] = useState<PythonLeaderboardData | null>(null);
+  const [loadingPythonLeaderboard, setLoadingPythonLeaderboard] = useState(false);
+  const [showPythonLeaderboard, setShowPythonLeaderboard] = useState(false);
+  const [pythonLeaderboardTab, setPythonLeaderboardTab] = useState<"overall" | number>("overall");
+
   // Multi-class assignment
   const [otherClasses, setOtherClasses] = useState<Class[]>([]);
   const [multiAssignModal, setMultiAssignModal] = useState<{ tool: string; levelId: number } | null>(null);
@@ -288,6 +296,13 @@ export default function ClassDetailPage() {
     const res = await fetch("/api/teacher/bridge-overall-leaderboard");
     if (res.ok) setLeaderboardData(await res.json());
     setLoadingLeaderboard(false);
+  }
+
+  async function loadPythonLeaderboard() {
+    setLoadingPythonLeaderboard(true);
+    const res = await fetch("/api/teacher/python-leaderboard");
+    if (res.ok) setPythonLeaderboardData(await res.json());
+    setLoadingPythonLeaderboard(false);
   }
 
   async function handleDeleteBridgeAssignment(id: string) {
@@ -1117,6 +1132,104 @@ export default function ClassDetailPage() {
                   "code-lab",
                   LEVELS.map(l => ({ id: l.id, title: l.title, color: l.color })),
                   `${cls.name} — Python Code Lab.csv`,
+                )}
+              </div>
+
+              {/* Python L5-6..L5-10 Leaderboard — fewest non-blank lines of code */}
+              <div style={{ ...CARD, padding: "24px 28px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showPythonLeaderboard ? 20 : 0 }}>
+                  <div>
+                    <h2 style={{ fontSize: 18, fontWeight: 900, color: "#059669", margin: 0 }}>
+                      Python Code Golf — L5 Synthesis
+                    </h2>
+                    <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                      Level 5 challenges 6–10, ranked by fewest non-blank lines of code (across all your classes).
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!showPythonLeaderboard && pythonLeaderboardData === null) loadPythonLeaderboard();
+                      setShowPythonLeaderboard(v => !v);
+                    }}
+                    style={{ padding: "9px 20px", borderRadius: 99, border: "2px solid #059669",
+                      background: showPythonLeaderboard ? "#059669" : "#fff",
+                      color: showPythonLeaderboard ? "#fff" : "#065f46",
+                      fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    {showPythonLeaderboard ? "Hide" : "Show Leaderboard"}
+                  </button>
+                </div>
+
+                {showPythonLeaderboard && (
+                  loadingPythonLeaderboard ? (
+                    <div style={{ textAlign: "center", padding: "32px 0", color: "#888", fontWeight: 600 }}>Loading…</div>
+                  ) : !pythonLeaderboardData || pythonLeaderboardData.overall.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
+                      No completed L5-6 through L5-10 submissions yet.
+                    </div>
+                  ) : (() => {
+                    const tabs: { key: "overall" | number; label: string }[] = [
+                      { key: "overall", label: "Overall" },
+                      ...pythonLeaderboardData.byChallenge.map(c => ({ key: c.ci, label: `L5-${c.ci + 1}` })),
+                    ];
+                    const activeRows = pythonLeaderboardTab === "overall"
+                      ? pythonLeaderboardData.overall
+                      : (pythonLeaderboardData.byChallenge.find(c => c.ci === pythonLeaderboardTab)?.rows ?? []);
+                    const showChallenge = pythonLeaderboardTab === "overall";
+                    return (
+                      <div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                          {tabs.map(tab => (
+                            <button key={String(tab.key)} onClick={() => setPythonLeaderboardTab(tab.key)}
+                              style={{ padding: "7px 16px", borderRadius: 99, border: "2px solid",
+                                borderColor: pythonLeaderboardTab === tab.key ? "#059669" : "#e5e7eb",
+                                background: pythonLeaderboardTab === tab.key ? "#059669" : "#fff",
+                                color: pythonLeaderboardTab === tab.key ? "#fff" : "#374151",
+                                fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                              {tab.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                            <thead>
+                              <tr>
+                                {["Rank", "Student", "Lines", ...(showChallenge ? ["Best Challenge"] : [])].map(h => (
+                                  <th key={h} style={{ padding: "8px 14px", fontWeight: 800, fontSize: 12,
+                                    color: "#555", textTransform: "uppercase", letterSpacing: "0.4px",
+                                    background: "#ecfdf5", borderBottom: "2px solid #a7f3d0",
+                                    textAlign: h === "Rank" ? "center" : "left", whiteSpace: "nowrap" }}>
+                                    {h}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {activeRows.map(row => (
+                                <tr key={row.student_id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                                  <td style={{ padding: "10px 14px", textAlign: "center", fontWeight: 800, fontSize: 15 }}>
+                                    {row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : row.rank}
+                                  </td>
+                                  <td style={{ padding: "10px 14px" }}>
+                                    <div style={{ fontWeight: 700, fontSize: 14, color: "#111" }}>{row.name}</div>
+                                    <div style={{ fontSize: 11, color: "#888" }}>{row.email}</div>
+                                  </td>
+                                  <td style={{ padding: "10px 14px", fontWeight: 800, fontSize: 14,
+                                    color: row.rank <= 3 ? "#16a34a" : "#111" }}>
+                                    {row.line_count}
+                                  </td>
+                                  {showChallenge && (
+                                    <td style={{ padding: "10px 14px", fontSize: 13, color: "#555" }}>
+                                      {row.challenge_title}
+                                    </td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             </div>
