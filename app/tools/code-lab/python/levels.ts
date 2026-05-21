@@ -2039,17 +2039,17 @@ if alien_in_sight() or not has_path_forward():
       grid: [
         [1,1,1,1,1,1,1,0,0,0,0,1],
         [0,0,1,1,1,1,1,0,1,1,0,1],
-        [1,0,0,1,1,1,1,0,1,0,0,0],
-        [1,1,0,0,1,1,1,0,0,0,1,0],
-        [1,1,1,0,0,1,1,0,0,1,1,0],
-        [1,1,1,0,0,0,0,0,1,1,1,0],
-        [1,1,1,0,1,1,1,1,1,1,1,0],
-        [1,1,1,0,1,1,1,1,0,0,0,0],
+        [1,0,0,1,1,0,1,0,1,0,0,0],
+        [1,1,0,0,1,0,1,0,0,0,1,0],
+        [1,1,1,0,1,0,1,0,0,1,1,0],
+        [1,0,0,0,0,0,0,0,1,1,1,0],
+        [1,1,1,1,1,1,1,1,1,1,1,0],
+        [1,1,1,1,1,1,1,1,0,0,0,0],
       ],
       startX:0, startY:1, startDir:1, exitX:8, exitY:7,
       image: { src: "/python-maze/python_5-9.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
-      blackHoles: [{ x: 3, y: 7 }, { x: 4, y: 4 }, { x: 8, y: 4 }],
-      aliens: [{ x: 3, y: 3 }, { x: 8, y: 3 }, { x: 9, y: 0 }, { x: 9, y: 2 }, { x: 11, y: 5 }, { x: 5, y: 5 }],
+      blackHoles: [{ x: 1, y: 5 }, { x: 5, y: 2 }, { x: 8, y: 4 }],
+      aliens: [{ x: 3, y: 3 }, { x: 5, y: 5 }, { x: 8, y: 3 }, { x: 9, y: 0 }, { x: 9, y: 2 }, { x: 11, y: 5 }],
       plasmaSupply: 4,
       starterCode: `# Some aliens are on the path. Some aren't. Spot the difference before you code.
 
@@ -2073,7 +2073,7 @@ if alien_in_sight() or not has_path_forward():
       blackHoles: [{ x: 8, y: 4 }, { x: 2, y: 0 }, { x: 1, y: 5 }],
       aliens: [{ x: 0, y: 4 }, { x: 5, y: 5 }, { x: 8, y: 2 }, { x: 1, y: 2 }, { x: 5, y: 0 }],
       plasmaPickups: [{ x: 10, y: 4 }, { x: 2, y: 1 }],
-      plasmaSupply: 3,
+      plasmaSupply: 2,
       starterCode: `# NEW: ⚡ pickups! Glowing blue cells give +1 plasma when you walk onto them.
 # More aliens than starting shots — plan a route that grabs the plasma you need.
 
