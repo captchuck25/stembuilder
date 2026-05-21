@@ -836,7 +836,7 @@ const L3: Level = {
     { cmd: "has_path_ahead()",   desc: "Returns True when the path ahead is clear (no wall)." },
     { cmd: "has_path_left()",    desc: "Returns True when the path to the left is clear." },
     { cmd: "has_path_right()",   desc: "Returns True when the path to the right is clear." },
-    { cmd: "alien_in_sight()",   desc: "Returns True when an alien is in line of sight ahead." },
+    { cmd: "alien_in_sight()",   desc: "Returns True when an alien is in the cell directly in front of the robot." },
     { cmd: "for i in range(n):", desc: "Repeat the indented block n times (review from Level 2)." },
   ],
   introNotes: `# Level 3 — If Statements
@@ -916,7 +916,7 @@ else:
     forward()
 \`\`\`
 
-\`alien_in_sight()\` returns True when an alien is anywhere in line of sight ahead. Combine it with the path sensors to build smart logic that handles every cell.`,
+\`alien_in_sight()\` only sees **one cell at a time** — it returns True when an alien is sitting in the cell directly in front of the robot. If the alien is two cells away, the robot can't see it yet; you have to walk closer before deciding what to do. (Plasma from \`fire()\` still travels the full corridor — see Level 4.) Combine the sensor with the path sensors to build smart logic that handles every cell.`,
 
   challenges: [
     {
@@ -1281,7 +1281,7 @@ const L4: Level = {
     { cmd: "not",              desc: "Flips True to False and False to True." },
     { cmd: "at_goal()",        desc: "Returns True when the robot is standing on the goal tile." },
     { cmd: "has_path_forward()", desc: "Returns True when the path directly ahead is clear." },
-    { cmd: "alien_in_sight()", desc: "Returns True if an alien is in line of sight ahead of the robot." },
+    { cmd: "alien_in_sight()", desc: "Returns True if an alien is in the cell directly ahead of the robot (one cell only)." },
     { cmd: "fire()",           desc: "Fires a plasma shot — destroys the alien in line of sight." },
   ],
   introNotes: `# Level 4 — While Loops
@@ -1341,7 +1341,11 @@ while not at_goal():
         turn_right()
 \`\`\`
 
-\`alien_in_sight()\` returns True if there's an alien anywhere in line of sight ahead. \`fire()\` shoots a plasma bolt that travels forward and destroys the first alien it hits. If there's no alien, the shot harmlessly travels to the wall.
+\`alien_in_sight()\` only reports what's in the **cell directly in front** of the robot — not the whole corridor. If an alien is two or more cells away, the sensor returns False until you step closer. This forces you to think about position, not just direction.
+
+\`fire()\`, on the other hand, is **long range** — the plasma travels forward until it hits an alien or a wall, destroying the first alien it finds. So you can shoot an alien several cells down a corridor even if your sensor can't see it yet. Useful when you've planned the layout and want to clear a path before walking into it.
+
+If there's no alien in the plasma's path, the shot harmlessly sails to the wall.
 
 ## ⚠️ Infinite Loops
 If the condition **never** becomes False, the loop runs forever. This is called an **infinite loop**.

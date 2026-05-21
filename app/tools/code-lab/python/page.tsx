@@ -226,13 +226,13 @@ function runMaze(ch: Challenge, code: string): { moves: MoveRecord[]; error: str
       });
     },
     has_alien_ahead: () => {
+      // Detection is now adjacent-only — robot can only "see" what is in the
+      // cell directly in front of it, even though fire() still travels the
+      // full corridor. Forces students to walk closer before deciding.
       const [dx,dy] = DIR_DELTA[dir];
-      let tx = x+dx, ty = y+dy;
-      while (!isWall(tx, ty)) {
-        if (cellHasAlien(tx, ty)) return true;
-        tx += dx; ty += dy;
-      }
-      return false;
+      const nx = x+dx, ny = y+dy;
+      if (isWall(nx, ny)) return false;
+      return cellHasAlien(nx, ny);
     },
     // path_* — renamed; these throw a helpful error so students update their code
     path_ahead:  () => { throw new Error("path_ahead() is not recognized. Use has_path_ahead() instead."); },
@@ -840,7 +840,7 @@ const LEVEL_CMDS = [
     { label: "has_path_ahead",  apply: "has_path_ahead()",  type: "function", detail: "True if path ahead is clear" },
     { label: "has_path_left",   apply: "has_path_left()",   type: "function", detail: "True if path left is clear" },
     { label: "has_path_right",  apply: "has_path_right()",  type: "function", detail: "True if path right is clear" },
-    { label: "alien_in_sight",  apply: "alien_in_sight()",  type: "function", detail: "True if an alien is in line of sight ahead" },
+    { label: "alien_in_sight",  apply: "alien_in_sight()",  type: "function", detail: "True if an alien is in the cell directly ahead" },
   ],
   // Level 3 — While Loops (cumulative)
   [
@@ -884,8 +884,8 @@ const LEVEL_CMDS = [
     { label: "has_path_left",     apply: "has_path_left()",     type: "function", detail: "True if path left is clear" },
     { label: "has_path_right",    apply: "has_path_right()",    type: "function", detail: "True if path right is clear" },
     { label: "has_path_forward",  apply: "has_path_forward()",  type: "function", detail: "True if path forward is clear" },
-    { label: "alien_in_sight",    apply: "alien_in_sight()",    type: "function", detail: "True if an alien is in line of sight ahead" },
-    { label: "has_alien_ahead",   apply: "has_alien_ahead()",   type: "function", detail: "(alias of alien_in_sight)" },
+    { label: "alien_in_sight",    apply: "alien_in_sight()",    type: "function", detail: "True if an alien is in the cell directly ahead" },
+    { label: "has_alien_ahead",   apply: "has_alien_ahead()",   type: "function", detail: "Alias of alien_in_sight — adjacent cell only" },
     { label: "at_goal",           apply: "at_goal()",           type: "function", detail: "True if at the goal" },
   ],
 ];
