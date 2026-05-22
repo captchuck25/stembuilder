@@ -2071,7 +2071,7 @@ if alien_in_sight() or not has_path_forward():
       startX:0, startY:7, startDir:0, exitX:0, exitY:0,
       image: { src: "/python-maze/python_5-10.png", width: 710, height: 510, cellPx: 50, originX: 55, originY: 55 },
       blackHoles: [{ x: 8, y: 4 }, { x: 2, y: 0 }, { x: 1, y: 5 }],
-      aliens: [{ x: 0, y: 4 }, { x: 5, y: 5 }, { x: 8, y: 2 }, { x: 1, y: 2 }, { x: 5, y: 0 }],
+      aliens: [{ x: 0, y: 4 }, { x: 8, y: 7 }, { x: 8, y: 2 }, { x: 1, y: 2 }, { x: 5, y: 0 }],
       plasmaPickups: [{ x: 10, y: 4 }, { x: 2, y: 1 }],
       plasmaSupply: 2,
       starterCode: `# NEW: ⚡ pickups! Glowing blue cells give +1 plasma when you walk onto them.
