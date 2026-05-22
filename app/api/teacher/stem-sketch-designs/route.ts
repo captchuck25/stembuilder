@@ -24,12 +24,12 @@ export async function GET(req: NextRequest) {
 
   const { data: enrollments } = await db
     .from('enrollments')
-    .select('user_id, profiles(id, name, email)')
+    .select('student_id, profiles(id, name, email)')
     .eq('class_id', classId)
 
   if (!enrollments?.length) return NextResponse.json([])
 
-  const studentIds = enrollments.map((e: { user_id: string }) => e.user_id)
+  const studentIds = enrollments.map((e: { student_id: string }) => e.student_id)
 
   const { data: designs } = await db
     .from('stem_sketch_designs')
@@ -37,11 +37,11 @@ export async function GET(req: NextRequest) {
     .in('user_id', studentIds)
     .order('updated_at', { ascending: false })
 
-  type EnrollmentRow = { user_id: string; profiles: { name: string; email: string }[] | { name: string; email: string } | null }
+  type EnrollmentRow = { student_id: string; profiles: { name: string; email: string }[] | { name: string; email: string } | null }
   const profileMap: Record<string, { name: string; email: string }> = {}
   for (const e of enrollments as EnrollmentRow[]) {
     const p = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles
-    profileMap[e.user_id] = p ?? { name: 'Unknown', email: '' }
+    profileMap[e.student_id] = p ?? { name: 'Unknown', email: '' }
   }
 
   type DesignRow = { id: string; user_id: string; name: string; units: string; thumbnail: string | null; updated_at: string }
