@@ -12,16 +12,14 @@ export interface PythonLeaderboardRow {
 }
 
 export interface PythonLeaderboardResponse {
-  overall: PythonLeaderboardRow[]
   byChallenge: { ci: number; title: string; rows: PythonLeaderboardRow[] }[]
 }
 
 // Python Code Lab synthesis-level leaderboard.
-// Ranks students by fewest non-blank lines of code on Level 5 challenges 6-10
-// (zero-indexed: level_idx=4, challenge_idx ∈ {5,6,7,8,9}).
-//
-// "Overall" picks each student's best (lowest-line) solution across the five
-// challenges; per-challenge tabs rank students individually within each one.
+// One independent leaderboard per Level 5 challenge 6-10 (zero-indexed:
+// level_idx=4, challenge_idx ∈ {5,6,7,8,9}), ranking students by fewest
+// non-blank lines of code. Aggregates across all the teacher's classes
+// so students can see where they stand against the teacher's other sections.
 
 const LEVEL_IDX = 4
 const CHALLENGE_INDICES = [5, 6, 7, 8, 9] as const
@@ -58,14 +56,14 @@ export async function GET() {
     .select('id')
     .eq('teacher_id', session.user.id)
   const classIds = (classes ?? []).map((c: { id: string }) => c.id)
-  if (classIds.length === 0) return NextResponse.json({ overall: [], byChallenge: [] })
+  if (classIds.length === 0) return NextResponse.json({ byChallenge: [] })
 
   const { data: enrollments } = await db
     .from('enrollments')
     .select('student_id')
     .in('class_id', classIds)
   const studentIds = [...new Set((enrollments ?? []).map((e: { student_id: string }) => e.student_id))]
-  if (studentIds.length === 0) return NextResponse.json({ overall: [], byChallenge: [] })
+  if (studentIds.length === 0) return NextResponse.json({ byChallenge: [] })
 
   const { data: rows } = await db
     .from('user_progress')
@@ -76,7 +74,7 @@ export async function GET() {
     .eq('completed', true)
     .in('user_id', studentIds)
 
-  if (!rows?.length) return NextResponse.json({ overall: [], byChallenge: [] })
+  if (!rows?.length) return NextResponse.json({ byChallenge: [] })
 
   const { data: profiles } = await db
     .from('profiles')
@@ -118,23 +116,5 @@ export async function GET() {
     })
     .filter(c => c.rows.length > 0)
 
-  // Overall: each student's single best (lowest line_count) entry across all five challenges.
-  const bestByStudent = new Map<string, Entry>()
-  for (const e of entries) {
-    const existing = bestByStudent.get(e.student_id)
-    if (!existing || e.line_count < existing.line_count) bestByStudent.set(e.student_id, e)
-  }
-
-  const overall: PythonLeaderboardRow[] = [...bestByStudent.values()]
-    .sort((a, b) => a.line_count - b.line_count)
-    .map((e, i) => ({
-      rank: i + 1,
-      student_id: e.student_id,
-      name: profileMap[e.student_id]?.name ?? 'Unknown',
-      email: profileMap[e.student_id]?.email ?? '',
-      line_count: e.line_count,
-      challenge_title: CHALLENGE_TITLES[e.challenge_idx] ?? `Challenge ${e.challenge_idx + 1}`,
-    }))
-
-  return NextResponse.json({ overall, byChallenge })
+  return NextResponse.json({ byChallenge })
 }
