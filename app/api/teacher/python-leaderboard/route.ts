@@ -62,9 +62,9 @@ export async function GET() {
 
   const { data: enrollments } = await db
     .from('enrollments')
-    .select('user_id')
+    .select('student_id')
     .in('class_id', classIds)
-  const studentIds = [...new Set((enrollments ?? []).map((e: { user_id: string }) => e.user_id))]
+  const studentIds = [...new Set((enrollments ?? []).map((e: { student_id: string }) => e.student_id))]
   if (studentIds.length === 0) return NextResponse.json({ overall: [], byChallenge: [] })
 
   const { data: rows } = await db
