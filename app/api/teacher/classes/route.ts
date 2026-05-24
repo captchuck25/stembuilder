@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { LEVELS } from '@/app/tools/code-lab/python/levels'
+import { UNITS } from '@/app/tools/block-lab/units'
+import { CHALLENGES as TURTLE_CHALLENGES } from '@/app/tools/code-lab/turtle/challenges'
 
 function generateJoinCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
+}
+
+// Default a new class to "all levels locked" for every lockable tool so students
+// can't access content until a teacher explicitly assigns or opens it.
+function buildDefaultLocks(classId: string) {
+  const turtleChallengeCount = TURTLE_CHALLENGES.filter(c => c.category === 'challenge').length
+  const rows: Array<{ class_id: string; tool: string; level_idx: number; challenge_idx: number }> = []
+  for (let i = 0; i < LEVELS.length; i++) rows.push({ class_id: classId, tool: 'code-lab', level_idx: i, challenge_idx: -1 })
+  for (let i = 0; i < UNITS.length; i++) rows.push({ class_id: classId, tool: 'block-lab', level_idx: i, challenge_idx: -1 })
+  for (let i = 0; i < turtleChallengeCount; i++) rows.push({ class_id: classId, tool: 'turtle', level_idx: i, challenge_idx: -1 })
+  return rows
 }
 
 export async function GET() {
@@ -47,5 +61,14 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Insert default locks for every level in every lockable tool. Failures here are
+  // non-fatal — the teacher can re-lock manually — so we don't roll back the class.
+  const lockRows = buildDefaultLocks(data.id)
+  if (lockRows.length > 0) {
+    const { error: lockError } = await db.from('lesson_locks').insert(lockRows)
+    if (lockError) console.error('Failed to seed default locks for new class', data.id, lockError)
+  }
+
   return NextResponse.json(data)
 }

@@ -496,6 +496,172 @@ export default function ClassDetailPage() {
     }
   }
 
+  // Set a single level to one of the three states. Used by the per-level controls.
+  // - lock:   no assignment, lesson_locks(challenge_idx=-1) exists
+  // - assign: assignment exists, no lesson_locks row for this level
+  // - open:   no assignment, no lesson_locks for this level (students can access but it's not on their assignment list)
+  async function setLevelState(tool: string, levelIdx: number, target: "lock" | "assign" | "open") {
+    if (!cls || saving) return;
+    setLockError(null);
+    setSaving(true);
+    try {
+      const existingAssignment = assignments.find(a => a.tool === tool && a.level_id === levelIdx);
+      const existingLevelLock = locks.find(l => l.tool === tool && l.level_idx === levelIdx && l.challenge_idx === -1);
+      const perChallengeLocks = locks.filter(l => l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1);
+
+      if (target === "lock") {
+        if (existingAssignment) {
+          await fetch(`/api/teacher/assignments?id=${existingAssignment.id}`, { method: "DELETE" });
+          setAssignments(prev => prev.filter(a => a.id !== existingAssignment.id));
+        }
+        if (perChallengeLocks.length > 0) {
+          await Promise.all(perChallengeLocks.map(l => fetch(`/api/teacher/locks?id=${l.id}`, { method: "DELETE" })));
+          setLocks(prev => prev.filter(l => !(l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1)));
+        }
+        if (!existingLevelLock) {
+          const res = await fetch("/api/teacher/locks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classId: cls.id, tool, levelIdx, challengeIdx: -1 }),
+          });
+          if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? res.statusText); }
+          const data = await res.json();
+          setLocks(prev => [...prev, data]);
+        }
+      } else if (target === "assign") {
+        if (existingLevelLock) {
+          await fetch(`/api/teacher/locks?id=${existingLevelLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLevelLock.id));
+        }
+        if (!existingAssignment) {
+          const res = await fetch("/api/teacher/assignments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classId: cls.id, tool, levelId: levelIdx }),
+          });
+          if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? res.statusText); }
+          const data = await res.json();
+          setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
+        }
+      } else {
+        // open
+        if (existingAssignment) {
+          await fetch(`/api/teacher/assignments?id=${existingAssignment.id}`, { method: "DELETE" });
+          setAssignments(prev => prev.filter(a => a.id !== existingAssignment.id));
+        }
+        if (existingLevelLock) {
+          await fetch(`/api/teacher/locks?id=${existingLevelLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLevelLock.id));
+        }
+        if (perChallengeLocks.length > 0) {
+          await Promise.all(perChallengeLocks.map(l => fetch(`/api/teacher/locks?id=${l.id}`, { method: "DELETE" })));
+          setLocks(prev => prev.filter(l => !(l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1)));
+        }
+      }
+      fetchedRef.current.delete(tool);
+      setGrades(prev => { const n = { ...prev }; delete n[tool]; return n; });
+    } catch (err) {
+      setLockError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Set every level in a tool to the same state (Lock All / Assign All / Open All).
+  async function setAllLevelsState(tool: string, target: "lock" | "assign" | "open") {
+    if (!cls || saving) return;
+    const allIdxs = tool === "code-lab"
+      ? LEVELS.map((_, i) => i)
+      : tool === "block-lab"
+      ? UNITS.map((_, i) => i)
+      : tool === "turtle"
+      ? Array.from({ length: TURTLE_CHALLENGES.filter(c => c.category === "challenge").length }, (_, i) => i)
+      : [];
+    if (!allIdxs.length) return;
+    setLockError(null);
+    setSaving(true);
+    try {
+      for (const idx of allIdxs) {
+        const existingAssignment = assignments.find(a => a.tool === tool && a.level_id === idx);
+        const existingLevelLock = locks.find(l => l.tool === tool && l.level_idx === idx && l.challenge_idx === -1);
+        const matchesTarget =
+          target === "lock"   ? !existingAssignment && !!existingLevelLock :
+          target === "assign" ? !!existingAssignment :
+                                !existingAssignment && !existingLevelLock;
+        if (matchesTarget) continue;
+        // Reuse single-level setter (sequential to keep state consistent)
+        await setLevelStateInternal(tool, idx, target);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Internal version of setLevelState that doesn't toggle the global saving flag —
+  // used by setAllLevelsState which manages saving itself across the batch.
+  async function setLevelStateInternal(tool: string, levelIdx: number, target: "lock" | "assign" | "open") {
+    if (!cls) return;
+    const existingAssignment = assignments.find(a => a.tool === tool && a.level_id === levelIdx);
+    const existingLevelLock = locks.find(l => l.tool === tool && l.level_idx === levelIdx && l.challenge_idx === -1);
+    const perChallengeLocks = locks.filter(l => l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1);
+    try {
+      if (target === "lock") {
+        if (existingAssignment) {
+          await fetch(`/api/teacher/assignments?id=${existingAssignment.id}`, { method: "DELETE" });
+          setAssignments(prev => prev.filter(a => a.id !== existingAssignment.id));
+        }
+        if (perChallengeLocks.length > 0) {
+          await Promise.all(perChallengeLocks.map(l => fetch(`/api/teacher/locks?id=${l.id}`, { method: "DELETE" })));
+          setLocks(prev => prev.filter(l => !(l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1)));
+        }
+        if (!existingLevelLock) {
+          const res = await fetch("/api/teacher/locks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classId: cls.id, tool, levelIdx, challengeIdx: -1 }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setLocks(prev => [...prev, data]);
+          }
+        }
+      } else if (target === "assign") {
+        if (existingLevelLock) {
+          await fetch(`/api/teacher/locks?id=${existingLevelLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLevelLock.id));
+        }
+        if (!existingAssignment) {
+          const res = await fetch("/api/teacher/assignments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classId: cls.id, tool, levelId: levelIdx }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
+          }
+        }
+      } else {
+        if (existingAssignment) {
+          await fetch(`/api/teacher/assignments?id=${existingAssignment.id}`, { method: "DELETE" });
+          setAssignments(prev => prev.filter(a => a.id !== existingAssignment.id));
+        }
+        if (existingLevelLock) {
+          await fetch(`/api/teacher/locks?id=${existingLevelLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLevelLock.id));
+        }
+        if (perChallengeLocks.length > 0) {
+          await Promise.all(perChallengeLocks.map(l => fetch(`/api/teacher/locks?id=${l.id}`, { method: "DELETE" })));
+          setLocks(prev => prev.filter(l => !(l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1)));
+        }
+      }
+    } catch (err) {
+      setLockError(err instanceof Error ? err.message : "Update failed");
+    }
+    fetchedRef.current.delete(tool);
+    setGrades(prev => { const n = { ...prev }; delete n[tool]; return n; });
+  }
+
   async function lockAllTool(tool: string) {
     if (!cls || saving) return;
 
@@ -857,6 +1023,46 @@ export default function ClassDetailPage() {
     );
   }
 
+  function renderSetAllControls(tool: "code-lab" | "block-lab" | "turtle") {
+    const allBtn = (
+      target: "lock" | "assign" | "open",
+      icon: string,
+      text: string,
+      activeBg: string,
+      activeBorder: string,
+      activeColor: string,
+    ) => (
+      <button
+        key={target}
+        onClick={() => setAllLevelsState(tool, target)}
+        disabled={saving}
+        title={
+          target === "lock"   ? "Lock every level — students cannot access any" :
+          target === "assign" ? "Assign every level to students" :
+                                "Open every level — students can access but not assigned"
+        }
+        style={{
+          padding: "7px 14px", borderRadius: 999,
+          border: `2px solid ${activeBorder}`,
+          background: activeBg,
+          color: activeColor,
+          fontWeight: 800, fontSize: 12,
+          cursor: saving ? "not-allowed" : "pointer",
+          opacity: saving ? 0.5 : 1, transition: "all 120ms",
+          display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+        }}>
+        <span>{icon}</span> {text}
+      </button>
+    );
+    return (
+      <div style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+        {allBtn("lock",   "🔒", "Lock All",   "#fef2f2", "#dc2626", "#991b1b")}
+        {allBtn("assign", "✓",  "Assign All", "#f0fdf4", "#16a34a", "#166534")}
+        {allBtn("open",   "👁", "Open All",   "#f0f9ff", "#0284c7", "#075985")}
+      </div>
+    );
+  }
+
   function renderAssignChips(
     tool: "code-lab" | "block-lab",
     items: Array<{ id: number; title: string; color: string }>,
@@ -864,39 +1070,67 @@ export default function ClassDetailPage() {
   ) {
     const label = tool === "code-lab" ? "Level" : "Unit";
     return (
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {items.map((item, idx) => {
           const assigned = assignedSet.has(idx);
           const isLevelLocked = locks.some(l => l.tool === tool && l.level_idx === idx && l.challenge_idx === -1);
-          const borderColor = isLevelLocked ? "#16a34a" : assigned ? item.color : "#d1d5db";
-          const bg = isLevelLocked ? "#dcfce7" : assigned ? `${item.color}18` : "#f9fafb";
-          const color = isLevelLocked ? "#166534" : assigned ? item.color : "#6b7280";
+          const state: "lock" | "assign" | "open" = assigned ? "assign" : isLevelLocked ? "lock" : "open";
+
+          const rowBg = state === "assign" ? `${item.color}14` : state === "lock" ? "#fef2f2" : "#f0f9ff";
+          const rowBorder = state === "assign" ? item.color : state === "lock" ? "#fca5a5" : "#7dd3fc";
+          const labelColor = state === "assign" ? item.color : state === "lock" ? "#991b1b" : "#075985";
+          const stateIcon = state === "lock" ? "🔒" : state === "assign" ? "✓" : "👁";
+
+          const stateButton = (
+            value: "lock" | "assign" | "open",
+            icon: string,
+            text: string,
+            activeBg: string,
+            activeBorder: string,
+            activeColor: string,
+          ) => {
+            const isActive = state === value;
+            return (
+              <button
+                key={value}
+                onClick={() => { if (!isActive) setLevelState(tool, idx, value); }}
+                disabled={saving || isActive}
+                title={
+                  value === "lock"   ? "Students cannot access" :
+                  value === "assign" ? "Students see this on their assignment list" :
+                                       "Students can access but it's not assigned"
+                }
+                style={{
+                  padding: "6px 12px", borderRadius: 8,
+                  border: `2px solid ${isActive ? activeBorder : "#e5e7eb"}`,
+                  background: isActive ? activeBg : "#fff",
+                  color: isActive ? activeColor : "#6b7280",
+                  fontWeight: 800, fontSize: 12,
+                  cursor: (saving || isActive) ? "default" : "pointer",
+                  opacity: saving && !isActive ? 0.5 : 1,
+                  transition: "all 120ms",
+                  display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+                }}>
+                <span>{icon}</span> {text}
+              </button>
+            );
+          };
+
           return (
-            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <button
-                onClick={() => { if (assigned && isLevelLocked) toggleLevelLock(tool, idx); else toggleLevel(tool, idx); }}
-                disabled={saving}
-                title={isLevelLocked ? "Unlock for students" : assigned ? "Click to unassign" : "Click to assign"}
-                style={{ padding: "8px 16px", borderRadius: 99, border: `2px solid ${borderColor}`,
-                  background: bg, color, fontWeight: 800, fontSize: 13,
-                  cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6,
-                  opacity: saving ? 0.6 : 1, transition: "all 120ms" }}>
-                <span>{isLevelLocked ? "🔒" : assigned ? "✓" : "+"}</span>
+            <div key={idx} style={{
+              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+              padding: "8px 14px", borderRadius: 10,
+              border: `2px solid ${rowBorder}`, background: rowBg,
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: labelColor, flex: "1 1 240px", minWidth: 0 }}>
+                <span style={{ marginRight: 6 }}>{stateIcon}</span>
                 {label} {item.id} — {item.title}
-              </button>
-              <button
-                onClick={() => toggleLevelLock(tool, idx)}
-                disabled={saving}
-                title={isLevelLocked ? `Unlock ${label} ${item.id} for students` : `Lock ${label} ${item.id} — students cannot access`}
-                aria-label={isLevelLocked ? `Unlock ${label} ${item.id}` : `Lock ${label} ${item.id}`}
-                style={{ padding: "6px 10px", borderRadius: 99,
-                  border: `2px solid ${isLevelLocked ? "#16a34a" : "#d1d5db"}`,
-                  background: isLevelLocked ? "#dcfce7" : "#fff",
-                  fontSize: 14, lineHeight: 1,
-                  cursor: saving ? "not-allowed" : "pointer",
-                  opacity: saving ? 0.6 : 1, transition: "all 120ms" }}>
-                {isLevelLocked ? "🔓" : "🔒"}
-              </button>
+              </div>
+              <div style={{ display: "inline-flex", gap: 4 }}>
+                {stateButton("lock",   "🔒", "Lock",   "#fee2e2", "#dc2626", "#991b1b")}
+                {stateButton("assign", "✓",  "Assign", `${item.color}30`, item.color, item.color)}
+                {stateButton("open",   "👁", "Open",   "#e0f2fe", "#0284c7", "#075985")}
+              </div>
             </div>
           );
         })}
@@ -1064,12 +1298,6 @@ export default function ClassDetailPage() {
               { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
             ] as const).map(tool => {
               const active = selectedTool === tool.id;
-              const hasLockControl = tool.id === "code-lab" || tool.id === "block-lab" || tool.id === "turtle";
-              const turtleChallengeCount = TURTLE_CHALLENGES.filter(c => c.category === "challenge").length;
-              const toolAllIdxs = tool.id === "code-lab" ? LEVELS.map((_, i) => i) : tool.id === "block-lab" ? UNITS.map((_, i) => i) : tool.id === "turtle" ? Array.from({ length: turtleChallengeCount }, (_, i) => i) : [];
-              const allToolLocked = hasLockControl && toolAllIdxs.length > 0 && toolAllIdxs.every(idx =>
-                locks.some(l => l.tool === tool.id && l.level_idx === idx && l.challenge_idx === -1),
-              );
               return (
                 <div key={tool.id} onClick={() => setSelectedTool(tool.id)}
                   style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 22px",
@@ -1082,18 +1310,7 @@ export default function ClassDetailPage() {
                     <div style={{ fontSize: 15, fontWeight: 800, color: active ? tool.color : "#444" }}>{tool.label}</div>
                     <div style={{ fontSize: 12, color: "#666" }}>{tool.desc}</div>
                   </div>
-                  {!hasLockControl && active && <div style={{ width: 8, height: 8, borderRadius: 999, background: tool.color, marginLeft: 4 }} />}
-                  {hasLockControl && (
-                    <div onClick={e => { e.stopPropagation(); lockAllTool(tool.id); }}
-                      style={{ marginLeft: 4, padding: "5px 11px", borderRadius: 8,
-                        border: `2px solid ${allToolLocked ? "#16a34a" : "#dc2626"}`,
-                        background: allToolLocked ? "#dcfce7" : "#fee2e2",
-                        color: allToolLocked ? "#166534" : "#dc2626",
-                        fontWeight: 800, fontSize: 10, cursor: saving ? "not-allowed" : "pointer",
-                        lineHeight: 1.3, textAlign: "center", whiteSpace: "nowrap" }}>
-                      {allToolLocked ? "🔓 Unlock All" : "🔒 Lock All"}
-                    </div>
-                  )}
+                  {active && <div style={{ width: 8, height: 8, borderRadius: 999, background: tool.color, marginLeft: 4 }} />}
                 </div>
               );
             })}
@@ -1115,13 +1332,14 @@ export default function ClassDetailPage() {
           {selectedTool === "code-lab" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               <div style={{ ...CARD, padding: "20px 24px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
                   <div>
                     <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: 0 }}>Assign Levels</h2>
                     <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
-                      Click chip to assign · Click <strong>🔒</strong> next to a level to lock it · Use <strong>🔒 Lock All</strong> on the tab for every level
+                      Each level has three states · <strong style={{ color: "#991b1b" }}>🔒 Lock</strong> (no access) · <strong style={{ color: "#166534" }}>✓ Assign</strong> (on assignment list) · <strong style={{ color: "#075985" }}>👁 Open</strong> (accessible, not assigned)
                     </p>
                   </div>
+                  {renderSetAllControls("code-lab")}
                 </div>
                 {renderAssignChips("code-lab", LEVELS.map(l => ({ id: l.id, title: l.title, color: l.color })), assignedCodeLab)}
               </div>
@@ -1232,13 +1450,14 @@ export default function ClassDetailPage() {
           {selectedTool === "block-lab" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
               <div style={{ ...CARD, padding: "20px 24px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
                   <div>
                     <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: 0 }}>Assign Units</h2>
                     <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
-                      Click chip to assign · Click <strong>🔒</strong> next to a unit to lock it · Use <strong>🔒 Lock All</strong> on the tab for every unit
+                      Each unit has three states · <strong style={{ color: "#991b1b" }}>🔒 Lock</strong> (no access) · <strong style={{ color: "#166534" }}>✓ Assign</strong> (on assignment list) · <strong style={{ color: "#075985" }}>👁 Open</strong> (accessible, not assigned)
                     </p>
                   </div>
+                  {renderSetAllControls("block-lab")}
                 </div>
                 {renderAssignChips("block-lab", UNITS.map(u => ({ id: u.id, title: u.title, color: u.color })), assignedBlockLab)}
               </div>
@@ -1316,14 +1535,17 @@ export default function ClassDetailPage() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
                   marginBottom: 6, flexWrap: "wrap", gap: 12 }}>
                   <h2 style={{ fontSize: 18, fontWeight: 900, color: "#059669" }}>Python Turtle</h2>
-                  <button onClick={exportTurtleCSV}
-                    style={{ padding: "8px 18px", borderRadius: 10, border: "2px solid #059669",
-                      background: "#ecfdf5", color: "#059669", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
-                    ↓ Export CSV
-                  </button>
+                  <div style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    {renderSetAllControls("turtle")}
+                    <button onClick={exportTurtleCSV}
+                      style={{ padding: "8px 18px", borderRadius: 10, border: "2px solid #059669",
+                        background: "#ecfdf5", color: "#059669", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                      ↓ Export CSV
+                    </button>
+                  </div>
                 </div>
                 <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                  Click a chip to assign a tutorial or creative challenge to this class. Assigned items appear in the gradebook below.
+                  Click a chip to assign a tutorial or creative challenge. Use the buttons above to bulk-lock or open everything.
                 </p>
 
                 {/* Assignment chips */}
