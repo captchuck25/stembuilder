@@ -379,6 +379,22 @@ export default function ClassDetailPage() {
     }
   }
 
+  // Refetch the gradebook for a tool — used after a level state change so the
+  // Student Progress section doesn't blank out until the user refreshes.
+  async function refetchGrades(tool: string) {
+    if (tool !== "code-lab" && tool !== "block-lab") return;
+    fetchedRef.current.delete(tool);
+    fetchedRef.current.add(tool);
+    setLoadingGrades(true);
+    try {
+      const res = await fetch(`/api/teacher/classes/${classId}/progress?tool=${tool}`);
+      const data = res.ok ? await res.json() : null;
+      setGrades(prev => ({ ...prev, [tool]: data }));
+    } finally {
+      setLoadingGrades(false);
+    }
+  }
+
   async function handleRemoveStudent(studentId: string) {
     setRemovingStudentId(studentId);
     const res = await fetch(`/api/teacher/classes/${classId}?studentId=${studentId}`, { method: "DELETE" });
@@ -558,8 +574,7 @@ export default function ClassDetailPage() {
           setLocks(prev => prev.filter(l => !(l.tool === tool && l.level_idx === levelIdx && l.challenge_idx !== -1)));
         }
       }
-      fetchedRef.current.delete(tool);
-      setGrades(prev => { const n = { ...prev }; delete n[tool]; return n; });
+      void refetchGrades(tool);
     } catch (err) {
       setLockError(err instanceof Error ? err.message : "Update failed");
     } finally {
@@ -594,6 +609,8 @@ export default function ClassDetailPage() {
       }
     } finally {
       setSaving(false);
+      // Single grade refetch after the whole batch
+      void refetchGrades(tool);
     }
   }
 
@@ -658,8 +675,7 @@ export default function ClassDetailPage() {
     } catch (err) {
       setLockError(err instanceof Error ? err.message : "Update failed");
     }
-    fetchedRef.current.delete(tool);
-    setGrades(prev => { const n = { ...prev }; delete n[tool]; return n; });
+    // Grade refetch is performed once at the end of the batch in setAllLevelsState
   }
 
   async function lockAllTool(tool: string) {
