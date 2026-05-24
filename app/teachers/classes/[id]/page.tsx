@@ -75,7 +75,11 @@ interface GradebookStudent {
 
 interface GradebookData {
   students: GradebookStudent[];
+  // Every level we render a column for — includes both currently-assigned levels and
+  // historic levels (locked/unassigned but students completed work while they were assigned).
   assignedLevelIds: number[];
+  // Only the levels currently in the assignments table — used to mark history columns.
+  currentlyAssignedLevelIds?: number[];
 }
 
 function lastNameKey(name: string): string {
@@ -323,6 +327,64 @@ export default function ClassDetailPage() {
     const res = await fetch(`/api/teacher/bridge-submissions?assignmentId=${id}`);
     if (res.ok) { const data = await res.json(); setBridgeLeaderboards(prev => ({ ...prev, [id]: data })); }
     setLoadingLeaderboardId(null);
+  }
+
+  // Three-state setter for a single turtle item (tutorial or challenge).
+  // - lock:   no turtle_assignments row, lesson_locks(challenge_idx=-1) row exists
+  // - assign: turtle_assignments row exists, no lesson_locks row
+  // - open:   neither row exists
+  async function setTurtleItemState(challengeId: string, levelIdx: number, target: "lock" | "assign" | "open") {
+    if (!cls || turtleAssignSaving) return;
+    setTurtleAssignSaving(challengeId);
+    setLockError(null);
+    try {
+      const isAssigned = turtleAssigned.has(challengeId);
+      const existingLock = locks.find(l => l.tool === "turtle" && l.level_idx === levelIdx && l.challenge_idx === -1);
+
+      if (target === "lock") {
+        if (isAssigned) {
+          await unassignTurtleChallenge(classId, challengeId);
+          setTurtleAssigned(prev => { const n = new Set(prev); n.delete(challengeId); return n; });
+        }
+        if (!existingLock) {
+          const res = await fetch("/api/teacher/locks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classId: cls.id, tool: "turtle", levelIdx, challengeIdx: -1 }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setLocks(prev => [...prev, data]);
+          } else {
+            const e = await res.json();
+            throw new Error(e.error ?? res.statusText);
+          }
+        }
+      } else if (target === "assign") {
+        if (existingLock) {
+          await fetch(`/api/teacher/locks?id=${existingLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLock.id));
+        }
+        if (!isAssigned) {
+          const ok = await assignTurtleChallenge(classId, challengeId);
+          if (ok) setTurtleAssigned(prev => { const n = new Set(prev); n.add(challengeId); return n; });
+        }
+      } else {
+        // open
+        if (isAssigned) {
+          await unassignTurtleChallenge(classId, challengeId);
+          setTurtleAssigned(prev => { const n = new Set(prev); n.delete(challengeId); return n; });
+        }
+        if (existingLock) {
+          await fetch(`/api/teacher/locks?id=${existingLock.id}`, { method: "DELETE" });
+          setLocks(prev => prev.filter(l => l.id !== existingLock.id));
+        }
+      }
+    } catch (err) {
+      setLockError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setTurtleAssignSaving(null);
+    }
   }
 
   async function toggleTurtleAssignment(challengeId: string) {
@@ -585,12 +647,34 @@ export default function ClassDetailPage() {
   // Set every level in a tool to the same state (Lock All / Assign All / Open All).
   async function setAllLevelsState(tool: string, target: "lock" | "assign" | "open") {
     if (!cls || saving) return;
+
+    // Turtle uses its own data model (turtle_assignments by string id) so route through
+    // setTurtleItemState for every CHALLENGES entry, indexed by position in the full array.
+    if (tool === "turtle") {
+      setLockError(null);
+      setSaving(true);
+      try {
+        for (let idx = 0; idx < TURTLE_CHALLENGES.length; idx++) {
+          const ch = TURTLE_CHALLENGES[idx];
+          const isAssigned = turtleAssigned.has(ch.id);
+          const existingLock = locks.find(l => l.tool === "turtle" && l.level_idx === idx && l.challenge_idx === -1);
+          const matchesTarget =
+            target === "lock"   ? !isAssigned && !!existingLock :
+            target === "assign" ? isAssigned :
+                                  !isAssigned && !existingLock;
+          if (matchesTarget) continue;
+          await setTurtleItemState(ch.id, idx, target);
+        }
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const allIdxs = tool === "code-lab"
       ? LEVELS.map((_, i) => i)
       : tool === "block-lab"
       ? UNITS.map((_, i) => i)
-      : tool === "turtle"
-      ? Array.from({ length: TURTLE_CHALLENGES.filter(c => c.category === "challenge").length }, (_, i) => i)
       : [];
     if (!allIdxs.length) return;
     setLockError(null);
@@ -782,12 +866,19 @@ export default function ClassDetailPage() {
       downloadCSV(rows, csvFilename);
     }
 
+    const currentlyAssignedSet = new Set(data.currentlyAssignedLevelIds ?? assignedLevelIds);
+    const historicCount = assignedLevelIds.filter(li => !currentlyAssignedSet.has(li)).length;
     return (
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
           <div>
             <div style={{ fontSize: 14, color: "#555" }}>
-              {gbStudents.length} student{gbStudents.length !== 1 ? "s" : ""} · {assignedLevelIds.length} level{assignedLevelIds.length !== 1 ? "s" : ""} assigned
+              {gbStudents.length} student{gbStudents.length !== 1 ? "s" : ""} · {currentlyAssignedSet.size} assigned
+              {historicCount > 0 && (
+                <span style={{ marginLeft: 6, color: "#92400e", fontStyle: "italic" }}>
+                  · {historicCount} past-due / locked still shown
+                </span>
+              )}
             </div>
           </div>
           <button onClick={exportCSV}
@@ -804,10 +895,14 @@ export default function ClassDetailPage() {
                 {assignedLevelIds.map(li => {
                   const meta = levelMeta[li];
                   if (!meta) return null;
+                  const isHistoric = !currentlyAssignedSet.has(li);
                   return (
                     <th key={li} colSpan={2}
                       style={{ ...TH, borderLeft: `4px solid ${meta.color}`, textAlign: "center", paddingLeft: 16, background: `${meta.color}08` }}>
-                      <div style={{ color: meta.color, fontWeight: 900 }}>{meta.title}</div>
+                      <div style={{ color: meta.color, fontWeight: 900 }}>
+                        {isHistoric && <span title="No longer assigned — historic data still visible" style={{ marginRight: 4 }}>🔒</span>}
+                        {meta.title}
+                      </div>
                     </th>
                   );
                 })}
@@ -1521,22 +1616,70 @@ export default function ClassDetailPage() {
             }
 
             const ChipRow = ({ items, color }: { items: typeof tutorials; color: string }) => (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {items.map(ch => {
+                  // Index within the full TURTLE_CHALLENGES array — what lesson_locks uses
+                  const levelIdx = TURTLE_CHALLENGES.findIndex(c => c.id === ch.id);
                   const isAssigned = turtleAssigned.has(ch.id);
+                  const isLocked = locks.some(l => l.tool === "turtle" && l.level_idx === levelIdx && l.challenge_idx === -1);
+                  const state: "lock" | "assign" | "open" = isAssigned ? "assign" : isLocked ? "lock" : "open";
                   const isSaving = turtleAssignSaving === ch.id;
+
+                  const rowBg = state === "assign" ? `${color}14` : state === "lock" ? "#fef2f2" : "#f0f9ff";
+                  const rowBorder = state === "assign" ? color : state === "lock" ? "#fca5a5" : "#7dd3fc";
+                  const labelColor = state === "assign" ? color : state === "lock" ? "#991b1b" : "#075985";
+                  const stateIcon = state === "lock" ? "🔒" : state === "assign" ? "✓" : "👁";
+
+                  const stateButton = (
+                    value: "lock" | "assign" | "open",
+                    icon: string,
+                    text: string,
+                    activeBg: string,
+                    activeBorder: string,
+                    activeColor: string,
+                  ) => {
+                    const isActive = state === value;
+                    return (
+                      <button
+                        key={value}
+                        onClick={() => { if (!isActive) setTurtleItemState(ch.id, levelIdx, value); }}
+                        disabled={isSaving || isActive}
+                        title={
+                          value === "lock"   ? "Students cannot access" :
+                          value === "assign" ? "Students see this on their assignment list" :
+                                               "Students can access but it's not assigned"
+                        }
+                        style={{
+                          padding: "5px 10px", borderRadius: 8,
+                          border: `2px solid ${isActive ? activeBorder : "#e5e7eb"}`,
+                          background: isActive ? activeBg : "#fff",
+                          color: isActive ? activeColor : "#6b7280",
+                          fontWeight: 800, fontSize: 11,
+                          cursor: (isSaving || isActive) ? "default" : "pointer",
+                          opacity: isSaving && !isActive ? 0.5 : 1,
+                          transition: "all 120ms",
+                          display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+                        }}>
+                        <span>{icon}</span> {text}
+                      </button>
+                    );
+                  };
+
                   return (
-                    <button key={ch.id} onClick={() => toggleTurtleAssignment(ch.id)} disabled={isSaving}
-                      style={{
-                        padding: "6px 12px", borderRadius: 999,
-                        border: `2px solid ${isAssigned ? color : "#e5e7eb"}`,
-                        background: isAssigned ? color : "#fff",
-                        color: isAssigned ? "#fff" : "#374151",
-                        fontWeight: 700, fontSize: 12, cursor: isSaving ? "wait" : "pointer",
-                        opacity: isSaving ? 0.6 : 1, whiteSpace: "nowrap",
-                      }}>
-                      {isAssigned ? "✓ " : "+ "}{ch.title}
-                    </button>
+                    <div key={ch.id} style={{
+                      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                      padding: "7px 12px", borderRadius: 10,
+                      border: `2px solid ${rowBorder}`, background: rowBg,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: labelColor, flex: "1 1 220px", minWidth: 0 }}>
+                        <span style={{ marginRight: 6 }}>{stateIcon}</span>{ch.title}
+                      </div>
+                      <div style={{ display: "inline-flex", gap: 4 }}>
+                        {stateButton("lock",   "🔒", "Lock",   "#fee2e2", "#dc2626", "#991b1b")}
+                        {stateButton("assign", "✓",  "Assign", `${color}30`, color, color)}
+                        {stateButton("open",   "👁", "Open",   "#e0f2fe", "#0284c7", "#075985")}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

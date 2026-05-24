@@ -42,7 +42,7 @@ export async function GET(
       .in('user_id', studentIds),
   ]);
 
-  const assignedLevelIds = (assignData ?? []).map((a: { level_id: number }) => a.level_id);
+  const assignedLevelIds: number[] = (assignData ?? []).map((a: { level_id: number }) => a.level_id);
 
   function getLevelInfo(li: number): { challengesTotal: number; quizTotal: number } {
     if (tool === 'code-lab') {
@@ -56,21 +56,28 @@ export async function GET(
 
   // Build per-student per-level progress map from a single bulk query
   const progMap: Record<string, Record<number, { done: number; quizScore: number | null }>> = {};
+  const activeLevelSet = new Set<number>();
   for (const row of (allProgress ?? [])) {
     if (!progMap[row.user_id]) progMap[row.user_id] = {};
     const li = row.level_idx;
     if (!progMap[row.user_id][li]) progMap[row.user_id][li] = { done: 0, quizScore: null };
     if (row.challenge_idx !== null && row.challenge_idx >= 0 && row.completed) {
       progMap[row.user_id][li].done++;
+      activeLevelSet.add(li);
     }
     if ((row.challenge_idx === null || row.challenge_idx < 0) && row.quiz_score !== null) {
       progMap[row.user_id][li].quizScore = row.quiz_score;
+      activeLevelSet.add(li);
     }
   }
 
+  // Visible columns = currently-assigned levels OR levels with any student activity.
+  // This way, a teacher who locks a level after a deadline still sees who completed it.
+  const visibleLevelIds = Array.from(new Set([...assignedLevelIds, ...activeLevelSet])).sort((a, b) => a - b);
+
   const students = (profiles ?? []).map((p: { id: string; name: string; email: string }) => {
     const levels: Record<number, { challengesDone: number; challengesTotal: number; quizScore: number | null; quizTotal: number }> = {};
-    for (const li of assignedLevelIds) {
+    for (const li of visibleLevelIds) {
       const { challengesTotal, quizTotal } = getLevelInfo(li);
       const prog = progMap[p.id]?.[li];
       levels[li] = { challengesDone: prog?.done ?? 0, challengesTotal, quizScore: prog?.quizScore ?? null, quizTotal };
@@ -78,5 +85,8 @@ export async function GET(
     return { id: p.id, name: p.name, email: p.email, levels };
   });
 
-  return NextResponse.json({ students, assignedLevelIds });
+  // Keep `assignedLevelIds` as the legacy field the client expects so existing UI keeps working.
+  // Levels that appear in students[].levels but NOT in assignedLevelIds are "history columns":
+  // students completed them while assigned, but the level has since been locked/opened.
+  return NextResponse.json({ students, assignedLevelIds: visibleLevelIds, currentlyAssignedLevelIds: assignedLevelIds });
 }

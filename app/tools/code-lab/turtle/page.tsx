@@ -514,6 +514,9 @@ export default function TurtlePage() {
   const [isSaved,       setIsSaved]       = useState(false);
   const [isSubmitted,   setIsSubmitted]   = useState(false);
   const [isEnrolled,    setIsEnrolled]    = useState(false);
+  // Set of level_idx values (positions in the CHALLENGES array) that the teacher
+  // has locked in any of this student's enrolled classes.
+  const [lockedLevelIdxs, setLockedLevelIdxs] = useState<Set<number>>(new Set());
 
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const bgRef      = useRef<HTMLCanvasElement | null>(null);
@@ -539,6 +542,22 @@ export default function TurtlePage() {
     fetch("/api/enrollments/check")
       .then(r => r.json())
       .then(d => setIsEnrolled(d.enrolled ?? false));
+  }, [userId]);
+
+  // Pull teacher-set locks for turtle so we can hide challenges the student isn't allowed to access.
+  // level_idx in lesson_locks corresponds to the position in the full CHALLENGES array.
+  useEffect(() => {
+    if (!session?.user) return;
+    fetch("/api/student/locks?tool=turtle")
+      .then(r => r.json())
+      .then((rows: Array<{ level_idx: number; challenge_idx: number }>) => {
+        const set = new Set<number>();
+        for (const r of rows) {
+          if (r.challenge_idx === -1) set.add(r.level_idx);
+        }
+        setLockedLevelIdxs(set);
+      })
+      .catch(() => {});
   }, [userId]);
 
   // Warn browser on tab close / external navigation when code is dirty
@@ -753,8 +772,14 @@ export default function TurtlePage() {
     if (e.key==="Enter"&&(e.ctrlKey||e.metaKey)) { e.preventDefault(); runCode(); }
   }
 
-  const tutorials       = CHALLENGES.filter(c => c.category === "tutorial");
-  const challenges      = CHALLENGES.filter(c => c.category === "challenge");
+  // Hide tutorials/challenges that the teacher has locked for this student's class.
+  // Non-enrolled students see everything (the lock set will be empty).
+  const isVisible = (c: { id: string }) => {
+    const idx = CHALLENGES.findIndex(x => x.id === c.id);
+    return !lockedLevelIdxs.has(idx);
+  };
+  const tutorials       = CHALLENGES.filter(c => c.category === "tutorial" && isVisible(c));
+  const challenges      = CHALLENGES.filter(c => c.category === "challenge" && isVisible(c));
   const activeChallenge = CHALLENGES.find(c => c.id === activeId);
   const isTutorial      = activeChallenge?.category === "tutorial";
   const activeTutIndex  = tutorials.findIndex(t => t.id === activeId);
