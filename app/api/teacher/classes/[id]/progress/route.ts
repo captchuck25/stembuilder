@@ -54,20 +54,34 @@ export async function GET(
     return { challengesTotal: 0, quizTotal: 0 };
   }
 
-  // Build per-student per-level progress map from a single bulk query
-  const progMap: Record<string, Record<number, { done: number; quizScore: number | null }>> = {};
+  // Build per-student per-level progress map from a single bulk query.
+  // Two kinds of rows live in user_progress for a (user, level):
+  //   - per-challenge:  challenge_idx >= 0, completed=true when that challenge is done
+  //   - per-level:      challenge_idx === -1 (or null); completed=true is set when the student
+  //     finishes EVERY challenge in the level, and quiz_score is set when they take the quiz.
+  // We count per-challenge rows for the running tally, but the per-level "completed=true"
+  // row is independent evidence that ALL challenges were finished — it covers the case
+  // where one per-challenge save failed silently (network blip / tab close mid-save) and
+  // we'd otherwise show e.g. 9/10 even though the student really finished all 10.
+  const progMap: Record<string, Record<number, { done: number; quizScore: number | null; levelMarkedComplete: boolean }>> = {};
   const activeLevelSet = new Set<number>();
   for (const row of (allProgress ?? [])) {
     if (!progMap[row.user_id]) progMap[row.user_id] = {};
     const li = row.level_idx;
-    if (!progMap[row.user_id][li]) progMap[row.user_id][li] = { done: 0, quizScore: null };
+    if (!progMap[row.user_id][li]) progMap[row.user_id][li] = { done: 0, quizScore: null, levelMarkedComplete: false };
     if (row.challenge_idx !== null && row.challenge_idx >= 0 && row.completed) {
       progMap[row.user_id][li].done++;
       activeLevelSet.add(li);
     }
-    if ((row.challenge_idx === null || row.challenge_idx < 0) && row.quiz_score !== null) {
-      progMap[row.user_id][li].quizScore = row.quiz_score;
-      activeLevelSet.add(li);
+    if (row.challenge_idx === null || row.challenge_idx < 0) {
+      if (row.quiz_score !== null) {
+        progMap[row.user_id][li].quizScore = row.quiz_score;
+        activeLevelSet.add(li);
+      }
+      if (row.completed) {
+        progMap[row.user_id][li].levelMarkedComplete = true;
+        activeLevelSet.add(li);
+      }
     }
   }
 
@@ -80,7 +94,10 @@ export async function GET(
     for (const li of visibleLevelIds) {
       const { challengesTotal, quizTotal } = getLevelInfo(li);
       const prog = progMap[p.id]?.[li];
-      levels[li] = { challengesDone: prog?.done ?? 0, challengesTotal, quizScore: prog?.quizScore ?? null, quizTotal };
+      // If the per-level "completed" marker is present, the student finished every challenge
+      // even if one of the per-challenge writes silently failed. Treat done as the max in that case.
+      const done = prog?.levelMarkedComplete ? challengesTotal : (prog?.done ?? 0);
+      levels[li] = { challengesDone: done, challengesTotal, quizScore: prog?.quizScore ?? null, quizTotal };
     }
     return { id: p.id, name: p.name, email: p.email, levels };
   });
