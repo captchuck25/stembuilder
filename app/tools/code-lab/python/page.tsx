@@ -967,6 +967,19 @@ function ChallengeView({
     }
   }, [li, ci]);
 
+  // If saved code loads AFTER first mount (e.g., refresh straight into a
+  // challenge via the sessionStorage phase restore), sync it in — but only if
+  // the user hasn't started editing the starter yet.
+  const savedForChallenge = progress.savedCode?.[chalKey(li, ci)];
+  useEffect(() => {
+    if (!savedForChallenge || !viewRef.current) return;
+    if (codeRef.current !== ch.starterCode) return;
+    codeRef.current = savedForChallenge;
+    viewRef.current.dispatch({
+      changes: { from: 0, to: viewRef.current.state.doc.length, insert: savedForChallenge },
+    });
+  }, [savedForChallenge, li, ci]);
+
   // Init CodeMirror once
   useEffect(() => {
     if (!editorRef.current || viewRef.current) return;
@@ -995,7 +1008,9 @@ function ChallengeView({
 
     viewRef.current = new EditorView({
       state: EditorState.create({
-        doc: ch.starterCode,
+        // codeRef.current was set by the reinit effect above (saved code if it
+        // exists, otherwise starter). Using ch.starterCode here would clobber it.
+        doc: codeRef.current,
         extensions: [
           basicSetup, pythonLanguage,
           pythonLanguage.data.of({ autocomplete: makePythonCompleter(liRef) }),
