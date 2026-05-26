@@ -14,6 +14,7 @@ import { CompletionContext, CompletionResult } from "@codemirror/autocomplete";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { EditorState } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
+import { indentWithTab } from "@codemirror/commands";
 import { indentUnit } from "@codemirror/language";
 import { LEVELS, type Challenge, type Dir } from "./levels";
 
@@ -1000,7 +1001,7 @@ function ChallengeView({
           pythonLanguage.data.of({ autocomplete: makePythonCompleter(liRef) }),
           oneDark,
           indentUnit.of("    "),
-          keymap.of([{ key: "Enter", run: pythonEnter }]),
+          keymap.of([{ key: "Enter", run: pythonEnter }, indentWithTab]),
           EditorView.updateListener.of(u => { if (u.docChanged) codeRef.current = u.state.doc.toString(); }),
           EditorView.theme({ "&":{ height:"100%", fontSize:"13px" }, ".cm-scroller":{ fontFamily:"'JetBrains Mono','Fira Code',monospace" }, ".cm-selectionMatch":{ backgroundColor:"transparent" }, ".cm-matchingBracket, .cm-nonmatchingBracket":{ backgroundColor:"transparent", outline:"none" } }),
         ],
@@ -1377,6 +1378,23 @@ export default function PythonMazePage() {
   const [phase, setPhase] = useState<Phase>(
     deepLinkLevel !== null ? { tag:"intro", li: deepLinkLevel } : { tag:"overview" }
   );
+
+  // Restore last phase from sessionStorage on refresh. Skip if a ?level= deep
+  // link is present so assignment links always land on the intro page.
+  useEffect(() => {
+    if (deepLinkLevel !== null) return;
+    try {
+      const raw = sessionStorage.getItem("python_maze_phase");
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (p && typeof p.tag === "string") setPhase(p as Phase);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Persist phase on every change so a refresh lands back on the same screen.
+  useEffect(() => {
+    try { sessionStorage.setItem("python_maze_phase", JSON.stringify(phase)); } catch { /* ignore */ }
+  }, [phase]);
   const [progress, setProgress] = useState<Progress>({ completedChallenges:{}, completedLevels:{}, savedCode:{} });
   const [isTeacher, setIsTeacher] = useState(false);
   const [lockedChallenges, setLockedChallenges] = useState<{level_idx:number;challenge_idx:number}[]>([]);
