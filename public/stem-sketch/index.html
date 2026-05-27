@@ -986,6 +986,7 @@
   <symbol id="i-group" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/><path d="M11 11L13 13" stroke-linecap="round"/></g></symbol>
   <symbol id="i-ungroup" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/><path d="M9 13L15 7 M9 7L15 13" stroke-linecap="round" stroke-width="1.4"/></g></symbol>
   <symbol id="i-trim" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M9 8L21 18 M9 16L21 6" stroke-linecap="round"/></g></symbol>
+  <symbol id="i-explode" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M4 4L9 4 M15 4L20 4 M20 4L20 9 M20 15L20 20 M20 20L15 20 M9 20L4 20 M4 20L4 15 M4 9L4 4"/></g></symbol>
   <symbol id="i-extend" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 12L17 12"/><path d="M14 8L18 12L14 16"/><path d="M21 6L21 18"/></g></symbol>
   <symbol id="i-node-add" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="12" r="3"/><path d="M16 8L22 8 M19 5L19 11"/></g></symbol>
   <symbol id="i-node-del" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="12" r="3"/><path d="M16 9L22 15 M22 9L16 15"/></g></symbol>
@@ -1075,6 +1076,7 @@
         <button class="tool" data-action="group" title="Group (Ctrl+G) — Shift-click to add shapes to selection first"><svg class="ico"><use href="#i-group"/></svg><span class="tool-label">Group</span></button>
         <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)"><svg class="ico"><use href="#i-ungroup"/></svg><span class="tool-label">Ungroup</span></button>
         <button class="tool" data-action="trim" title="Trim line — click any polyline segment to remove it"><svg class="ico"><use href="#i-trim"/></svg><span class="tool-label">Trim</span></button>
+        <button class="tool" data-action="explode-2d" title="Explode — break a rectangle or closed polyline into individual line segments so each edge can be selected, offset, or moved on its own"><svg class="ico"><use href="#i-explode"/></svg><span class="tool-label">Explode</span></button>
         <button class="tool" data-tool="extend" title="Extend (X) — click a line near the end you want to extend; it grows along its angle until it hits another line or the workplane edge"><svg class="ico"><use href="#i-extend"/></svg><span class="tool-label">Extend</span></button>
         <span class="tool-sep"></span>
         <button class="tool node-btn" id="tb-node-add"   title="Insert node — select a node first, then click to insert a new node after it"><svg class="ico"><use href="#i-node-add"/></svg><span class="tool-label">Add Node</span></button>
@@ -1423,42 +1425,16 @@ class SketchEngine {
       pushUndo();
       const ent = this.activeLine;
 
-      // Snap-to-merge: if either endpoint is very close to an existing open polyline's
-      // endpoint (happens when the user snapped to it), absorb the new segments into it.
-      const mergeTol = 2; // mm — snap already placed the point exactly; this catches fp slop
-      const newFirst = ent.points[0];
-      const newLast  = ent.points[ent.points.length - 1];
-      let mergedInto = null;
-      for (const other of doc.sketch.entities) {
-        if (other.type !== 'polyline' || other.closed) continue;
-        const oFirst = other.points[0];
-        const oLast  = other.points[other.points.length - 1];
-        if (Math.hypot(newLast.x - oFirst.x, newLast.y - oFirst.y) < mergeTol) {
-          other.points = [...ent.points.slice(0, -1), ...other.points];
-          mergedInto = other; break;
-        }
-        if (Math.hypot(newLast.x - oLast.x, newLast.y - oLast.y) < mergeTol) {
-          other.points = [...ent.points.slice(0, -1), ...other.points.slice().reverse()];
-          mergedInto = other; break;
-        }
-        if (Math.hypot(newFirst.x - oLast.x, newFirst.y - oLast.y) < mergeTol) {
-          other.points = [...other.points.slice(0, -1), ...ent.points];
-          mergedInto = other; break;
-        }
-        if (Math.hypot(newFirst.x - oFirst.x, newFirst.y - oFirst.y) < mergeTol) {
-          other.points = [...ent.points.slice().reverse().slice(0, -1), ...other.points];
-          mergedInto = other; break;
-        }
-      }
-
-      if (mergedInto) {
-        doc.selection = { kind: 'sketch', id: mergedInto.id };
-        setStatus('Merged into existing polyline');
-      } else {
-        doc.sketch.entities.push(ent);
-        doc.selection = { kind: 'sketch', id: ent.id };
-        setStatus(ent.closed ? 'Closed polyline added' : 'Polyline added');
-      }
+      // No auto-merge with neighbouring polylines. Each line tool session
+      // produces ONE entity — drawing several connected line segments in a
+      // single click-string still makes one polyline, but lines drawn in
+      // separate sessions stay as their own entities even when their
+      // endpoints touch. That gives the user per-segment selection (and
+      // per-segment offset / trim / mirror) on shapes built from individual
+      // strokes, which is what they'd expect from a 2D editor.
+      doc.sketch.entities.push(ent);
+      doc.selection = { kind: 'sketch', id: ent.id };
+      setStatus(ent.closed ? 'Closed polyline added' : 'Polyline added');
       renderTree();
       renderProps();
     }
@@ -1492,25 +1468,37 @@ class SketchEngine {
     if (tbRmOut) { tbRmOut.style.display = hasCpOut ? '' : 'none'; if (hasCpOut) tbRmOut.classList.add('node-ready'); }
   }
 
-  // Compute which side of lastEnt is closer to (wx, wy) and set offsetMode.preview
+  // Compute the live offset preview(s). Supports multi-select: every entity
+  // in om.sources gets its own preview at the same distance d (chosen by the
+  // cursor's distance to whichever source is currently closest). Each source
+  // independently decides whether to shrink (cursor inside) or expand
+  // (cursor outside). om.previews is the array of preview entities; om.preview
+  // is kept pointed at the first one for back-compat with single-source code.
   _updateOffsetPreview(wx, wy) {
     const om = this.offsetMode;
     if (!om) return;
-    // Live distance: if the user typed an override, use that; otherwise derive
-    // from the perpendicular distance between the cursor and the source.
+    const sources = om.sources && om.sources.length ? om.sources
+                  : (om.lastEnt ? [{ lastEnt: om.lastEnt }] : []);
+    if (!sources.length) { om.preview = null; om.previews = []; return; }
+
+    // Distance: typed override wins; otherwise use the perpendicular distance
+    // from the cursor to the NEAREST source's edge (so the user can wave the
+    // mouse anywhere and the offset still tracks naturally).
     if (om.typedOverride != null && om.typedOverride > 0) {
       om.d = om.typedOverride;
     } else {
-      let d = Math.max(0.001, pointToEntityEdgeDist(wx, wy, om.lastEnt));
-      // Snap distance to the current grid spacing when grid snap is on,
-      // so the offset lands on clean values (1/4", 1/2", etc.).
+      let dMin = +Infinity;
+      for (const s of sources) {
+        const d = pointToEntityEdgeDist(wx, wy, s.lastEnt);
+        if (d < dMin) dMin = d;
+      }
+      let d = Math.max(0.001, dMin);
       if (doc.grid?.snap && doc.grid.spacing > 0) {
         d = Math.max(doc.grid.spacing, Math.round(d / doc.grid.spacing) * doc.grid.spacing);
       }
       om.d = d;
     }
-    const copyPlus  = offsetEntity(om.lastEnt, om.d);
-    const copyMinus = offsetEntity(om.lastEnt, -om.d);
+
     const centroid = (ent) => {
       if (!ent) return null;
       if (ent.type === 'circle') return { x: ent.cx, y: ent.cy };
@@ -1521,35 +1509,45 @@ class SketchEngine {
       }
       return null;
     };
-    if (!copyPlus && !copyMinus) { om.preview = null; return; }
-    if (!copyMinus) { om.preview = copyPlus; return; }
-    if (!copyPlus)  { om.preview = copyMinus; return; }
-    // For rects and circles both copies share the same centroid, so centroid-distance
-    // comparison always ties. Instead use inside/outside the source shape:
-    // mouse inside → shrink (copyMinus); mouse outside → expand (copyPlus).
-    const ent = om.lastEnt;
-    let mouseInside = false;
-    if (ent.type === 'circle') {
-      mouseInside = Math.hypot(wx - ent.cx, wy - ent.cy) < ent.r;
-    } else if (ent.type === 'rect') {
-      mouseInside = wx > ent.x && wx < ent.x + ent.w && wy > ent.y && wy < ent.y + ent.h;
-    } else if (ent.type === 'polyline' && ent.closed && ent.points.length >= 3) {
-      // Ray casting for closed polylines
-      let inside = false;
-      const pts = ent.points, n = pts.length;
-      for (let i = 0, j = n - 1; i < n; j = i++) {
-        const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
-        if ((yi > wy) !== (yj > wy) && wx < (xj - xi) * (wy - yi) / (yj - yi) + xi) inside = !inside;
+
+    const previews = [];
+    for (const s of sources) {
+      const ent = s.lastEnt;
+      const copyPlus  = offsetEntity(ent, om.d);
+      const copyMinus = offsetEntity(ent, -om.d);
+      let chosen = null;
+      if (!copyPlus && !copyMinus) chosen = null;
+      else if (!copyMinus) chosen = copyPlus;
+      else if (!copyPlus)  chosen = copyMinus;
+      else {
+        // Pick the side the cursor is on relative to THIS source.
+        let mouseInside = false;
+        if (ent.type === 'circle') {
+          mouseInside = Math.hypot(wx - ent.cx, wy - ent.cy) < ent.r;
+        } else if (ent.type === 'rect') {
+          mouseInside = wx > ent.x && wx < ent.x + ent.w && wy > ent.y && wy < ent.y + ent.h;
+        } else if (ent.type === 'polyline' && ent.closed && ent.points.length >= 3) {
+          let inside = false;
+          const pts = ent.points, n = pts.length;
+          for (let i = 0, j = n - 1; i < n; j = i++) {
+            const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+            if ((yi > wy) !== (yj > wy) && wx < (xj - xi) * (wy - yi) / (yj - yi) + xi) inside = !inside;
+          }
+          mouseInside = inside;
+        } else {
+          // Open polyline / single line: compare cursor distance to each
+          // candidate offset to pick the closer side.
+          const cp = centroid(copyPlus), cm = centroid(copyMinus);
+          if (cp && cm) {
+            mouseInside = Math.hypot(wx - cm.x, wy - cm.y) < Math.hypot(wx - cp.x, wy - cp.y);
+          }
+        }
+        chosen = mouseInside ? copyMinus : copyPlus;
       }
-      mouseInside = inside;
-    } else {
-      // Open polyline: fall back to centroid distance
-      const cp = centroid(copyPlus), cm = centroid(copyMinus);
-      if (cp && cm) {
-        mouseInside = Math.hypot(wx - cm.x, wy - cm.y) < Math.hypot(wx - cp.x, wy - cp.y);
-      }
+      previews.push(chosen);
     }
-    om.preview = mouseInside ? copyMinus : copyPlus;
+    om.previews = previews;
+    om.preview = previews[0] || null;
   }
 
   // Place a new vertex at typed length, with optional explicit angle (degrees).
@@ -1890,7 +1888,10 @@ class SketchEngine {
     // Capture pointer so move/up events keep firing even if cursor leaves the SVG
     try { this.svg.setPointerCapture(e.pointerId); } catch(_) {}
 
-    if (e.button === 1 || (e.button === 0 && e.shiftKey && this.tool === 'select')) {
+    // Middle-click (or held space + drag) pans. Shift+left-click MUST NOT
+    // pan — it's reserved for multi-select add/toggle. Earlier this binding
+    // was eating every shift-click before the hit-test could see it.
+    if (e.button === 1) {
       this.dragMode = 'pan';
       this.dragStart = { sx: e.clientX, sy: e.clientY, panX: this.view.panX, panY: this.view.panY };
       e.preventDefault();
@@ -1926,24 +1927,52 @@ class SketchEngine {
 
     // Repeat-offset mode: each click places a copy in mouse direction
     if (this.offsetMode) {
-      if (this.offsetMode.preview) {
+      // Commit every active preview as a new entity. Each source advances
+      // its lastEnt forward so the next click steps another distance out.
+      const previews = this.offsetMode.previews && this.offsetMode.previews.length
+                       ? this.offsetMode.previews
+                       : (this.offsetMode.preview ? [this.offsetMode.preview] : []);
+      if (previews.length) {
         pushUndo();
-        const copy = JSON.parse(JSON.stringify(this.offsetMode.preview));
-        copy.id = doc.sketch.nextId++;
-        doc.sketch.entities.push(copy);
-        doc.selection = { kind: 'sketch', id: copy.id };
-        this.offsetMode.lastEnt = this.offsetMode.preview;
+        const newIds = [];
+        for (let i = 0; i < previews.length; i++) {
+          const p = previews[i];
+          if (!p) continue;
+          const copy = JSON.parse(JSON.stringify(p));
+          copy.id = doc.sketch.nextId++;
+          doc.sketch.entities.push(copy);
+          newIds.push(copy.id);
+          if (this.offsetMode.sources && this.offsetMode.sources[i]) {
+            this.offsetMode.sources[i].lastEnt = p;
+          }
+        }
+        // Keep the newly-placed offsets as the selection so a follow-up tool
+        // (mirror, trim, delete) acts on them directly.
+        if (newIds.length) {
+          doc.multiSelectedSketch = newIds;
+          doc.selection = { kind: 'sketch', id: newIds[newIds.length - 1] };
+        }
+        // Sync the back-compat single-source aliases to the new first source.
+        if (this.offsetMode.sources?.[0]) {
+          this.offsetMode.lastEnt = this.offsetMode.sources[0].lastEnt;
+        }
         this.offsetMode.preview = null;
+        this.offsetMode.previews = [];
         this._updateOffsetPreview(wx, wy);
         renderTree(); renderProps(); this.render();
-        setStatus('Offset copy placed — click again or Esc to stop.');
+        setStatus(`Offset placed (${newIds.length} shape${newIds.length === 1 ? '' : 's'}) — click again or Esc to stop.`);
       }
       return;
     }
 
     if (this.tool === 'select') {
-      // CP handle hit: dragging an orange Bezier control circle
-      if (doc.selection?.kind === 'sketch') {
+      // CP / vertex handle hits — skip them entirely when Shift is held.
+      // Shift means "add to selection," and the vertex of the currently-
+      // selected polyline sits on top of any neighbour line's endpoint at a
+      // shared corner, which otherwise hijacks the shift-click and blocks
+      // multi-select. With Shift the click always falls through to the
+      // hitTest / multi-select logic below.
+      if (!e.shiftKey && doc.selection?.kind === 'sketch') {
         const selEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
         if (selEnt && selEnt.type === 'polyline') {
           const cpTolPx = 8;
@@ -2170,7 +2199,9 @@ class SketchEngine {
       let bestD = tolMm;
       for (let ei = doc.sketch.entities.length - 1; ei >= 0; ei--) {
         const ent = doc.sketch.entities[ei];
-        if (ent.construction) continue;
+        // Construction lines participate in trim too — both as targets (you
+        // can click one and trim it) and as cutters (handled below). Trim is
+        // about geometric intersections, not about which lines export.
         const poly = convertToSimplePolyline(ent);
         if (!poly || poly.points.length < 2) continue;
         const n = poly.points.length;
@@ -2212,9 +2243,11 @@ class SketchEngine {
       const clickedS = cumLens[clickedSegIdx] + clickedT * segLens[clickedSegIdx];
 
       // 3. Find intersections of the whole polyline with all OTHER entities.
+      //    Construction lines count as cutters — if a line physically crosses
+      //    a dashed reference, that crossing IS a valid trim bracket.
       const intersections = []; // each: { s, x, y }
       for (const other of doc.sketch.entities) {
-        if (other.id === clickedOrig.id || other.construction) continue;
+        if (other.id === clickedOrig.id) continue;
         const oSegs = entityToSegments(other);
         if (!oSegs.length) continue;
         for (let i = 0; i < segCount; i++) {
@@ -3008,8 +3041,11 @@ class SketchEngine {
     svg += `<line class="axis" x1="${oX}" y1="0" x2="${oX}" y2="${h}"/>`;
     svg += `<circle class="origin" cx="${oX}" cy="${oY}" r="3"/>`;
 
-    // Body silhouettes — project all 3D bodies onto the active sketch's plane
-    if (doc.bodies.length && doc.sketch?.plane) {
+    // Body silhouettes — only show the projected 3D body outlines when the
+    // sketch was started ON a body face (Sketch-on-Face workflow). A free
+    // sketch made by picking a reference plane should be a clean canvas
+    // with only what the user actually drew in it.
+    if (doc.bodies.length && doc.sketch?.plane && doc.sketch.sourceBodyId) {
       const segs = projectBodiesOntoPlane(doc.sketch.plane);
       // Edges with both endpoints near z=0 lie ON the sketch plane → highlight
       const onPlaneTol = 0.5; // mm
@@ -3182,9 +3218,15 @@ class SketchEngine {
       this.updateNodeActions();
     }
 
-    // Offset preview (dashed ghost of the next copy to be placed)
-    if (this.offsetMode?.preview) {
-      svg += renderEntitySVG(this.offsetMode.preview, this, false, true);
+    // Offset preview (dashed ghost of the next copy to be placed). Multi-
+    // source offset draws one ghost per source.
+    if (this.offsetMode) {
+      const previews = this.offsetMode.previews?.length
+        ? this.offsetMode.previews
+        : (this.offsetMode.preview ? [this.offsetMode.preview] : []);
+      for (const p of previews) {
+        if (p) svg += renderEntitySVG(p, this, false, true);
+      }
     }
 
     // Snap marker — distinct visual + label per kind so the user can tell at
@@ -8538,8 +8580,11 @@ function insert2DShape(kind) {
 // and fills ~60% of the canvas. Used when entering a sketch — esp. Sketch on Face.
 function fitSketchViewToBodies() {
   if (!sketchEng) return;
-  if (!doc.bodies.length || !doc.sketch?.plane) {
-    // No bodies — center on origin at default zoom
+  // Only fit the view to projected body silhouettes when this sketch is
+  // pinned to a body (Sketch-on-Face). A free sketch shouldn't show body
+  // outlines, so don't try to center on them either.
+  if (!doc.bodies.length || !doc.sketch?.plane || !doc.sketch.sourceBodyId) {
+    // Center on origin at default zoom
     sketchEng.view.panX = 0;
     sketchEng.view.panY = 0;
     sketchEng.view.pxPerMm = 4;
@@ -9840,6 +9885,81 @@ function mirror2D(axis) {
   setStatus(`Mirrored across ${axis.toUpperCase()} axis`);
 }
 
+// Break a Rect / closed polyline / open multi-segment polyline into one
+// single-segment polyline per edge. Returns the array of new entities,
+// or null if the entity isn't "explodable" (single straight lines and
+// circles are left alone — circles aren't a finite set of edges).
+function explodeEntityToSegments(ent) {
+  const out = [];
+  const mk = (a, b) => ({
+    id: doc.sketch.nextId++,
+    type: 'polyline',
+    closed: false,
+    construction: !!ent.construction,
+    groupId: ent.groupId,
+    points: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }],
+  });
+  if (ent.type === 'rect' && ent.w > 0 && ent.h > 0) {
+    const c = [
+      { x: ent.x,         y: ent.y },
+      { x: ent.x + ent.w, y: ent.y },
+      { x: ent.x + ent.w, y: ent.y + ent.h },
+      { x: ent.x,         y: ent.y + ent.h },
+    ];
+    for (let i = 0; i < 4; i++) out.push(mk(c[i], c[(i + 1) % 4]));
+    return out;
+  }
+  if (ent.type === 'polyline' && ent.points && ent.points.length >= 2) {
+    // Skip a single straight line — it's already one segment.
+    if (!ent.closed && ent.points.length === 2) return null;
+    const n = ent.points.length;
+    const segCount = ent.closed ? n : n - 1;
+    for (let i = 0; i < segCount; i++) {
+      const a = ent.points[i], b = ent.points[(i + 1) % n];
+      // Preserve curved segments (bezier handles) — emit a 2-point polyline
+      // carrying the same cpOut/cpIn so the curve survives explosion.
+      const np = mk(a, b);
+      if (a.cpOut) np.points[0].cpOut = { ...a.cpOut };
+      if (b.cpIn)  np.points[1].cpIn  = { ...b.cpIn };
+      out.push(np);
+    }
+    return out;
+  }
+  return null;
+}
+
+function explodeSelected() {
+  const ids = (doc.multiSelectedSketch?.length ? doc.multiSelectedSketch.slice()
+              : (doc.selection?.kind === 'sketch' ? [doc.selection.id] : []));
+  if (!ids.length) { showHint('Select a rectangle or closed polyline first, then click Explode.'); return; }
+  const targets = ids.map(id => doc.sketch.entities.find(e => e.id === id)).filter(Boolean);
+  const explodable = targets.filter(e => e.type === 'rect' || (e.type === 'polyline' && (e.closed || e.points.length > 2)));
+  if (!explodable.length) {
+    showHint('Nothing to explode — already a single line or a circle.');
+    return;
+  }
+  pushUndo();
+  const newIds = [];
+  for (const ent of explodable) {
+    const segs = explodeEntityToSegments(ent);
+    if (!segs) continue;
+    const idx = doc.sketch.entities.indexOf(ent);
+    doc.sketch.entities.splice(idx, 1);
+    for (const s of segs) {
+      doc.sketch.entities.push(s);
+      newIds.push(s.id);
+    }
+  }
+  // Deselect after explode. If we left every new line selected, shift-click
+  // would TOGGLE OFF (since everything's already in the selection) instead
+  // of feeling like "add more lines" — confusing the user. Empty selection
+  // lets them click whichever line(s) they actually want.
+  doc.multiSelectedSketch = [];
+  doc.selection = null;
+  sketchEng.render(); renderTree(); renderProps();
+  setStatus(`Exploded into ${newIds.length} line${newIds.length === 1 ? '' : 's'} — click any one, or shift-click to pick several`);
+}
+
 // Start the in-canvas mirror flow: user clicks two points to define an
 // arbitrary axis line, the current selection is mirrored across that line,
 // originals stay in place. Replaces the old X-or-Y modal — far more useful
@@ -10303,15 +10423,27 @@ function renderProps() {
     if (!body) { props.innerHTML = ''; return; }
     const u = unitLabel();
     const rot = body.rotation || { x: 0, y: 0, z: 0 };
+    // CAD convention: Y = depth (into screen), Z = up.
+    // Internal Three.js storage stays Y-up (body.y is vertical) so saved
+    // designs aren't migrated. The label/wiring just swaps Y↔Z for the user.
     const positionFields = `
       <h4 style="margin-top:14px">Position</h4>
       <div class="field"><label>X (${u})</label><input type="number" data-k="x" value="${fmtU(body.x || 0)}" step="1"/></div>
-      <div class="field"><label>Y (${u})</label><input type="number" data-k="y" value="${fmtU(body.y || 0)}" step="1"/></div>
-      <div class="field"><label>Z (${u})</label><input type="number" data-k="z" value="${fmtU(body.z || 0)}" step="1"/></div>
+      <div class="field"><label>Y (${u})</label><input type="number" data-k="z" value="${fmtU(body.z || 0)}" step="1"/></div>
+      <div class="field"><label>Z (${u})</label><input type="number" data-k="y" value="${fmtU(body.y || 0)}" step="1"/></div>
+      <div class="field"><label></label>
+        <button class="action" id="snap-to-plane" title="Drop the body so its lowest point sits on the workplane (Z=0)" style="font-size:12px;padding:6px 10px;display:inline-flex;align-items:center;gap:6px;justify-content:center">
+          <svg width="13" height="13" viewBox="0 0 13 13" style="flex-shrink:0">
+            <path d="M6.5 1.5 L6.5 8 M3.5 5 L6.5 8 L9.5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <line x1="2" y1="11" x2="11" y2="11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          Snap to plane
+        </button>
+      </div>
       <h4 style="margin-top:14px">Rotation (°)</h4>
       <div class="field"><label>X axis</label><input type="number" data-rk="x" value="${fmt(rot.x)}" step="15"/></div>
-      <div class="field"><label>Y axis</label><input type="number" data-rk="y" value="${fmt(rot.y)}" step="15"/></div>
-      <div class="field"><label>Z axis</label><input type="number" data-rk="z" value="${fmt(rot.z)}" step="15"/></div>`;
+      <div class="field"><label>Y axis</label><input type="number" data-rk="z" value="${fmt(rot.z)}" step="15"/></div>
+      <div class="field"><label>Z axis</label><input type="number" data-rk="y" value="${fmt(rot.y)}" step="15"/></div>`;
 
     let dimFields = '';
     if (body.type === 'cube') {
@@ -10408,6 +10540,21 @@ function renderProps() {
         viewer?.rebuildBodies();
       });
     });
+    // Snap-to-plane: drop the body so its lowest point sits at internal Y=0
+    // (the workplane). Use the current world-space bbox so any rotation /
+    // existing offset is accounted for.
+    const snapBtn = $('snap-to-plane');
+    if (snapBtn) snapBtn.onclick = () => {
+      if (!body.mesh) return;
+      viewer?.scene.updateMatrixWorld(true);
+      const wbb = new THREE.Box3().setFromObject(body.mesh);
+      if (wbb.isEmpty()) return;
+      pushUndo();
+      body.y = (body.y || 0) - wbb.min.y;
+      viewer?.rebuildBodies();
+      renderProps();
+      setStatus('Snapped body to the workplane');
+    };
     props.querySelectorAll('select').forEach(sel => {
       sel.addEventListener('change', () => {
         body[sel.dataset.k] = sel.value;
@@ -10910,21 +11057,31 @@ function pointToEntityEdgeDist(wx, wy, ent) {
 // each frame. Floating offset-tooltip near the cursor shows the live value
 // and lets the user type a specific distance to override.
 function startOffsetMode() {
-  const sel = doc.selection;
-  if (!sel || sel.kind !== 'sketch') {
-    showHint('Select a shape first, then click Offset.');
+  // Gather every currently-selected sketch entity. Multi-select is honored
+  // so a user can highlight several lines / circles (anywhere in the sketch)
+  // and offset them all together at the same distance — no grouping needed.
+  const ids = (doc.multiSelectedSketch?.length ? doc.multiSelectedSketch.slice()
+              : (doc.selection?.kind === 'sketch' ? [doc.selection.id] : []));
+  const ents = ids.map(id => doc.sketch.entities.find(e => e.id === id)).filter(Boolean);
+  if (!ents.length) {
+    showHint('Select one or more shapes first, then click Offset.');
     return;
   }
-  const ent = doc.sketch.entities.find(e => e.id === sel.id);
-  if (!ent) return;
-  const entCopy = JSON.parse(JSON.stringify(ent));
+  const sources = ents.map(e => {
+    const c = JSON.parse(JSON.stringify(e));
+    return { sourceEnt: c, lastEnt: c };
+  });
   // d starts at 0 — _updateOffsetPreview will derive it from the cursor on
   // the next move. typedOverride lets the user override with a typed value.
   sketchEng.offsetMode = {
-    sourceEnt: entCopy,
-    lastEnt: entCopy,
+    sources,
+    // Kept for backward compat with code paths that still reference the
+    // single-entity fields; they alias the first source.
+    sourceEnt: sources[0].sourceEnt,
+    lastEnt: sources[0].lastEnt,
     d: 0,
     preview: null,
+    previews: [],
     typedOverride: null,
   };
   // Position the tooltip near the cursor for the user's first reading.
@@ -11654,6 +11811,7 @@ function init() {
       case 'copy': copySelection(); break;
       case 'paste': pasteSelection(); break;
       case 'duplicate': duplicateSelection(); break;
+      case 'explode-2d': explodeSelected(); break;
       case 'toggle-construction-vis': toggleConstructionVisibility(); break;
       case 'combine': groupSelected(); break; // legacy alias
       case 'mirror-2d': openMirrorDialog(); break;
