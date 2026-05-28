@@ -517,6 +517,10 @@ export default function TurtlePage() {
   // Set of level_idx values (positions in the CHALLENGES array) that the teacher
   // has locked in any of this student's enrolled classes.
   const [lockedLevelIdxs, setLockedLevelIdxs] = useState<Set<number>>(new Set());
+  // We need to know whether the lock fetch has completed before honoring a ?challenge=
+  // URL param, otherwise a student could deep-link past a lock during the brief window
+  // between page load and the locks arriving.
+  const [locksLoaded, setLocksLoaded] = useState(false);
 
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const bgRef      = useRef<HTMLCanvasElement | null>(null);
@@ -547,7 +551,7 @@ export default function TurtlePage() {
   // Pull teacher-set locks for turtle so we can hide challenges the student isn't allowed to access.
   // level_idx in lesson_locks corresponds to the position in the full CHALLENGES array.
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user) { setLocksLoaded(true); return; }
     fetch("/api/student/locks?tool=turtle")
       .then(r => r.json())
       .then((rows: Array<{ level_idx: number; challenge_idx: number }>) => {
@@ -557,7 +561,8 @@ export default function TurtlePage() {
         }
         setLockedLevelIdxs(set);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLocksLoaded(true));
   }, [userId]);
 
   // Warn browser on tab close / external navigation when code is dirty
@@ -596,14 +601,22 @@ export default function TurtlePage() {
     return () => document.removeEventListener("click", onClick, true);
   }, [view, code, router]);
 
-  // Handle ?challenge= param from My Work page (load saved code)
+  // Handle ?challenge= param from My Work page (load saved code).
+  // Wait for the lock fetch before honoring the param — a locked challenge must not be
+  // loadable just by bookmarking its URL, which was bypassing the hub-view lock filter.
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user || !locksLoaded) return;
     const params = new URLSearchParams(window.location.search);
     const challengeId = params.get("challenge");
     if (!challengeId) return;
     const ch = CHALLENGES.find(c => c.id === challengeId);
     if (!ch || !userId) return;
+    const idx = CHALLENGES.findIndex(c => c.id === challengeId);
+    if (lockedLevelIdxs.has(idx)) {
+      // Strip the param so reloads land on the hub instead of bouncing again, then stay in hub.
+      try { window.history.replaceState({}, "", "/tools/code-lab/turtle"); } catch {}
+      return;
+    }
     fetchTurtleSubmission(userId, challengeId).then(saved => {
       const loadedCode = saved?.code ?? ch.starterCode;
       setCode(loadedCode);
@@ -615,7 +628,7 @@ export default function TurtlePage() {
       setView("editor");
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, locksLoaded]);
 
   useEffect(() => {
     if (view !== "editor") return;
@@ -667,6 +680,13 @@ export default function TurtlePage() {
       try { localStorage.setItem("turtle_completed", JSON.stringify([...next])); } catch {}
       return next;
     });
+    // Tutorials don't go through Save/Submit, so we sync a turtle_submissions row here
+    // when the student is logged in. Without this the teacher dashboard never sees
+    // tutorial completions — the "✓ Done" badge keys off the existence of a row.
+    const ch = CHALLENGES.find(c => c.id === id);
+    if (ch?.category === "tutorial" && userId) {
+      void saveTurtleWork(userId, id, code, captureCanvas()).catch(() => {});
+    }
   }
 
   function captureCanvas(): string {
