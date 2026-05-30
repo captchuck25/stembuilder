@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
-import SiteHeader from "@/app/components/SiteHeader";
 
 type DemoDesign = {
   id: string;
@@ -32,6 +30,26 @@ export default function StemSketchClient() {
   const postToSketch = useCallback((msg: object) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
   }, []);
+
+  // Feed the iframe's in-toolbar account menu with the wrapper's auth session.
+  const postUser = useCallback(() => {
+    postToSketch({
+      type: "STEMSKETCH_USER",
+      user: session?.user
+        ? {
+            signedIn: true,
+            name: session.user.name ?? null,
+            email: session.user.email ?? null,
+            image: session.user.image ?? null,
+          }
+        : { signedIn: false },
+    });
+  }, [postToSketch, session]);
+
+  // Re-push whenever the session resolves/changes (the iframe may already be loaded).
+  useEffect(() => {
+    if (iframeLoadedRef.current) postUser();
+  }, [postUser]);
 
   // Fetch the student's design via the teacher endpoint
   useEffect(() => {
@@ -89,20 +107,39 @@ export default function StemSketchClient() {
         if (isDemoMode) return;
         dirtyRef.current = (e.data as { dirty: boolean }).dirty;
 
+      } else if (type === "STEMSKETCH_REQUEST_USER") {
+        postUser();
+
+      } else if (type === "STEMSKETCH_SIGNOUT") {
+        signOut({ callbackUrl: "/" });
+
       } else if (type === "STEMSKETCH_SAVE") {
         if (isDemoMode) {
           postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: "Demo view — saves are disabled while viewing a student's work." });
           return;
         }
-        const { name, docJson, units, thumbnail } = e.data as { name: string; docJson: object; units: string; thumbnail: string | null };
+        // The iframe ships either docJson (legacy / fallback) or docJsonGz
+        // (gzip + base64 — the modern path that keeps complex saves under
+        // the Vercel/Supabase body-size limits). Pass whichever it sent
+        // straight through; the API route accepts either.
+        const { name, docJson, docJsonGz, units, thumbnail } = e.data as {
+          name: string;
+          docJson?: object;
+          docJsonGz?: string;
+          units: string;
+          thumbnail: string | null;
+        };
         if (!session?.user?.id) {
           postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: "Sign in to save" });
           return;
         }
+        const body = docJsonGz
+          ? { name, docJsonGz, units, thumbnail }
+          : { name, docJson, units, thumbnail };
         const res = await fetch("/api/stem-sketch/designs", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, docJson, units, thumbnail }),
+          body: JSON.stringify(body),
         });
         if (res.ok) {
           dirtyRef.current = false;
@@ -154,25 +191,13 @@ export default function StemSketchClient() {
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [session, postToSketch, isDemoMode, demoDesign]);
+  }, [session, postToSketch, postUser, isDemoMode, demoDesign]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
-      <SiteHeader>
-        <Link
-          href="/"
-          onClick={(e) => {
-            if (!isDemoMode && dirtyRef.current) {
-              const ok = window.confirm("You have unsaved changes. Leave without saving?");
-              if (!ok) e.preventDefault();
-            }
-          }}
-          style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
-            borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none" }}>
-          ← Home
-        </Link>
-      </SiteHeader>
-
+      {/* The former 120px SiteHeader is gone — the SB logo, Home, and account
+          menu now live inside the iframe's own single toolbar row (see
+          public/stem-sketch/index.html), so the canvas gets the full height. */}
       {isDemoMode && (
         <div style={{
           background: "#fef3c7", borderBottom: "3px solid #f59e0b", color: "#78350f",
@@ -206,13 +231,11 @@ export default function StemSketchClient() {
         title="STEM Sketch"
         onLoad={() => {
           iframeLoadedRef.current = true;
+          postUser();
           pushDemoDesign();
         }}
         style={{ flex: 1, border: "none", display: "block" }}
       />
-
-      <footer style={{ height: 40, width: "100%", backgroundImage: "url('/ui/footer-metal.png')",
-        backgroundSize: "cover", backgroundPosition: "center", flexShrink: 0 }} />
     </div>
   );
 }

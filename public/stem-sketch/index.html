@@ -95,6 +95,34 @@
   .brand-name { font-weight: 600; letter-spacing: 0.2px; font-size: 13px; }
   .brand-sub { color: var(--ink-muted); font-size: 10px; line-height: 1.2; }
 
+  /* STEM Builder brand logo + account menu — folded into this single toolbar
+     row so the wrapper page needs no separate header (max canvas height). */
+  .brand-logo { display: flex; align-items: center; margin-right: 2px; flex-shrink: 0; }
+  .brand-logo img { height: 32px; width: auto; display: block; }
+  .user-menu { position: relative; display: flex; align-items: center; }
+  .user-avatar {
+    width: 30px; height: 30px; border-radius: 50%; border: none;
+    background: var(--accent); color: #fff; font-weight: 800; font-size: 14px;
+    cursor: pointer; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .user-avatar img { width: 30px; height: 30px; border-radius: 50%; display: block; }
+  .user-dropdown {
+    position: absolute; right: 0; top: calc(100% + 8px);
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width: 180px;
+    overflow: hidden; z-index: 200; display: none;
+  }
+  .user-dropdown.show { display: block; }
+  .user-dropdown a, .user-dropdown button {
+    display: block; width: 100%; text-align: left; box-sizing: border-box;
+    padding: 10px 16px; font: inherit; font-size: 14px; font-weight: 600;
+    color: #111; text-decoration: none; background: none; border: none;
+    border-bottom: 1px solid #f3f4f6; cursor: pointer;
+  }
+  .user-dropdown button#signout-btn { color: #dc2626; border-bottom: none; }
+  .user-dropdown a:hover, .user-dropdown button:hover { background: #f9fafb; }
+
   .mode-toggle {
     display: inline-flex;
     background: var(--bg);
@@ -1012,8 +1040,10 @@
   <header class="topbar">
     <!-- Row 1: brand · history · sketch actions · spacer · filename · save/load · export -->
     <div class="topbar-row actions">
+      <a class="brand-logo" href="/" target="_top" title="STEM Builder home">
+        <img src="/ui/sb-logo.png" alt="STEM Builder"/>
+      </a>
       <div class="brand">
-        <div class="brand-mark">S</div>
         <div>
           <div class="brand-name">STEM Sketch</div>
           <div class="brand-sub">design · sketch · print</div>
@@ -1036,6 +1066,16 @@
         <button class="action" id="cloud-load-btn" title="Load a saved design" style="font-size:14px;padding:0 8px">📂</button>
         <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
         <button class="action primary" id="export-btn">Export ▾</button>
+        <a class="action" id="home-link" href="/" target="_top" style="text-decoration:none;display:inline-flex;align-items:center">← Home</a>
+        <div class="user-menu" id="user-menu">
+          <a class="action" id="login-link" href="/sign-in" target="_top" style="text-decoration:none;display:none;align-items:center">Log In</a>
+          <button class="user-avatar" id="user-avatar" style="display:none" title="Account"></button>
+          <div class="user-dropdown" id="user-dropdown">
+            <a href="/mywork" target="_top">🏆 My Work</a>
+            <a href="/dashboard" target="_top">🏫 My Classes</a>
+            <button id="signout-btn" type="button">Sign Out</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1720,8 +1760,14 @@ class SketchEngine {
 
     // Snap to the face boundary (only present when sketching on a body face).
     // Corners get highest priority, then mid-edge points, then anywhere along
-    // the edges (like an axis snap).
+    // the edges (like an axis snap). The face perimeter is the single most
+    // important reference when sketching on a face, so it gets a very wide
+    // pull radius (~40 px) and the edge strength dominates every non-corner
+    // candidate, so anywhere near the perimeter the cursor locks to it.
+    // The grid-snap toggle still controls whether the boundary snap runs at
+    // all — flipping snap off disables it like every other snap kind.
     const b = doc.sketch?.boundary;
+    const faceTolMm = 40 / this.view.pxPerMm;
     if (b && b.type === 'rect') {
       const corners = [
         { x: b.x,         y: b.y         },
@@ -1731,7 +1777,7 @@ class SketchEngine {
       ];
       for (const c of corners) {
         const d = Math.hypot(wx - c.x, wy - c.y);
-        if (d < tolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-corner', strength: 2 - d / tolMm });
+        if (d < faceTolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-corner', strength: 2.4 - 1.0 * (d / faceTolMm) });
       }
       const midpoints = [
         { x: b.x + b.w / 2, y: b.y         },
@@ -1741,21 +1787,35 @@ class SketchEngine {
       ];
       for (const m of midpoints) {
         const d = Math.hypot(wx - m.x, wy - m.y);
-        if (d < tolMm) candidates.push({ x: m.x, y: m.y, kind: 'face-mid', strength: 1.5 - d / tolMm });
+        if (d < faceTolMm) candidates.push({ x: m.x, y: m.y, kind: 'face-mid', strength: 1.8 - 0.8 * (d / faceTolMm) });
       }
-      // Project onto the four edges
+      // Project onto the four edges. When grid snap is on, also round the
+      // along-edge coordinate to the grid — otherwise the cursor locks to
+      // the edge at an arbitrary off-grid position, which defeats the
+      // "snap to 1/8 inch" expectation. Result: cursor sits at the
+      // intersection of the edge AND a grid line.
+      const gridSnapOn = doc.grid?.snap && doc.grid.spacing > 0;
+      const step = gridSnapOn ? doc.grid.spacing : 0;
       const onEdgeX = (yEdge) => {
         const d = Math.abs(wy - yEdge);
-        if (d < tolMm && wx >= b.x - tolMm && wx <= b.x + b.w + tolMm) {
-          const cx = Math.min(Math.max(wx, b.x), b.x + b.w);
-          candidates.push({ x: cx, y: yEdge, kind: 'face-edge', strength: 0.9 - d / tolMm });
+        if (d < faceTolMm && wx >= b.x - faceTolMm && wx <= b.x + b.w + faceTolMm) {
+          let cx = Math.min(Math.max(wx, b.x), b.x + b.w);
+          if (gridSnapOn) {
+            cx = Math.round(cx / step) * step;
+            cx = Math.min(Math.max(cx, b.x), b.x + b.w);
+          }
+          candidates.push({ x: cx, y: yEdge, kind: 'face-edge', strength: 1.7 - 0.9 * (d / faceTolMm) });
         }
       };
       const onEdgeY = (xEdge) => {
         const d = Math.abs(wx - xEdge);
-        if (d < tolMm && wy >= b.y - tolMm && wy <= b.y + b.h + tolMm) {
-          const cy = Math.min(Math.max(wy, b.y), b.y + b.h);
-          candidates.push({ x: xEdge, y: cy, kind: 'face-edge', strength: 0.9 - d / tolMm });
+        if (d < faceTolMm && wy >= b.y - faceTolMm && wy <= b.y + b.h + faceTolMm) {
+          let cy = Math.min(Math.max(wy, b.y), b.y + b.h);
+          if (gridSnapOn) {
+            cy = Math.round(cy / step) * step;
+            cy = Math.min(Math.max(cy, b.y), b.y + b.h);
+          }
+          candidates.push({ x: xEdge, y: cy, kind: 'face-edge', strength: 1.7 - 0.9 * (d / faceTolMm) });
         }
       };
       onEdgeX(b.y);
@@ -1766,7 +1826,7 @@ class SketchEngine {
     if (b && b.type === 'circle') {
       // Snap to center
       const dC = Math.hypot(wx - b.cx, wy - b.cy);
-      if (dC < tolMm) candidates.push({ x: b.cx, y: b.cy, kind: 'face-corner', strength: 2 - dC / tolMm });
+      if (dC < faceTolMm) candidates.push({ x: b.cx, y: b.cy, kind: 'face-corner', strength: 2.4 - 1.0 * (dC / faceTolMm) });
       // Snap to 4 cardinals (top, bottom, left, right of the circle)
       const cards = [
         { x: b.cx + b.r, y: b.cy }, { x: b.cx - b.r, y: b.cy },
@@ -1774,14 +1834,15 @@ class SketchEngine {
       ];
       for (const c of cards) {
         const d = Math.hypot(wx - c.x, wy - c.y);
-        if (d < tolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-mid', strength: 1.5 - d / tolMm });
+        if (d < faceTolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-mid', strength: 1.8 - 0.8 * (d / faceTolMm) });
       }
       // Snap to any point on the perimeter
       const dCenter = Math.hypot(wx - b.cx, wy - b.cy);
-      if (Math.abs(dCenter - b.r) < tolMm && dCenter > 1e-6) {
+      const distFromPerim = Math.abs(dCenter - b.r);
+      if (distFromPerim < faceTolMm && dCenter > 1e-6) {
         const cx = b.cx + (wx - b.cx) / dCenter * b.r;
         const cy = b.cy + (wy - b.cy) / dCenter * b.r;
-        candidates.push({ x: cx, y: cy, kind: 'face-edge', strength: 0.9 - Math.abs(dCenter - b.r) / tolMm });
+        candidates.push({ x: cx, y: cy, kind: 'face-edge', strength: 1.7 - 0.9 * (distFromPerim / faceTolMm) });
       }
     }
 
@@ -4137,6 +4198,45 @@ function makePlaneMatrix(plane) {
   return M;
 }
 
+// Walk a body and collect every cylindrical hole made by a negative-extrude
+// child whose sketch contains a circle. Returns {center, axis, radius} per
+// hole, all in current WORLD coordinates (current body transform applied).
+// Used by the fastener "Place on face" workflow to snap a bolt to a hole's
+// center axis when the user clicks anywhere on a face the hole pokes
+// through.
+function findHoleCylindersInBody(body) {
+  if (!body) return [];
+  const out = [];
+  const mw = body.mesh ? body.mesh.matrixWorld.clone() : new THREE.Matrix4();
+  const mwNormal = new THREE.Matrix3().getNormalMatrix(mw);
+  const walk = (kids, parentIsCut) => {
+    if (!Array.isArray(kids)) return;
+    for (const child of kids) {
+      const cumCut = parentIsCut || child.op === 'subtract';
+      if (child.type === 'group' || child.type === 'combined') {
+        walk(child.children, cumCut);
+        continue;
+      }
+      if (!cumCut) continue;
+      if (child.type !== 'extrude' || !child.sketch || !child.plane) continue;
+      const planeMat = makePlaneMatrix(child.plane);
+      const axisLocal = new THREE.Vector3(...child.plane.n).normalize();
+      for (const ent of (child.sketch.entities || [])) {
+        if (ent.type !== 'circle' || !(ent.r > 0)) continue;
+        const centerLocal = new THREE.Vector3(ent.cx, ent.cy, 0).applyMatrix4(planeMat);
+        centerLocal.x += (child.x || 0);
+        centerLocal.y += (child.y || 0);
+        centerLocal.z += (child.z || 0);
+        const center = centerLocal.applyMatrix4(mw);
+        const axis = axisLocal.clone().applyMatrix3(mwNormal).normalize();
+        out.push({ center, axis, radius: ent.r });
+      }
+    }
+  };
+  walk(body.children, body.op === 'subtract');
+  return out;
+}
+
 // Given a world-space point and a world-space normal, build a plane definition with
 // a sensible (u, v) basis: v = projected world-up, u = v × n.
 function planeFromFace(originVec, normalVec) {
@@ -4534,21 +4634,55 @@ function projectBodiesOntoPlane(plane) {
           const before = segments.length;
           projectChildAsStandalone(child, offset);
           if (childIsCut) {
-            // Clip to parent AABB and tag as cut. Drop segments whose midpoint
-            // lies outside the parent's projected silhouette — that's the
-            // over-extrusion the user said shouldn't be visible.
+            // Clip each segment to the parent body's projected AABB using
+            // Liang–Barsky parametric clipping. The midpoint test the old
+            // code did kept any segment whose centre landed in the body —
+            // a Through-cut prism's long side edges span the entire body
+            // with the midpoint inside, so the over-extrusion past the far
+            // face stayed visible. Proper clipping trims the endpoints to
+            // the AABB so only the part of the cut actually inside the
+            // body shows in the 2D view.
+            const PAD = 0.5; // mm — tolerance so coplanar edges aren't lost
+            const clipBox = {
+              minX: parentAabb.minX - PAD,
+              maxX: parentAabb.maxX + PAD,
+              minY: parentAabb.minY - PAD,
+              maxY: parentAabb.maxY + PAD,
+            };
+            const clipSeg = (s) => {
+              let t0 = 0, t1 = 1;
+              const dx = s.p2.x - s.p1.x;
+              const dy = s.p2.y - s.p1.y;
+              const p = [-dx, dx, -dy, dy];
+              const q = [
+                s.p1.x - clipBox.minX,
+                clipBox.maxX - s.p1.x,
+                s.p1.y - clipBox.minY,
+                clipBox.maxY - s.p1.y,
+              ];
+              for (let i = 0; i < 4; i++) {
+                if (Math.abs(p[i]) < 1e-9) {
+                  if (q[i] < 0) return null; // parallel and outside
+                  continue;
+                }
+                const t = q[i] / p[i];
+                if (p[i] < 0) { if (t > t1) return null; if (t > t0) t0 = t; }
+                else          { if (t < t0) return null; if (t < t1) t1 = t; }
+              }
+              const dz = s.p2.z - s.p1.z;
+              return {
+                p1: { x: s.p1.x + t0 * dx, y: s.p1.y + t0 * dy, z: s.p1.z + t0 * dz },
+                p2: { x: s.p1.x + t1 * dx, y: s.p1.y + t1 * dy, z: s.p1.z + t1 * dz },
+                dz1: s.p1.z + t0 * dz,
+                dz2: s.p1.z + t1 * dz,
+                _cut: true,
+              };
+            };
             const kept = [];
             for (let k = before; k < segments.length; k++) {
-              const s = segments[k];
-              const mx = (s.p1.x + s.p2.x) / 2;
-              const my = (s.p1.y + s.p2.y) / 2;
-              const PAD = 0.5; // mm tolerance so segments touching the bbox edge stay
-              if (mx < parentAabb.minX - PAD || mx > parentAabb.maxX + PAD ||
-                  my < parentAabb.minY - PAD || my > parentAabb.maxY + PAD) continue;
-              s._cut = true;
-              kept.push(s);
+              const trimmed = clipSeg(segments[k]);
+              if (trimmed) kept.push(trimmed);
             }
-            // Replace tail of segments[] with the kept ones
             segments.length = before;
             for (const s of kept) segments.push(s);
           }
@@ -4879,6 +5013,71 @@ class Viewer3D {
         if (hits.length > 0) {
           const hit = hits[0];
           const sourceBody = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
+          // Fastener-placement variant: seat the bolt with the bottom of its
+          // head face flush against the picked face, shaft perpendicular into
+          // the body. Skips the sketch-on-face flow entirely.
+          if (doc.fastenerPlaceTarget) {
+            const fb = doc.bodies.find(b => b.id === doc.fastenerPlaceTarget);
+            doc.fastenerPlaceTarget = null;
+            doc.faceMode = false;
+            this.canvas.style.cursor = '';
+            if (fb && fb.type === 'fastener') {
+              const nLocal = hit.face.normal.clone();
+              const nWorld = nLocal.transformDirection(hit.object.matrixWorld).normalize();
+              // Cylinder/hole detection: walk the picked body's negative
+              // children for circular holes whose axis is perpendicular to
+              // the picked face. If the click sits inside (or near) one of
+              // those holes, snap the seat point to the hole's axis-on-face
+              // intersection — that's "perfectly centered" placement.
+              let seatPoint = hit.point.clone();
+              let snapAxis = nWorld.clone();
+              let snappedToHole = false;
+              const cylinders = findHoleCylindersInBody(sourceBody);
+              let best = null;
+              for (const cyl of cylinders) {
+                // Need cylinder axis (anti-)parallel to face normal to be
+                // a hole on THIS face.
+                const dot = cyl.axis.dot(nWorld);
+                if (Math.abs(dot) < 0.92) continue;
+                // Cylinder-axis intersection with the face plane through
+                // hit.point: hit.point lies in plane (P - hit.point)·nWorld = 0.
+                // P = cyl.center + t * cyl.axis  →  t = ((hit.point − cyl.center)·nWorld) / (cyl.axis·nWorld)
+                const t = hit.point.clone().sub(cyl.center).dot(nWorld) / dot;
+                const onFace = cyl.center.clone().add(cyl.axis.clone().multiplyScalar(t));
+                const perpDist = hit.point.distanceTo(onFace);
+                // Click must fall within the hole's radius (small slack for
+                // edge-of-hole picks).
+                if (perpDist > cyl.radius + 0.5) continue;
+                if (!best || perpDist < best.perpDist) best = { cyl, onFace, perpDist, dot };
+              }
+              if (best) {
+                seatPoint = best.onFace;
+                // Axis points OUT of the face (so the head sits on the +axis
+                // side and the shaft drops into the hole along -axis).
+                snapAxis = (best.dot >= 0 ? best.cyl.axis.clone() : best.cyl.axis.clone().negate()).normalize();
+                snappedToHole = true;
+              }
+              // Fastener is modeled with shaft bottom at y=0, head sitting on
+              // top; head BOTTOM face is at y = shaft length. We want that
+              // point flush against seatPoint with the head sticking out
+              // along +snapAxis (so the shaft goes in along -snapAxis).
+              const shaftLen = fb.length || 0;
+              const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), snapAxis);
+              const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+              pushUndo();
+              fb.rotation = {
+                x: THREE.MathUtils.radToDeg(euler.x),
+                y: THREE.MathUtils.radToDeg(euler.y),
+                z: THREE.MathUtils.radToDeg(euler.z),
+              };
+              const origin = seatPoint.clone().sub(snapAxis.clone().multiplyScalar(shaftLen));
+              fb.x = origin.x; fb.y = origin.y; fb.z = origin.z;
+              this.rebuildBodies();
+              renderProps();
+              setStatus(snappedToHole ? 'Fastener seated — centered on hole' : 'Fastener seated on face');
+            }
+            return;
+          }
           // Decide if the picked surface is FLAT or CURVED. On curved surfaces
           // a tessellated triangle's normal would produce a slanted sketch
           // plane — show the bbox 6-face picker instead.
@@ -5602,18 +5801,17 @@ class Viewer3D {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.bodyGroup.add(mesh);
-        // Edge overlay — draws lines at sharp corners (25° threshold) so the
-        // body's form reads clearly. For groups/CSG results, weld coincident
-        // vertices in a TEMP geometry before extracting edges; CSG output has
-        // tiny vertex duplicates at the seam between input meshes that would
-        // otherwise count as boundary edges and draw a visible line across
-        // coplanar surfaces.
-        if (mesh.geometry && mesh.geometry.attributes?.position) {
+        // Edge overlay — only for non-CSG primitives / single extrudes.
+        // CSG output is too tessellation-noisy for EdgesGeometry to extract
+        // a clean line set: fans around cut cylinders, near-coplanar seams
+        // at unions, and short artifact segments survive every threshold /
+        // weld / length-filter combination. The shaded mesh + silhouette
+        // already convey the form on a grouped body; skipping the overlay
+        // gives the cleanest read.
+        const isCSGBody = body.type === 'group' || body.type === 'combined';
+        if (!isCSGBody && mesh.geometry && mesh.geometry.attributes?.position) {
           try {
-            const isCSG = body.type === 'group' || body.type === 'combined';
-            const edgeSrc = isCSG ? weldGeometryForEdges(mesh.geometry) : mesh.geometry;
-            const edgeGeo = new THREE.EdgesGeometry(edgeSrc, 25);
-            if (isCSG && edgeSrc !== mesh.geometry) edgeSrc.dispose();
+            const edgeGeo = new THREE.EdgesGeometry(mesh.geometry, 25);
             if (edgeGeo.attributes?.position?.count >= 2) {
               const edgeMat = new THREE.LineBasicMaterial({
                 color: 0x2f5fe0, transparent: true, opacity: 0.55,
@@ -5684,14 +5882,26 @@ class Viewer3D {
     }
     if (!region) { this.extrudeArrows.visible = false; return; }
     let cu = 0, cv = 0;
-    for (const p of region.points) { cu += p.x; cv += p.y; }
+    let rMinX = +Infinity, rMaxX = -Infinity, rMinY = +Infinity, rMaxY = -Infinity;
+    for (const p of region.points) {
+      cu += p.x; cv += p.y;
+      if (p.x < rMinX) rMinX = p.x; if (p.x > rMaxX) rMaxX = p.x;
+      if (p.y < rMinY) rMinY = p.y; if (p.y > rMaxY) rMaxY = p.y;
+    }
     cu /= region.points.length; cv /= region.points.length;
     const planeM = makePlaneMatrix(sketch.plane);
     const center = new THREE.Vector3(cu, cv, 0).applyMatrix4(planeM);
     const n = new THREE.Vector3(...sketch.plane.n).normalize();
+    // Scale the extrude cone with the region's largest in-plane span so a
+    // 6 mm hole doesn't get a 7 mm cone hovering over it, and a 200 mm
+    // pocket doesn't get a barely-visible one. ~5% of span, clamped.
+    const regionSpan = Math.max(rMaxX - rMinX, rMaxY - rMinY);
+    const eScale = Math.min(2.5, Math.max(0.3, regionSpan * 0.05));
+    this.extrudeArrows.scale.setScalar(eScale);
     this.extrudeArrows.position.copy(center);
     const yAxis = new THREE.Vector3(0, 1, 0);
-    const posOffset = n.clone().multiplyScalar(7);
+    // Lift offset scales too so the cone sits just above the region.
+    const posOffset = n.clone().multiplyScalar(7 * eScale);
     const posQ = new THREE.Quaternion().setFromUnitVectors(yAxis, n);
     this.extrudeArrows.children[0].position.copy(posOffset);
     this.extrudeArrows.children[0].quaternion.copy(posQ);
@@ -6093,25 +6303,41 @@ class Viewer3D {
     if ((doc.multiSelectedBodies?.length || 0) > 1) return;
     const body = doc.bodies.find(b => b.id === doc.selection.id);
     if (!body || !body.mesh) return;
+    // Threaded fasteners have their shape set in the fastener dialog
+    // (length / diameter / pitch) — letting the user drag the bbox would
+    // distort the helix. Skip resize handles entirely; the properties panel
+    // still exposes every parameter.
+    if (body.type === 'fastener') return;
 
     this.scene.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(body.mesh);
     if (bb.isEmpty()) return;
 
     const ctr = bb.getCenter(new THREE.Vector3());
-    const hr = 1.5;
-    const off = 1.5;
+    // Scale the resize spheres with the body's largest bbox dimension so
+    // they read as a small affordance on any-size object instead of a
+    // fixed 1.5 mm sphere that looks huge on a 6 mm fastener and tiny on a
+    // 200 mm block. ~5% of the span, clamped so they stay clickable even
+    // on extreme sizes.
+    const sz = bb.getSize(new THREE.Vector3());
+    const span = Math.max(sz.x, sz.y, sz.z);
+    const hr = Math.min(3, Math.max(0.4, span * 0.05));
+    const off = hr * 1.2;
     const isCSGResult = body.type === 'group' || body.type === 'combined';
 
     const group = new THREE.Group();
     const matEdge = new THREE.LineBasicMaterial({ color: 0x4f7cff, transparent: true, opacity: 0.45 });
 
-    // Faint bbox helper — visible for every selected body, including groups,
-    // so the user sees the X / Y / Z extents of the selection.
-    const helper = new THREE.Box3Helper(bb.clone(), 0x4f7cff);
-    helper.material = matEdge;
-    helper.renderOrder = 999;
-    group.add(helper);
+    // Faint bbox helper — only shown for parametric primitives. For a group
+    // with cuts the bbox is still cube-shaped even after the material's
+    // been carved out, so drawing it creates a confusing "phantom cube"
+    // outline floating in the empty space where the cuts went through.
+    if (!isCSGResult) {
+      const helper = new THREE.Box3Helper(bb.clone(), 0x4f7cff);
+      helper.material = matEdge;
+      helper.renderOrder = 999;
+      group.add(helper);
+    }
 
     // Per-axis face-center resize spheres — only meaningful for parametric
     // primitives + extrudes; not for CSG group/combined results (their
@@ -6164,8 +6390,15 @@ class Viewer3D {
         const combined = new THREE.Box3();
         for (const m of meshes) combined.union(new THREE.Box3().setFromObject(m));
         const ctr = combined.getCenter(new THREE.Vector3());
-        // Fixed lift above body so the cone stays a constant offset, not body-size proportional
-        this.gizmo.position.set(ctr.x, combined.max.y + 6, ctr.z);
+        // Scale the Y-lift cone with the body span so it stays a sensible
+        // affordance on tiny fasteners and big plates alike. ~4% of span,
+        // clamped. The hover lift above the body also scales so a small
+        // body doesn't get a cone that visually crashes into the top face.
+        const sz = combined.getSize(new THREE.Vector3());
+        const span = Math.max(sz.x, sz.y, sz.z);
+        const gScale = Math.min(2.5, Math.max(0.3, span * 0.04));
+        this.gizmo.scale.setScalar(gScale);
+        this.gizmo.position.set(ctr.x, combined.max.y + 6 * gScale, ctr.z);
         this.gizmo.visible = true;
         // Rotation arches removed for now — rotation is still available via
         // the property panel (X / Y / Z degree fields). buildRotationHandles
@@ -6285,17 +6518,21 @@ class Viewer3D {
 
 function buildBodyMesh(body) {
   const isNeg = body.op === 'subtract';
-  // FrontSide only. DoubleSide combined with the shader's gl_FrontFacing
-  // auto-flip causes a visible lighting "horizon" across curved surfaces —
-  // back-facing triangles get their normals flipped, producing a sudden
-  // shading change at the silhouette. For mirrored bodies the index buffer
-  // is flipped below so the winding stays consistent with FrontSide.
+  // Parametric primitives and single extrudes render FrontSide — we control
+  // their winding, and DoubleSide would introduce the gl_FrontFacing
+  // lighting horizon on smooth curves. Group / CSG results render DoubleSide
+  // because the boolean engine occasionally outputs patches of geometry with
+  // reversed winding at cut seams; FrontSide would render those as literal
+  // holes through the body (visible from one side, gone from the other).
+  // The faceted CSG output hides the horizon artifact that bothered us on
+  // smooth primitive curves, so DoubleSide is the lesser evil for groups.
+  const isCSGResult = body.type === 'group' || body.type === 'combined';
   const matSolid = new THREE.MeshStandardMaterial({
     color: isNeg ? 0xff7070 : 0x9eb6ff,
     roughness: 0.55, metalness: 0.05, flatShading: false,
     transparent: isNeg,
     opacity: isNeg ? 0.45 : 1.0,
-    side: THREE.FrontSide,
+    side: isCSGResult ? THREE.DoubleSide : THREE.FrontSide,
   });
   // Reverse triangle winding to keep front faces outward when the plane
   // matrix has negative determinant (a mirror). Used by extrude/revolve.
@@ -7201,28 +7438,88 @@ const undoStack = [];
 const redoStack = [];
 const MAX_UNDO = 60;
 
+// Encode a TypedArray's raw bytes as base64. ~10–100× faster than
+// Array.from + JSON.stringify on number arrays, and ~3× smaller in JSON
+// (no per-number digit/comma overhead). Chunked to avoid the apply()
+// arg-count overflow on big buffers.
+function _typedArrayToBase64(typedArr) {
+  const u8 = new Uint8Array(typedArr.buffer, typedArr.byteOffset, typedArr.byteLength);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < u8.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+function _base64ToBytes(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
 function _serializeGeometry(g) {
   if (!g) return null;
-  const out = { position: Array.from(g.attributes.position.array) };
-  if (g.attributes.normal) out.normal = Array.from(g.attributes.normal.array);
-  if (g.index) out.index = Array.from(g.index.array);
+  // Binary format (default for fresh saves). _bin:1 lets the loader pick
+  // the right path. Plain number arrays are still understood for legacy
+  // designs saved before this change.
+  const out = { _bin: 1, position: _typedArrayToBase64(g.attributes.position.array) };
+  if (g.attributes.normal) out.normal = _typedArrayToBase64(g.attributes.normal.array);
+  if (g.index) {
+    out.index = _typedArrayToBase64(g.index.array);
+    // Tag the integer width so the loader picks Uint16/Uint32 correctly.
+    out.indexBytes = g.index.array.BYTES_PER_ELEMENT;
+  }
   return out;
 }
 function _deserializeGeometry(d) {
   if (!d) return null;
   const g = new THREE.BufferGeometry();
+  if (d._bin) {
+    const pb = _base64ToBytes(d.position);
+    const pos = new Float32Array(pb.buffer, pb.byteOffset, pb.byteLength / 4);
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    if (d.normal) {
+      const nb = _base64ToBytes(d.normal);
+      const nor = new Float32Array(nb.buffer, nb.byteOffset, nb.byteLength / 4);
+      g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    }
+    if (d.index) {
+      const ib = _base64ToBytes(d.index);
+      const stride = d.indexBytes || 4;
+      const Ctor = stride === 2 ? Uint16Array : Uint32Array;
+      const idx = new Ctor(ib.buffer, ib.byteOffset, ib.byteLength / stride);
+      g.setIndex(new THREE.BufferAttribute(idx, 1));
+    }
+    if (!d.normal) g.computeVertexNormals();
+    return g;
+  }
+  // Legacy: arrays of numbers
   g.setAttribute('position', new THREE.Float32BufferAttribute(d.position, 3));
   if (d.normal) g.setAttribute('normal', new THREE.Float32BufferAttribute(d.normal, 3));
   if (d.index) g.setIndex(d.index);
   if (!d.normal) g.computeVertexNormals();
   return g;
 }
-function _snapshotBody(b) {
+function _snapshotBody(b, asChild = false) {
   const out = {};
   for (const k of Object.keys(b)) {
     if (k === 'mesh') continue;
-    if (k === 'geometry') { out.geometry = _serializeGeometry(b.geometry); out._geomSerialized = true; continue; }
-    if (k === 'children' && Array.isArray(b.children)) { out.children = b.children.map(_snapshotBody); continue; }
+    if (k === 'geometry') {
+      // Top-level bodies always store their geometry (CSG groups need it to
+      // render). For NESTED CHILDREN, only persist geometry when the child
+      // is itself a group — primitive / extrude children can rebuild from
+      // their parametric props during ungroup, so storing their geometry
+      // would just bloat the doc 3–5× with no functional gain. Heavy CSG
+      // models otherwise hit multi-MB saves that freeze JSON.stringify.
+      if (asChild && b.type !== 'group' && b.type !== 'combined') continue;
+      out.geometry = _serializeGeometry(b.geometry);
+      out._geomSerialized = true;
+      continue;
+    }
+    if (k === 'children' && Array.isArray(b.children)) {
+      out.children = b.children.map(c => _snapshotBody(c, true));
+      continue;
+    }
     try { out[k] = JSON.parse(JSON.stringify(b[k])); }
     catch (_) { /* skip unserializable */ }
   }
@@ -8056,7 +8353,10 @@ function getFastenerSpec(key) {
 // on CSG results — the visual mesh keeps its original (possibly duplicated)
 // vertices, but the welded copy lets EdgesGeometry's angle threshold cleanly
 // reject coplanar seams that would otherwise be flagged as boundary edges.
-function weldGeometryForEdges(geo, eps = 1e-3) {
+// eps=0.02 mm is generous enough to catch the small drift CSG output leaves
+// at union seams while still well below any meaningful printer-resolution
+// feature size.
+function weldGeometryForEdges(geo, eps = 0.02) {
   const pos = geo.attributes.position;
   if (!pos) return geo;
   const verts = pos.array;
@@ -8887,6 +9187,10 @@ function openNewSketchDialog() {
 function showDimLabels(body) {
   const overlay = $('dim-overlay');
   if (!overlay || !viewer || !body || !body.mesh) { hideDimLabels(); return; }
+  // Fasteners are fully parameterised in the fastener dialog (length,
+  // diameter, pitch) — bbox dimension labels add visual noise without any
+  // resize affordance, since stretching the bbox would deform the helix.
+  if (body.type === 'fastener') { hideDimLabels(); return; }
   viewer.scene.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(body.mesh);
   if (bb.isEmpty()) { hideDimLabels(); return; }
@@ -9241,6 +9545,18 @@ function groupSelected(skipUndo) {
     };
     doc.bodies = doc.bodies.filter(b => !ids.includes(b.id));
     doc.bodies.push(group);
+    // Re-point every sketch that was anchored to one of the consumed bodies
+    // at the new group. Without this, only the sketch that triggered the
+    // group (the one auto-grouped right after its extrude) gets updated —
+    // any OTHER sketches you started on the same face / cube still point at
+    // the now-deleted body id, so the next extrude can't find its parent,
+    // the "Through" button stays hidden, and auto-group never fires again.
+    const consumed = new Set(ids);
+    for (const sk of doc.sketches) {
+      if (sk.sourceBodyId != null && consumed.has(sk.sourceBodyId)) {
+        sk.sourceBodyId = group.id;
+      }
+    }
     doc.selection = { kind: 'body', id: group.id };
     doc.multiSelectedBodies = [group.id];
     viewer.rebuildBodies();
@@ -10493,6 +10809,9 @@ function renderProps() {
         <div class="field"><label>Thread size</label><select data-k="size">${sizeOpts}</select></div>
         <div class="field"><label>Length (${u})</label><input type="number" data-k="length" value="${fmtU(body.length)}" min="0.1" step="0.5"/></div>
         <div class="field"><label>Fit</label><select data-k="fit">${fitOpts}</select></div>
+        <div class="field"><label></label>
+          <button class="action" id="fastener-place-btn" title="Click any body face — the bolt seats with the bottom of its head flush on that face, perpendicular to it">📌 Place on face</button>
+        </div>
         <div class="hint">Use <b>Tight</b> for bolts that print as a solid, or <b>Loose</b> when grouping as a Negative to cut a threaded hole that fits a real bolt.</div>`;
     } else if (body.type === 'group') {
       const childList = (body.children || []).map(c => `${c.type}${c.op === 'subtract' ? ' (neg)' : ''}`).join(', ');
@@ -10540,6 +10859,16 @@ function renderProps() {
         viewer?.rebuildBodies();
       });
     });
+    // Place-on-face: enter a pick mode where the next 3D face click seats
+    // the bolt with its head-bottom face flush against that face,
+    // perpendicular to it (shaft pointing INTO the body).
+    const placeBtn = $('fastener-place-btn');
+    if (placeBtn) placeBtn.onclick = () => {
+      doc.fastenerPlaceTarget = body.id;
+      doc.faceMode = true; // reuse the existing face-pick infra
+      setStatus('Place fastener: click any body face. Esc to cancel.');
+      if (viewer) viewer.canvas.style.cursor = 'crosshair';
+    };
     // Snap-to-plane: drop the body so its lowest point sits at internal Y=0
     // (the workplane). Use the current world-space bbox so any rotation /
     // existing offset is accounted for.
@@ -11384,6 +11713,30 @@ function captureThumbnailAsync() {
   });
 }
 
+// gzip + base64-encode a JSON-serialisable value. CompressionStream ships
+// in every modern browser. Returns null on browsers that don't support it
+// (we then fall back to raw JSON). 10× size reduction on a typical CSG-
+// heavy doc means saves stop hitting Vercel/Supabase body-size limits and
+// JSON.stringify finishes in tens of ms instead of seconds.
+async function gzipJsonToBase64(value) {
+  if (typeof CompressionStream === 'undefined') return null;
+  try {
+    const json = JSON.stringify(value);
+    const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('gzip'));
+    const buf = await new Response(stream).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    // Build base64 in chunks to avoid String.fromCharCode arg-count overflow on big payloads.
+    let bin = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
+  } catch (_) {
+    return null;
+  }
+}
+
 async function cloudSave() {
   const btn = document.getElementById('cloud-save-btn');
   if (btn) {
@@ -11397,7 +11750,14 @@ async function cloudSave() {
   setStatus('Saving to cloud…');
   const name = getProjectName() || 'Untitled';
   const thumbnail = await captureThumbnailAsync();
-  notifyParent({ type: 'STEMSKETCH_SAVE', name, docJson: snapshotDoc(), units: doc.units, thumbnail });
+  const docJson = snapshotDoc();
+  const docJsonGz = await gzipJsonToBase64(docJson);
+  // Prefer the compressed payload; fall back to raw if the browser can't
+  // compress for any reason. The server route accepts either field.
+  const payload = docJsonGz
+    ? { type: 'STEMSKETCH_SAVE', name, docJsonGz, units: doc.units, thumbnail }
+    : { type: 'STEMSKETCH_SAVE', name, docJson,   units: doc.units, thumbnail };
+  notifyParent(payload);
 }
 
 // Flash the cloud Save button green/red briefly, then revert. Reuses the
@@ -11526,8 +11886,50 @@ window.addEventListener('message', (e) => {
   } else if (data.type === 'STEMSKETCH_SAVE_ERR') {
     setStatus('⚠ Save failed: ' + (data.message || 'unknown error'));
     cloudSaveFlash(false, data.message);
+  } else if (data.type === 'STEMSKETCH_USER') {
+    applyUser(data.user);
   }
 });
+
+// ---------- Account menu (driven by the wrapper page's auth session) ----------
+// The wrapper posts STEMSKETCH_USER on load / session change; Sign Out posts
+// back so the parent can run next-auth's signOut(). Nav links use target=_top
+// (same-origin) to drive the whole page.
+function applyUser(user) {
+  const login  = document.getElementById('login-link');
+  const avatar = document.getElementById('user-avatar');
+  if (!login || !avatar) return;
+  if (user && user.signedIn) {
+    login.style.display = 'none';
+    avatar.style.display = 'flex';
+    if (user.image) {
+      avatar.innerHTML = '<img src="' + user.image + '" alt=""/>';
+    } else {
+      avatar.textContent = String(user.name || user.email || '?').trim().charAt(0).toUpperCase() || '?';
+    }
+    avatar.title = user.name || user.email || 'Account';
+  } else {
+    login.style.display = 'inline-flex';
+    avatar.style.display = 'none';
+  }
+}
+function initUserMenu() {
+  const avatar = document.getElementById('user-avatar');
+  const dd = document.getElementById('user-dropdown');
+  const signout = document.getElementById('signout-btn');
+  if (!avatar || !dd) return;
+  avatar.addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('show'); });
+  document.addEventListener('click', (e) => {
+    if (!dd.contains(e.target) && e.target !== avatar) dd.classList.remove('show');
+  });
+  if (signout) signout.addEventListener('click', () => {
+    dd.classList.remove('show');
+    notifyParent({ type: 'STEMSKETCH_SIGNOUT' });
+  });
+  // Ask the wrapper for the current session (covers the case where the parent
+  // posted STEMSKETCH_USER before this iframe finished wiring up).
+  notifyParent({ type: 'STEMSKETCH_REQUEST_USER' });
+}
 
 // ---------- Auto-dimension ----------
 function autoAddDimensions() {
@@ -11896,6 +12298,7 @@ function init() {
   // input lives in the topbar so STEM Builder can use it as the saved name.
   $('export-btn').onclick = openExportDialog;
   $('new-sketch-btn').onclick = openNewSketchDialog;
+  initUserMenu();
 
   // Length / angle inputs — Enter commits a vertex at the typed distance.
   // If angle field is filled, that angle (in degrees) is used; else cursor direction.
@@ -12058,13 +12461,15 @@ function init() {
     }
     // Cancel face-pick mode in 3D (also clears the bbox 6-face picker if up)
     if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody)) {
+      const wasFastener = !!doc.fastenerPlaceTarget;
       doc.faceMode = false;
       doc.curvedPickBody = null;
+      doc.fastenerPlaceTarget = null;
       if (viewer) {
         viewer.canvas.style.cursor = '';
         viewer.clearBboxFacePicker && viewer.clearBboxFacePicker();
       }
-      setStatus('Sketch on Face cancelled');
+      setStatus(wasFastener ? 'Fastener placement cancelled' : 'Sketch on Face cancelled');
     }
     // Cancel align mode
     if (e.key === 'Escape' && doc.alignMode) {
