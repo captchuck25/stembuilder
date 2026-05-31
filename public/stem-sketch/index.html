@@ -4627,6 +4627,49 @@ function projectBodiesOntoPlane(plane) {
     if (!body.mesh) continue;
     // Top-level extrude that came from the active sketch — skip its silhouette.
     if (isFromActiveSketch(body)) continue;
+    // Group bodies — minimal version: just project the body's mesh AABB to
+    // the sketch plane and emit a solid rectangle. We need to get the
+    // perimeter right first; hidden-line projection of internal cuts
+    // (dashed rectangles for holes) comes back once the outer outline is
+    // verified working in every view.
+    if ((body.type === 'group' || body.type === 'combined') && body.mesh) {
+      const wbb = new THREE.Box3().setFromObject(body.mesh);
+      if (wbb.isEmpty()) continue;
+      const cornersW = [
+        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.min.z),
+        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.min.z),
+        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.min.z),
+        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.min.z),
+        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.max.z),
+        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.max.z),
+        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.max.z),
+        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.max.z),
+      ];
+      let pMinX = Infinity, pMaxX = -Infinity, pMinY = Infinity, pMaxY = -Infinity;
+      let pMinZ = Infinity, pMaxZ = -Infinity;
+      for (const c of cornersW) {
+        const s = c.clone().applyMatrix4(planeMInv);
+        if (s.x < pMinX) pMinX = s.x;
+        if (s.x > pMaxX) pMaxX = s.x;
+        if (s.y < pMinY) pMinY = s.y;
+        if (s.y > pMaxY) pMaxY = s.y;
+        if (s.z < pMinZ) pMinZ = s.z;
+        if (s.z > pMaxZ) pMaxZ = s.z;
+      }
+      if (!isFinite(pMinX) || pMaxX - pMinX < 0.1 || pMaxY - pMinY < 0.1) continue;
+      const zMid = (pMinZ + pMaxZ) / 2;
+      const r = [
+        { x: pMinX, y: pMinY }, { x: pMaxX, y: pMinY },
+        { x: pMaxX, y: pMaxY }, { x: pMinX, y: pMaxY },
+      ];
+      for (let i = 0; i < 4; i++) {
+        const a = r[i], b = r[(i + 1) % 4];
+        segments.push({ p1: { x: a.x, y: a.y, z: zMid }, p2: { x: b.x, y: b.y, z: zMid }, dz1: zMid, dz2: zMid });
+      }
+      continue;
+    }
+    // ============================================================ DEAD CODE BELOW (kept for re-enable)
+    if (false) {
     // Group bodies — engineering-drawing style. Walk children and for each
     // one project its WORLD AABB onto the sketch plane as a rectangle.
     //   • Positive children  → solid rectangle (each contributes outer +
@@ -4795,6 +4838,7 @@ function projectBodiesOntoPlane(plane) {
       }
       continue;
     }
+    } // end DEAD CODE block (if false)
     // Smooth-surface bodies have no real edges — skip EdgesGeometry entirely
     // and let the silhouette code below render a clean circle/annulus.
     const skipEdges = body.type === 'sphere' || body.type === 'torus';
