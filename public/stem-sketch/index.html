@@ -4632,16 +4632,22 @@ function projectBodiesOntoPlane(plane) {
     // outlines (arch tops) because adjacent triangles on a tessellated
     // curve have small angles, and it KEEPS internal cylinder rings on
     // a CSG hole bore. Silhouette detection:
-    //   • Boundary edges (one adjacent triangle) → always show
     //   • Internal edges where one adjacent triangle faces the view and
-    //     the other faces away → silhouette (gives smooth-curve outlines)
+    //     the other faces away → silhouette (gives smooth-curve outlines
+    //     AND the real outer outline — at the silhouette of any solid
+    //     body, a front-facing triangle meets a back-facing one)
     //   • Internal edges with both triangles same-facing but sharp angle
-    //     between normals → crease (gives cube corners, step edges, etc.)
-    // Everything else (tessellation rings on smooth surfaces, coplanar
-    // CSG seams) is dropped.
+    //     between normals → crease (gives cube corners, step edges, hole rims)
+    // Boundary edges (one adjacent triangle) are SKIPPED. A grouped CSG
+    // result is a closed manifold by design — any "boundary" is a vertex-
+    // welding artifact from CSG output, and drawing them produces the
+    // horizontal-dash mess across smooth surfaces.
     if ((body.type === 'group' || body.type === 'combined') && body.mesh?.geometry) {
       try {
-        const welded = weldGeometryForEdges(body.mesh.geometry);
+        // 0.2 mm weld tolerance — wider than the previous 0.02 mm so CSG
+        // bore halves that don't quite share vertices still merge into a
+        // single mesh, leaving only the actual silhouette + creases.
+        const welded = weldGeometryForEdges(body.mesh.geometry, 0.2);
         const idx = welded.index;
         const pos = welded.attributes.position;
         if (idx && pos && pos.count > 0) {
@@ -4687,18 +4693,19 @@ function projectBodiesOntoPlane(plane) {
           const MIN_LEN_2D = 0.6;       // mm — drop hair-line tessellation artifacts in 2D
           const CREASE_DOT = Math.cos(35 * Math.PI / 180); // 35° crease threshold
           for (const [key, tris] of edgeMap) {
+            // Skip boundary edges entirely (1 adjacent triangle). They
+            // shouldn't exist in valid manifold CSG output — when they do,
+            // they're welding artifacts that draw as noise across the
+            // surface.
+            if (tris.length < 2) continue;
             let keep = false;
-            if (tris.length === 1) {
-              keep = true; // boundary edge
-            } else if (tris.length >= 2) {
-              const t0 = tris[0], t1 = tris[1];
-              if (triFront[t0] !== triFront[t1]) {
-                keep = true; // silhouette (one front, one back)
-              } else {
-                // Crease check: angle between face normals
-                const dot = triNx[t0] * triNx[t1] + triNy[t0] * triNy[t1] + triNz[t0] * triNz[t1];
-                if (dot < CREASE_DOT) keep = true;
-              }
+            const t0 = tris[0], t1 = tris[1];
+            if (triFront[t0] !== triFront[t1]) {
+              keep = true; // silhouette (one front, one back)
+            } else {
+              // Crease check: angle between face normals
+              const dot = triNx[t0] * triNx[t1] + triNy[t0] * triNy[t1] + triNz[t0] * triNz[t1];
+              if (dot < CREASE_DOT) keep = true;
             }
             if (!keep) continue;
             const i = (key / N) | 0, j = key - i * N;
