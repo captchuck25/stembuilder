@@ -4693,7 +4693,17 @@ function projectBodiesOntoPlane(plane) {
           }
           for (const e of edgeMap.values()) {
             if (e.count !== 1) continue; // shared = internal
-            segments.push({ p1: e.p1, p2: e.p2, dz1: e.p1.z, dz2: e.p2.z });
+            // Force every boundary edge to dz=0 so the renderer treats them
+            // as solid "in-plane" lines. The actual world-space depth of
+            // an edge isn't meaningful in an orthographic CAD projection —
+            // every visible silhouette edge belongs on the drawing plane.
+            // Hidden-line dashing for back-facing geometry will come from
+            // a separate pass that tags those edges with _cut.
+            segments.push({
+              p1: { x: e.p1.x, y: e.p1.y, z: 0 },
+              p2: { x: e.p2.x, y: e.p2.y, z: 0 },
+              dz1: 0, dz2: 0,
+            });
           }
         }
       } catch (_) { /* fail safe */ }
