@@ -4637,7 +4637,7 @@ function projectBodiesOntoPlane(plane) {
     //     disappear naturally — only the relevant interior dashed lines
     //     remain, matching standard hidden-line conventions)
     // Avoids edge-detection on the noisy CSG mesh entirely.
-    if (body.type === 'group' && Array.isArray(body.children)) {
+    if ((body.type === 'group' || body.type === 'combined') && Array.isArray(body.children)) {
       // Parent body's projected AABB for clipping negatives.
       const wbb = new THREE.Box3().setFromObject(body.mesh);
       const cornersW = [
@@ -4670,7 +4670,9 @@ function projectBodiesOntoPlane(plane) {
           y: offset.y + (child.y || 0),
           z: offset.z + (child.z || 0),
         };
-        if (child.type === 'group' && Array.isArray(child.children)) {
+        // Recurse into nested groups AND legacy 'combined' bodies (older
+        // boolean-cut results saved before the rename to group).
+        if ((child.type === 'group' || child.type === 'combined') && Array.isArray(child.children)) {
           for (const k of child.children) emitChildRect(k, off, isCut || k.op === 'subtract');
           return;
         }
@@ -4772,6 +4774,24 @@ function projectBodiesOntoPlane(plane) {
 
       for (const child of body.children) {
         emitChildRect(child, { x: body.x || 0, y: body.y || 0, z: body.z || 0 }, child.op === 'subtract');
+      }
+      // Outer outline guarantee: always project the body's full mesh AABB
+      // as a solid rectangle. Drops in last so its z is whatever it is, and
+      // overlaps with the largest positive child's rect when they coincide
+      // (the renderer doesn't double-stroke). Without this, models built
+      // from body types my analytic walk doesn't recognize (anything past
+      // extrude / cube / group / combined) wouldn't show their silhouette.
+      {
+        const zMid = (parentAabb2D.minY + parentAabb2D.maxY) / 2; // any consistent depth
+        const edges = [
+          [{ x: parentAabb2D.minX, y: parentAabb2D.minY }, { x: parentAabb2D.maxX, y: parentAabb2D.minY }],
+          [{ x: parentAabb2D.maxX, y: parentAabb2D.minY }, { x: parentAabb2D.maxX, y: parentAabb2D.maxY }],
+          [{ x: parentAabb2D.maxX, y: parentAabb2D.maxY }, { x: parentAabb2D.minX, y: parentAabb2D.maxY }],
+          [{ x: parentAabb2D.minX, y: parentAabb2D.maxY }, { x: parentAabb2D.minX, y: parentAabb2D.minY }],
+        ];
+        for (const [a, b] of edges) {
+          segments.push({ p1: { x: a.x, y: a.y, z: zMid }, p2: { x: b.x, y: b.y, z: zMid }, dz1: zMid, dz2: zMid });
+        }
       }
       continue;
     }
