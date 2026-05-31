@@ -4627,111 +4627,35 @@ function projectBodiesOntoPlane(plane) {
     if (!body.mesh) continue;
     // Top-level extrude that came from the active sketch — skip its silhouette.
     if (isFromActiveSketch(body)) continue;
-    // Group bodies — render each child's silhouette explicitly (clean) instead
-    // of running EdgesGeometry on the messy CSG result. Negative children get
-    // skipped entirely so the 2D view shows only what physically remains.
-    if (body.type === 'group' && Array.isArray(body.children)) {
-      // Compute the GROUP's bbox in plane-local 2D so we can clip negative
-      // children to where they actually remove material. A 2-inch cylinder
-      // cut through a 1-inch sphere should only show the 1 inch that was
-      // actually removed — the over-extrusion is invisible material.
-      const wbb = new THREE.Box3().setFromObject(body.mesh);
-      const cornersW = [
-        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.min.z),
-        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.min.z),
-        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.min.z),
-        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.min.z),
-        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.max.z),
-        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.max.z),
-        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.max.z),
-        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.max.z),
-      ];
-      let pMinX = Infinity, pMaxX = -Infinity, pMinY = Infinity, pMaxY = -Infinity;
-      for (const c of cornersW) {
-        const s = c.applyMatrix4(planeMInv);
-        if (s.x < pMinX) pMinX = s.x;
-        if (s.x > pMaxX) pMaxX = s.x;
-        if (s.y < pMinY) pMinY = s.y;
-        if (s.y > pMaxY) pMaxY = s.y;
-      }
-      const parentAabb = { minX: pMinX, maxX: pMaxX, minY: pMinY, maxY: pMaxY };
-      // Walk the tree. For each child we render its silhouette explicitly.
-      // Negative (cut) children are tagged so the SVG renderer can dash them —
-      // and are clipped to the parent body's projected AABB so the
-      // over-extrusion poking out of the body is hidden.
-      const walk = (kids, offset, parentIsCut) => {
-        for (const child of kids) {
-          // Skip child silhouette if its source IS the active sketch — the
-          // shape is already visible as a live source entity in the 2D view.
-          if (isFromActiveSketch(child)) continue;
-          const childIsCut = parentIsCut || child.op === 'subtract';
-          const off = {
-            x: offset.x + (child.x || 0),
-            y: offset.y + (child.y || 0),
-            z: offset.z + (child.z || 0),
-          };
-          if (child.type === 'group' && Array.isArray(child.children)) {
-            walk(child.children, off, childIsCut);
-            continue;
-          }
-          const before = segments.length;
-          projectChildAsStandalone(child, offset);
-          if (childIsCut) {
-            // Clip each segment to the parent body's projected AABB using
-            // Liang–Barsky parametric clipping. The midpoint test the old
-            // code did kept any segment whose centre landed in the body —
-            // a Through-cut prism's long side edges span the entire body
-            // with the midpoint inside, so the over-extrusion past the far
-            // face stayed visible. Proper clipping trims the endpoints to
-            // the AABB so only the part of the cut actually inside the
-            // body shows in the 2D view.
-            const PAD = 0.5; // mm — tolerance so coplanar edges aren't lost
-            const clipBox = {
-              minX: parentAabb.minX - PAD,
-              maxX: parentAabb.maxX + PAD,
-              minY: parentAabb.minY - PAD,
-              maxY: parentAabb.maxY + PAD,
-            };
-            const clipSeg = (s) => {
-              let t0 = 0, t1 = 1;
-              const dx = s.p2.x - s.p1.x;
-              const dy = s.p2.y - s.p1.y;
-              const p = [-dx, dx, -dy, dy];
-              const q = [
-                s.p1.x - clipBox.minX,
-                clipBox.maxX - s.p1.x,
-                s.p1.y - clipBox.minY,
-                clipBox.maxY - s.p1.y,
-              ];
-              for (let i = 0; i < 4; i++) {
-                if (Math.abs(p[i]) < 1e-9) {
-                  if (q[i] < 0) return null; // parallel and outside
-                  continue;
-                }
-                const t = q[i] / p[i];
-                if (p[i] < 0) { if (t > t1) return null; if (t > t0) t0 = t; }
-                else          { if (t < t0) return null; if (t < t1) t1 = t; }
-              }
-              const dz = s.p2.z - s.p1.z;
-              return {
-                p1: { x: s.p1.x + t0 * dx, y: s.p1.y + t0 * dy, z: s.p1.z + t0 * dz },
-                p2: { x: s.p1.x + t1 * dx, y: s.p1.y + t1 * dy, z: s.p1.z + t1 * dz },
-                dz1: s.p1.z + t0 * dz,
-                dz2: s.p1.z + t1 * dz,
-                _cut: true,
-              };
-            };
-            const kept = [];
-            for (let k = before; k < segments.length; k++) {
-              const trimmed = clipSeg(segments[k]);
-              if (trimmed) kept.push(trimmed);
-            }
-            segments.length = before;
-            for (const s of kept) segments.push(s);
+    // Group bodies — project the FINAL merged geometry's edges, not each
+    // input child. The old child-walk drew every negative-extrude
+    // silhouette (the cut tools) on top of the body, even after clipping,
+    // which made the 2D view show "what we used to remove material" rather
+    // than "what currently exists." EdgesGeometry on the welded final mesh
+    // gives only the silhouette + holes + step edges that physically remain.
+    // Front-vs-back classification falls out of the existing dz tracking
+    // so the SVG renderer can dash occluded edges (hidden lines).
+    if ((body.type === 'group' || body.type === 'combined') && body.mesh?.geometry) {
+      try {
+        const welded = weldGeometryForEdges(body.mesh.geometry);
+        const edges = new THREE.EdgesGeometry(welded, 35);
+        welded.dispose();
+        const pos = edges.attributes?.position;
+        if (pos && pos.count >= 2) {
+          const mw = body.mesh.matrixWorld;
+          const va = new THREE.Vector3(), vb = new THREE.Vector3();
+          const MIN_LEN = 0.6; // mm — drop CSG hair-line artifacts
+          for (let i = 0; i < pos.count; i += 2) {
+            va.fromBufferAttribute(pos, i);
+            vb.fromBufferAttribute(pos, i + 1);
+            const p1 = projPoint(va, mw);
+            const p2 = projPoint(vb, mw);
+            if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < MIN_LEN) continue;
+            segments.push({ p1, p2, dz1: p1.z, dz2: p2.z });
           }
         }
-      };
-      walk(body.children, { x: body.x || 0, y: body.y || 0, z: body.z || 0 }, false);
+        edges.dispose();
+      } catch (_) { /* some geometries reject EdgesGeometry */ }
       continue;
     }
     // Smooth-surface bodies have no real edges — skip EdgesGeometry entirely
