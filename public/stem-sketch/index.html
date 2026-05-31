@@ -4627,98 +4627,152 @@ function projectBodiesOntoPlane(plane) {
     if (!body.mesh) continue;
     // Top-level extrude that came from the active sketch — skip its silhouette.
     if (isFromActiveSketch(body)) continue;
-    // Group bodies — proper view-dependent silhouette detection on the
-    // final merged geometry. EdgesGeometry alone misses smooth-curve
-    // outlines (arch tops) because adjacent triangles on a tessellated
-    // curve have small angles, and it KEEPS internal cylinder rings on
-    // a CSG hole bore. Silhouette detection:
-    //   • Internal edges where one adjacent triangle faces the view and
-    //     the other faces away → silhouette (gives smooth-curve outlines
-    //     AND the real outer outline — at the silhouette of any solid
-    //     body, a front-facing triangle meets a back-facing one)
-    //   • Internal edges with both triangles same-facing but sharp angle
-    //     between normals → crease (gives cube corners, step edges, hole rims)
-    // Boundary edges (one adjacent triangle) are SKIPPED. A grouped CSG
-    // result is a closed manifold by design — any "boundary" is a vertex-
-    // welding artifact from CSG output, and drawing them produces the
-    // horizontal-dash mess across smooth surfaces.
-    if ((body.type === 'group' || body.type === 'combined') && body.mesh?.geometry) {
-      try {
-        // 0.2 mm weld tolerance — wider than the previous 0.02 mm so CSG
-        // bore halves that don't quite share vertices still merge into a
-        // single mesh, leaving only the actual silhouette + creases.
-        const welded = weldGeometryForEdges(body.mesh.geometry, 0.2);
-        const idx = welded.index;
-        const pos = welded.attributes.position;
-        if (idx && pos && pos.count > 0) {
-          const mw = body.mesh.matrixWorld;
-          const ix = idx.array;
-          const triCount = (ix.length / 3) | 0;
-          const N = pos.count;
-          // World-space view direction = the projection plane's normal.
-          const viewDir = new THREE.Vector3(...plane.n).normalize();
-          // Pre-compute each triangle's world-space face normal + front/back
-          // flag relative to viewDir.
-          const triNx = new Float32Array(triCount);
-          const triNy = new Float32Array(triCount);
-          const triNz = new Float32Array(triCount);
-          const triFront = new Uint8Array(triCount);
-          const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
-          const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3();
-          for (let t = 0; t < triCount; t++) {
-            const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
-            va.fromBufferAttribute(pos, i0).applyMatrix4(mw);
-            vb.fromBufferAttribute(pos, i1).applyMatrix4(mw);
-            vc.fromBufferAttribute(pos, i2).applyMatrix4(mw);
-            ab.subVectors(vb, va);
-            ac.subVectors(vc, va);
-            nrm.crossVectors(ab, ac);
-            const len = nrm.length();
-            if (len > 1e-9) nrm.multiplyScalar(1 / len);
-            triNx[t] = nrm.x; triNy[t] = nrm.y; triNz[t] = nrm.z;
-            triFront[t] = (nrm.dot(viewDir) >= 0) ? 1 : 0;
-          }
-          // Edge → list of triangle indices map. Edge key uses ordered pair.
-          const edgeMap = new Map();
-          const addEdge = (i, j, t) => {
-            const key = (i < j) ? (i * N + j) : (j * N + i);
-            let arr = edgeMap.get(key);
-            if (!arr) { arr = []; edgeMap.set(key, arr); }
-            arr.push(t);
-          };
-          for (let t = 0; t < triCount; t++) {
-            const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
-            addEdge(i0, i1, t); addEdge(i1, i2, t); addEdge(i2, i0, t);
-          }
-          const MIN_LEN_2D = 0.6;       // mm — drop hair-line tessellation artifacts in 2D
-          const CREASE_DOT = Math.cos(35 * Math.PI / 180); // 35° crease threshold
-          for (const [key, tris] of edgeMap) {
-            // Skip boundary edges entirely (1 adjacent triangle). They
-            // shouldn't exist in valid manifold CSG output — when they do,
-            // they're welding artifacts that draw as noise across the
-            // surface.
-            if (tris.length < 2) continue;
-            let keep = false;
-            const t0 = tris[0], t1 = tris[1];
-            if (triFront[t0] !== triFront[t1]) {
-              keep = true; // silhouette (one front, one back)
-            } else {
-              // Crease check: angle between face normals
-              const dot = triNx[t0] * triNx[t1] + triNy[t0] * triNy[t1] + triNz[t0] * triNz[t1];
-              if (dot < CREASE_DOT) keep = true;
-            }
-            if (!keep) continue;
-            const i = (key / N) | 0, j = key - i * N;
-            va.fromBufferAttribute(pos, i);
-            vb.fromBufferAttribute(pos, j);
-            const p1 = projPoint(va, mw);
-            const p2 = projPoint(vb, mw);
-            if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < MIN_LEN_2D) continue;
-            segments.push({ p1, p2, dz1: p1.z, dz2: p2.z });
-          }
+    // Group bodies — engineering-drawing style. Walk children and for each
+    // one project its WORLD AABB onto the sketch plane as a rectangle.
+    //   • Positive children  → solid rectangle (each contributes outer +
+    //     inner outlines as expected from a top-view CAD drawing)
+    //   • Negative children  → dashed rectangle CLIPPED to the parent
+    //     body's projected AABB (so over-extrude past the body is hidden,
+    //     and side edges that coincide with the parent silhouette
+    //     disappear naturally — only the relevant interior dashed lines
+    //     remain, matching standard hidden-line conventions)
+    // Avoids edge-detection on the noisy CSG mesh entirely.
+    if (body.type === 'group' && Array.isArray(body.children)) {
+      // Parent body's projected AABB for clipping negatives.
+      const wbb = new THREE.Box3().setFromObject(body.mesh);
+      const cornersW = [
+        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.min.z),
+        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.min.z),
+        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.min.z),
+        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.min.z),
+        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.max.z),
+        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.max.z),
+        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.max.z),
+        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.max.z),
+      ];
+      let pMinX = Infinity, pMaxX = -Infinity, pMinY = Infinity, pMaxY = -Infinity;
+      for (const c of cornersW) {
+        const s = c.clone().applyMatrix4(planeMInv);
+        if (s.x < pMinX) pMinX = s.x;
+        if (s.x > pMaxX) pMaxX = s.x;
+        if (s.y < pMinY) pMinY = s.y;
+        if (s.y > pMaxY) pMaxY = s.y;
+      }
+      const parentAabb2D = { minX: pMinX, maxX: pMaxX, minY: pMinY, maxY: pMaxY };
+
+      // Project a child to its 2D AABB rectangle on the sketch plane and
+      // emit its 4 edges. The child's own bbox is computed analytically
+      // so the projection is independent of the messy CSG mesh.
+      const emitChildRect = (child, offset, isCut) => {
+        if (isFromActiveSketch(child)) return;
+        const off = {
+          x: offset.x + (child.x || 0),
+          y: offset.y + (child.y || 0),
+          z: offset.z + (child.z || 0),
+        };
+        if (child.type === 'group' && Array.isArray(child.children)) {
+          for (const k of child.children) emitChildRect(k, off, isCut || k.op === 'subtract');
+          return;
         }
-        welded.dispose();
-      } catch (_) { /* some geometries reject the silhouette pass */ }
+        // Build the child's WORLD AABB without relying on a fresh mesh —
+        // compute from the parametric definition where possible. For
+        // extrudes, derive corners from the sketch's region bbox + plane;
+        // for primitives use w/h/d. Falls back to the body.mesh AABB if
+        // we built one already (preserves consistency for fasteners etc.).
+        let localCorners = null;
+        if (child.type === 'extrude' && child.sketch && child.plane) {
+          let bbX1 = Infinity, bbX2 = -Infinity, bbY1 = Infinity, bbY2 = -Infinity;
+          for (const e of (child.sketch.entities || [])) {
+            const eb = entityBBox(e);
+            if (!eb) continue;
+            if (eb.minX < bbX1) bbX1 = eb.minX;
+            if (eb.maxX > bbX2) bbX2 = eb.maxX;
+            if (eb.minY < bbY1) bbY1 = eb.minY;
+            if (eb.maxY > bbY2) bbY2 = eb.maxY;
+          }
+          if (isFinite(bbX1)) {
+            const h = child.height || 0;
+            const cornersLocal = [];
+            const planeM = makePlaneMatrix(child.plane);
+            for (const x of [bbX1, bbX2]) for (const y of [bbY1, bbY2]) for (const z of [0, h]) {
+              const v = new THREE.Vector3(x, y, z).applyMatrix4(planeM);
+              cornersLocal.push(v);
+            }
+            localCorners = cornersLocal;
+          }
+        } else if (typeof child.w === 'number' && typeof child.h === 'number' && typeof child.d === 'number') {
+          const hw = child.w / 2, hd = child.d / 2;
+          const yMin = 0, yMax = child.h;
+          const cube = [];
+          for (const x of [-hw, hw]) for (const y of [yMin, yMax]) for (const z of [-hd, hd]) {
+            cube.push(new THREE.Vector3(x, y, z));
+          }
+          localCorners = cube;
+        }
+        if (!localCorners) return;
+        // Apply the cumulative translation (group / parent offsets + child x/y/z)
+        for (const c of localCorners) c.add(new THREE.Vector3(off.x, off.y, off.z));
+        // Project to plane-local 2D and find AABB
+        let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity, cMaxY = -Infinity;
+        let cMinZ = Infinity, cMaxZ = -Infinity;
+        for (const c of localCorners) {
+          const s = c.applyMatrix4(planeMInv);
+          if (s.x < cMinX) cMinX = s.x;
+          if (s.x > cMaxX) cMaxX = s.x;
+          if (s.y < cMinY) cMinY = s.y;
+          if (s.y > cMaxY) cMaxY = s.y;
+          if (s.z < cMinZ) cMinZ = s.z;
+          if (s.z > cMaxZ) cMaxZ = s.z;
+        }
+        if (cMaxX - cMinX < 0.1 || cMaxY - cMinY < 0.1) return; // degenerate
+        // Use mid Z for the segments' depth (used by the front/back classifier)
+        const zMid = (cMinZ + cMaxZ) / 2;
+        const rectEdges = [
+          [{ x: cMinX, y: cMinY }, { x: cMaxX, y: cMinY }],
+          [{ x: cMaxX, y: cMinY }, { x: cMaxX, y: cMaxY }],
+          [{ x: cMaxX, y: cMaxY }, { x: cMinX, y: cMaxY }],
+          [{ x: cMinX, y: cMaxY }, { x: cMinX, y: cMinY }],
+        ];
+        const PAD = 0.5;
+        const cb = {
+          minX: parentAabb2D.minX - PAD,
+          maxX: parentAabb2D.maxX + PAD,
+          minY: parentAabb2D.minY - PAD,
+          maxY: parentAabb2D.maxY + PAD,
+        };
+        for (const [a, b] of rectEdges) {
+          let seg = { p1: { x: a.x, y: a.y, z: zMid }, p2: { x: b.x, y: b.y, z: zMid }, dz1: zMid, dz2: zMid };
+          if (isCut) {
+            // Liang-Barsky clip to parent AABB
+            let t0 = 0, t1 = 1;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const p = [-dx, dx, -dy, dy];
+            const q = [a.x - cb.minX, cb.maxX - a.x, a.y - cb.minY, cb.maxY - a.y];
+            let outside = false;
+            for (let i = 0; i < 4; i++) {
+              if (Math.abs(p[i]) < 1e-9) { if (q[i] < 0) { outside = true; break; } continue; }
+              const t = q[i] / p[i];
+              if (p[i] < 0) { if (t > t1) { outside = true; break; } if (t > t0) t0 = t; }
+              else          { if (t < t0) { outside = true; break; } if (t < t1) t1 = t; }
+            }
+            if (outside) continue;
+            seg = {
+              p1: { x: a.x + t0 * dx, y: a.y + t0 * dy, z: zMid },
+              p2: { x: a.x + t1 * dx, y: a.y + t1 * dy, z: zMid },
+              dz1: zMid, dz2: zMid,
+              _cut: true,
+            };
+            // Drop a clipped segment if it's basically a point (the
+            // negative's side that coincided with the parent boundary).
+            if (Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y) < 0.5) continue;
+          }
+          segments.push(seg);
+        }
+      };
+
+      for (const child of body.children) {
+        emitChildRect(child, { x: body.x || 0, y: body.y || 0, z: body.z || 0 }, child.op === 'subtract');
+      }
       continue;
     }
     // Smooth-surface bodies have no real edges — skip EdgesGeometry entirely
