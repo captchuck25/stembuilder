@@ -4627,13 +4627,14 @@ function projectBodiesOntoPlane(plane) {
     if (!body.mesh) continue;
     // Top-level extrude that came from the active sketch — skip its silhouette.
     if (isFromActiveSketch(body)) continue;
-    // Group bodies — project all front-facing triangles to 2D plane-local
+    // ALL body types — project all front-facing triangles to 2D plane-local
     // coords and emit the BOUNDARY of the union (every 2D edge that
     // appears in exactly one triangle). This is the actual silhouette of
     // the body as seen from the sketch plane: outer outline + holes where
-    // material has been cut away. Bbox-only projection couldn't show this
-    // because subtractive CSG doesn't shrink the bbox.
-    if ((body.type === 'group' || body.type === 'combined') && body.mesh?.geometry) {
+    // material has been cut away. Runs for groups, combined, and every
+    // primitive type so we get a consistent silhouette regardless of how
+    // the body was built.
+    if (body.mesh?.geometry) {
       try {
         const geo = body.mesh.geometry;
         const pos = geo.attributes.position;
