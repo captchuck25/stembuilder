@@ -1027,6 +1027,7 @@
   <symbol id="i-extrude" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M5 17L5 11L12 8L19 11L19 17L12 20Z"/><path d="M5 11L12 14L19 11 M12 14L12 20"/><path d="M12 6L12 2 M9 4L12 1L15 4"/></g></symbol>
   <symbol id="i-cube" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 7L12 3L20 7L20 17L12 21L4 17Z"/><path d="M4 7L12 11L20 7 M12 11L12 21"/></g></symbol>
   <symbol id="i-fastener" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3L16 3L16 7L8 7Z"/><path d="M10 7L10 21 M14 7L14 21"/><path d="M10 10L14 10 M10 13L14 13 M10 16L14 16 M10 19L14 19"/></g></symbol>
+  <symbol id="i-thread-mark" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="6"/><path d="M12 4L12 20 M4 12L20 12"/></g></symbol>
   <symbol id="i-boolean-cut" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="12" r="6"/><circle cx="16" cy="12" r="6" stroke-dasharray="2 2"/></g></symbol>
   <symbol id="i-align" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 6L21 6"/><rect x="5" y="9" width="6" height="10"/><rect x="13" y="11" width="6" height="8"/></g></symbol>
   <symbol id="i-mirror-3d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3L12 21" stroke-dasharray="2 2"/><path d="M4 8L4 16L10 16L10 8Z M4 8L7 5L10 8"/><path d="M20 8L20 16L14 16L14 8Z M20 8L17 5L14 8"/></g></symbol>
@@ -1091,6 +1092,7 @@
         <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
         <button class="tool" data-action="toggle-construction-vis" id="toggle-construction-vis" title="Show/hide all construction lines (visibility only — they stay in the sketch)"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Show</span></button>
         <button class="tool" data-tool="dimension" title="Dimension (D) — click two points to label the distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
+        <button class="tool" data-tool="thread-mark" title="Thread mark — drops a hole-center marker. In 3D, &quot;Threaded holes&quot; turns every mark into a real threaded hole at a chosen size + depth."><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thread</span></button>
         <button class="tool" data-action="auto-dim" title="Auto-dimension — add engineering dimensions to all shapes"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
         <div class="dropdown" id="shape2d-dropdown">
           <button class="tool has-dropdown" data-action="shape2d-menu" title="Insert a pre-made shape into the sketch"><svg class="ico"><use href="#i-hexagon"/></svg><span class="tool-label">Shape</span></button>
@@ -1150,6 +1152,7 @@
           </div>
         </div>
         <button class="tool" data-action="add-fastener" title="Add a threaded fastener (hex bolt, Phillips screw, socket cap, flat head)"><svg class="ico"><use href="#i-fastener"/></svg><span class="tool-label">Fastener</span></button>
+        <button class="tool" data-action="threaded-holes" title="Threaded holes — turn every Thread mark from the active sketch into a real threaded hole + visualizer bolt at the chosen size and depth"><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thd Holes</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)"><svg class="ico"><use href="#i-copy"/></svg><span class="tool-label">Copy</span></button>
         <button class="tool" data-action="paste" title="Paste (Ctrl+V)"><svg class="ico"><use href="#i-paste"/></svg><span class="tool-label">Paste</span></button>
@@ -1438,7 +1441,7 @@ class SketchEngine {
     this.updateNodeActions();
 
     this.tool = t;
-    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension');
+    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark');
     this.svg.classList.add('tool-' + t);
     document.querySelectorAll('#tools-2d .tool').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === t));
@@ -2520,6 +2523,23 @@ class SketchEngine {
     // Dimension tool — click two points (snap-aware) to drop a permanent
     // distance label. The picked points are the actual entity points if a
     // snap matched (endpoint, corner, etc.), otherwise the raw cursor.
+    if (this.tool === 'thread-mark') {
+      // Drop a thread-hole center mark. In 3D the "Thd Holes" action turns
+      // every mark in the active sketch into a real threaded hole + (opt.)
+      // matching bolt at a chosen size + depth.
+      pushUndo();
+      const mark = {
+        id: doc.sketch.nextId++,
+        type: 'threadMark',
+        cx: px, cy: py,
+      };
+      doc.sketch.entities.push(mark);
+      doc.selection = { kind: 'sketch', id: mark.id };
+      setStatus('Thread mark placed — switch to 3D and click "Thd Holes" to turn marks into real threaded holes.');
+      this.render(); renderTree(); renderProps();
+      return;
+    }
+
     if (this.tool === 'dimension') {
       if (!this.activeDim) {
         this.activeDim = { p1: { x: px, y: py } };
@@ -3540,6 +3560,10 @@ function pointSegDist(px, py, ax, ay, bx, by) {
 }
 
 function entityHit(ent, wx, wy, tol) {
+  if (ent.type === 'threadMark') {
+    // ~5 mm click target on top of the marker
+    return Math.hypot(wx - ent.cx, wy - ent.cy) < Math.max(tol, 5);
+  }
   if (ent.type === 'rect') {
     return wx >= ent.x - tol && wx <= ent.x + ent.w + tol &&
            wy >= ent.y - tol && wy <= ent.y + ent.h + tol;
@@ -3658,6 +3682,9 @@ function moveEntity(ent, start, dx, dy) {
 // form so the bbox reflects the actual rendered curve, not just the control pts.
 function entityBBox(ent) {
   if (!ent) return null;
+  if (ent.type === 'threadMark') {
+    return { minX: ent.cx, minY: ent.cy, maxX: ent.cx, maxY: ent.cy };
+  }
   if (ent.type === 'rect') {
     return { minX: ent.x, minY: ent.y, maxX: ent.x + ent.w, maxY: ent.y + ent.h };
   }
@@ -4104,6 +4131,22 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
       }
       // Closed dense polyline → no per-vertex handles (bbox controls all motion)
     }
+    return s;
+  }
+  if (ent.type === 'threadMark') {
+    // Hole-center marker: circle + crosshair, drawn in orange so it stands
+    // apart from regular geometry. Rendered as a feature, not exported.
+    const [cx, cy] = eng.worldToScreen(ent.cx, ent.cy);
+    const r = 8;
+    const stroke = selected ? '#e8732a' : '#ff9a3e';
+    let s = `<g class="thread-mark" data-thread-id="${ent.id}">`;
+    s += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${stroke}" stroke-width="1.6"/>`;
+    s += `<line x1="${cx - r - 3}" y1="${cy}" x2="${cx + r + 3}" y2="${cy}" stroke="${stroke}" stroke-width="1.4"/>`;
+    s += `<line x1="${cx}" y1="${cy - r - 3}" x2="${cx}" y2="${cy + r + 3}" stroke="${stroke}" stroke-width="1.4"/>`;
+    if (selected) {
+      s += `<rect class="entity-handle" x="${cx-3}" y="${cy-3}" width="6" height="6"/>`;
+    }
+    s += `</g>`;
     return s;
   }
   if (ent.type === 'dimension') {
@@ -8338,10 +8381,11 @@ const FASTENER_SPECS = [
   { key: 'M10', label: 'M10', d: 10, af: 17,   p: 1.50, system: 'Metric' },
   { key: 'M12', label: 'M12', d: 12, af: 19,   p: 1.75, system: 'Metric' },
 ];
-const FASTENER_HEAD_TYPES = ['hex', 'phillips', 'cap', 'flat'];
+const FASTENER_HEAD_TYPES = ['hex', 'phillips', 'cap', 'flat', 'none'];
 const FASTENER_FIT_CLEARANCE = { tight: 0, normal: 0.1, loose: 0.25 }; // mm radial
 const FASTENER_HEAD_LABELS = {
   hex: 'Hex bolt', phillips: 'Phillips screw', cap: 'Socket cap', flat: 'Machine screw',
+  none: 'Headless (threaded shaft only — for cut-out holes)',
 };
 
 function getFastenerSpec(key) {
@@ -8789,6 +8833,157 @@ function addFastener(headType, size, length, fit) {
 }
 
 // Open the fastener picker dialog — head type, size, length, fit all at once.
+// Convert every Thread mark in the active sketch into:
+//   (a) a real threaded hole (negative headless fastener, auto-grouped with
+//       the sketch's source body so CSG actually carves the helix), and
+//   (b) optionally a positive matching bolt at the same location so the
+//       student can see what the hole accepts.
+// The mark itself is left in the sketch as a reference. Re-running on a
+// sketch that's already been processed is a no-op for the mark (idempotent
+// — bodies are recreated each time, so undo the call if you don't like the
+// result).
+function openThreadedHolesDialog() {
+  if (doc.mode !== '3d') {
+    showHint('Switch to 3D first, then click Thd Holes.');
+    return;
+  }
+  const sketch = doc.sketches.find(s => s.id === doc.activeSketchId);
+  if (!sketch) { showHint('Open a sketch with Thread marks first.'); return; }
+  const marks = (sketch.entities || []).filter(e => e.type === 'threadMark');
+  if (!marks.length) {
+    showHint('Place Thread marks in the sketch (Thread tool in 2D) before running this.');
+    return;
+  }
+  const u = unitLabel();
+  const sizeOpts = FASTENER_SPECS.map(s =>
+    `<option value="${s.key}"${s.key === 'M5' ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
+  ).join('');
+  const defDepth = doc.units === 'in' ? 0.5 : 12;
+  openModal({
+    title: `Threaded holes (${marks.length} mark${marks.length === 1 ? '' : 's'})`,
+    body: `<p>For each mark in <b>${sketch.name || 'this sketch'}</b>, generate a real threaded hole at the chosen size and depth. Auto-groups with the sketch's parent body.</p>
+           <div class="field" style="margin-top:8px">
+             <label>Thread size</label>
+             <select id="th-size">${sizeOpts}</select>
+           </div>
+           <div class="field">
+             <label>Depth (${u})</label>
+             <input id="th-depth" type="number" value="${defDepth}" min="0.1" step="0.5"/>
+           </div>
+           <div class="field">
+             <label>Fit</label>
+             <select id="th-fit">
+               <option value="tight">Tight — actual size</option>
+               <option value="normal">Normal — +0.1 mm clearance</option>
+               <option value="loose" selected>Loose — +0.25 mm clearance (FDM-friendly)</option>
+             </select>
+           </div>
+           <label class="field" style="margin-top:6px">
+             <input type="checkbox" id="th-bolt" checked/>
+             <span>Place a matching visualizer bolt at each mark (hideable later)</span>
+           </label>
+           <div class="hint">The hole's axis is the sketch plane's normal. The bolt sits with head flush on the sketch plane, shaft pointing into the body.</div>`,
+    onConfirm: () => {
+      const size = $('th-size').value;
+      const depthVal = parseFloat($('th-depth').value);
+      const depth = depthVal > 0 ? fromUnit(depthVal) : 0;
+      const fit = $('th-fit').value || 'loose';
+      const placeBolt = $('th-bolt').checked;
+      if (depth <= 0) { showHint('Depth must be positive.'); return; }
+      processThreadMarks(sketch, marks, { size, depth, fit, placeBolt });
+    },
+  });
+}
+
+function processThreadMarks(sketch, marks, opts) {
+  pushUndo();
+  const planeM = makePlaneMatrix(sketch.plane);
+  const n = new THREE.Vector3(...sketch.plane.n).normalize();
+  // The hole goes INTO the body — opposite to the plane normal.
+  const holeAxis = n.clone().negate();
+  // Hole origin (where the fastener's shaft bottom sits = y=0 in fastener
+  // local) is at depth below the sketch plane along holeAxis.
+  // Fastener is modelled with shaft bottom at y=0 and head on top, so its
+  // local +Y direction is from tip → head. We want +Y to point along +n
+  // (out of the body) and bottom-of-shaft to be at (mark world position) +
+  // holeAxis × depth.
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+  const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+  const rotDeg = {
+    x: THREE.MathUtils.radToDeg(euler.x),
+    y: THREE.MathUtils.radToDeg(euler.y),
+    z: THREE.MathUtils.radToDeg(euler.z),
+  };
+  const hasParent = !!sketch.sourceBodyId;
+  const newSelection = [];
+  for (const m of marks) {
+    const markWorld = new THREE.Vector3(m.cx, m.cy, 0).applyMatrix4(planeM);
+    // The shaft bottom (local y=0) needs to be at markWorld + holeAxis * depth.
+    // Mesh origin = shaft bottom, so body.x/y/z = that point.
+    const shaftBottom = markWorld.clone().add(holeAxis.clone().multiplyScalar(opts.depth));
+    // Headless negative — the actual cut tool. Length = depth so the
+    // thread fully occupies the hole.
+    const hole = {
+      id: doc.nextBodyId++,
+      type: 'fastener',
+      headType: 'none',
+      size: opts.size,
+      length: opts.depth,
+      fit: opts.fit,
+      x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
+      rotation: { ...rotDeg },
+      op: 'subtract',
+    };
+    doc.bodies.push(hole);
+    // Re-resolve the parent body each iteration — earlier auto-groups
+    // consume the previous parent and produce a new group whose id is
+    // now stored on sketch.sourceBodyId (groupSelected updates that for
+    // us). Without this lookup, the second mark would try to group with
+    // a dead body id.
+    const parentNow = sketch.sourceBodyId
+      ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
+      : null;
+    if (parentNow && typeof CSG !== 'undefined') {
+      doc.multiSelectedBodies = [parentNow.id, hole.id];
+      groupSelected(true);
+    }
+    if (opts.placeBolt) {
+      // Matching bolt: head bottom flush on sketch plane at the mark, shaft
+      // points into the body along holeAxis = same orientation as the hole
+      // but with a real head (hex by default). Length matches depth.
+      const spec = getFastenerSpec(opts.size);
+      const shaftLen = opts.depth;
+      // Bolt body origin (shaft bottom) should land at shaftBottom too.
+      const bolt = {
+        id: doc.nextBodyId++,
+        type: 'fastener',
+        headType: 'hex',
+        size: opts.size,
+        length: shaftLen,
+        fit: 'tight',
+        x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
+        rotation: { ...rotDeg },
+        op: 'add',
+      };
+      doc.bodies.push(bolt);
+      newSelection.push(bolt.id);
+    }
+  }
+  // After the loop, the active group (if any) IS the new parent. Select
+  // it so undo/visual feedback land on the visible body.
+  if (hasParent) {
+    const finalGroup = doc.bodies.find(b => b.id === sketch.sourceBodyId);
+    if (finalGroup) {
+      doc.selection = { kind: 'body', id: finalGroup.id };
+      doc.multiSelectedBodies = [finalGroup.id, ...newSelection];
+    }
+  }
+  viewer.rebuildBodies();
+  renderTree(); renderProps();
+  const note = hasParent ? ' (auto-grouped)' : ' — drop them as Negative inside a body and group to cut';
+  setStatus(`Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''}${note}`);
+}
+
 function openFastenerDialog() {
   const u = unitLabel();
   const sizeOpts = FASTENER_SPECS.map(s =>
@@ -10687,6 +10882,13 @@ function renderProps() {
           <button type="button" data-type="construction"${ent.construction ? ' class="active"' : ''}>Construction</button>
         </div></div>
         <button class="action" id="del-ent" style="margin-top:10px">Delete shape</button>`;
+    } else if (ent.type === 'threadMark') {
+      props.innerHTML = `
+        <h4>Thread mark</h4>
+        <div class="field"><label>X (${u})</label><input type="number" data-k="cx" value="${fmtU(ent.cx)}" step="0.5"/></div>
+        <div class="field"><label>Y (${u})</label><input type="number" data-k="cy" value="${fmtU(ent.cy)}" step="0.5"/></div>
+        <div class="hint">Switch to 3D and click <b>Thd Holes</b> to turn every mark in this sketch into a real threaded hole + visualizer bolt.</div>
+        <button class="action" id="del-ent" style="margin-top:10px">Delete mark</button>`;
     } else if (ent.type === 'polyline') {
       let len = 0;
       for (let i = 0; i < ent.points.length - 1; i++) {
@@ -12221,6 +12423,7 @@ function init() {
       case 'sketch-on-face': startSketchOnFace(); break;
       case 'boolean-cut': startBooleanCut(); break;
       case 'add-fastener': openFastenerDialog(); break;
+      case 'threaded-holes': openThreadedHolesDialog(); break;
       case 'new-sketch': openNewSketchDialog(); break;
       case 'fillet-2d': openFilletDialog(); break;
       case 'fillet-3d': openFillet3DDialog(); break;
