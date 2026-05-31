@@ -4627,45 +4627,76 @@ function projectBodiesOntoPlane(plane) {
     if (!body.mesh) continue;
     // Top-level extrude that came from the active sketch — skip its silhouette.
     if (isFromActiveSketch(body)) continue;
-    // Group bodies — minimal version: just project the body's mesh AABB to
-    // the sketch plane and emit a solid rectangle. We need to get the
-    // perimeter right first; hidden-line projection of internal cuts
-    // (dashed rectangles for holes) comes back once the outer outline is
-    // verified working in every view.
-    if ((body.type === 'group' || body.type === 'combined') && body.mesh) {
-      const wbb = new THREE.Box3().setFromObject(body.mesh);
-      if (wbb.isEmpty()) continue;
-      const cornersW = [
-        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.min.z),
-        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.min.z),
-        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.min.z),
-        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.min.z),
-        new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.max.z),
-        new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.max.z),
-        new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.max.z),
-        new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.max.z),
-      ];
-      let pMinX = Infinity, pMaxX = -Infinity, pMinY = Infinity, pMaxY = -Infinity;
-      let pMinZ = Infinity, pMaxZ = -Infinity;
-      for (const c of cornersW) {
-        const s = c.clone().applyMatrix4(planeMInv);
-        if (s.x < pMinX) pMinX = s.x;
-        if (s.x > pMaxX) pMaxX = s.x;
-        if (s.y < pMinY) pMinY = s.y;
-        if (s.y > pMaxY) pMaxY = s.y;
-        if (s.z < pMinZ) pMinZ = s.z;
-        if (s.z > pMaxZ) pMaxZ = s.z;
-      }
-      if (!isFinite(pMinX) || pMaxX - pMinX < 0.1 || pMaxY - pMinY < 0.1) continue;
-      const zMid = (pMinZ + pMaxZ) / 2;
-      const r = [
-        { x: pMinX, y: pMinY }, { x: pMaxX, y: pMinY },
-        { x: pMaxX, y: pMaxY }, { x: pMinX, y: pMaxY },
-      ];
-      for (let i = 0; i < 4; i++) {
-        const a = r[i], b = r[(i + 1) % 4];
-        segments.push({ p1: { x: a.x, y: a.y, z: zMid }, p2: { x: b.x, y: b.y, z: zMid }, dz1: zMid, dz2: zMid });
-      }
+    // Group bodies — project all front-facing triangles to 2D plane-local
+    // coords and emit the BOUNDARY of the union (every 2D edge that
+    // appears in exactly one triangle). This is the actual silhouette of
+    // the body as seen from the sketch plane: outer outline + holes where
+    // material has been cut away. Bbox-only projection couldn't show this
+    // because subtractive CSG doesn't shrink the bbox.
+    if ((body.type === 'group' || body.type === 'combined') && body.mesh?.geometry) {
+      try {
+        const geo = body.mesh.geometry;
+        const pos = geo.attributes.position;
+        const idx = geo.index;
+        const mw = body.mesh.matrixWorld;
+        if (pos) {
+          const viewDir = new THREE.Vector3(...plane.n).normalize();
+          // Quantise endpoints to a grid so floating-point jitter doesn't
+          // turn shared edges into "boundary" edges (= every edge would
+          // emit). 0.05 mm grid is below any meaningful feature size.
+          const Q = 1 / 0.05;
+          const qx = (n) => Math.round(n * Q);
+          const edgeMap = new Map();
+          const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+          const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3();
+          const triCount = idx ? (idx.count / 3) | 0 : (pos.count / 3) | 0;
+          const getIdx = (t, k) => idx ? idx.getX(t * 3 + k) : (t * 3 + k);
+          for (let t = 0; t < triCount; t++) {
+            const i0 = getIdx(t, 0), i1 = getIdx(t, 1), i2 = getIdx(t, 2);
+            va.fromBufferAttribute(pos, i0).applyMatrix4(mw);
+            vb.fromBufferAttribute(pos, i1).applyMatrix4(mw);
+            vc.fromBufferAttribute(pos, i2).applyMatrix4(mw);
+            // Front-facing only — we want the silhouette of geometry that
+            // FACES the sketch plane (the side the user is looking at).
+            ab.subVectors(vb, va);
+            ac.subVectors(vc, va);
+            nrm.crossVectors(ab, ac);
+            if (nrm.dot(viewDir) < 0) continue;
+            // Project to plane-local 2D
+            const pa = va.clone().applyMatrix4(planeMInv);
+            const pb = vb.clone().applyMatrix4(planeMInv);
+            const pc = vc.clone().applyMatrix4(planeMInv);
+            // Three edges per triangle. Hash by ordered pair of quantised
+            // endpoints so opposite-orientation edges (shared between two
+            // triangles) collide and cancel.
+            const e = [
+              [pa, pb], [pb, pc], [pc, pa],
+            ];
+            for (const [u, v] of e) {
+              const ux = qx(u.x), uy = qx(u.y), vx = qx(v.x), vy = qx(v.y);
+              // Order endpoints so the same edge is hashed identically
+              // regardless of which triangle visits it first.
+              let kA, kB, p1, p2;
+              if (ux < vx || (ux === vx && uy < vy)) {
+                kA = ux + ':' + uy; kB = vx + ':' + vy; p1 = u; p2 = v;
+              } else {
+                kA = vx + ':' + vy; kB = ux + ':' + uy; p1 = v; p2 = u;
+              }
+              const key = kA + '|' + kB;
+              const existing = edgeMap.get(key);
+              if (existing) {
+                existing.count++;
+              } else {
+                edgeMap.set(key, { p1: { x: p1.x, y: p1.y, z: p1.z }, p2: { x: p2.x, y: p2.y, z: p2.z }, count: 1 });
+              }
+            }
+          }
+          for (const e of edgeMap.values()) {
+            if (e.count !== 1) continue; // shared = internal
+            segments.push({ p1: e.p1, p2: e.p2, dz1: e.p1.z, dz2: e.p2.z });
+          }
+        }
+      } catch (_) { /* fail safe */ }
       continue;
     }
     // ============================================================ DEAD CODE BELOW (kept for re-enable)
