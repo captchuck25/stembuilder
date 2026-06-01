@@ -4636,81 +4636,61 @@ function projectBodiesOntoPlane(plane) {
     // the body was built.
     if (body.mesh?.geometry) {
       try {
-        const geo = body.mesh.geometry;
-        const pos = geo.attributes.position;
-        const idx = geo.index;
+        // Weld vertices first. After welding, two triangles that share
+        // an edge have IDENTICAL vertex indices, so edge matching becomes
+        // exact integer comparison — no floating-point tolerance ever
+        // again. weldGeometryForEdges at 0.1 mm catches CSG vertex drift
+        // while staying below any meaningful feature size.
+        const welded = weldGeometryForEdges(body.mesh.geometry, 0.1);
+        const pos = welded.attributes.position;
+        const idx = welded.index;
         const mw = body.mesh.matrixWorld;
-        if (pos) {
+        if (pos && idx) {
           const viewDir = new THREE.Vector3(...plane.n).normalize();
-          // Quantise endpoints to a grid so floating-point jitter from CSG
-          // output doesn't turn shared interior edges into "boundary"
-          // edges. 0.05 mm was too tight — CSG bores have triangles whose
-          // vertices drift by 0.1+ mm, leaving fragmented outlines that
-          // LOOK dashed because each small boundary segment has gaps to
-          // the next. 0.5 mm is below print resolution but large enough
-          // to merge tessellation neighbours.
-          const Q = 1 / 0.5;
-          const qx = (n) => Math.round(n * Q);
-          const edgeMap = new Map();
+          const triCount = (idx.count / 3) | 0;
+          const N = pos.count;
           const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
           const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3();
-          const triCount = idx ? (idx.count / 3) | 0 : (pos.count / 3) | 0;
-          const getIdx = (t, k) => idx ? idx.getX(t * 3 + k) : (t * 3 + k);
+          // Edge → count map. Key = min_index * N + max_index (exact).
+          const edgeMap = new Map();
+          const bumpEdge = (a, b) => {
+            const lo = a < b ? a : b, hi = a < b ? b : a;
+            const key = lo * N + hi;
+            edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
+          };
+          const ix = idx.array;
           for (let t = 0; t < triCount; t++) {
-            const i0 = getIdx(t, 0), i1 = getIdx(t, 1), i2 = getIdx(t, 2);
+            const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
             va.fromBufferAttribute(pos, i0).applyMatrix4(mw);
             vb.fromBufferAttribute(pos, i1).applyMatrix4(mw);
             vc.fromBufferAttribute(pos, i2).applyMatrix4(mw);
-            // Front-facing only — we want the silhouette of geometry that
-            // FACES the sketch plane (the side the user is looking at).
+            // Front-facing only.
             ab.subVectors(vb, va);
             ac.subVectors(vc, va);
             nrm.crossVectors(ab, ac);
             if (nrm.dot(viewDir) < 0) continue;
-            // Project to plane-local 2D
-            const pa = va.clone().applyMatrix4(planeMInv);
-            const pb = vb.clone().applyMatrix4(planeMInv);
-            const pc = vc.clone().applyMatrix4(planeMInv);
-            // Three edges per triangle. Hash by ordered pair of quantised
-            // endpoints so opposite-orientation edges (shared between two
-            // triangles) collide and cancel.
-            const e = [
-              [pa, pb], [pb, pc], [pc, pa],
-            ];
-            for (const [u, v] of e) {
-              const ux = qx(u.x), uy = qx(u.y), vx = qx(v.x), vy = qx(v.y);
-              // Order endpoints so the same edge is hashed identically
-              // regardless of which triangle visits it first.
-              let kA, kB, p1, p2;
-              if (ux < vx || (ux === vx && uy < vy)) {
-                kA = ux + ':' + uy; kB = vx + ':' + vy; p1 = u; p2 = v;
-              } else {
-                kA = vx + ':' + vy; kB = ux + ':' + uy; p1 = v; p2 = u;
-              }
-              const key = kA + '|' + kB;
-              const existing = edgeMap.get(key);
-              if (existing) {
-                existing.count++;
-              } else {
-                edgeMap.set(key, { p1: { x: p1.x, y: p1.y, z: p1.z }, p2: { x: p2.x, y: p2.y, z: p2.z }, count: 1 });
-              }
-            }
+            bumpEdge(i0, i1);
+            bumpEdge(i1, i2);
+            bumpEdge(i2, i0);
           }
-          for (const e of edgeMap.values()) {
-            if (e.count !== 1) continue; // shared = internal
-            // Force every boundary edge to dz=0 so the renderer treats them
-            // as solid "in-plane" lines. The actual world-space depth of
-            // an edge isn't meaningful in an orthographic CAD projection —
-            // every visible silhouette edge belongs on the drawing plane.
-            // Hidden-line dashing for back-facing geometry will come from
-            // a separate pass that tags those edges with _cut.
+          // Emit each edge with count == 1 (boundary of front-facing union).
+          const tmp = new THREE.Vector3();
+          for (const [key, count] of edgeMap) {
+            if (count !== 1) continue;
+            const hi = key % N;
+            const lo = (key - hi) / N;
+            tmp.fromBufferAttribute(pos, lo).applyMatrix4(mw);
+            const pa = tmp.clone().applyMatrix4(planeMInv);
+            tmp.fromBufferAttribute(pos, hi).applyMatrix4(mw);
+            const pb = tmp.clone().applyMatrix4(planeMInv);
             segments.push({
-              p1: { x: e.p1.x, y: e.p1.y, z: 0 },
-              p2: { x: e.p2.x, y: e.p2.y, z: 0 },
+              p1: { x: pa.x, y: pa.y, z: 0 },
+              p2: { x: pb.x, y: pb.y, z: 0 },
               dz1: 0, dz2: 0,
             });
           }
         }
+        welded.dispose();
       } catch (_) { /* fail safe */ }
       continue;
     }
