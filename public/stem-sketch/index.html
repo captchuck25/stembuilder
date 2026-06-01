@@ -4494,7 +4494,9 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
   // of consecutive edge pixels as line segments along each row + column
   // so the renderer doesn't get a million single-pixel segments.
   const px2u = (px) => pMinX + (px / W) * finalSpanX;
-  const px2v = (py) => pMaxY - (py / H) * finalSpanY; // flip Y
+  // readRenderTargetPixels delivers row 0 at the BOTTOM of the texture
+  // (WebGL convention). Map py=0 → pMinY so the output isn't flipped.
+  const px2v = (py) => pMinY + (py / H) * finalSpanY;
   const out = [];
   // Horizontal runs
   for (let y = 0; y < H; y++) {
