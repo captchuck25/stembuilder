@@ -952,11 +952,7 @@
   .body-outline {
     stroke: #6b7a96;
     stroke-width: 1.2;
-    /* TEMP DEBUG: force every body-outline to render solid regardless of
-       in-plane / depth tagging. If the user still sees ANY dashed lines
-       on the bracket silhouette, those lines aren't .body-outline at all
-       and come from a different render pass. */
-    stroke-dasharray: none;
+    stroke-dasharray: 5 4;
     opacity: 0.75;
     fill: none;
     pointer-events: none;
@@ -975,10 +971,7 @@
      over both the default (hidden) and in-plane styles. */
   .body-outline.cut {
     stroke: #c0392b;
-    /* TEMP DEBUG: force solid regardless of in-plane state. If user
-       still sees dashed lines on the bracket, they're not from any
-       body-outline class. */
-    stroke-dasharray: none;
+    stroke-dasharray: 6 4;
     opacity: 0.85;
     stroke-width: 1.4;
   }
@@ -4649,10 +4642,14 @@ function projectBodiesOntoPlane(plane) {
         const mw = body.mesh.matrixWorld;
         if (pos) {
           const viewDir = new THREE.Vector3(...plane.n).normalize();
-          // Quantise endpoints to a grid so floating-point jitter doesn't
-          // turn shared edges into "boundary" edges (= every edge would
-          // emit). 0.05 mm grid is below any meaningful feature size.
-          const Q = 1 / 0.05;
+          // Quantise endpoints to a grid so floating-point jitter from CSG
+          // output doesn't turn shared interior edges into "boundary"
+          // edges. 0.05 mm was too tight — CSG bores have triangles whose
+          // vertices drift by 0.1+ mm, leaving fragmented outlines that
+          // LOOK dashed because each small boundary segment has gaps to
+          // the next. 0.5 mm is below print resolution but large enough
+          // to merge tessellation neighbours.
+          const Q = 1 / 0.5;
           const qx = (n) => Math.round(n * Q);
           const edgeMap = new Map();
           const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
@@ -4969,18 +4966,10 @@ function projectBodiesOntoPlane(plane) {
   }
   // Defensive: while we work through the projection pipeline, force every
   // emitted segment to render as solid in-plane. We can layer hidden-line
-  // dashing back on top later by tagging specific segments with _cut. This
-  // catches any stray emitters in legacy / fallback paths that still set
-  // real-depth z values.
+  // dashing back on top later by tagging specific segments with _cut.
   for (const s of segments) {
     s.dz1 = 0;
     s.dz2 = 0;
-    // TEMP DEBUG: tag every segment as a "cut" so it renders solid RED
-    // (CSS rule .body-outline.cut.in-plane). Lets us verify whether the
-    // faint dashed lines in the user's screenshot are from this function
-    // or from a separate pass we haven't found yet. Will be removed once
-    // diagnosed.
-    s._cut = true;
   }
   return segments;
 }
