@@ -4309,6 +4309,249 @@ function planeFromFace(originVec, normalVec) {
 // the plane (used to mark in-plane edges as solid vs. off-plane as dashed).
 // Uses THREE.EdgesGeometry so groups/CSG-merged bodies expose interior step
 // edges — the orthographic-drawing look.
+// Canvas-based technical-drawing edge extraction. Renders the body's mesh
+// to an offscreen target with a normal-output shader, then walks the
+// pixel buffer to find boundaries (silhouette) and crease lines (where
+// surface normals change abruptly). Robust against CSG mesh artifacts
+// because it operates in image space — fan triangulations and unwelded
+// vertices don't affect the rendered pixels.
+//
+// Caches the offscreen renderer + render target so repeated calls during
+// a sketch session don't re-allocate WebGL resources.
+const _edgeRender = {
+  renderer: null,
+  target: null,
+  scene: null,
+  camera: null,
+  material: null,
+  meshCache: new WeakMap(), // body.mesh → cached segments + plane signature
+};
+
+function _ensureEdgeRenderer(W, H) {
+  if (!_edgeRender.renderer) {
+    // Share the main renderer's WebGL context to avoid spinning up a
+    // second one (Chromebooks already cap us at ~16 contexts per tab).
+    if (!viewer?.renderer) return null;
+    _edgeRender.renderer = viewer.renderer;
+    _edgeRender.material = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
+      vertexShader: `
+        varying vec3 vN;
+        void main() {
+          vN = normalize(mat3(modelMatrix) * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vN;
+        void main() {
+          gl_FragColor = vec4(vN * 0.5 + 0.5, 1.0);
+        }
+      `,
+    });
+    _edgeRender.scene = new THREE.Scene();
+    _edgeRender.scene.background = new THREE.Color(0x000000);
+    _edgeRender.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+  }
+  if (!_edgeRender.target || _edgeRender.target.width !== W || _edgeRender.target.height !== H) {
+    if (_edgeRender.target) _edgeRender.target.dispose();
+    _edgeRender.target = new THREE.WebGLRenderTarget(W, H, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+    });
+  }
+  return _edgeRender;
+}
+
+function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
+  if (!body.mesh?.geometry || !viewer?.renderer) return;
+
+  // Per-body cache: if the plane signature + mesh identity haven't changed,
+  // reuse the previously-computed segments instead of re-rendering.
+  const planeSig = plane.origin.join(',') + '|' + plane.n.join(',') + '|' + plane.u.join(',');
+  let cache = _edgeRender.meshCache.get(body.mesh);
+  if (cache && cache.planeSig === planeSig) {
+    for (const s of cache.segments) segments.push(s);
+    return;
+  }
+
+  // Compute the body's projected bbox on the sketch plane so the camera
+  // fits it tightly with a small margin.
+  viewer.scene.updateMatrixWorld(true);
+  const wbb = new THREE.Box3().setFromObject(body.mesh);
+  if (wbb.isEmpty()) return;
+  const corners = [
+    new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.min.z),
+    new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.min.z),
+    new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.min.z),
+    new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.min.z),
+    new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.max.z),
+    new THREE.Vector3(wbb.max.x, wbb.min.y, wbb.max.z),
+    new THREE.Vector3(wbb.max.x, wbb.max.y, wbb.max.z),
+    new THREE.Vector3(wbb.min.x, wbb.max.y, wbb.max.z),
+  ];
+  let pMinX = Infinity, pMaxX = -Infinity, pMinY = Infinity, pMaxY = -Infinity;
+  let pMinZ = Infinity, pMaxZ = -Infinity;
+  for (const c of corners) {
+    const p = c.clone().applyMatrix4(planeMInv);
+    if (p.x < pMinX) pMinX = p.x; if (p.x > pMaxX) pMaxX = p.x;
+    if (p.y < pMinY) pMinY = p.y; if (p.y > pMaxY) pMaxY = p.y;
+    if (p.z < pMinZ) pMinZ = p.z; if (p.z > pMaxZ) pMaxZ = p.z;
+  }
+  const spanX = pMaxX - pMinX;
+  const spanY = pMaxY - pMinY;
+  if (spanX < 0.01 || spanY < 0.01) return;
+  const margin = Math.max(spanX, spanY) * 0.04;
+  pMinX -= margin; pMaxX += margin;
+  pMinY -= margin; pMaxY += margin;
+  const finalSpanX = pMaxX - pMinX;
+  const finalSpanY = pMaxY - pMinY;
+
+  // Pick render resolution — square texture, sized by the body's span so
+  // 1 px ≈ 0.1 mm in world units. Capped at 1024 to stay reasonable.
+  const targetMmPerPx = 0.1;
+  const idealSize = Math.max(finalSpanX, finalSpanY) / targetMmPerPx;
+  const W = Math.min(1024, Math.max(256, Math.ceil(idealSize / 64) * 64));
+  const H = W;
+  const er = _ensureEdgeRenderer(W, H);
+  if (!er) return;
+
+  // Build camera oriented along plane.n looking at the body.
+  const planeOrigin = new THREE.Vector3(...plane.origin);
+  const planeNormal = new THREE.Vector3(...plane.n).normalize();
+  const planeU = new THREE.Vector3(...plane.u).normalize();
+  const planeV = new THREE.Vector3(...plane.v).normalize();
+  const cu = (pMinX + pMaxX) / 2;
+  const cv = (pMinY + pMaxY) / 2;
+  const camTarget = planeOrigin.clone()
+    .add(planeU.clone().multiplyScalar(cu))
+    .add(planeV.clone().multiplyScalar(cv));
+  // Camera sits well behind the body along +n, large enough to cover any
+  // body depth. Render through to the far back.
+  const camDist = (pMaxZ - pMinZ) * 4 + 200;
+  er.camera.left   = -finalSpanX / 2;
+  er.camera.right  =  finalSpanX / 2;
+  er.camera.top    =  finalSpanY / 2;
+  er.camera.bottom = -finalSpanY / 2;
+  er.camera.near = 0.1;
+  er.camera.far  = camDist * 4;
+  er.camera.position.copy(camTarget).add(planeNormal.clone().multiplyScalar(camDist));
+  er.camera.up.copy(planeV);
+  er.camera.lookAt(camTarget);
+  er.camera.updateProjectionMatrix();
+  er.camera.updateMatrixWorld(true);
+
+  // Swap our temp mesh in. Reuse the body's geometry directly (don't
+  // clone — too expensive) but use our normal-output shader.
+  while (er.scene.children.length) er.scene.remove(er.scene.children[0]);
+  const tempMesh = new THREE.Mesh(body.mesh.geometry, er.material);
+  tempMesh.applyMatrix4(body.mesh.matrixWorld);
+  er.scene.add(tempMesh);
+
+  // Render to the offscreen target.
+  const oldTarget = er.renderer.getRenderTarget();
+  const oldAutoClear = er.renderer.autoClear;
+  er.renderer.setRenderTarget(er.target);
+  er.renderer.autoClear = true;
+  er.renderer.clear(true, true, false);
+  er.renderer.render(er.scene, er.camera);
+  er.renderer.setRenderTarget(oldTarget);
+  er.renderer.autoClear = oldAutoClear;
+
+  // Read back the pixel data.
+  const pixels = new Uint8Array(W * H * 4);
+  er.renderer.readRenderTargetPixels(er.target, 0, 0, W, H, pixels);
+
+  // Edge detection: silhouette (background neighbor) OR crease (normal
+  // differs significantly from neighbor). Walk 4-connected neighbors.
+  const edgeMask = new Uint8Array(W * H);
+  const NORMAL_DIFF_THRESHOLD = 64; // out of 255 per channel
+  const isOnSurface = (idx) => pixels[idx + 3] >= 128; // alpha test
+  for (let y = 1; y < H - 1; y++) {
+    for (let x = 1; x < W - 1; x++) {
+      const i = (y * W + x) * 4;
+      if (!isOnSurface(i)) continue;
+      const nx = pixels[i];
+      const ny = pixels[i + 1];
+      const nz = pixels[i + 2];
+      const ni = [
+        ((y - 1) * W + x) * 4, ((y + 1) * W + x) * 4,
+        (y * W + (x - 1)) * 4, (y * W + (x + 1)) * 4,
+      ];
+      let edge = false;
+      for (const k of ni) {
+        if (!isOnSurface(k)) { edge = true; break; }
+        const dd = Math.abs(pixels[k] - nx) + Math.abs(pixels[k + 1] - ny) + Math.abs(pixels[k + 2] - nz);
+        if (dd > NORMAL_DIFF_THRESHOLD) { edge = true; break; }
+      }
+      if (edge) edgeMask[y * W + x] = 1;
+    }
+  }
+
+  // Convert edge pixels back to plane-local 2D world coords. Emit chains
+  // of consecutive edge pixels as line segments along each row + column
+  // so the renderer doesn't get a million single-pixel segments.
+  const px2u = (px) => pMinX + (px / W) * finalSpanX;
+  const px2v = (py) => pMaxY - (py / H) * finalSpanY; // flip Y
+  const out = [];
+  // Horizontal runs
+  for (let y = 0; y < H; y++) {
+    let runStart = -1;
+    for (let x = 0; x < W; x++) {
+      const on = edgeMask[y * W + x];
+      if (on && runStart < 0) runStart = x;
+      else if (!on && runStart >= 0) {
+        if (x - runStart >= 2) {
+          out.push({
+            p1: { x: px2u(runStart),       y: px2v(y), z: 0 },
+            p2: { x: px2u(x - 1),          y: px2v(y), z: 0 },
+            dz1: 0, dz2: 0,
+          });
+        }
+        runStart = -1;
+      }
+    }
+    if (runStart >= 0 && W - runStart >= 2) {
+      out.push({
+        p1: { x: px2u(runStart), y: px2v(y), z: 0 },
+        p2: { x: px2u(W - 1),    y: px2v(y), z: 0 },
+        dz1: 0, dz2: 0,
+      });
+    }
+  }
+  // Vertical runs
+  for (let x = 0; x < W; x++) {
+    let runStart = -1;
+    for (let y = 0; y < H; y++) {
+      const on = edgeMask[y * W + x];
+      if (on && runStart < 0) runStart = y;
+      else if (!on && runStart >= 0) {
+        if (y - runStart >= 2) {
+          out.push({
+            p1: { x: px2u(x), y: px2v(runStart), z: 0 },
+            p2: { x: px2u(x), y: px2v(y - 1),    z: 0 },
+            dz1: 0, dz2: 0,
+          });
+        }
+        runStart = -1;
+      }
+    }
+    if (runStart >= 0 && H - runStart >= 2) {
+      out.push({
+        p1: { x: px2u(x), y: px2v(runStart), z: 0 },
+        p2: { x: px2u(x), y: px2v(H - 1),    z: 0 },
+        dz1: 0, dz2: 0,
+      });
+    }
+  }
+
+  // Cache and emit.
+  _edgeRender.meshCache.set(body.mesh, { planeSig, segments: out });
+  for (const s of out) segments.push(s);
+}
+
 function projectBodiesOntoPlane(plane) {
   const segments = [];
   if (typeof viewer === 'undefined' || !viewer) return segments;
@@ -4700,25 +4943,21 @@ function projectBodiesOntoPlane(plane) {
     // and let the silhouette code below render a clean circle/annulus.
     const skipEdges = body.type === 'sphere' || body.type === 'torus';
     let usedEdges = false;
-    if (!skipEdges) try {
-      // Weld vertices first for groups (CSG output has duplicated
-      // apex vertices at fan-triangulation seams; without welding, every
-      // radial edge of the fan emits as a boundary edge because each fan
-      // triangle has its own slightly-offset apex). For primitives the
-      // mesh is already clean.
-      const isCSG = body.type === 'group' || body.type === 'combined';
-      const srcGeo = isCSG
-        ? weldGeometryForEdges(body.mesh.geometry, 0.1)
-        : body.mesh.geometry;
-      const ANGLE = isCSG ? 35 : 25;
-      const MIN_LEN = isCSG ? 0.5 : 0.25;
-      const edges = new THREE.EdgesGeometry(srcGeo, ANGLE);
-      if (isCSG) srcGeo.dispose();
+    // For CSG groups, route to the canvas-based edge extraction (works in
+    // image space — robust against fan triangulations and unwelded
+    // vertices that defeat EdgesGeometry on CSG output).
+    const isCSG = body.type === 'group' || body.type === 'combined';
+    if (isCSG) {
+      projectBodyEdgesViaCanvas(body, plane, planeMInv, segments);
+      usedEdges = true;
+    } else if (!skipEdges) try {
+      const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
       const pos = edges.attributes?.position;
       if (pos && pos.count >= 2) {
         usedEdges = true;
         const mw = body.mesh.matrixWorld;
         const va = new THREE.Vector3(), vb = new THREE.Vector3();
+        const MIN_LEN = 0.25;
         for (let i = 0; i < pos.count; i += 2) {
           va.fromBufferAttribute(pos, i);
           vb.fromBufferAttribute(pos, i + 1);
