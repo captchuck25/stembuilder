@@ -4636,12 +4636,17 @@ function projectBodiesOntoPlane(plane) {
     // the body was built.
     if (body.mesh?.geometry) {
       try {
-        // Weld vertices first. After welding, two triangles that share
-        // an edge have IDENTICAL vertex indices, so edge matching becomes
-        // exact integer comparison — no floating-point tolerance ever
-        // again. weldGeometryForEdges at 0.1 mm catches CSG vertex drift
-        // while staying below any meaningful feature size.
-        const welded = weldGeometryForEdges(body.mesh.geometry, 0.1);
+        // Cache the welded geometry per body — welding the mesh on every
+        // render is what was freezing the tab during face sketches. The
+        // cache is keyed by mesh identity, so any rebuildBodies() that
+        // creates a new mesh automatically invalidates it.
+        let cache = body._projCache;
+        if (!cache || cache.mesh !== body.mesh) {
+          if (cache?.welded) try { cache.welded.dispose(); } catch (_) {}
+          const w = weldGeometryForEdges(body.mesh.geometry, 0.1);
+          cache = body._projCache = { mesh: body.mesh, welded: w };
+        }
+        const welded = cache.welded;
         const pos = welded.attributes.position;
         const idx = welded.index;
         const mw = body.mesh.matrixWorld;
@@ -4690,7 +4695,8 @@ function projectBodiesOntoPlane(plane) {
             });
           }
         }
-        welded.dispose();
+        // welded.dispose() removed — it's cached; disposal happens when
+        // the mesh is rebuilt and the cache is invalidated above.
       } catch (_) { /* fail safe */ }
       continue;
     }
