@@ -4960,6 +4960,15 @@ function projectBodiesOntoPlane(plane) {
       for (const [a, b] of ee) segments.push({ p1: proj[a], p2: proj[b], dz1: proj[a].z, dz2: proj[b].z });
     }
   }
+  // Defensive: while we work through the projection pipeline, force every
+  // emitted segment to render as solid in-plane. We can layer hidden-line
+  // dashing back on top later by tagging specific segments with _cut. This
+  // catches any stray emitters in legacy / fallback paths that still set
+  // real-depth z values.
+  for (const s of segments) {
+    s.dz1 = 0;
+    s.dz2 = 0;
+  }
   return segments;
 }
 
