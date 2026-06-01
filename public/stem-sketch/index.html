@@ -4616,119 +4616,16 @@ function projectBodiesOntoPlane(plane) {
     }
   };
 
-  // While editing a sketch, skip silhouette projection for any body whose
-  // source IS that sketch — its shape is already visible as the live source
-  // entity in the 2D view, so projecting it again creates a confusing
-  // duplicate that diverges from the live entity once the user resizes it.
-  const activeSketchId = doc.activeSketchId;
-  const isFromActiveSketch = (b) => b && b.sourceSketchId != null && b.sourceSketchId === activeSketchId;
-
   for (const body of doc.bodies) {
     if (!body.mesh) continue;
-    // Top-level extrude that came from the active sketch — skip its silhouette.
-    if (isFromActiveSketch(body)) continue;
-    // ALL body types — project all front-facing triangles to 2D plane-local
-    // coords and emit the BOUNDARY of the union (every 2D edge that
-    // appears in exactly one triangle). This is the actual silhouette of
-    // the body as seen from the sketch plane: outer outline + holes where
-    // material has been cut away. Runs for groups, combined, and every
-    // primitive type so we get a consistent silhouette regardless of how
-    // the body was built.
-    if (body.mesh?.geometry) {
-      try {
-        // Cache the welded geometry per body — welding the mesh on every
-        // render is what was freezing the tab during face sketches. The
-        // cache is keyed by mesh identity, so any rebuildBodies() that
-        // creates a new mesh automatically invalidates it.
-        let cache = body._projCache;
-        if (!cache || cache.mesh !== body.mesh) {
-          if (cache?.welded) try { cache.welded.dispose(); } catch (_) {}
-          const w = weldGeometryForEdges(body.mesh.geometry, 0.1);
-          cache = body._projCache = { mesh: body.mesh, welded: w };
-        }
-        const welded = cache.welded;
-        const pos = welded.attributes.position;
-        const idx = welded.index;
-        const mw = body.mesh.matrixWorld;
-        if (pos && idx) {
-          const viewDir = new THREE.Vector3(...plane.n).normalize();
-          const triCount = (idx.count / 3) | 0;
-          const N = pos.count;
-          const ix = idx.array;
-          // Only process triangles whose normal is NEARLY PARALLEL to the
-          // sketch plane normal — i.e., faces that are facing the viewer
-          // head-on. Side faces, back faces, and the angled fan triangles
-          // CSG produces at intersection seams all fail this test and
-          // contribute nothing. The visible front of the body is exactly
-          // the union of these "head-on" triangles; the boundary of that
-          // 2D union is the silhouette we want.
-          // 15° tolerance keeps mostly-flat faces (allows for small
-          // numerical drift) while excluding fan triangles which are
-          // typically pitched 30°+ from the cut plane.
-          const FACE_DOT = Math.cos(15 * Math.PI / 180);
-          const edgeMap = new Map();
-          const bumpEdge = (a, b) => {
-            const lo = a < b ? a : b, hi = a < b ? b : a;
-            const key = lo * N + hi;
-            edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
-          };
-          const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
-          const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3();
-          for (let t = 0; t < triCount; t++) {
-            const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
-            va.fromBufferAttribute(pos, i0).applyMatrix4(mw);
-            vb.fromBufferAttribute(pos, i1).applyMatrix4(mw);
-            vc.fromBufferAttribute(pos, i2).applyMatrix4(mw);
-            ab.subVectors(vb, va);
-            ac.subVectors(vc, va);
-            nrm.crossVectors(ab, ac);
-            const len = nrm.length();
-            if (len < 1e-9) continue;
-            nrm.multiplyScalar(1 / len);
-            // Keep only triangles within 15° of viewDir.
-            if (nrm.dot(viewDir) < FACE_DOT) continue;
-            bumpEdge(i0, i1);
-            bumpEdge(i1, i2);
-            bumpEdge(i2, i0);
-          }
-          // Emit edges with count == 1 — those are the boundary of the
-          // union of head-on triangles. Internal edges (shared between
-          // adjacent head-on triangles) cancel out as count == 2.
-          const tmp = new THREE.Vector3();
-          for (const [key, count] of edgeMap) {
-            if (count !== 1) continue;
-            const hi = key % N;
-            const lo = (key - hi) / N;
-            tmp.fromBufferAttribute(pos, lo).applyMatrix4(mw);
-            const pa = tmp.clone().applyMatrix4(planeMInv);
-            tmp.fromBufferAttribute(pos, hi).applyMatrix4(mw);
-            const pb = tmp.clone().applyMatrix4(planeMInv);
-            segments.push({
-              p1: { x: pa.x, y: pa.y, z: 0 },
-              p2: { x: pb.x, y: pb.y, z: 0 },
-              dz1: 0, dz2: 0,
-            });
-          }
-        }
-        // welded.dispose() removed — it's cached; disposal happens when
-        // the mesh is rebuilt and the cache is invalidated above.
-      } catch (_) { /* fail safe */ }
-      continue;
-    }
-    // ============================================================ DEAD CODE BELOW (kept for re-enable)
-    if (false) {
-    // Group bodies — engineering-drawing style. Walk children and for each
-    // one project its WORLD AABB onto the sketch plane as a rectangle.
-    //   • Positive children  → solid rectangle (each contributes outer +
-    //     inner outlines as expected from a top-view CAD drawing)
-    //   • Negative children  → dashed rectangle CLIPPED to the parent
-    //     body's projected AABB (so over-extrude past the body is hidden,
-    //     and side edges that coincide with the parent silhouette
-    //     disappear naturally — only the relevant interior dashed lines
-    //     remain, matching standard hidden-line conventions)
-    // Avoids edge-detection on the noisy CSG mesh entirely.
-    if ((body.type === 'group' || body.type === 'combined') && Array.isArray(body.children)) {
-      // Parent body's projected AABB for clipping negatives.
+    // Group bodies — render each child's silhouette explicitly (clean) instead
+    // of running EdgesGeometry on the messy CSG result. Negative children get
+    // skipped entirely so the 2D view shows only what physically remains.
+    if (body.type === 'group' && Array.isArray(body.children)) {
+      // Compute the GROUP's bbox in plane-local 2D so we can clip negative
+      // children to where they actually remove material. A 2-inch cylinder
+      // cut through a 1-inch sphere should only show the 1 inch that was
+      // actually removed — the over-extrusion is invisible material.
       const wbb = new THREE.Box3().setFromObject(body.mesh);
       const cornersW = [
         new THREE.Vector3(wbb.min.x, wbb.min.y, wbb.min.z),
@@ -4742,150 +4639,55 @@ function projectBodiesOntoPlane(plane) {
       ];
       let pMinX = Infinity, pMaxX = -Infinity, pMinY = Infinity, pMaxY = -Infinity;
       for (const c of cornersW) {
-        const s = c.clone().applyMatrix4(planeMInv);
+        const s = c.applyMatrix4(planeMInv);
         if (s.x < pMinX) pMinX = s.x;
         if (s.x > pMaxX) pMaxX = s.x;
         if (s.y < pMinY) pMinY = s.y;
         if (s.y > pMaxY) pMaxY = s.y;
       }
-      const parentAabb2D = { minX: pMinX, maxX: pMaxX, minY: pMinY, maxY: pMaxY };
-
-      // Project a child to its 2D AABB rectangle on the sketch plane and
-      // emit its 4 edges. The child's own bbox is computed analytically
-      // so the projection is independent of the messy CSG mesh.
-      const emitChildRect = (child, offset, isCut) => {
-        if (isFromActiveSketch(child)) return;
-        const off = {
-          x: offset.x + (child.x || 0),
-          y: offset.y + (child.y || 0),
-          z: offset.z + (child.z || 0),
-        };
-        // Recurse into nested groups AND legacy 'combined' bodies (older
-        // boolean-cut results saved before the rename to group).
-        if ((child.type === 'group' || child.type === 'combined') && Array.isArray(child.children)) {
-          for (const k of child.children) emitChildRect(k, off, isCut || k.op === 'subtract');
-          return;
-        }
-        // Build the child's WORLD AABB without relying on a fresh mesh —
-        // compute from the parametric definition where possible. For
-        // extrudes, derive corners from the sketch's region bbox + plane;
-        // for primitives use w/h/d. Falls back to the body.mesh AABB if
-        // we built one already (preserves consistency for fasteners etc.).
-        let localCorners = null;
-        if (child.type === 'extrude' && child.sketch && child.plane) {
-          let bbX1 = Infinity, bbX2 = -Infinity, bbY1 = Infinity, bbY2 = -Infinity;
-          for (const e of (child.sketch.entities || [])) {
-            const eb = entityBBox(e);
-            if (!eb) continue;
-            if (eb.minX < bbX1) bbX1 = eb.minX;
-            if (eb.maxX > bbX2) bbX2 = eb.maxX;
-            if (eb.minY < bbY1) bbY1 = eb.minY;
-            if (eb.maxY > bbY2) bbY2 = eb.maxY;
+      const parentAabb = { minX: pMinX, maxX: pMaxX, minY: pMinY, maxY: pMaxY };
+      // Walk the tree. For each child we render its silhouette explicitly.
+      // Negative (cut) children are tagged so the SVG renderer can dash them —
+      // and are clipped to the parent body's projected AABB so the
+      // over-extrusion poking out of the body is hidden.
+      const walk = (kids, offset, parentIsCut) => {
+        for (const child of kids) {
+          const childIsCut = parentIsCut || child.op === 'subtract';
+          const off = {
+            x: offset.x + (child.x || 0),
+            y: offset.y + (child.y || 0),
+            z: offset.z + (child.z || 0),
+          };
+          if (child.type === 'group' && Array.isArray(child.children)) {
+            walk(child.children, off, childIsCut);
+            continue;
           }
-          if (isFinite(bbX1)) {
-            const h = child.height || 0;
-            const cornersLocal = [];
-            const planeM = makePlaneMatrix(child.plane);
-            for (const x of [bbX1, bbX2]) for (const y of [bbY1, bbY2]) for (const z of [0, h]) {
-              const v = new THREE.Vector3(x, y, z).applyMatrix4(planeM);
-              cornersLocal.push(v);
+          const before = segments.length;
+          projectChildAsStandalone(child, offset);
+          if (childIsCut) {
+            // Clip to parent AABB and tag as cut. Drop segments whose midpoint
+            // lies outside the parent's projected silhouette — that's the
+            // over-extrusion the user said shouldn't be visible.
+            const kept = [];
+            for (let k = before; k < segments.length; k++) {
+              const s = segments[k];
+              const mx = (s.p1.x + s.p2.x) / 2;
+              const my = (s.p1.y + s.p2.y) / 2;
+              const PAD = 0.5; // mm tolerance so segments touching the bbox edge stay
+              if (mx < parentAabb.minX - PAD || mx > parentAabb.maxX + PAD ||
+                  my < parentAabb.minY - PAD || my > parentAabb.maxY + PAD) continue;
+              s._cut = true;
+              kept.push(s);
             }
-            localCorners = cornersLocal;
+            // Replace tail of segments[] with the kept ones
+            segments.length = before;
+            for (const s of kept) segments.push(s);
           }
-        } else if (typeof child.w === 'number' && typeof child.h === 'number' && typeof child.d === 'number') {
-          const hw = child.w / 2, hd = child.d / 2;
-          const yMin = 0, yMax = child.h;
-          const cube = [];
-          for (const x of [-hw, hw]) for (const y of [yMin, yMax]) for (const z of [-hd, hd]) {
-            cube.push(new THREE.Vector3(x, y, z));
-          }
-          localCorners = cube;
-        }
-        if (!localCorners) return;
-        // Apply the cumulative translation (group / parent offsets + child x/y/z)
-        for (const c of localCorners) c.add(new THREE.Vector3(off.x, off.y, off.z));
-        // Project to plane-local 2D and find AABB
-        let cMinX = Infinity, cMaxX = -Infinity, cMinY = Infinity, cMaxY = -Infinity;
-        let cMinZ = Infinity, cMaxZ = -Infinity;
-        for (const c of localCorners) {
-          const s = c.applyMatrix4(planeMInv);
-          if (s.x < cMinX) cMinX = s.x;
-          if (s.x > cMaxX) cMaxX = s.x;
-          if (s.y < cMinY) cMinY = s.y;
-          if (s.y > cMaxY) cMaxY = s.y;
-          if (s.z < cMinZ) cMinZ = s.z;
-          if (s.z > cMaxZ) cMaxZ = s.z;
-        }
-        if (cMaxX - cMinX < 0.1 || cMaxY - cMinY < 0.1) return; // degenerate
-        // Use mid Z for the segments' depth (used by the front/back classifier)
-        const zMid = (cMinZ + cMaxZ) / 2;
-        const rectEdges = [
-          [{ x: cMinX, y: cMinY }, { x: cMaxX, y: cMinY }],
-          [{ x: cMaxX, y: cMinY }, { x: cMaxX, y: cMaxY }],
-          [{ x: cMaxX, y: cMaxY }, { x: cMinX, y: cMaxY }],
-          [{ x: cMinX, y: cMaxY }, { x: cMinX, y: cMinY }],
-        ];
-        const PAD = 0.5;
-        const cb = {
-          minX: parentAabb2D.minX - PAD,
-          maxX: parentAabb2D.maxX + PAD,
-          minY: parentAabb2D.minY - PAD,
-          maxY: parentAabb2D.maxY + PAD,
-        };
-        for (const [a, b] of rectEdges) {
-          let seg = { p1: { x: a.x, y: a.y, z: zMid }, p2: { x: b.x, y: b.y, z: zMid }, dz1: zMid, dz2: zMid };
-          if (isCut) {
-            // Liang-Barsky clip to parent AABB
-            let t0 = 0, t1 = 1;
-            const dx = b.x - a.x, dy = b.y - a.y;
-            const p = [-dx, dx, -dy, dy];
-            const q = [a.x - cb.minX, cb.maxX - a.x, a.y - cb.minY, cb.maxY - a.y];
-            let outside = false;
-            for (let i = 0; i < 4; i++) {
-              if (Math.abs(p[i]) < 1e-9) { if (q[i] < 0) { outside = true; break; } continue; }
-              const t = q[i] / p[i];
-              if (p[i] < 0) { if (t > t1) { outside = true; break; } if (t > t0) t0 = t; }
-              else          { if (t < t0) { outside = true; break; } if (t < t1) t1 = t; }
-            }
-            if (outside) continue;
-            seg = {
-              p1: { x: a.x + t0 * dx, y: a.y + t0 * dy, z: zMid },
-              p2: { x: a.x + t1 * dx, y: a.y + t1 * dy, z: zMid },
-              dz1: zMid, dz2: zMid,
-              _cut: true,
-            };
-            // Drop a clipped segment if it's basically a point (the
-            // negative's side that coincided with the parent boundary).
-            if (Math.hypot(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y) < 0.5) continue;
-          }
-          segments.push(seg);
         }
       };
-
-      for (const child of body.children) {
-        emitChildRect(child, { x: body.x || 0, y: body.y || 0, z: body.z || 0 }, child.op === 'subtract');
-      }
-      // Outer outline guarantee: always project the body's full mesh AABB
-      // as a solid rectangle. Drops in last so its z is whatever it is, and
-      // overlaps with the largest positive child's rect when they coincide
-      // (the renderer doesn't double-stroke). Without this, models built
-      // from body types my analytic walk doesn't recognize (anything past
-      // extrude / cube / group / combined) wouldn't show their silhouette.
-      {
-        const zMid = (parentAabb2D.minY + parentAabb2D.maxY) / 2; // any consistent depth
-        const edges = [
-          [{ x: parentAabb2D.minX, y: parentAabb2D.minY }, { x: parentAabb2D.maxX, y: parentAabb2D.minY }],
-          [{ x: parentAabb2D.maxX, y: parentAabb2D.minY }, { x: parentAabb2D.maxX, y: parentAabb2D.maxY }],
-          [{ x: parentAabb2D.maxX, y: parentAabb2D.maxY }, { x: parentAabb2D.minX, y: parentAabb2D.maxY }],
-          [{ x: parentAabb2D.minX, y: parentAabb2D.maxY }, { x: parentAabb2D.minX, y: parentAabb2D.minY }],
-        ];
-        for (const [a, b] of edges) {
-          segments.push({ p1: { x: a.x, y: a.y, z: zMid }, p2: { x: b.x, y: b.y, z: zMid }, dz1: zMid, dz2: zMid });
-        }
-      }
+      walk(body.children, { x: body.x || 0, y: body.y || 0, z: body.z || 0 }, false);
       continue;
     }
-    } // end DEAD CODE block (if false)
     // Smooth-surface bodies have no real edges — skip EdgesGeometry entirely
     // and let the silhouette code below render a clean circle/annulus.
     const skipEdges = body.type === 'sphere' || body.type === 'torus';
@@ -4893,13 +4695,8 @@ function projectBodiesOntoPlane(plane) {
     if (!skipEdges) try {
       // 25° threshold — picks up real geometric edges (cube corners, step
       // edges, holes) but skips coplanar triangles created by CSG that would
-      // otherwise spray fans of fake edges across the sketch view. For
-      // group/combined results, weld coincident vertices first so CSG
-      // seam T-junctions don't survive as boundary edges.
-      const isCSG = body.type === 'group' || body.type === 'combined';
-      const edgeSrc = isCSG ? weldGeometryForEdges(body.mesh.geometry) : body.mesh.geometry;
-      const edges = new THREE.EdgesGeometry(edgeSrc, 25);
-      if (isCSG && edgeSrc !== body.mesh.geometry) edgeSrc.dispose();
+      // otherwise spray fans of fake edges across the sketch view.
+      const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
       const pos = edges.attributes?.position;
       if (pos && pos.count >= 2) {
         usedEdges = true;
@@ -4964,13 +4761,6 @@ function projectBodiesOntoPlane(plane) {
       const ee = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
       for (const [a, b] of ee) segments.push({ p1: proj[a], p2: proj[b], dz1: proj[a].z, dz2: proj[b].z });
     }
-  }
-  // Defensive: while we work through the projection pipeline, force every
-  // emitted segment to render as solid in-plane. We can layer hidden-line
-  // dashing back on top later by tagging specific segments with _cut.
-  for (const s of segments) {
-    s.dz1 = 0;
-    s.dz2 = 0;
   }
   return segments;
 }
