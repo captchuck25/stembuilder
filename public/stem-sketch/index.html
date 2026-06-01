@@ -4662,17 +4662,13 @@ function projectBodiesOntoPlane(plane) {
             walk(child.children, off, childIsCut);
             continue;
           }
-          // Skip foundational primitives (cubes & smooth-surface primitives
-          // that were the "starting material" of the group). Their bboxes
-          // project as a full rectangle that the user perceives as "the
-          // original cube," even though material's been carved away. The
-          // remaining cuts and additive children describe the bracket's
-          // actual visible silhouette.
-          if (!childIsCut && (child.type === 'cube' || child.type === 'sphere' ||
-              child.type === 'cylinder' || child.type === 'cone' || child.type === 'torus' ||
-              child.type === 'pyramid' || child.type === 'hexagon' || child.type === 'pentagon' ||
-              child.type === 'octagon' || child.type === 'star' || child.type === 'heart' ||
-              child.type === 'teardrop')) continue;
+          // Skip ALL positive (additive) children. They were the starting
+          // material — their projections give the body's original (pre-cut)
+          // bbox outline, which the user perceives as "the cube I started
+          // with that doesn't exist anymore." The CUT children, after
+          // clipping to the body's actual projected AABB, trace the visible
+          // carved silhouette themselves.
+          if (!childIsCut) continue;
           const before = segments.length;
           projectChildAsStandalone(child, offset);
           if (childIsCut) {
