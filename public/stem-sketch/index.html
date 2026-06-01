@@ -952,7 +952,11 @@
   .body-outline {
     stroke: #6b7a96;
     stroke-width: 1.2;
-    stroke-dasharray: 5 4;
+    /* TEMP DEBUG: force every body-outline to render solid regardless of
+       in-plane / depth tagging. If the user still sees ANY dashed lines
+       on the bracket silhouette, those lines aren't .body-outline at all
+       and come from a different render pass. */
+    stroke-dasharray: none;
     opacity: 0.75;
     fill: none;
     pointer-events: none;
