@@ -4701,14 +4701,19 @@ function projectBodiesOntoPlane(plane) {
     const skipEdges = body.type === 'sphere' || body.type === 'torus';
     let usedEdges = false;
     if (!skipEdges) try {
-      // Just edges. For groups (CSG output is noisy) use an aggressive 50°
-      // threshold + 2 mm projected-length filter to drop the fan-
-      // triangulation artifacts. For primitives the 25° / 0.25 mm pair
-      // gives sharp cube corners and hole rims as before.
+      // Weld vertices first for groups (CSG output has duplicated
+      // apex vertices at fan-triangulation seams; without welding, every
+      // radial edge of the fan emits as a boundary edge because each fan
+      // triangle has its own slightly-offset apex). For primitives the
+      // mesh is already clean.
       const isCSG = body.type === 'group' || body.type === 'combined';
-      const ANGLE = isCSG ? 50 : 25;
-      const MIN_LEN = isCSG ? 2.0 : 0.25;
-      const edges = new THREE.EdgesGeometry(body.mesh.geometry, ANGLE);
+      const srcGeo = isCSG
+        ? weldGeometryForEdges(body.mesh.geometry, 0.1)
+        : body.mesh.geometry;
+      const ANGLE = isCSG ? 35 : 25;
+      const MIN_LEN = isCSG ? 0.5 : 0.25;
+      const edges = new THREE.EdgesGeometry(srcGeo, ANGLE);
+      if (isCSG) srcGeo.dispose();
       const pos = edges.attributes?.position;
       if (pos && pos.count >= 2) {
         usedEdges = true;
