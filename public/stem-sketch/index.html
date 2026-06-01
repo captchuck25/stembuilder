@@ -4618,10 +4618,11 @@ function projectBodiesOntoPlane(plane) {
 
   for (const body of doc.bodies) {
     if (!body.mesh) continue;
-    // Group bodies — render each child's silhouette explicitly (clean) instead
-    // of running EdgesGeometry on the messy CSG result. Negative children get
-    // skipped entirely so the 2D view shows only what physically remains.
-    if (body.type === 'group' && Array.isArray(body.children)) {
+    // Group bodies — same path as primitives. EdgesGeometry on the merged
+    // CSG mesh. The user's insight: primitive face-sketches work cleanly
+    // with the EdgesGeometry path, so groups should use it too instead of
+    // the child-walking logic that kept producing original-bbox outlines.
+    if (false && body.type === 'group' && Array.isArray(body.children)) {
       // Compute the GROUP's bbox in plane-local 2D so we can clip negative
       // children to where they actually remove material. A 2-inch cylinder
       // cut through a 1-inch sphere should only show the 1 inch that was
