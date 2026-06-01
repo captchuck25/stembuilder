@@ -975,7 +975,10 @@
      over both the default (hidden) and in-plane styles. */
   .body-outline.cut {
     stroke: #c0392b;
-    stroke-dasharray: 6 4;
+    /* TEMP DEBUG: force solid regardless of in-plane state. If user
+       still sees dashed lines on the bracket, they're not from any
+       body-outline class. */
+    stroke-dasharray: none;
     opacity: 0.85;
     stroke-width: 1.4;
   }
