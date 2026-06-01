@@ -4968,6 +4968,12 @@ function projectBodiesOntoPlane(plane) {
   for (const s of segments) {
     s.dz1 = 0;
     s.dz2 = 0;
+    // TEMP DEBUG: tag every segment as a "cut" so it renders solid RED
+    // (CSS rule .body-outline.cut.in-plane). Lets us verify whether the
+    // faint dashed lines in the user's screenshot are from this function
+    // or from a separate pass we haven't found yet. Will be removed once
+    // diagnosed.
+    s._cut = true;
   }
   return segments;
 }
