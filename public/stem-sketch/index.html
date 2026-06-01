@@ -4654,34 +4654,65 @@ function projectBodiesOntoPlane(plane) {
           const viewDir = new THREE.Vector3(...plane.n).normalize();
           const triCount = (idx.count / 3) | 0;
           const N = pos.count;
+          const ix = idx.array;
+          // Compute every triangle's normal + front/back flag once.
+          const triNx = new Float32Array(triCount);
+          const triNy = new Float32Array(triCount);
+          const triNz = new Float32Array(triCount);
+          const triFront = new Uint8Array(triCount);
           const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
           const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3();
-          // Edge → count map. Key = min_index * N + max_index (exact).
-          const edgeMap = new Map();
-          const bumpEdge = (a, b) => {
-            const lo = a < b ? a : b, hi = a < b ? b : a;
-            const key = lo * N + hi;
-            edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
-          };
-          const ix = idx.array;
           for (let t = 0; t < triCount; t++) {
             const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
             va.fromBufferAttribute(pos, i0).applyMatrix4(mw);
             vb.fromBufferAttribute(pos, i1).applyMatrix4(mw);
             vc.fromBufferAttribute(pos, i2).applyMatrix4(mw);
-            // Front-facing only.
             ab.subVectors(vb, va);
             ac.subVectors(vc, va);
             nrm.crossVectors(ab, ac);
-            if (nrm.dot(viewDir) < 0) continue;
-            bumpEdge(i0, i1);
-            bumpEdge(i1, i2);
-            bumpEdge(i2, i0);
+            const len = nrm.length();
+            if (len > 1e-9) nrm.multiplyScalar(1 / len);
+            triNx[t] = nrm.x; triNy[t] = nrm.y; triNz[t] = nrm.z;
+            triFront[t] = (nrm.dot(viewDir) >= 0) ? 1 : 0;
           }
-          // Emit each edge with count == 1 (boundary of front-facing union).
+          // Edge → up to 2 adjacent triangles (indices into the tri arrays).
+          const edgeMap = new Map();
+          const addEdge = (a, b, t) => {
+            const lo = a < b ? a : b, hi = a < b ? b : a;
+            const key = lo * N + hi;
+            let arr = edgeMap.get(key);
+            if (!arr) { arr = []; edgeMap.set(key, arr); }
+            arr.push(t);
+          };
+          for (let t = 0; t < triCount; t++) {
+            const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
+            addEdge(i0, i1, t);
+            addEdge(i1, i2, t);
+            addEdge(i2, i0, t);
+          }
+          // 35° crease — adjacent triangles with normals differing by more
+          // than this are "real" features; nearly-coplanar pairs are
+          // suppressed even when front/back classification flips (those
+          // are CSG fan triangulation artifacts at intersection seams).
+          const CREASE_DOT = Math.cos(35 * Math.PI / 180);
           const tmp = new THREE.Vector3();
-          for (const [key, count] of edgeMap) {
-            if (count !== 1) continue;
+          for (const [key, tris] of edgeMap) {
+            let keep = false;
+            if (tris.length === 1) {
+              // Open boundary — emit only if the lone triangle is front-
+              // facing (otherwise the edge is on the back of the body).
+              if (triFront[tris[0]]) keep = true;
+            } else {
+              const t0 = tris[0], t1 = tris[1];
+              const dot = triNx[t0]*triNx[t1] + triNy[t0]*triNy[t1] + triNz[t0]*triNz[t1];
+              if (dot < CREASE_DOT) {
+                // Sharp crease — keep if any side faces the viewer.
+                if (triFront[t0] || triFront[t1]) keep = true;
+              }
+              // Near-coplanar pair → not a silhouette edge, skip even if
+              // front/back flips. This is the fan-triangulation killer.
+            }
+            if (!keep) continue;
             const hi = key % N;
             const lo = (key - hi) / N;
             tmp.fromBufferAttribute(pos, lo).applyMatrix4(mw);
