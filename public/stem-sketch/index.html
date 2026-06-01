@@ -4701,18 +4701,19 @@ function projectBodiesOntoPlane(plane) {
     const skipEdges = body.type === 'sphere' || body.type === 'torus';
     let usedEdges = false;
     if (!skipEdges) try {
-      // 25° threshold — picks up real geometric edges (cube corners, step
-      // edges, holes) but skips coplanar triangles created by CSG that would
-      // otherwise spray fans of fake edges across the sketch view.
-      const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
+      // Just edges. For groups (CSG output is noisy) use an aggressive 50°
+      // threshold + 2 mm projected-length filter to drop the fan-
+      // triangulation artifacts. For primitives the 25° / 0.25 mm pair
+      // gives sharp cube corners and hole rims as before.
+      const isCSG = body.type === 'group' || body.type === 'combined';
+      const ANGLE = isCSG ? 50 : 25;
+      const MIN_LEN = isCSG ? 2.0 : 0.25;
+      const edges = new THREE.EdgesGeometry(body.mesh.geometry, ANGLE);
       const pos = edges.attributes?.position;
       if (pos && pos.count >= 2) {
         usedEdges = true;
         const mw = body.mesh.matrixWorld;
         const va = new THREE.Vector3(), vb = new THREE.Vector3();
-        // Reject very-short segments — typically tessellation artifacts on
-        // curved CSG faces. 0.25 mm is well below any real feature size.
-        const MIN_LEN = 0.25;
         for (let i = 0; i < pos.count; i += 2) {
           va.fromBufferAttribute(pos, i);
           vb.fromBufferAttribute(pos, i + 1);
