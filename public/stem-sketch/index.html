@@ -4655,11 +4655,23 @@ function projectBodiesOntoPlane(plane) {
           const triCount = (idx.count / 3) | 0;
           const N = pos.count;
           const ix = idx.array;
-          // Compute every triangle's normal + front/back flag once.
-          const triNx = new Float32Array(triCount);
-          const triNy = new Float32Array(triCount);
-          const triNz = new Float32Array(triCount);
-          const triFront = new Uint8Array(triCount);
+          // Only process triangles whose normal is NEARLY PARALLEL to the
+          // sketch plane normal — i.e., faces that are facing the viewer
+          // head-on. Side faces, back faces, and the angled fan triangles
+          // CSG produces at intersection seams all fail this test and
+          // contribute nothing. The visible front of the body is exactly
+          // the union of these "head-on" triangles; the boundary of that
+          // 2D union is the silhouette we want.
+          // 15° tolerance keeps mostly-flat faces (allows for small
+          // numerical drift) while excluding fan triangles which are
+          // typically pitched 30°+ from the cut plane.
+          const FACE_DOT = Math.cos(15 * Math.PI / 180);
+          const edgeMap = new Map();
+          const bumpEdge = (a, b) => {
+            const lo = a < b ? a : b, hi = a < b ? b : a;
+            const key = lo * N + hi;
+            edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
+          };
           const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
           const ab = new THREE.Vector3(), ac = new THREE.Vector3(), nrm = new THREE.Vector3();
           for (let t = 0; t < triCount; t++) {
@@ -4671,62 +4683,25 @@ function projectBodiesOntoPlane(plane) {
             ac.subVectors(vc, va);
             nrm.crossVectors(ab, ac);
             const len = nrm.length();
-            if (len > 1e-9) nrm.multiplyScalar(1 / len);
-            triNx[t] = nrm.x; triNy[t] = nrm.y; triNz[t] = nrm.z;
-            triFront[t] = (nrm.dot(viewDir) >= 0) ? 1 : 0;
+            if (len < 1e-9) continue;
+            nrm.multiplyScalar(1 / len);
+            // Keep only triangles within 15° of viewDir.
+            if (nrm.dot(viewDir) < FACE_DOT) continue;
+            bumpEdge(i0, i1);
+            bumpEdge(i1, i2);
+            bumpEdge(i2, i0);
           }
-          // Edge → up to 2 adjacent triangles (indices into the tri arrays).
-          const edgeMap = new Map();
-          const addEdge = (a, b, t) => {
-            const lo = a < b ? a : b, hi = a < b ? b : a;
-            const key = lo * N + hi;
-            let arr = edgeMap.get(key);
-            if (!arr) { arr = []; edgeMap.set(key, arr); }
-            arr.push(t);
-          };
-          for (let t = 0; t < triCount; t++) {
-            const i0 = ix[t*3], i1 = ix[t*3+1], i2 = ix[t*3+2];
-            addEdge(i0, i1, t);
-            addEdge(i1, i2, t);
-            addEdge(i2, i0, t);
-          }
-          // 35° crease — adjacent triangles with normals differing by more
-          // than this are "real" features; nearly-coplanar pairs are
-          // suppressed even when front/back classification flips.
-          const CREASE_DOT = Math.cos(35 * Math.PI / 180);
-          // First pass: decide which edges to keep.
-          const keepEdges = []; // array of {lo, hi}
-          for (const [key, tris] of edgeMap) {
-            let keep = false;
-            if (tris.length === 1) {
-              if (triFront[tris[0]]) keep = true;
-            } else {
-              const t0 = tris[0], t1 = tris[1];
-              const dot = triNx[t0]*triNx[t1] + triNy[t0]*triNy[t1] + triNz[t0]*triNz[t1];
-              if (dot < CREASE_DOT) {
-                if (triFront[t0] || triFront[t1]) keep = true;
-              }
-            }
-            if (!keep) continue;
+          // Emit edges with count == 1 — those are the boundary of the
+          // union of head-on triangles. Internal edges (shared between
+          // adjacent head-on triangles) cancel out as count == 2.
+          const tmp = new THREE.Vector3();
+          for (const [key, count] of edgeMap) {
+            if (count !== 1) continue;
             const hi = key % N;
             const lo = (key - hi) / N;
-            keepEdges.push({ lo, hi });
-          }
-          // Fan-apex filter: count how many kept edges touch each vertex.
-          // A real silhouette/crease vertex sits on at most a few edges
-          // (corners typically 2-3, hole rim points 2). A CSG fan apex
-          // sits on TEN+. Drop every edge that has a high-degree vertex
-          // at either end — those are CSG triangulation artifacts that
-          // survived the crease test.
-          const degree = new Int32Array(N);
-          for (const e of keepEdges) { degree[e.lo]++; degree[e.hi]++; }
-          const MAX_DEGREE = 6;
-          const tmp = new THREE.Vector3();
-          for (const e of keepEdges) {
-            if (degree[e.lo] > MAX_DEGREE || degree[e.hi] > MAX_DEGREE) continue;
-            tmp.fromBufferAttribute(pos, e.lo).applyMatrix4(mw);
+            tmp.fromBufferAttribute(pos, lo).applyMatrix4(mw);
             const pa = tmp.clone().applyMatrix4(planeMInv);
-            tmp.fromBufferAttribute(pos, e.hi).applyMatrix4(mw);
+            tmp.fromBufferAttribute(pos, hi).applyMatrix4(mw);
             const pb = tmp.clone().applyMatrix4(planeMInv);
             segments.push({
               p1: { x: pa.x, y: pa.y, z: 0 },
