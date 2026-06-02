@@ -9393,6 +9393,9 @@ function processThreadMarks(sketch, marks, opts) {
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
         op: 'add',
+        // Tagged so the tree can label it as a thread-mark companion and
+        // so a tree-eye toggle on the bolt can sync mark._settings.placeBolt.
+        _threadMarkRef: { sketchId: sketch.id, markId: m.id },
       };
       doc.bodies.push(bolt);
       m._boltBodyId = bolt.id; // bookkeeping for "already materialised" check
@@ -11051,7 +11054,8 @@ function renderTree() {
     else if (body.type === 'revolve') label = 'Revolved';
     else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
-      label = `${spec.label} ${FASTENER_HEAD_LABELS[body.headType] || body.headType} (${fmtUL(body.length)})`;
+      const tag = body._threadMarkRef ? ' · thread visualizer' : '';
+      label = `${spec.label} ${FASTENER_HEAD_LABELS[body.headType] || body.headType} (${fmtUL(body.length)})${tag}`;
     }
     const ico = body.type === 'extrude' ? '⇪' :
                 body.type === 'fastener' ? '🔩' :
@@ -11098,6 +11102,14 @@ function renderTree() {
         const b = doc.bodies.find(x => x.id === id);
         if (!b) return;
         b.hidden = !b.hidden;
+        // If this is a thread-mark visualizer bolt, keep the source mark's
+        // settings in sync so the configure dialog reflects what the user
+        // sees in the scene.
+        if (b._threadMarkRef) {
+          const sk = doc.sketches.find(s => s.id === b._threadMarkRef.sketchId);
+          const mk = sk?.entities?.find(e => e.id === b._threadMarkRef.markId);
+          if (mk?._settings) mk._settings.placeBolt = !b.hidden;
+        }
         renderTree();
         if (viewer) viewer.rebuildBodies();
       }
