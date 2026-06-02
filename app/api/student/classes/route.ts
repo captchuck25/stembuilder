@@ -19,12 +19,12 @@ export async function GET() {
 
   const result = await Promise.all(
     (classes ?? []).map(async (cls: { id: string }) => {
-      const { data: assignments } = await db
-        .from('assignments')
-        .select('*')
-        .eq('class_id', cls.id)
-        .order('level_id')
-      return { class: cls, assignments: assignments ?? [] }
+      const [{ data: assignments }, { data: turtleAssignments }] = await Promise.all([
+        db.from('assignments').select('*').eq('class_id', cls.id).order('level_id'),
+        db.from('turtle_assignments').select('challenge_id').eq('class_id', cls.id),
+      ])
+      const turtleAssignedIds = (turtleAssignments ?? []).map((r: { challenge_id: string }) => r.challenge_id)
+      return { class: cls, assignments: assignments ?? [], turtleAssignedIds }
     })
   )
 

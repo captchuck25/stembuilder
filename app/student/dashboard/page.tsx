@@ -8,6 +8,7 @@ import { type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { UNITS } from "@/app/tools/block-lab/units";
+import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const CARD: React.CSSProperties = {
@@ -20,6 +21,9 @@ const CARD: React.CSSProperties = {
 interface EnrolledClass {
   class: Class;
   assignments: Assignment[];
+  // challenge_id strings from turtle_assignments — turtle items live in a separate
+  // table from regular assignments, so they ride alongside instead of inside.
+  turtleAssignedIds?: string[];
 }
 
 interface BridgeAssignment {
@@ -42,6 +46,9 @@ export default function StudentDashboard() {
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [progressMap, setProgressMap] = useState<ProgressMap>({});
+  // challenge_ids the student has a turtle_submissions row for — used to show
+  // a "Complete" badge on assigned turtle items.
+  const [turtleCompletedIds, setTurtleCompletedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [joinCode, setJoinCode] = useState("");
   const [joinError, setJoinError] = useState("");
@@ -59,13 +66,18 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes, progressRes] = await Promise.all([
+    const [classRes, bridgeRes, progressRes, turtleRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
       fetch("/api/student/my-progress"),
+      fetch("/api/turtle"),
     ]);
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
+    if (turtleRes.ok) {
+      const subs: Array<{ challenge_id: string }> = await turtleRes.json();
+      setTurtleCompletedIds(new Set(subs.map(s => s.challenge_id)));
+    }
 
     if (progressRes.ok) {
       const rows: { tool: string; level_idx: number; challenge_idx: number | null }[] = await progressRes.json();
@@ -198,9 +210,10 @@ export default function StudentDashboard() {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-              {enrolledClasses.map(({ class: cls, assignments }) => {
+              {enrolledClasses.map(({ class: cls, assignments, turtleAssignedIds }) => {
                 const classBridgeAssignments = bridgeAssignments.filter(b => b.class_id === cls.id);
-                const totalAssignments = assignments.length + classBridgeAssignments.length;
+                const turtleIds = turtleAssignedIds ?? [];
+                const totalAssignments = assignments.length + classBridgeAssignments.length + turtleIds.length;
                 return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
@@ -302,6 +315,47 @@ export default function StudentDashboard() {
                           </div>
                         </div>
                       )}
+                      {/* Turtle */}
+                      {turtleIds.length > 0 && (() => {
+                        const items = turtleIds
+                          .map(id => TURTLE_CHALLENGES.find(c => c.id === id))
+                          .filter((c): c is NonNullable<typeof c> => !!c);
+                        return (
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: "#059669",
+                              textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                              🐢 Python Turtle
+                            </div>
+                            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                              {items.map(ch => {
+                                const complete = turtleCompletedIds.has(ch.id);
+                                const isTutorial = ch.category === "tutorial";
+                                return (
+                                  <Link key={ch.id} href={`/tools/code-lab/turtle?challenge=${ch.id}`} style={{ textDecoration: "none" }}>
+                                    <div style={{ padding: "14px 20px", borderRadius: 14,
+                                      background: complete ? "linear-gradient(135deg, #dcfce722, #dcfce744)" : "linear-gradient(135deg, #d1fae522, #a7f3d044)",
+                                      border: `2px solid ${complete ? "#16a34a" : "#059669"}`,
+                                      display: "flex", alignItems: "center", gap: 10, minWidth: 200 }}>
+                                      <div style={{ fontSize: 22 }}>{complete ? "✅" : isTutorial ? "📘" : "🎨"}</div>
+                                      <div>
+                                        <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                          {ch.title}
+                                        </div>
+                                        <div style={{ fontSize: 12, color: "#555" }}>
+                                          {isTutorial ? "Tutorial" : "Creative challenge"}
+                                        </div>
+                                        {complete && (
+                                          <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>✓ Complete</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </Link>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                       {/* Bridge Assignments */}
                       {classBridgeAssignments.length > 0 && (
                         <div>

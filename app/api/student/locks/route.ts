@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { adminDb } from '@/lib/db.server';
+import { CHALLENGES as TURTLE_CHALLENGES } from '@/app/tools/code-lab/turtle/challenges';
 
 // GET /api/student/locks?tool=code-lab
 // Returns: { level_idx, challenge_idx }[] — challenges locked in any of the student's enrolled classes.
@@ -29,13 +30,29 @@ export async function GET(req: Request) {
 
   if (!locks?.length) return NextResponse.json([]);
 
-  // Assignments explicitly grant access — they override any lock for that level
+  // Build the override set — assignments explicitly grant access regardless of lock.
+  // Code Lab / Block Lab use the `assignments` table indexed by level_id.
+  // Turtle uses `turtle_assignments` keyed by challenge_id (string), so we have to
+  // translate those to the level_idx positions used by lesson_locks.
+  const assignedLevelIds = new Set<number>();
   const { data: assignments } = await db
     .from('assignments')
-    .select('tool, level_id')
+    .select('level_id')
     .eq('tool', tool)
     .in('class_id', classIds);
-  const assignedLevelIds = new Set((assignments ?? []).map((a: { level_id: number }) => a.level_id));
+  for (const a of (assignments ?? []) as Array<{ level_id: number }>) {
+    assignedLevelIds.add(a.level_id);
+  }
+  if (tool === 'turtle') {
+    const { data: turtleAssignments } = await db
+      .from('turtle_assignments')
+      .select('challenge_id')
+      .in('class_id', classIds);
+    for (const a of (turtleAssignments ?? []) as Array<{ challenge_id: string }>) {
+      const idx = TURTLE_CHALLENGES.findIndex(c => c.id === a.challenge_id);
+      if (idx >= 0) assignedLevelIds.add(idx);
+    }
+  }
 
   // Deduplicate and remove locks for explicitly assigned levels
   const seen = new Set<string>();
