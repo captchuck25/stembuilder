@@ -8011,19 +8011,33 @@ function setDirty(v) {
 // loaded. Cleared when the user explicitly loads a different cloud design.
 const LOCAL_DRAFT_KEY = 'stem-sketch:draft';
 let _autosaveTimer = null;
+// Synchronous autosave write. Used both by the 500 ms debounced timer and
+// by force-flush paths (beforeunload, end of large mutations like thread-
+// mark materialisation). Failure is surfaced to the console — the previous
+// silent catch hid quota / disabled-storage errors that left the user
+// thinking their work was being saved when the localStorage line had
+// actually thrown.
+function flushAutosave() {
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = null;
+  try {
+    const name = (typeof getProjectName === 'function' ? getProjectName() : '') || 'Untitled';
+    const draft = {
+      name, units: doc.units,
+      docJson: snapshotDoc(),
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draft));
+  } catch (err) {
+    console.warn('STEM Sketch autosave failed:', err);
+    if (err && err.name === 'QuotaExceededError') {
+      setStatus('⚠ Local autosave hit browser storage limit — use ☁ Save before reloading');
+    }
+  }
+}
 function scheduleAutosave() {
   clearTimeout(_autosaveTimer);
-  _autosaveTimer = setTimeout(() => {
-    try {
-      const name = (typeof getProjectName === 'function' ? getProjectName() : '') || 'Untitled';
-      const draft = {
-        name, units: doc.units,
-        docJson: snapshotDoc(),
-        savedAt: Date.now(),
-      };
-      localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draft));
-    } catch (_) { /* quota / disabled — ignore */ }
-  }, 500);
+  _autosaveTimer = setTimeout(flushAutosave, 500);
 }
 function clearLocalDraft() {
   try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch (_) {}
@@ -9731,6 +9745,10 @@ function processThreadMarks(sketch, marks, opts) {
   renderTree(); renderProps();
   const note = hasParent ? ' (auto-grouped)' : ' — drop them as Negative inside a body and group to cut';
   setStatus(`Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''}${note}`);
+  // Force-flush autosave immediately — thread materialisation is a major
+  // edit, and waiting 500 ms for the debounce means a fast Cmd+R loses
+  // everything we just did.
+  flushAutosave();
 }
 
 function openFastenerDialog() {
@@ -12828,7 +12846,16 @@ function triggerCloudLoad(id) {
 }
 
 window.addEventListener('beforeunload', (e) => {
-  if (_docDirty) { e.preventDefault(); e.returnValue = ''; }
+  // Force-write the latest doc to localStorage NOW — the 500 ms autosave
+  // timer doesn't survive a close / refresh, so without this flush a user
+  // who reloads within half a second of an edit (thread mark, group, ...)
+  // sees the pre-edit state come back. Synchronous setItem keeps the
+  // browser's unload sequence happy.
+  if (_docDirty) {
+    flushAutosave();
+    e.preventDefault();
+    e.returnValue = '';
+  }
 });
 
 window.addEventListener('message', (e) => {
