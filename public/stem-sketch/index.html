@@ -4340,13 +4340,18 @@ function _ensureEdgeRenderer(W, H) {
       // spot height steps where two coplanar surfaces meet at different
       // depths (e.g., column top sitting on base plate top).
       // A = on-surface flag.
+      // Uniform names prefixed with u_ to avoid colliding with three.js
+      // built-ins (cameraNear/cameraFar are reserved in some shader chunks
+      // and conflicts produce silent blank output).
       vertexShader: `
         varying vec3 vN;
         varying float vDepth;
+        uniform float u_camNear;
+        uniform float u_camFar;
         void main() {
           vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
           vN = normalize(normalMatrix * normal);
-          vDepth = (-viewPos.z - cameraNear) / (cameraFar - cameraNear);
+          vDepth = (-viewPos.z - u_camNear) / (u_camFar - u_camNear);
           gl_Position = projectionMatrix * viewPos;
         }
       `,
@@ -4358,8 +4363,8 @@ function _ensureEdgeRenderer(W, H) {
         }
       `,
       uniforms: {
-        cameraNear: { value: 0.1 },
-        cameraFar:  { value: 1000.0 },
+        u_camNear: { value: 0.1 },
+        u_camFar:  { value: 1000.0 },
       },
     });
     _edgeRender.scene = new THREE.Scene();
@@ -4458,8 +4463,8 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
 
   // Update shader uniforms with the current camera's near/far so the
   // depth channel actually represents 0..1 across this body's depth range.
-  er.material.uniforms.cameraNear.value = er.camera.near;
-  er.material.uniforms.cameraFar.value  = er.camera.far;
+  er.material.uniforms.u_camNear.value = er.camera.near;
+  er.material.uniforms.u_camFar.value  = er.camera.far;
 
   // Swap our temp mesh in. Reuse the body's geometry directly (don't
   // clone — too expensive) but use our normal-output shader.
