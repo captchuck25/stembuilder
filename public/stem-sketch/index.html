@@ -7944,10 +7944,16 @@ function applySnapshot(s) {
 }
 let _docDirty = false;
 function setDirty(v) {
+  // ALWAYS reschedule autosave on every dirty edit — the previous early-return
+  // when v matched _docDirty meant only the FIRST mutation in a dirty cycle
+  // got an autosave timer. Every later edit (e.g. materialising a thread mark
+  // on a doc that was already dirty from a prior body move) silently failed
+  // to reach localStorage, so reload via restoreLocalDraft brought back the
+  // pre-edit state and the threads/bolts looked "lost".
+  if (v) scheduleAutosave();
   if (_docDirty === v) return;
   _docDirty = v;
   notifyParent({ type: 'STEMSKETCH_DIRTY', dirty: v });
-  if (v) scheduleAutosave();
 }
 
 // ─── Local autosave ────────────────────────────────────────────────────────
