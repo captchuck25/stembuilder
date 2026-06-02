@@ -9140,11 +9140,33 @@ function addFastener(headType, size, length, fit) {
 // Per-mark dialog — triggered when the user clicks a Thread mark in
 // 3D. Configures and immediately materialises just that one mark, leaving
 // other marks untouched so each can be a different thread size.
+// Re-clicking an already-materialised mark offers delete-and-replace
+// instead of stacking new CSG ops at the same spot (which produced the
+// "deterioration" the user reported when fiddling with settings).
 function openThreadedHoleForMark(sketchId, markId) {
   const sketch = doc.sketches.find(s => s.id === sketchId);
   if (!sketch) return;
   const mark = (sketch.entities || []).find(e => e.id === markId && e.type === 'threadMark');
   if (!mark) return;
+
+  // Already-materialised: offer to delete the existing hole + bolt
+  // before re-running. Without this, every dialog close stacks another
+  // identical CSG cut on the body and the mesh degrades each time.
+  if (mark._materialised) {
+    openModal({
+      title: 'Thread already placed',
+      body: `<p>This mark has already been turned into a hole${mark._boltBodyId ? ' (with visualizer bolt)' : ''}.
+             Delete the existing hole/bolt to place a new one at different settings?</p>
+             <p style="color:var(--ink-soft);font-size:12px">Deleting also ungroups the hole from the parent body so the body's mesh returns to its previous state.</p>`,
+      confirmText: 'Delete and reconfigure',
+      onConfirm: () => {
+        deleteMaterialisedThreadMark(mark);
+        // Re-open the configure dialog now that the mark is fresh.
+        setTimeout(() => openThreadedHoleForMark(sketchId, markId), 0);
+      },
+    });
+    return;
+  }
   const u = unitLabel();
   const sizeOpts = FASTENER_SPECS.map(s =>
     `<option value="${s.key}"${s.key === 'M5' ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
@@ -9181,8 +9203,33 @@ function openThreadedHoleForMark(sketchId, markId) {
       const placeBolt = $('th1-bolt').checked;
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
       processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt });
+      // Mark as materialised so subsequent clicks offer delete + replace
+      // instead of stacking another identical CSG cut.
+      mark._materialised = true;
     },
   });
+}
+
+// Wipe the bodies created by an earlier processThreadMarks call for
+// this single mark. The hole was auto-grouped into the parent body
+// (consumed by CSG) so we can't surgically remove just the hole — we
+// undo back to the snapshot taken before processing. That's what
+// pushUndo was for. Easiest reliable path: trigger one undo step.
+function deleteMaterialisedThreadMark(mark) {
+  // Remove visualizer bolt if we tracked it.
+  if (mark._boltBodyId) {
+    doc.bodies = doc.bodies.filter(b => b.id !== mark._boltBodyId);
+  }
+  // Undo the last action — that was the processThreadMarks call that
+  // created the hole + auto-grouped it. After undo, the body is back
+  // to its pre-hole state and we can re-run.
+  if (undoStack.length) undo();
+  delete mark._materialised;
+  delete mark._boltBodyId;
+  delete mark._holeBodyId;
+  if (viewer) viewer.rebuildBodies();
+  if (viewer) viewer.updateSketchOverlay();
+  renderTree(); renderProps();
 }
 
 function openThreadedHolesDialog() {
@@ -9278,6 +9325,7 @@ function processThreadMarks(sketch, marks, opts) {
       op: 'subtract',
     };
     doc.bodies.push(hole);
+    m._holeBodyId = hole.id; // bookkeeping for "already materialised" check
     // Re-resolve the parent body each iteration — earlier auto-groups
     // consume the previous parent and produce a new group whose id is
     // now stored on sketch.sourceBodyId (groupSelected updates that for
@@ -9309,8 +9357,10 @@ function processThreadMarks(sketch, marks, opts) {
         op: 'add',
       };
       doc.bodies.push(bolt);
+      m._boltBodyId = bolt.id; // bookkeeping for "already materialised" check
       newSelection.push(bolt.id);
     }
+    m._materialised = true;
   }
   // After the loop, the active group (if any) IS the new parent. Select
   // it so undo/visual feedback land on the visible body.
