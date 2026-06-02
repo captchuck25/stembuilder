@@ -9170,65 +9170,82 @@ function openThreadedHoleForMark(sketchId, markId) {
   const mark = (sketch.entities || []).find(e => e.id === markId && e.type === 'threadMark');
   if (!mark) return;
 
-  // Already-materialised: offer to delete the existing hole + bolt
-  // before re-running. Without this, every dialog close stacks another
-  // identical CSG cut on the body and the mesh degrades each time.
-  if (mark._materialised) {
-    openModal({
-      title: 'Thread already placed',
-      body: `<p>This mark has already been turned into a hole${mark._boltBodyId ? ' (with visualizer bolt)' : ''}.
-             Delete the existing hole/bolt to place a new one at different settings?</p>
-             <p style="color:var(--ink-soft);font-size:12px">Deleting also ungroups the hole from the parent body so the body's mesh returns to its previous state.</p>`,
-      confirmText: 'Delete and reconfigure',
-      onConfirm: () => {
-        deleteMaterialisedThreadMark(mark);
-        // Re-open the configure dialog now that the mark is fresh.
-        setTimeout(() => openThreadedHoleForMark(sketchId, markId), 0);
-      },
-    });
-    return;
-  }
+  // Pre-fill from the mark's existing settings if it's already materialised,
+  // otherwise use sensible defaults. One dialog handles both create + edit.
+  const isEdit = !!mark._materialised;
+  const prev = mark._settings || {};
+  const defDepthUnits = doc.units === 'in' ? 0.5 : 12;
+  const curSize     = prev.size     || 'M5';
+  const curDepthUL  = (typeof prev.depth === 'number') ? toUnit(prev.depth) : defDepthUnits;
+  const curFit      = prev.fit      || 'loose';
+  const curHead     = prev.boltHead || 'hex';
+  const curPlaceBolt = (prev.placeBolt !== undefined) ? !!prev.placeBolt : true;
+
   const u = unitLabel();
   const sizeOpts = FASTENER_SPECS.map(s =>
-    `<option value="${s.key}"${s.key === 'M5' ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
+    `<option value="${s.key}"${s.key === curSize ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
   ).join('');
-  const defDepth = doc.units === 'in' ? 0.5 : 12;
+  // Head type options for the visualizer bolt only. The hole itself is always
+  // headless (cutting a head into the body wouldn't make a usable threaded hole).
+  const headOpts = ['hex', 'phillips', 'cap', 'flat'].map(k =>
+    `<option value="${k}"${k === curHead ? ' selected' : ''}>${FASTENER_HEAD_LABELS[k]}</option>`
+  ).join('');
+  const fitOpts = [
+    ['tight',  'Tight — actual size'],
+    ['normal', 'Normal — +0.1 mm clearance'],
+    ['loose',  'Loose — +0.25 mm clearance (FDM-friendly)'],
+  ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
+
   openModal({
-    title: 'Threaded hole at this mark',
-    body: `<p>Configure thread size and depth for this mark. Other marks in <b>${sketch.name || 'this sketch'}</b> stay untouched.</p>
+    title: isEdit ? 'Adjust threaded hole' : 'Threaded hole at this mark',
+    body: `<p>${isEdit
+              ? 'Change any setting and Save to rebuild this hole. The old hole + bolt are removed first so the body returns to its previous state, then re-cut with the new settings.'
+              : `Configure thread size and depth for this mark. Other marks in <b>${sketch.name || 'this sketch'}</b> stay untouched.`}</p>
            <div class="field" style="margin-top:8px">
              <label>Thread size</label>
              <select id="th1-size">${sizeOpts}</select>
            </div>
            <div class="field">
              <label>Depth (${u})</label>
-             <input id="th1-depth" type="number" value="${defDepth}" min="0.1" step="0.5"/>
+             <input id="th1-depth" type="number" value="${curDepthUL}" min="0.1" step="0.5"/>
            </div>
            <div class="field">
              <label>Fit</label>
-             <select id="th1-fit">
-               <option value="tight">Tight — actual size</option>
-               <option value="normal">Normal — +0.1 mm clearance</option>
-               <option value="loose" selected>Loose — +0.25 mm clearance (FDM-friendly)</option>
-             </select>
+             <select id="th1-fit">${fitOpts}</select>
            </div>
            <label class="field" style="margin-top:6px">
-             <input type="checkbox" id="th1-bolt" checked/>
-             <span>Place a matching visualizer bolt</span>
-           </label>`,
+             <input type="checkbox" id="th1-bolt"${curPlaceBolt ? ' checked' : ''}/>
+             <span>Show matching visualizer bolt</span>
+           </label>
+           <div class="field" id="th1-head-row">
+             <label>Bolt head type</label>
+             <select id="th1-head">${headOpts}</select>
+             <p style="color:var(--ink-soft);font-size:11px;margin:4px 0 0">Only affects the visualizer bolt — the hole itself stays headless.</p>
+           </div>`,
+    confirmText: isEdit ? 'Save changes' : undefined,
     onConfirm: () => {
       const size = $('th1-size').value;
       const depthVal = parseFloat($('th1-depth').value);
       const depth = depthVal > 0 ? fromUnit(depthVal) : 0;
       const fit = $('th1-fit').value || 'loose';
       const placeBolt = $('th1-bolt').checked;
+      const boltHead = $('th1-head').value || 'hex';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt });
-      // Mark as materialised so subsequent clicks offer delete + replace
-      // instead of stacking another identical CSG cut.
-      mark._materialised = true;
+      // Edit path: peel the previous hole/bolt before re-running so we don't
+      // stack another CSG cut on the body (that was the "deterioration" bug).
+      if (mark._materialised) deleteMaterialisedThreadMark(mark);
+      processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt, boltHead });
     },
   });
+  // Wire the visualizer-bolt checkbox to grey out the head-type row when off,
+  // so the UI makes clear that head only matters when the bolt is visible.
+  setTimeout(() => {
+    const cb = $('th1-bolt'); const headRow = $('th1-head-row');
+    if (!cb || !headRow) return;
+    const sync = () => { headRow.style.opacity = cb.checked ? '1' : '0.4'; $('th1-head').disabled = !cb.checked; };
+    cb.addEventListener('change', sync);
+    sync();
+  }, 0);
 }
 
 // Wipe the bodies created by an earlier processThreadMarks call for
@@ -9369,7 +9386,7 @@ function processThreadMarks(sketch, marks, opts) {
       const bolt = {
         id: doc.nextBodyId++,
         type: 'fastener',
-        headType: 'hex',
+        headType: opts.boltHead || 'hex',
         size: opts.size,
         length: shaftLen,
         fit: 'tight',
@@ -9382,6 +9399,15 @@ function processThreadMarks(sketch, marks, opts) {
       newSelection.push(bolt.id);
     }
     m._materialised = true;
+    // Persist the chosen settings on the mark so re-opening the dialog
+    // pre-fills with what's actually there (not the defaults).
+    m._settings = {
+      size: opts.size,
+      depth: opts.depth,
+      fit: opts.fit,
+      placeBolt: !!opts.placeBolt,
+      boltHead: opts.boltHead || 'hex',
+    };
   }
   // After the loop, the active group (if any) IS the new parent. Select
   // it so undo/visual feedback land on the visible body.
@@ -12263,13 +12289,13 @@ function openArrayDialog() {
 }
 
 // ---------- Modal ----------
-function openModal({ title, body, onConfirm, custom, hideOk }) {
+function openModal({ title, body, onConfirm, custom, hideOk, confirmText }) {
   $('modal').innerHTML = `
     <h3>${title}</h3>
     ${body}
     <div class="modal-actions">
       <button class="action" id="m-cancel">${hideOk ? 'Close' : 'Cancel'}</button>
-      ${hideOk ? '' : '<button class="action primary" id="m-ok">OK</button>'}
+      ${hideOk ? '' : `<button class="action primary" id="m-ok">${confirmText || 'OK'}</button>`}
     </div>`;
   $('modal-bg').classList.add('show');
   const close = () => $('modal-bg').classList.remove('show');
