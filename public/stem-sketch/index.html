@@ -8964,16 +8964,21 @@ function buildFastenerCSGMesh(body) {
   const rFlat  = spec.d * 0.95 + clearance;
 
   const parts = [];
-  // Smooth-cylinder envelope at the MAJOR diameter — NOT the real helical
-  // shaft. The helical geometry is near-non-manifold at the thread crest
-  // and the CSG boolean engine accumulates fan-triangulation noise every
-  // time it's used as a cutting volume, which manifested as wedge slivers
-  // through the parent body after the second hole was cut. A plain
-  // cylinder at the major radius produces a clean printable hole and lets
-  // CSG.subtract round-trip cleanly across many marks on the same body.
-  const SHAFT_SEG = 32;
-  const threadedGeo = new THREE.CylinderGeometry(rMajor, rMajor, length, SHAFT_SEG);
-  threadedGeo.translate(0, length / 2, 0);
+  // Low-density helical thread for CSG — keeps the visible spiral on the
+  // INSIDE of the cut hole (which is what makes a threaded hole look
+  // threaded) but at a vertex count the boolean engine can survive across
+  // multiple compound subtractions. Vertices are welded after generation
+  // so adjacent helical turns share their crest vertices instead of
+  // sitting at near-duplicate positions — that's the main source of the
+  // fan-triangulation rays we saw when cutting a second hole.
+  const SEG_PER_TURN = 14;
+  const AXIAL_PER_PITCH = 2;
+  const threadedRaw = buildThreadedShaftGeo(rMinor, rMajor, pitch, length, SEG_PER_TURN, AXIAL_PER_PITCH);
+  // Weld eps must stay well below the thread-crest-to-root depth so the
+  // pattern survives; pitch/8 is a safe ceiling (≈0.1 mm at M5 pitch 0.8).
+  const weldEps = Math.min(0.08, pitch / 8);
+  const threadedGeo = weldGeometryForEdges(threadedRaw, weldEps);
+  threadedGeo.computeVertexNormals();
   parts.push(threadedGeo);
   let headGeo = null;
   if (headType === 'hex') {
