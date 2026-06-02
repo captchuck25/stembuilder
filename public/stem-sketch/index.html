@@ -4335,19 +4335,32 @@ function _ensureEdgeRenderer(W, H) {
     _edgeRender.renderer = viewer.renderer;
     _edgeRender.material = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
+      // R, G = camera-space normal X, Y (the projection-plane components).
+      // B = linear depth (0 at near, 1 at far) — lets the edge detector
+      // spot height steps where two coplanar surfaces meet at different
+      // depths (e.g., column top sitting on base plate top).
+      // A = on-surface flag.
       vertexShader: `
         varying vec3 vN;
+        varying float vDepth;
         void main() {
-          vN = normalize(mat3(modelMatrix) * normal);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vec4 viewPos = modelViewMatrix * vec4(position, 1.0);
+          vN = normalize(normalMatrix * normal);
+          vDepth = (-viewPos.z - cameraNear) / (cameraFar - cameraNear);
+          gl_Position = projectionMatrix * viewPos;
         }
       `,
       fragmentShader: `
         varying vec3 vN;
+        varying float vDepth;
         void main() {
-          gl_FragColor = vec4(vN * 0.5 + 0.5, 1.0);
+          gl_FragColor = vec4(vN.x * 0.5 + 0.5, vN.y * 0.5 + 0.5, clamp(vDepth, 0.0, 1.0), 1.0);
         }
       `,
+      uniforms: {
+        cameraNear: { value: 0.1 },
+        cameraFar:  { value: 1000.0 },
+      },
     });
     _edgeRender.scene = new THREE.Scene();
     _edgeRender.scene.background = new THREE.Color(0x000000);
@@ -4443,6 +4456,11 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
   er.camera.updateProjectionMatrix();
   er.camera.updateMatrixWorld(true);
 
+  // Update shader uniforms with the current camera's near/far so the
+  // depth channel actually represents 0..1 across this body's depth range.
+  er.material.uniforms.cameraNear.value = er.camera.near;
+  er.material.uniforms.cameraFar.value  = er.camera.far;
+
   // Swap our temp mesh in. Reuse the body's geometry directly (don't
   // clone — too expensive) but use our normal-output shader.
   while (er.scene.children.length) er.scene.remove(er.scene.children[0]);
@@ -4465,17 +4483,18 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
   er.renderer.readRenderTargetPixels(er.target, 0, 0, W, H, pixels);
 
   // Edge detection: silhouette (background neighbor) OR crease (normal
-  // differs significantly from neighbor). Walk 4-connected neighbors.
+  // X/Y differs significantly) OR step (depth differs significantly,
+  // catches height transitions where two coplanar surfaces stack like
+  // column-on-base). Walk 4-connected neighbors.
   const edgeMask = new Uint8Array(W * H);
-  const NORMAL_DIFF_THRESHOLD = 64; // out of 255 per channel
+  const NORMAL_DIFF_THRESHOLD = 48; // out of 255 per channel (R+G)
+  const DEPTH_DIFF_THRESHOLD  = 6;  // out of 255 (blue channel = linear depth)
   const isOnSurface = (idx) => pixels[idx + 3] >= 128; // alpha test
   for (let y = 1; y < H - 1; y++) {
     for (let x = 1; x < W - 1; x++) {
       const i = (y * W + x) * 4;
       if (!isOnSurface(i)) continue;
-      const nx = pixels[i];
-      const ny = pixels[i + 1];
-      const nz = pixels[i + 2];
+      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
       const ni = [
         ((y - 1) * W + x) * 4, ((y + 1) * W + x) * 4,
         (y * W + (x - 1)) * 4, (y * W + (x + 1)) * 4,
@@ -4483,8 +4502,10 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
       let edge = false;
       for (const k of ni) {
         if (!isOnSurface(k)) { edge = true; break; }
-        const dd = Math.abs(pixels[k] - nx) + Math.abs(pixels[k + 1] - ny) + Math.abs(pixels[k + 2] - nz);
-        if (dd > NORMAL_DIFF_THRESHOLD) { edge = true; break; }
+        const dn = Math.abs(pixels[k] - r) + Math.abs(pixels[k + 1] - g);
+        if (dn > NORMAL_DIFF_THRESHOLD) { edge = true; break; }
+        const dd = Math.abs(pixels[k + 2] - b);
+        if (dd > DEPTH_DIFF_THRESHOLD) { edge = true; break; }
       }
       if (edge) edgeMask[y * W + x] = 1;
     }
