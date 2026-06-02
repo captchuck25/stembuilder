@@ -9460,21 +9460,19 @@ function openThreadedHoleForMark(sketchId, markId) {
 // undo back to the snapshot taken before processing. That's what
 // pushUndo was for. Easiest reliable path: trigger one undo step.
 function deleteMaterialisedThreadMark(mark) {
-  // Remove visualizer bolt + thread shell if we tracked them. These were
-  // added AFTER the auto-group CSG cut so they're plain entries in
-  // doc.bodies (not consumed by groupSelected) and a simple filter
-  // removes them. The actual hole cut lives in the parent group's geom
-  // and is peeled by the undo() below.
+  // Drop the visualizer bolt — it's always a standalone body. The
+  // fallback-mode standalone thread shell (only created when there's no
+  // parent body) is dropped the same way. The merged-shell case needs no
+  // explicit cleanup: its triangles were folded into the parent group's
+  // geometry, and the undo() below restores the pre-merge geometry.
   const drop = new Set([mark._boltBodyId, mark._threadShellBodyId].filter(Boolean));
   if (drop.size) doc.bodies = doc.bodies.filter(b => !drop.has(b.id));
-  // Undo the last action — that was the processThreadMarks call that
-  // created the hole + auto-grouped it. After undo, the body is back
-  // to its pre-hole state and we can re-run.
   if (undoStack.length) undo();
   delete mark._materialised;
   delete mark._boltBodyId;
   delete mark._holeBodyId;
   delete mark._threadShellBodyId;
+  delete mark._mergedShellInBodyId;
   if (viewer) viewer.rebuildBodies();
   if (viewer) viewer.updateSketchOverlay();
   renderTree(); renderProps();
@@ -9586,12 +9584,43 @@ function processThreadMarks(sketch, marks, opts) {
       doc.multiSelectedBodies = [parentNow.id, hole.id];
       groupSelected(true);
     }
-    // Visual-only thread shell sitting inside the cleanly-cut hole. It's
-    // a normal toggleable body (so the user can hide / delete it) but
-    // never goes through CSG — that's how we get the spiraling thread
-    // look on the inside of the hole without the boolean engine choking
-    // on a helical input.
-    {
+    // Thread shell visualisation. The shell is a hollow sleeve with a
+    // helical thread profile on its inner surface — sits inside the cleanly-
+    // cut cylindrical hole so the user sees the spiraling thread pattern
+    // when looking down through the opening. We MERGE the shell's triangles
+    // directly into the parent group's geometry instead of registering a
+    // separate body: it shouldn't be a tree row the user can lose track of
+    // or move independently, and it doesn't go through CSG so this is just
+    // a triangle-list concatenation — cheap, no boolean engine involved,
+    // can't blow up the body.
+    const parentAfterCut = sketch.sourceBodyId
+      ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
+      : null;
+    if (parentAfterCut && parentAfterCut.geometry) {
+      const tempShellBody = {
+        type: 'threadShell',
+        size: opts.size,
+        length: opts.depth,
+        fit: opts.fit,
+        x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
+        rotation: { ...rotDeg },
+      };
+      const tempMesh = buildBodyMesh(tempShellBody);
+      if (tempMesh) {
+        tempMesh.updateMatrixWorld(true);
+        const shellGeo = tempMesh.geometry.clone();
+        shellGeo.applyMatrix4(tempMesh.matrixWorld);
+        // Both inputs to _mergeBufferGeometries must have normals — both do
+        // (parent's geometry got computeVertexNormals in groupSelected, the
+        // shell got it in buildThreadShellGeo).
+        parentAfterCut.geometry = _mergeBufferGeometries([parentAfterCut.geometry, shellGeo]);
+        parentAfterCut.geometry.computeVertexNormals();
+        tempMesh.geometry.dispose();
+        m._mergedShellInBodyId = parentAfterCut.id;
+      }
+    } else {
+      // No parent body (the sketch is freestanding) — fall back to a
+      // standalone shell body so the user still gets a thread visual.
       const shell = {
         id: doc.nextBodyId++,
         type: 'threadShell',
