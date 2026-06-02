@@ -5210,6 +5210,23 @@ class Viewer3D {
     };
 
     this.canvas.addEventListener('pointerdown', (e) => {
+      // Thread mark — click a mark in 3D to open the per-mark thread
+      // dialog. The hit-disc is invisible but raycastable; tagged with
+      // userData.kind === 'threadMark'.
+      if (e.button === 0 && doc.mode === '3d' && !doc.faceMode && !doc.curvedPickBody &&
+          !doc.mirrorMode && !doc.alignMode && !doc.cutMode && !doc.jointPickStage) {
+        this.raycaster.setFromCamera(ndc(e), this.camera);
+        const markTargets = [];
+        this.sketchGroup.traverse(o => { if (o.userData?.kind === 'threadMark') markTargets.push(o); });
+        if (markTargets.length) {
+          const markHits = this.raycaster.intersectObjects(markTargets, false);
+          if (markHits.length > 0) {
+            const ud = markHits[0].object.userData;
+            openThreadedHoleForMark(ud.sketchId, ud.markId);
+            return;
+          }
+        }
+      }
       // Curved-body bbox face picker — 6 clickable face overlays around the
       // body's bounding box. Click one to sketch on that side. Click empty
       // space to cancel.
@@ -6735,6 +6752,54 @@ class Viewer3D {
       for (const ent of sketch.entities) {
         if (doc.hideConstruction && ent.construction) continue;
         const useMat = ent.construction ? matConstruction : baseMat;
+
+        // Thread mark — render as an orange crosshair-in-circle on the
+        // sketch plane. Tagged with userData.threadMark so the 3D click
+        // handler can pick them and pop the per-mark thread dialog.
+        if (ent.type === 'threadMark') {
+          const orangeMat = new THREE.LineBasicMaterial({ color: 0xff9a3e, transparent: true, opacity: 0.95 });
+          const R = 3; // mm
+          // Circle
+          const cPts = [];
+          const Nc = 32;
+          for (let i = 0; i <= Nc; i++) {
+            const t = (i / Nc) * Math.PI * 2;
+            cPts.push(sketch2dTo3d(ent.cx + Math.cos(t) * R, ent.cy + Math.sin(t) * R));
+          }
+          const cGeo = new THREE.BufferGeometry().setFromPoints(cPts);
+          const cLine = new THREE.Line(cGeo, orangeMat);
+          cLine.renderOrder = 7;
+          cLine.userData = { kind: 'threadMark', markId: ent.id, sketchId: sketch.id };
+          this.sketchGroup.add(cLine);
+          // Crosshair (horizontal + vertical)
+          const cross = R + 1.5;
+          const hGeo = new THREE.BufferGeometry().setFromPoints([
+            sketch2dTo3d(ent.cx - cross, ent.cy), sketch2dTo3d(ent.cx + cross, ent.cy),
+          ]);
+          const vGeo = new THREE.BufferGeometry().setFromPoints([
+            sketch2dTo3d(ent.cx, ent.cy - cross), sketch2dTo3d(ent.cx, ent.cy + cross),
+          ]);
+          const hLine = new THREE.Line(hGeo, orangeMat);
+          const vLine = new THREE.Line(vGeo, orangeMat);
+          hLine.userData = vLine.userData = { kind: 'threadMark', markId: ent.id, sketchId: sketch.id };
+          hLine.renderOrder = vLine.renderOrder = 7;
+          this.sketchGroup.add(hLine);
+          this.sketchGroup.add(vLine);
+          // Invisible disc centered on the mark — line geometries are too
+          // thin to raycast reliably, so this provides a clickable target.
+          const hitDisc = new THREE.Mesh(
+            new THREE.CircleGeometry(R + 2, 16),
+            new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide, depthWrite: false }),
+          );
+          const markWorld = new THREE.Vector3(ent.cx, ent.cy, 0.06).applyMatrix4(planeM);
+          hitDisc.position.copy(markWorld);
+          const planeN = new THREE.Vector3(...sketch.plane.n).normalize();
+          hitDisc.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), planeN);
+          hitDisc.userData = { kind: 'threadMark', markId: ent.id, sketchId: sketch.id };
+          hitDisc.renderOrder = 8;
+          this.sketchGroup.add(hitDisc);
+          continue;
+        }
 
         // Shaded fill for closed shapes
         if (!ent.construction) {
@@ -9072,6 +9137,54 @@ function addFastener(headType, size, length, fit) {
 // sketch that's already been processed is a no-op for the mark (idempotent
 // — bodies are recreated each time, so undo the call if you don't like the
 // result).
+// Per-mark dialog — triggered when the user clicks a Thread mark in
+// 3D. Configures and immediately materialises just that one mark, leaving
+// other marks untouched so each can be a different thread size.
+function openThreadedHoleForMark(sketchId, markId) {
+  const sketch = doc.sketches.find(s => s.id === sketchId);
+  if (!sketch) return;
+  const mark = (sketch.entities || []).find(e => e.id === markId && e.type === 'threadMark');
+  if (!mark) return;
+  const u = unitLabel();
+  const sizeOpts = FASTENER_SPECS.map(s =>
+    `<option value="${s.key}"${s.key === 'M5' ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
+  ).join('');
+  const defDepth = doc.units === 'in' ? 0.5 : 12;
+  openModal({
+    title: 'Threaded hole at this mark',
+    body: `<p>Configure thread size and depth for this mark. Other marks in <b>${sketch.name || 'this sketch'}</b> stay untouched.</p>
+           <div class="field" style="margin-top:8px">
+             <label>Thread size</label>
+             <select id="th1-size">${sizeOpts}</select>
+           </div>
+           <div class="field">
+             <label>Depth (${u})</label>
+             <input id="th1-depth" type="number" value="${defDepth}" min="0.1" step="0.5"/>
+           </div>
+           <div class="field">
+             <label>Fit</label>
+             <select id="th1-fit">
+               <option value="tight">Tight — actual size</option>
+               <option value="normal">Normal — +0.1 mm clearance</option>
+               <option value="loose" selected>Loose — +0.25 mm clearance (FDM-friendly)</option>
+             </select>
+           </div>
+           <label class="field" style="margin-top:6px">
+             <input type="checkbox" id="th1-bolt" checked/>
+             <span>Place a matching visualizer bolt</span>
+           </label>`,
+    onConfirm: () => {
+      const size = $('th1-size').value;
+      const depthVal = parseFloat($('th1-depth').value);
+      const depth = depthVal > 0 ? fromUnit(depthVal) : 0;
+      const fit = $('th1-fit').value || 'loose';
+      const placeBolt = $('th1-bolt').checked;
+      if (depth <= 0) { showHint('Depth must be positive.'); return; }
+      processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt });
+    },
+  });
+}
+
 function openThreadedHolesDialog() {
   if (doc.mode !== '3d') {
     showHint('Switch to 3D first, then click Thd Holes.');
