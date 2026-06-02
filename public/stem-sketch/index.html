@@ -5299,7 +5299,19 @@ class Viewer3D {
       // Face-pick mode (Sketch on Face workflow)
       if (doc.faceMode && e.button === 0) {
         this.raycaster.setFromCamera(ndc(e), this.camera);
-        const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
+        const allHits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
+        // Skip visualizer overlays (thread shells + thread-mark visualizer bolts)
+        // so a click on a body that already has threads picks the BODY's face,
+        // not the shell sitting inside the hole — otherwise the sketch plane
+        // gets built off the shell's small helical surface and the projection
+        // looks empty.
+        const hits = allHits.filter(h => {
+          const b = doc.bodies.find(x => x.id === h.object.userData.bodyId);
+          if (!b) return true;
+          if (b.type === 'threadShell') return false;
+          if (b.type === 'fastener' && b._threadMarkRef) return false;
+          return true;
+        });
         if (hits.length > 0) {
           const hit = hits[0];
           const sourceBody = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
