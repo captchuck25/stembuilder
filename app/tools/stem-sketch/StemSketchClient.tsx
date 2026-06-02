@@ -229,10 +229,42 @@ export default function StemSketchClient() {
         ref={iframeRef}
         src="/stem-sketch/index.html"
         title="STEM Sketch"
-        onLoad={() => {
+        onLoad={async () => {
           iframeLoadedRef.current = true;
           postUser();
           pushDemoDesign();
+          // Cloud-backed fallback. If the iframe's localStorage draft is
+          // missing or corrupt, restoreLocalDraft inside the iframe leaves
+          // a blank canvas. That's surprising right after a successful
+          // cloud save (the cloud has the work, but a plain refresh
+          // doesn't reach for it). Detect the empty case from out here —
+          // we share an origin with the iframe so the same localStorage
+          // key is readable — and fetch the user's most recent design
+          // to seed the canvas. Skipped in demo mode and when a draft
+          // exists (iframe's own restore handles that path).
+          if (isDemoMode) return;
+          if (!session?.user?.id) return;
+          let hasDraft = false;
+          try { hasDraft = !!localStorage.getItem("stem-sketch:draft"); } catch {}
+          if (hasDraft) return;
+          try {
+            const listRes = await fetch("/api/stem-sketch/designs");
+            if (!listRes.ok) return;
+            const designs = (await listRes.json()) as Array<{ id: string; updated_at: string }>;
+            if (!designs.length) return;
+            const mostRecent = designs[0]; // API returns updated_at DESC
+            const designRes = await fetch(`/api/stem-sketch/designs/${mostRecent.id}`);
+            if (!designRes.ok) return;
+            const design = await designRes.json();
+            postToSketch({
+              type: "STEMSKETCH_LOAD",
+              name: design.name,
+              docJson: design.doc_json,
+              units: design.units,
+            });
+          } catch (err) {
+            console.warn("STEM Sketch auto-load of most recent design failed:", err);
+          }
         }}
         style={{ flex: 1, border: "none", display: "block" }}
       />

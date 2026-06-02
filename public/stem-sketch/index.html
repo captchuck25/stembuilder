@@ -8043,20 +8043,37 @@ function clearLocalDraft() {
   try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch (_) {}
 }
 function restoreLocalDraft() {
+  let raw;
+  try { raw = localStorage.getItem(LOCAL_DRAFT_KEY); }
+  catch (err) { console.warn('STEM Sketch localStorage read failed:', err); return false; }
+  if (!raw) return false;
+  let draft;
+  try { draft = JSON.parse(raw); }
+  catch (err) {
+    console.warn('STEM Sketch local draft JSON parse failed — clearing:', err);
+    try { localStorage.removeItem(LOCAL_DRAFT_KEY); } catch (_) {}
+    return false;
+  }
+  if (!draft?.docJson) {
+    console.warn('STEM Sketch local draft missing docJson:', Object.keys(draft || {}));
+    return false;
+  }
   try {
-    const raw = localStorage.getItem(LOCAL_DRAFT_KEY);
-    if (!raw) return false;
-    const draft = JSON.parse(raw);
-    if (!draft?.docJson) return false;
-    // Restore name + units, then apply the snapshot.
     const inp = document.getElementById('project-filename');
     if (inp && draft.name) inp.value = draft.name;
     if (draft.units && draft.units !== doc.units) setUnits(draft.units);
     applySnapshot(draft.docJson);
-    // Mark as dirty since we haven't synced to the cloud yet.
     setStatus('Restored unsaved work from last session');
     return true;
-  } catch (_) { return false; }
+  } catch (err) {
+    // Most useful error to surface — applySnapshot blowing up means the
+    // saved doc was structurally valid JSON but something inside (a body
+    // geometry, a sketch entity) couldn't be rebuilt. Without this log
+    // the user saw a blank canvas and had to manually re-load from cloud.
+    console.error('STEM Sketch local draft restore failed inside applySnapshot:', err);
+    setStatus('⚠ Could not restore last session — open from cloud via 📂 Load');
+    return false;
+  }
 }
 
 function pushUndo() {
