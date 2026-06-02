@@ -5395,16 +5395,28 @@ class Viewer3D {
           const normalWorld = normalLocal.transformDirection(hit.object.matrixWorld).normalize();
           const bbox = new THREE.Box3().setFromObject(hit.object);
           const bodyCenter = bbox.getCenter(new THREE.Vector3());
-          // Ensure the sketch-plane normal points AWAY from the body's
-          // center — i.e. truly "outward" from the face. Without this, a
-          // click that lands on the back face of a triangle (concave hole
-          // interior, or just a triangle whose winding is reversed) gives
-          // an inward-pointing normal. Downstream features that derive
-          // direction from plane.n (Through-extrude, thread-mark hole
-          // axis, fastener placement) all then point INTO the body
-          // instead of OUT of it, and the bolt comes out upside-down.
-          const outward = hit.point.clone().sub(bodyCenter);
-          if (normalWorld.dot(outward) < 0) normalWorld.negate();
+          // Verify the face normal points OUT of the body. The earlier
+          // bodyCenter heuristic was wrong for asymmetric bodies — on
+          // this bracket the bbox center sits inside the bosses, so the
+          // base plate's top face read as "inward" and the plane flipped
+          // upside down. Instead, probe a short distance along the
+          // proposed normal and cast a ray back toward hit.point: if we
+          // hit body geometry between the probe and the surface we
+          // started on, we were inside the body and the normal needs to
+          // flip. Robust to convex and non-convex shapes alike.
+          const probeDist = Math.max(1, bbox.getSize(new THREE.Vector3()).length() * 0.01);
+          const probe = hit.point.clone().add(normalWorld.clone().multiplyScalar(probeDist));
+          const tester = new THREE.Raycaster(probe, normalWorld.clone().negate(), 0, probeDist * 2);
+          const testerHits = tester.intersectObject(hit.object, false);
+          // If the nearest hit going back toward the surface lands
+          // noticeably SHORTER than probeDist, there's body material
+          // between us and the click point → we probed INTO the body →
+          // normal was inward → flip. The 0.5×probeDist threshold
+          // tolerates the probe ending right at the surface (no hit
+          // returned for a coincident plane) without false positives.
+          if (testerHits.length && testerHits[0].distance < probeDist * 0.5) {
+            normalWorld.negate();
+          }
           const dist = bodyCenter.clone().sub(hit.point).dot(normalWorld);
           const planeOrigin = bodyCenter.clone().sub(normalWorld.clone().multiplyScalar(dist));
           const plane = planeFromFace(planeOrigin, normalWorld);
