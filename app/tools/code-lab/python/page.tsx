@@ -1345,10 +1345,11 @@ function QuizView({ li, onComplete }: { li: number; onComplete: (score: number, 
 
 // ─── Level complete screen ────────────────────────────────────────────────────
 
-function LevelComplete({ li, score, total, onContinue }: { li: number; score: number; total: number; onContinue: () => void }) {
+function LevelComplete({ li, score, total, onContinue, onRetake }: { li: number; score: number; total: number; onContinue: () => void; onRetake: () => void }) {
   const lv = LEVELS[li];
   const pct = Math.round(score/total*100);
   const hasNext = li < LEVELS.length-1;
+  const isPerfect = score === total;
   return (
     <SiteChrome>
       <div style={{maxWidth:560,margin:"0 auto",padding:"60px 32px",textAlign:"center"}}>
@@ -1369,6 +1370,12 @@ function LevelComplete({ li, score, total, onContinue }: { li: number; score: nu
           <button onClick={onContinue} style={{padding:"14px 32px",borderRadius:12,background:lv.color,color:"#fff",border:"none",fontWeight:800,fontSize:16,cursor:"pointer",width:"100%"}}>
             {hasNext?"Start Next Level →":"Back to Levels"}
           </button>
+          {!isPerfect && (
+            <button onClick={onRetake}
+              style={{marginTop:12,padding:"12px 32px",borderRadius:12,background:"transparent",color:lv.color,border:`2px solid ${lv.color}`,fontWeight:800,fontSize:15,cursor:"pointer",width:"100%"}}>
+              ↻ Retake Quiz
+            </button>
+          )}
         </div>
       </div>
     </SiteChrome>
@@ -1548,6 +1555,7 @@ export default function PythonMazePage() {
           if (li+1 < LEVELS.length) setPhase({tag:"intro",li:nextLi});
           else setPhase({tag:"overview"});
         }}
+        onRetake={() => setPhase({tag:"quiz",li})}
       />
     );
   }
