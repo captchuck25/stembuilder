@@ -11395,8 +11395,7 @@ function renderTree() {
     else if (body.type === 'revolve') label = 'Revolved';
     else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
-      const tag = body._threadMarkRef ? ' · thread visualizer' : '';
-      label = `${spec.label} ${FASTENER_HEAD_LABELS[body.headType] || body.headType} (${fmtUL(body.length)})${tag}`;
+      label = `${spec.label} ${FASTENER_HEAD_LABELS[body.headType] || body.headType} (${fmtUL(body.length)})`;
     }
     else if (body.type === 'threadShell') {
       const spec = getFastenerSpec(body.size);
