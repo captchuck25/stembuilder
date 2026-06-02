@@ -5383,6 +5383,16 @@ class Viewer3D {
           const normalWorld = normalLocal.transformDirection(hit.object.matrixWorld).normalize();
           const bbox = new THREE.Box3().setFromObject(hit.object);
           const bodyCenter = bbox.getCenter(new THREE.Vector3());
+          // Ensure the sketch-plane normal points AWAY from the body's
+          // center — i.e. truly "outward" from the face. Without this, a
+          // click that lands on the back face of a triangle (concave hole
+          // interior, or just a triangle whose winding is reversed) gives
+          // an inward-pointing normal. Downstream features that derive
+          // direction from plane.n (Through-extrude, thread-mark hole
+          // axis, fastener placement) all then point INTO the body
+          // instead of OUT of it, and the bolt comes out upside-down.
+          const outward = hit.point.clone().sub(bodyCenter);
+          if (normalWorld.dot(outward) < 0) normalWorld.negate();
           const dist = bodyCenter.clone().sub(hit.point).dot(normalWorld);
           const planeOrigin = bodyCenter.clone().sub(normalWorld.clone().multiplyScalar(dist));
           const plane = planeFromFace(planeOrigin, normalWorld);
