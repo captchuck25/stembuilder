@@ -9485,50 +9485,97 @@ function openThreadedHolesDialog() {
   }
   const sketch = doc.sketches.find(s => s.id === doc.activeSketchId);
   if (!sketch) { showHint('Open a sketch with Thread marks first.'); return; }
-  const marks = (sketch.entities || []).filter(e => e.type === 'threadMark');
-  if (!marks.length) {
+  const allMarks = (sketch.entities || []).filter(e => e.type === 'threadMark');
+  if (!allMarks.length) {
     showHint('Place Thread marks in the sketch (Thread tool in 2D) before running this.');
     return;
   }
+  const freshMarks = allMarks.filter(m => !m._materialised);
+  const doneMarks  = allMarks.filter(m =>  m._materialised);
+  if (!freshMarks.length && doneMarks.length) {
+    // All marks are already done. Offer to rebuild them with new settings —
+    // single call so the user doesn't have to click each mark individually.
+    openModal({
+      title: 'All marks already threaded',
+      body: `<p>All ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} in <b>${sketch.name || 'this sketch'}</b> already have threaded holes. Rebuild them all with new settings? The existing holes + visualizer bolts will be peeled first.</p>`,
+      confirmText: 'Rebuild all',
+      onConfirm: () => {
+        for (const m of doneMarks) deleteMaterialisedThreadMark(m);
+        openThreadedHolesDialog();
+      },
+    });
+    return;
+  }
+  // Default settings come from the LAST materialised mark if there is one,
+  // so a batch on a sketch that already has some threads pre-fills with
+  // matching values instead of the dialog's static M5 / loose defaults.
+  const seed = doneMarks[doneMarks.length - 1]?._settings || {};
   const u = unitLabel();
+  const defDepthUL = (typeof seed.depth === 'number') ? toUnit(seed.depth) : (doc.units === 'in' ? 0.5 : 12);
+  const curSize  = seed.size     || 'M5';
+  const curFit   = seed.fit      || 'loose';
+  const curHead  = seed.boltHead || 'hex';
+  const curBolt  = (seed.placeBolt !== undefined) ? !!seed.placeBolt : true;
   const sizeOpts = FASTENER_SPECS.map(s =>
-    `<option value="${s.key}"${s.key === 'M5' ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
+    `<option value="${s.key}"${s.key === curSize ? ' selected' : ''}>${s.label} · pitch ${s.p.toFixed(2)} mm (${s.system})</option>`
   ).join('');
-  const defDepth = doc.units === 'in' ? 0.5 : 12;
+  const headOpts = ['hex', 'phillips', 'cap', 'flat'].map(k =>
+    `<option value="${k}"${k === curHead ? ' selected' : ''}>${FASTENER_HEAD_LABELS[k]}</option>`
+  ).join('');
+  const fitOpts = [
+    ['tight',  'Tight — actual size'],
+    ['normal', 'Normal — +0.1 mm clearance'],
+    ['loose',  'Loose — +0.25 mm clearance (FDM-friendly)'],
+  ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
+  const titleCount = freshMarks.length;
+  const doneNote = doneMarks.length
+    ? `<p style="color:var(--ink-soft);font-size:12px;margin-top:0">Skipping ${doneMarks.length} already-threaded mark${doneMarks.length === 1 ? '' : 's'} (click an existing mark in 3D to adjust it individually).</p>`
+    : '';
   openModal({
-    title: `Threaded holes (${marks.length} mark${marks.length === 1 ? '' : 's'})`,
-    body: `<p>For each mark in <b>${sketch.name || 'this sketch'}</b>, generate a real threaded hole at the chosen size and depth. Auto-groups with the sketch's parent body.</p>
+    title: `Threaded holes (${titleCount} new mark${titleCount === 1 ? '' : 's'})`,
+    body: `<p>For each fresh mark in <b>${sketch.name || 'this sketch'}</b>, cut a threaded hole and place a matching visualizer bolt. All ${titleCount} get the same settings — adjust individual marks later by clicking each one in 3D.</p>
+           ${doneNote}
            <div class="field" style="margin-top:8px">
              <label>Thread size</label>
              <select id="th-size">${sizeOpts}</select>
            </div>
            <div class="field">
              <label>Depth (${u})</label>
-             <input id="th-depth" type="number" value="${defDepth}" min="0.1" step="0.5"/>
+             <input id="th-depth" type="number" value="${defDepthUL}" min="0.1" step="0.5"/>
            </div>
            <div class="field">
              <label>Fit</label>
-             <select id="th-fit">
-               <option value="tight">Tight — actual size</option>
-               <option value="normal">Normal — +0.1 mm clearance</option>
-               <option value="loose" selected>Loose — +0.25 mm clearance (FDM-friendly)</option>
-             </select>
+             <select id="th-fit">${fitOpts}</select>
            </div>
            <label class="field" style="margin-top:6px">
-             <input type="checkbox" id="th-bolt" checked/>
-             <span>Place a matching visualizer bolt at each mark (hideable later)</span>
+             <input type="checkbox" id="th-bolt"${curBolt ? ' checked' : ''}/>
+             <span>Place a matching visualizer bolt at each mark</span>
            </label>
-           <div class="hint">The hole's axis is the sketch plane's normal. The bolt sits with head flush on the sketch plane, shaft pointing into the body.</div>`,
+           <div class="field" id="th-head-row">
+             <label>Bolt head type</label>
+             <select id="th-head">${headOpts}</select>
+             <p style="color:var(--ink-soft);font-size:11px;margin:4px 0 0">Only affects the visualizer bolts — the holes themselves are always headless.</p>
+           </div>
+           <div class="hint">The hole's axis is the sketch plane's normal. Each bolt sits with head flush on the sketch plane, shaft pointing into the body.</div>`,
+    confirmText: `Cut ${titleCount} hole${titleCount === 1 ? '' : 's'}`,
     onConfirm: () => {
       const size = $('th-size').value;
       const depthVal = parseFloat($('th-depth').value);
       const depth = depthVal > 0 ? fromUnit(depthVal) : 0;
       const fit = $('th-fit').value || 'loose';
       const placeBolt = $('th-bolt').checked;
+      const boltHead = $('th-head').value || 'hex';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      processThreadMarks(sketch, marks, { size, depth, fit, placeBolt });
+      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead });
     },
   });
+  setTimeout(() => {
+    const cb = $('th-bolt'); const headRow = $('th-head-row');
+    if (!cb || !headRow) return;
+    const sync = () => { headRow.style.opacity = cb.checked ? '1' : '0.4'; $('th-head').disabled = !cb.checked; };
+    cb.addEventListener('change', sync);
+    sync();
+  }, 0);
 }
 
 function processThreadMarks(sketch, marks, opts) {
