@@ -9148,7 +9148,71 @@ function buildFastenerCSGMesh(body) {
 
 function getCSGMesh(body) {
   if (body.type === 'fastener') return buildFastenerCSGMesh(body);
+  // CSG groups carry baked-in geometry from a previous boolean. That output
+  // tends to have welded-but-not-quite-coincident vertices around cut seams
+  // and the occasional zero-area triangle, both of which destabilise the
+  // BSP tree on the NEXT subtract — that's what kept blowing the body apart
+  // when a second thread mark was placed on an already-cut bracket.
+  // Hand CSG a cleaned-up clone so each round starts from manifold-ish input.
+  if (body.type === 'group' || body.type === 'combined') {
+    return _cleanedCSGInputMesh(body);
+  }
   return body.mesh;
+}
+
+// Build a Mesh whose geometry is a welded + degenerate-stripped clone of the
+// body's baked CSG geometry. The original body.mesh stays untouched (it's
+// what the user sees in the viewport); this is purely a transient input for
+// the boolean engine. The cleaned mesh inherits the source mesh's world
+// transform so positioning still works.
+function _cleanedCSGInputMesh(body) {
+  if (!body.mesh?.geometry) return body.mesh;
+  const src = body.mesh.geometry;
+  // Weld coincident vertices first. 0.005 mm is well below any printable
+  // feature size; CSG output drift across union/subtract seams sits in
+  // that range, so welding collapses it without erasing real corners.
+  let cleaned = weldGeometryForEdges(src, 0.005);
+  // Drop triangles whose 3 vertices are too close to colinear / coincident
+  // to form a non-degenerate face. CSG.js's BSP build divides by triangle
+  // area; degenerates cause NaN normals and the wedge-spray artifacts.
+  cleaned = _stripDegenerateTriangles(cleaned, 1e-6);
+  cleaned.computeVertexNormals();
+  const mesh = new THREE.Mesh(cleaned, new THREE.MeshBasicMaterial());
+  mesh.position.copy(body.mesh.position);
+  mesh.rotation.copy(body.mesh.rotation);
+  mesh.scale.copy(body.mesh.scale);
+  mesh.updateMatrixWorld(true);
+  return mesh;
+}
+
+// Drop triangles whose 2× signed area is below epsAreaMm² (these are the
+// degenerate slivers a boolean engine spits out around cut boundaries).
+function _stripDegenerateTriangles(geo, epsArea) {
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  if (!pos || !idx) return geo;
+  const a = idx.array;
+  const v = pos.array;
+  const keep = [];
+  const ax = new THREE.Vector3(), bx = new THREE.Vector3(), cx = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), cr = new THREE.Vector3();
+  for (let i = 0; i < a.length; i += 3) {
+    const ia = a[i] * 3, ib = a[i + 1] * 3, ic = a[i + 2] * 3;
+    ax.set(v[ia],     v[ia + 1], v[ia + 2]);
+    bx.set(v[ib],     v[ib + 1], v[ib + 2]);
+    cx.set(v[ic],     v[ic + 1], v[ic + 2]);
+    e1.subVectors(bx, ax);
+    e2.subVectors(cx, ax);
+    cr.crossVectors(e1, e2);
+    // |cross| = 2 × triangle area
+    if (cr.lengthSq() < epsArea) continue;
+    keep.push(a[i], a[i + 1], a[i + 2]);
+  }
+  if (keep.length === a.length) return geo; // nothing to strip
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', pos);
+  out.setIndex(new THREE.BufferAttribute(new Uint32Array(keep), 1));
+  return out;
 }
 
 function build2DProfilePoints(kind, r) {
