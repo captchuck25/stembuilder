@@ -8984,10 +8984,21 @@ function buildFastenerCSGMesh(body) {
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial());
+  // Source of truth = body fields, not body.mesh — the mesh may not exist yet
+  // for a body freshly pushed into doc.bodies (e.g. a thread-mark hole being
+  // CSG-subtracted before the render pass has had a chance to instantiate it).
   if (body.mesh) {
     mesh.position.copy(body.mesh.position);
     mesh.rotation.copy(body.mesh.rotation);
     mesh.scale.copy(body.mesh.scale);
+  } else {
+    mesh.position.set(body.x || 0, body.y || 0, body.z || 0);
+    const r = body.rotation || { x: 0, y: 0, z: 0 };
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(r.x || 0),
+      THREE.MathUtils.degToRad(r.y || 0),
+      THREE.MathUtils.degToRad(r.z || 0)
+    );
   }
   mesh.updateMatrixWorld(true);
   return mesh;
