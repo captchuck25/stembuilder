@@ -8958,7 +8958,16 @@ function buildFastenerCSGMesh(body) {
   const rFlat  = spec.d * 0.95 + clearance;
 
   const parts = [];
-  const threadedGeo = buildThreadedShaftGeo(rMinor, rMajor, pitch, length);
+  // Smooth-cylinder envelope at the MAJOR diameter — NOT the real helical
+  // shaft. The helical geometry is near-non-manifold at the thread crest
+  // and the CSG boolean engine accumulates fan-triangulation noise every
+  // time it's used as a cutting volume, which manifested as wedge slivers
+  // through the parent body after the second hole was cut. A plain
+  // cylinder at the major radius produces a clean printable hole and lets
+  // CSG.subtract round-trip cleanly across many marks on the same body.
+  const SHAFT_SEG = 32;
+  const threadedGeo = new THREE.CylinderGeometry(rMajor, rMajor, length, SHAFT_SEG);
+  threadedGeo.translate(0, length / 2, 0);
   parts.push(threadedGeo);
   let headGeo = null;
   if (headType === 'hex') {
