@@ -12734,6 +12734,19 @@ async function cloudSave() {
   const name = getProjectName() || 'Untitled';
   const thumbnail = await captureThumbnailAsync();
   const docJson = snapshotDoc();
+  // Mirror the cloud snapshot into localStorage RIGHT NOW. A plain page
+  // reload only restores from localStorage — the cloud copy is only loaded
+  // when the user explicitly clicks Load — so if the local draft was older
+  // than what we're sending up here, a reload right after cloud save would
+  // bring back the stale draft and the work "looks lost". Flushing now
+  // keeps the two stores in lockstep.
+  try {
+    localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify({
+      name, units: doc.units, docJson, savedAt: Date.now(),
+    }));
+  } catch (err) {
+    console.warn('STEM Sketch local draft mirror failed:', err);
+  }
   const docJsonGz = await gzipJsonToBase64(docJson);
   // Prefer the compressed payload; fall back to raw if the browser can't
   // compress for any reason. The server route accepts either field.
