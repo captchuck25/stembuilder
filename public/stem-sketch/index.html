@@ -7061,6 +7061,30 @@ function buildBodyMesh(body) {
     applyRotation(mesh);
     return mesh;
   }
+  if (body.type === 'threadShell') {
+    const spec = getFastenerSpec(body.size);
+    if (!spec) return null;
+    const fit = body.fit || 'loose';
+    const clearance = FASTENER_FIT_CLEARANCE[fit] || 0;
+    const pitch = spec.p;
+    // Inset rOuter by a hair so the smooth shell wall doesn't z-fight with
+    // the CSG-cut hole wall (which sits at exactly (spec.d/2)+clearance).
+    const rOuter = (spec.d / 2) + clearance - 0.005;
+    const rCrest = Math.max(0.3, rOuter - 0.04);      // thread crest sits just inside the wall
+    const rRoot  = Math.max(0.2, (spec.d / 2) - 0.5413 * pitch);
+    const shellGeo = buildThreadShellGeo(rRoot, rCrest, rOuter, pitch, body.length);
+    // Match the body colour so the shell reads as a feature of the part,
+    // not a separate hardware piece (which is the bolt's job).
+    const matShell = new THREE.MeshStandardMaterial({
+      color: 0x9eb6ff,
+      roughness: 0.55, metalness: 0.05, flatShading: false,
+      side: THREE.DoubleSide,
+    });
+    mesh = new THREE.Mesh(shellGeo, matShell);
+    mesh.position.set(body.x || 0, body.y || 0, body.z || 0);
+    applyRotation(mesh);
+    return mesh;
+  }
   if (body.type === 'revolve') {
     const profile = (body.sketch?.entities || []).find(e => e.type === 'polyline' && !e.construction && e.points?.length >= 2);
     if (!profile) return null;
@@ -8844,6 +8868,84 @@ function buildThreadedShaftGeo(rMinor, rMajor, pitch, length, segPerTurn = 24, a
   return geo;
 }
 
+// Hollow threaded sleeve — the OUTER surface is a smooth cylinder that
+// hugs the inside wall of a clean cylindrical CSG cut, the INNER surface
+// is the helical thread profile. Used as a non-CSG visualization sitting
+// inside a smoothly-cut threaded hole so the user can still see the
+// helical pattern without ever feeding the (non-manifold-ish) helix into
+// the boolean engine. Open top and bottom — the hole stays see-through.
+function buildThreadShellGeo(rMinor, rMajor, rOuter, pitch, length, segPerTurn = 18, axialStepsPerPitch = 4) {
+  const halfPitch = pitch / 2;
+  const totalAxialSteps = Math.max(8, Math.ceil((length / pitch) * axialStepsPerPitch));
+  const N = segPerTurn;
+  const positions = [];
+  const indices = [];
+  // Inner ring (helical thread profile)  + outer ring (smooth cyl)
+  // for each axial slice.
+  for (let i = 0; i <= totalAxialSteps; i++) {
+    const z = (i / totalAxialSteps) * length;
+    for (let j = 0; j < N; j++) {
+      const theta = (j / N) * 2 * Math.PI;
+      let phase = (z - theta * pitch / (2 * Math.PI)) % pitch;
+      if (phase >  halfPitch) phase -= pitch;
+      else if (phase < -halfPitch) phase += pitch;
+      const rIn = rMajor - (rMajor - rMinor) * Math.abs(phase) / halfPitch;
+      positions.push(rIn * Math.cos(theta), z, rIn * Math.sin(theta));
+    }
+    for (let j = 0; j < N; j++) {
+      const theta = (j / N) * 2 * Math.PI;
+      positions.push(rOuter * Math.cos(theta), z, rOuter * Math.sin(theta));
+    }
+  }
+  const sliceVerts = 2 * N;
+  // Inner wall — wind so normal faces INWARD (toward the axis); that's the
+  // surface the user is looking at from outside down through the hole.
+  for (let i = 0; i < totalAxialSteps; i++) {
+    for (let j = 0; j < N; j++) {
+      const jN = (j + 1) % N;
+      const a = i * sliceVerts + j;
+      const b = i * sliceVerts + jN;
+      const c = (i + 1) * sliceVerts + j;
+      const d = (i + 1) * sliceVerts + jN;
+      indices.push(a, b, c);
+      indices.push(b, d, c);
+    }
+  }
+  // Outer wall — wind so normal faces OUTWARD (away from axis); flush
+  // against the smooth CSG cut wall.
+  for (let i = 0; i < totalAxialSteps; i++) {
+    for (let j = 0; j < N; j++) {
+      const jN = (j + 1) % N;
+      const a = i * sliceVerts + N + j;
+      const b = i * sliceVerts + N + jN;
+      const c = (i + 1) * sliceVerts + N + j;
+      const d = (i + 1) * sliceVerts + N + jN;
+      indices.push(a, c, b);
+      indices.push(b, c, d);
+    }
+  }
+  // Top annular cap (z = length) — connects inner ring to outer ring,
+  // normal pointing +Y (out of the hole opening at the top).
+  const topInnerBase = totalAxialSteps * sliceVerts;
+  const topOuterBase = topInnerBase + N;
+  for (let j = 0; j < N; j++) {
+    const jN = (j + 1) % N;
+    indices.push(topInnerBase + j,  topOuterBase + j,  topInnerBase + jN);
+    indices.push(topInnerBase + jN, topOuterBase + j,  topOuterBase + jN);
+  }
+  // Bottom annular cap (z = 0) — normal pointing −Y (into the body).
+  for (let j = 0; j < N; j++) {
+    const jN = (j + 1) % N;
+    indices.push(j,      jN,     N + j);
+    indices.push(jN,     N + jN, N + j);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 // Helper — bake a CSG.subtract into a fresh BufferGeometry. Used to carve
 // recesses (hex socket, Phillips cross) into the head before merging with
 // the rest of the bolt parts.
@@ -8964,21 +9066,17 @@ function buildFastenerCSGMesh(body) {
   const rFlat  = spec.d * 0.95 + clearance;
 
   const parts = [];
-  // Low-density helical thread for CSG — keeps the visible spiral on the
-  // INSIDE of the cut hole (which is what makes a threaded hole look
-  // threaded) but at a vertex count the boolean engine can survive across
-  // multiple compound subtractions. Vertices are welded after generation
-  // so adjacent helical turns share their crest vertices instead of
-  // sitting at near-duplicate positions — that's the main source of the
-  // fan-triangulation rays we saw when cutting a second hole.
-  const SEG_PER_TURN = 14;
-  const AXIAL_PER_PITCH = 2;
-  const threadedRaw = buildThreadedShaftGeo(rMinor, rMajor, pitch, length, SEG_PER_TURN, AXIAL_PER_PITCH);
-  // Weld eps must stay well below the thread-crest-to-root depth so the
-  // pattern survives; pitch/8 is a safe ceiling (≈0.1 mm at M5 pitch 0.8).
-  const weldEps = Math.min(0.08, pitch / 8);
-  const threadedGeo = weldGeometryForEdges(threadedRaw, weldEps);
-  threadedGeo.computeVertexNormals();
+  // Smooth-cylinder envelope at the major-clearance radius. The helical
+  // mesh — even at low density + welded — confuses CSG once a body already
+  // has a helical cut: the second subtract was returning the input
+  // basically unchanged, so the previous hole disappeared and the new one
+  // never got cut. Visible threads on the hole INTERIOR are restored
+  // separately via a non-CSG thread-shell body inserted by
+  // processThreadMarks; the CSG engine itself only ever sees plain
+  // cylinders, so compound cuts on the same body stay reliable.
+  const SHAFT_SEG = 32;
+  const threadedGeo = new THREE.CylinderGeometry(rMajor, rMajor, length, SHAFT_SEG);
+  threadedGeo.translate(0, length / 2, 0);
   parts.push(threadedGeo);
   let headGeo = null;
   if (headType === 'hex') {
@@ -9274,10 +9372,13 @@ function openThreadedHoleForMark(sketchId, markId) {
 // undo back to the snapshot taken before processing. That's what
 // pushUndo was for. Easiest reliable path: trigger one undo step.
 function deleteMaterialisedThreadMark(mark) {
-  // Remove visualizer bolt if we tracked it.
-  if (mark._boltBodyId) {
-    doc.bodies = doc.bodies.filter(b => b.id !== mark._boltBodyId);
-  }
+  // Remove visualizer bolt + thread shell if we tracked them. These were
+  // added AFTER the auto-group CSG cut so they're plain entries in
+  // doc.bodies (not consumed by groupSelected) and a simple filter
+  // removes them. The actual hole cut lives in the parent group's geom
+  // and is peeled by the undo() below.
+  const drop = new Set([mark._boltBodyId, mark._threadShellBodyId].filter(Boolean));
+  if (drop.size) doc.bodies = doc.bodies.filter(b => !drop.has(b.id));
   // Undo the last action — that was the processThreadMarks call that
   // created the hole + auto-grouped it. After undo, the body is back
   // to its pre-hole state and we can re-run.
@@ -9285,6 +9386,7 @@ function deleteMaterialisedThreadMark(mark) {
   delete mark._materialised;
   delete mark._boltBodyId;
   delete mark._holeBodyId;
+  delete mark._threadShellBodyId;
   if (viewer) viewer.rebuildBodies();
   if (viewer) viewer.updateSketchOverlay();
   renderTree(); renderProps();
@@ -9395,6 +9497,26 @@ function processThreadMarks(sketch, marks, opts) {
     if (parentNow && typeof CSG !== 'undefined') {
       doc.multiSelectedBodies = [parentNow.id, hole.id];
       groupSelected(true);
+    }
+    // Visual-only thread shell sitting inside the cleanly-cut hole. It's
+    // a normal toggleable body (so the user can hide / delete it) but
+    // never goes through CSG — that's how we get the spiraling thread
+    // look on the inside of the hole without the boolean engine choking
+    // on a helical input.
+    {
+      const shell = {
+        id: doc.nextBodyId++,
+        type: 'threadShell',
+        size: opts.size,
+        length: opts.depth,
+        fit: opts.fit,
+        x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
+        rotation: { ...rotDeg },
+        op: 'add',
+        _threadMarkRef: { sketchId: sketch.id, markId: m.id },
+      };
+      doc.bodies.push(shell);
+      m._threadShellBodyId = shell.id;
     }
     if (opts.placeBolt) {
       // Matching bolt: head bottom flush on sketch plane at the mark, shaft
@@ -11077,8 +11199,13 @@ function renderTree() {
       const tag = body._threadMarkRef ? ' · thread visualizer' : '';
       label = `${spec.label} ${FASTENER_HEAD_LABELS[body.headType] || body.headType} (${fmtUL(body.length)})${tag}`;
     }
+    else if (body.type === 'threadShell') {
+      const spec = getFastenerSpec(body.size);
+      label = `${spec ? spec.label : body.size} thread shell (${fmtUL(body.length)})`;
+    }
     const ico = body.type === 'extrude' ? '⇪' :
                 body.type === 'fastener' ? '🔩' :
+                body.type === 'threadShell' ? '⌬' :
                 body.type === 'revolve' ? '⟳' :
                 body.type === 'sphere' ? '●' :
                 body.type === 'cylinder' ? '⬭' :
