@@ -35,6 +35,19 @@ export default function TeacherDashboard() {
       if (!profile) { router.push("/onboarding"); return; }
       if (profile.role !== "teacher") { router.push("/tools/code-lab"); return; }
       loadClasses(session?.user?.id);
+      // One-time migration: fix turtle locks in classes that were auto-seeded with the
+      // wrong (challenge-only) indexing before we corrected it. Only touches classes
+      // where the teacher hasn't done anything with turtle yet. Idempotent — re-runs
+      // are no-ops because the lock pattern no longer matches the buggy signature.
+      const flagKey = `turtle_lock_migration_done:${session.user!.id}`;
+      if (localStorage.getItem(flagKey) !== "1") {
+        fetch("/api/teacher/migrate-turtle-locks", { method: "POST" })
+          .then(r => r.ok ? r.json() : null)
+          .then(result => {
+            if (result) localStorage.setItem(flagKey, "1");
+          })
+          .catch(() => {});
+      }
     });
   }, [status, session?.user?.id]);
 
