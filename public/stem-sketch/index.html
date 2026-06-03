@@ -1307,7 +1307,8 @@ const doc = {
   faceMode: false, // when true, next 3D click picks a face for new sketch
   cutMode: null,   // { stage: 'target'|'tool', targetId } during interactive Cut
   curvedPickBody: null, // body id when 6-face bbox picker is active for a curved body
-  bevelPickMode: false, // when true, next 3D click picks an edge to round / chamfer
+  bevelPickMode: false, // when true, 3D clicks accumulate edges for the Fillet tool
+  bevelSelected: [],    // [{ bodyId, edge:{p1,p2,n1,n2}, kind:'convex'|'concave' }]
   orbitMode: false, // toggle: when true, plain left-drag in 3D orbits instead of selecting
   panMode: false,   // toggle: when true, plain left-drag in 3D pans the view
   spaceHeld: false, // tracked from key events — temporary orbit modifier
@@ -5297,38 +5298,61 @@ class Viewer3D {
         }
         return;
       }
-      // Bevel-pick mode (Fillet workflow) — click anywhere on a body, we
-      // snap to the closest visible edge and open the round / chamfer dialog.
+      // Bevel-pick mode (Fillet workflow). Each click ADDS one edge to a
+      // running selection set so the user can bevel many edges in one
+      // operation; click empty space (or Enter) to finish and open the
+      // dialog, Esc to cancel.
       if (doc.bevelPickMode && e.button === 0) {
         this.raycaster.setFromCamera(ndc(e), this.camera);
         const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false)
           .filter(h => {
             const b = doc.bodies.find(x => x.id === h.object.userData.bodyId);
             if (!b) return true;
-            // Skip thread-mark visualizers so they don't catch the click in
-            // front of the real body.
             if (b.type === 'threadShell') return false;
             if (b.type === 'fastener' && b._threadMarkRef) return false;
             return true;
           });
         if (!hits.length) {
-          // Click on empty space cancels the mode.
-          doc.bevelPickMode = false;
-          this.canvas.style.cursor = '';
-          setStatus('Fillet cancelled');
+          // Empty-space click: if anything is selected, finish; else cancel.
+          if (doc.bevelSelected.length) {
+            const sels = doc.bevelSelected.slice();
+            doc.bevelSelected = [];
+            _clearBevelHighlight();
+            doc.bevelPickMode = false;
+            this.canvas.style.cursor = '';
+            openBevelDialog(sels);
+          } else {
+            doc.bevelPickMode = false;
+            this.canvas.style.cursor = '';
+            setStatus('Fillet cancelled');
+          }
           return;
         }
         const hit = hits[0];
         const body = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
         if (!body) return;
-        const edge = pickClosestBevelEdge(body, hit);
-        if (!edge) {
-          showHint('No usable edge near that click — try clicking closer to a corner of the body.');
+        const allEdges = _buildBevelEdgeIndex(body.mesh);
+        const seed = _pickClosestSegment(allEdges, hit.point, body.mesh);
+        if (!seed) {
+          showHint('No usable edge near that click — try clicking closer to a corner.');
           return;
         }
-        doc.bevelPickMode = false;
-        this.canvas.style.cursor = '';
-        openBevelDialog(body, edge);
+        // Expand the picked segment to the full straight edge chain so the
+        // bevel covers the whole edge instead of one tessellation sliver.
+        const fullEdge = expandToFullStraightEdge(seed, allEdges);
+        // Skip duplicates — if the same edge was already picked, ignore.
+        const isDuplicate = doc.bevelSelected.some(s =>
+          s.bodyId === body.id &&
+          s.edge.p1.distanceTo(fullEdge.p1) < 0.05 &&
+          s.edge.p2.distanceTo(fullEdge.p2) < 0.05);
+        if (isDuplicate) {
+          setStatus(`Already selected (${doc.bevelSelected.length} edge${doc.bevelSelected.length === 1 ? '' : 's'} — click empty space or press Enter to apply).`);
+          return;
+        }
+        const kind = classifyBevelEdge(fullEdge, body);
+        doc.bevelSelected.push({ bodyId: body.id, edge: fullEdge, kind });
+        _renderBevelHighlight();
+        setStatus(`Fillet — ${doc.bevelSelected.length} edge${doc.bevelSelected.length === 1 ? '' : 's'} selected. Click more, or click empty space / press Enter to apply.`);
         return;
       }
       // Face-pick mode (Sketch on Face workflow)
@@ -12375,8 +12399,10 @@ function enterBevelPickMode() {
     return;
   }
   doc.bevelPickMode = true;
+  doc.bevelSelected = [];
+  _clearBevelHighlight();
   if (viewer) viewer.canvas.style.cursor = 'crosshair';
-  setStatus('Fillet — click an edge of a body (or empty space to cancel). Esc also cancels.');
+  setStatus('Fillet — click each edge to add it. Click empty space (or press Enter) to apply, Esc to cancel.');
 }
 
 // Build a list of {p1, p2, n1, n2} edges in WORLD coords for a body's mesh.
@@ -12449,36 +12475,155 @@ function _buildBevelEdgeIndex(mesh, creaseDeg = 20) {
   return out;
 }
 
-// Given a 3D click point (in world coords) and a body's mesh, find the
-// edge with the smallest perpendicular distance from the click to the
-// edge SEGMENT. Edges that don't have the click point in their axial
-// range are penalised. Returns null if nothing usable is nearby.
-function pickClosestBevelEdge(body, hit) {
-  if (!body.mesh) return null;
-  const edges = _buildBevelEdgeIndex(body.mesh);
+// Given a list of edges (each with world-coord p1, p2) and a world-coord
+// click point, return the edge whose SEGMENT (not infinite line) is
+// nearest the click. The acceptance threshold scales with the body so a
+// distant click on a giant base plate doesn't bias toward a tiny detail
+// edge in the foreground.
+function _pickClosestSegment(edges, clickPoint, mesh) {
   if (!edges.length) return null;
-  const clickW = hit.point.clone();
-  let best = null;
-  let bestDist = Infinity;
+  let best = null, bestDist = Infinity;
   const ab = new THREE.Vector3();
   const ap = new THREE.Vector3();
   for (const ed of edges) {
     ab.subVectors(ed.p2, ed.p1);
     const len2 = ab.lengthSq();
     if (len2 < 1e-9) continue;
-    ap.subVectors(clickW, ed.p1);
-    let t = ap.dot(ab) / len2;
-    t = Math.max(0, Math.min(1, t));
+    ap.subVectors(clickPoint, ed.p1);
+    let t = Math.max(0, Math.min(1, ap.dot(ab) / len2));
     const closest = ed.p1.clone().add(ab.clone().multiplyScalar(t));
-    const d = closest.distanceTo(clickW);
+    const d = closest.distanceTo(clickPoint);
     if (d < bestDist) { bestDist = d; best = ed; }
   }
-  // Acceptance threshold scales with the body's bbox so a giant base
-  // plate doesn't bias toward tiny detail edges in the distance.
-  const bbox = new THREE.Box3().setFromObject(body.mesh);
+  const bbox = new THREE.Box3().setFromObject(mesh);
   const scale = bbox.getSize(new THREE.Vector3()).length();
   if (bestDist > scale * 0.15) return null;
   return best;
+}
+
+// Position quantization key — 0.05 mm grid. Used to detect "same vertex"
+// across edge segments produced by a tessellated mesh.
+function _bevelPosKey(p) {
+  const Q = 20;
+  return Math.round(p.x * Q) + '|' + Math.round(p.y * Q) + '|' + Math.round(p.z * Q);
+}
+
+// A CSG-baked cube edge typically arrives split into many short colinear
+// segments because the boolean engine retessellates the face. The user
+// clicks NEAR the edge and snaps to one of those segments; without
+// expansion the bevel covers only the slice between two interior
+// tessellation vertices. Walk the edge chain from the picked segment in
+// both directions, gathering every neighbouring segment that:
+//   * shares an endpoint with the chain
+//   * runs along (within ~8°) the same direction
+//   * meets the SAME two faces (n1, n2 match within ~14°, in either order)
+// Then return the chain's extreme endpoints as a single logical edge.
+function expandToFullStraightEdge(seed, allEdges) {
+  const seedDir = new THREE.Vector3().subVectors(seed.p2, seed.p1).normalize();
+  const DIR_DOT_MIN    = 0.99;   // ≈ 8° wiggle
+  const NORMAL_DOT_MIN = 0.97;   // ≈ 14° wiggle
+  const POS_EPS        = 0.05;   // mm — coincident-endpoint tolerance
+  const sameDir = (d) => Math.abs(d.dot(seedDir)) > DIR_DOT_MIN;
+  const sameFaces = (a1, a2) =>
+    (a1.dot(seed.n1) > NORMAL_DOT_MIN && a2.dot(seed.n2) > NORMAL_DOT_MIN) ||
+    (a1.dot(seed.n2) > NORMAL_DOT_MIN && a2.dot(seed.n1) > NORMAL_DOT_MIN);
+  // Pre-filter: candidates that match direction + face pair.
+  const candidates = [];
+  for (const ed of allEdges) {
+    if (ed === seed) continue;
+    const edir = new THREE.Vector3().subVectors(ed.p2, ed.p1);
+    if (edir.lengthSq() < 1e-9) continue;
+    edir.normalize();
+    if (!sameDir(edir)) continue;
+    if (!sameFaces(ed.n1, ed.n2)) continue;
+    candidates.push(ed);
+  }
+  // Index candidate edges by both of their endpoint keys for cheap lookup.
+  const byKey = new Map();
+  for (const ed of candidates) {
+    for (const p of [ed.p1, ed.p2]) {
+      const k = _bevelPosKey(p);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(ed);
+    }
+  }
+  const used = new Set([seed]);
+  const chain = [seed];
+  // Extend from a given endpoint until no further match is found.
+  const extend = (startPoint) => {
+    let tip = startPoint;
+    while (true) {
+      const k = _bevelPosKey(tip);
+      const list = byKey.get(k) || [];
+      let next = null;
+      for (const ed of list) {
+        if (used.has(ed)) continue;
+        if (ed.p1.distanceTo(tip) < POS_EPS || ed.p2.distanceTo(tip) < POS_EPS) {
+          next = ed; break;
+        }
+      }
+      if (!next) break;
+      used.add(next);
+      chain.push(next);
+      tip = (next.p1.distanceTo(tip) < POS_EPS) ? next.p2 : next.p1;
+    }
+  };
+  extend(seed.p2);
+  extend(seed.p1);
+  // Chain extremes by projection along seedDir.
+  let minProj = Infinity, maxProj = -Infinity;
+  let minPt = seed.p1, maxPt = seed.p2;
+  for (const ed of chain) {
+    for (const p of [ed.p1, ed.p2]) {
+      const proj = p.dot(seedDir);
+      if (proj < minProj) { minProj = proj; minPt = p; }
+      if (proj > maxProj) { maxProj = proj; maxPt = p; }
+    }
+  }
+  return { p1: minPt.clone(), p2: maxPt.clone(), n1: seed.n1, n2: seed.n2 };
+}
+
+// Render orange tubes over the currently-selected edges so the user can
+// see what's accumulated. Sits in viewer.scene with depthTest off so it's
+// visible through the body — matches the convention we use elsewhere for
+// selection feedback.
+function _renderBevelHighlight() {
+  if (!viewer) return;
+  _clearBevelHighlight();
+  const group = new THREE.Group();
+  for (const sel of doc.bevelSelected) {
+    const len = sel.edge.p1.distanceTo(sel.edge.p2);
+    if (len < 0.01) continue;
+    const dir = new THREE.Vector3().subVectors(sel.edge.p2, sel.edge.p1).normalize();
+    const mid = new THREE.Vector3().addVectors(sel.edge.p1, sel.edge.p2).multiplyScalar(0.5);
+    // Tube radius scales with the body so giant bracket edges get a thick
+    // highlight and small features get a thin one.
+    const body = doc.bodies.find(b => b.id === sel.bodyId);
+    const scale = body?.mesh
+      ? new THREE.Box3().setFromObject(body.mesh).getSize(new THREE.Vector3()).length()
+      : 50;
+    const r = Math.max(0.4, Math.min(1.5, scale * 0.006));
+    const cyl = new THREE.CylinderGeometry(r, r, len, 12);
+    const color = sel.kind === 'convex' ? 0xff9000 : 0x00b870;
+    const mat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(cyl, mat);
+    mesh.position.copy(mid);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    mesh.renderOrder = 999;
+    group.add(mesh);
+  }
+  viewer.scene.add(group);
+  viewer._bevelHighlight = group;
+}
+
+function _clearBevelHighlight() {
+  if (!viewer || !viewer._bevelHighlight) return;
+  viewer.scene.remove(viewer._bevelHighlight);
+  viewer._bevelHighlight.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  viewer._bevelHighlight = null;
 }
 
 // Classify an edge as convex or concave by signing the dihedral. The
@@ -12548,26 +12693,42 @@ function openFillet3DDialog() {
   });
 }
 
-// Bevel dialog — opens after edge-pick resolves an edge. Style (round or
-// 45° chamfer) and size, plus a read-only label showing whether the pick
-// classified as outer/inner so the user can confirm the auto-detect.
-function openBevelDialog(body, edge) {
-  const kind = classifyBevelEdge(edge, body);
-  const edgeLen = edge.p1.distanceTo(edge.p2);
-  const bbox = new THREE.Box3().setFromObject(body.mesh);
+// Bevel dialog — opens after the user finishes picking. Accepts the full
+// selection array (each entry has a bodyId + classified edge) so one
+// confirm beveles all of them. Style (round / 45° chamfer) and size apply
+// uniformly; convex selections get CSG.subtract, concave get CSG.union.
+function openBevelDialog(selections) {
+  if (!selections.length) return;
+  // Resolve current body objects (the id might have changed if a previous
+  // bevel already ran on this body during this session — selections from
+  // the pick mode are always fresh, so this is just defensive).
+  const sels = selections.map(s => ({
+    body: doc.bodies.find(b => b.id === s.bodyId),
+    edge: s.edge,
+    kind: s.kind,
+  })).filter(s => s.body);
+  if (!sels.length) { showHint('Edges no longer point to a valid body — try again.'); return; }
+  const convexCount = sels.filter(s => s.kind === 'convex').length;
+  const concaveCount = sels.length - convexCount;
+  const totalLen = sels.reduce((sum, s) => sum + s.edge.p1.distanceTo(s.edge.p2), 0);
+  const avgLen = totalLen / sels.length;
+  // Use the smallest edge as the cap so the default size doesn't blow past
+  // a short edge in the batch.
+  const shortestLen = Math.min(...sels.map(s => s.edge.p1.distanceTo(s.edge.p2)));
+  const firstBody = sels[0].body;
+  const bbox = new THREE.Box3().setFromObject(firstBody.mesh);
   const bodyScale = bbox.getSize(new THREE.Vector3()).length();
-  // Default size = 8% of the picked edge length, capped at 25% of body scale
-  // and a minimum that's printable. Reasonable starting point on bracket-
-  // sized work; user can tune.
-  const defaultMm = Math.max(0.5, Math.min(edgeLen * 0.08, bodyScale * 0.05));
+  const defaultMm = Math.max(0.5, Math.min(avgLen * 0.08, bodyScale * 0.05, shortestLen * 0.3));
   const u = unitLabel();
   const defaultUL = toUnit(defaultMm).toFixed(2);
-  const kindLabel = kind === 'convex'
-    ? 'Outer edge (material will be removed)'
-    : 'Inner edge (material will be added to fill the corner)';
+  const mix = (convexCount && concaveCount)
+    ? `Mixed selection — ${convexCount} outer (removed) and ${concaveCount} inner (filled).`
+    : convexCount
+      ? `${convexCount} outer edge${convexCount === 1 ? '' : 's'} — material will be removed.`
+      : `${concaveCount} inner edge${concaveCount === 1 ? '' : 's'} — material will be added to fill each corner.`;
   openModal({
-    title: 'Bevel edge',
-    body: `<p>${kindLabel}.</p>
+    title: `Bevel ${sels.length} edge${sels.length === 1 ? '' : 's'}`,
+    body: `<p>${mix}</p>
            <div class="field" style="margin-top:8px">
              <label>Style</label>
              <select id="bv-style">
@@ -12579,15 +12740,15 @@ function openBevelDialog(body, edge) {
              <label>Size (${u})</label>
              <input id="bv-size" type="number" value="${defaultUL}" min="0.05" step="0.1"/>
            </div>
-           <div class="hint">Edge length: ${fmtUL(edgeLen)}. Size is the bevel's reach along each adjacent face.</div>`,
-    confirmText: 'Apply',
+           <div class="hint">Shortest edge in batch: ${fmtUL(shortestLen)}. Size is the bevel's reach along each adjacent face — keep it well under half the shortest edge.</div>`,
+    confirmText: `Apply to ${sels.length}`,
     onConfirm: () => {
       const style = document.getElementById('bv-style').value || 'round';
       const sizeVal = parseFloat(document.getElementById('bv-size').value);
       const size = fromUnit(sizeVal);
       if (!isFinite(size) || size <= 0) { showHint('Size must be positive.'); return; }
-      if (size >= edgeLen * 0.5) { showHint('Size is too large relative to the edge length.'); return; }
-      applyBevelToBody(body, edge, kind, style, size);
+      if (size >= shortestLen * 0.5) { showHint('Size too large for the shortest edge in the batch.'); return; }
+      applyBevelsBatch(sels, style, size);
     },
   });
 }
@@ -12657,55 +12818,61 @@ function buildBevelTool(edge, kind, style, size) {
   return mesh;
 }
 
-// Run the boolean. Subtract for convex edges (removes the sliver),
-// union for concave (fills the corner). Replaces the source body in
-// doc.bodies with a new combined/group result and selects it so undo
-// and visual feedback land naturally.
+// Core single-edge bevel. Does NOT push undo, NOT rebuild views, NOT
+// autosave — the caller owns those so a batch can wrap N bevels in one
+// undo step + one redraw. Returns the new body id on success, null on
+// failure.
+function _bevelOnce(body, edge, kind, style, size) {
+  if (typeof CSG === 'undefined') return null;
+  const tool = buildBevelTool(edge, kind, style, size);
+  if (!tool) return null;
+  // getCSGMesh handles the cleanup pass for group/combined bodies so
+  // compound bevels on a CSG bracket stay stable across iterations.
+  const targetMesh = getCSGMesh(body);
+  const result = (kind === 'concave')
+    ? CSG.union(targetMesh, tool)
+    : CSG.subtract(targetMesh, tool);
+  result.updateMatrixWorld(true);
+  const baked = result.geometry.clone();
+  baked.applyMatrix4(result.matrixWorld);
+  baked.computeVertexNormals();
+  // Wrap the result as a single-child group so Ungroup recovers the
+  // pre-bevel body. Children are stored without mesh / geometry — same
+  // shape groupSelected uses.
+  const childClone = JSON.parse(JSON.stringify({
+    id: body.id, type: body.type, op: body.op,
+    x: body.x, y: body.y, z: body.z,
+    w: body.w, h: body.h, d: body.d,
+    rotation: body.rotation, name: body.name,
+    filletRadius: body.filletRadius, filletEdges: body.filletEdges,
+    children: body.children,
+  }));
+  const groupBody = {
+    id: doc.nextBodyId++,
+    type: 'group',
+    children: [childClone],
+    geometry: baked,
+    op: body.op || 'add',
+    x: 0, y: 0, z: 0,
+    name: body.name ? `${body.name} (beveled)` : undefined,
+  };
+  doc.bodies = doc.bodies.filter(b => b.id !== body.id);
+  doc.bodies.push(groupBody);
+  for (const sk of doc.sketches) {
+    if (sk.sourceBodyId === body.id) sk.sourceBodyId = groupBody.id;
+  }
+  return groupBody.id;
+}
+
+// Single-edge entry kept for any code that still wants the old signature.
 function applyBevelToBody(body, edge, kind, style, size) {
-  if (typeof CSG === 'undefined') { showHint('CSG library failed to load — cannot apply bevel.'); return; }
   pushUndo();
   try {
     viewer.scene.updateMatrixWorld(true);
-    const tool = buildBevelTool(edge, kind, style, size);
-    if (!tool) { showHint('Could not build bevel tool — edge too short?'); return; }
-    // Use the same cleanup path the thread-mark workflow relies on so
-    // compound bevels on a CSG bracket stay stable.
-    const targetMesh = getCSGMesh(body);
-    const result = (kind === 'concave')
-      ? CSG.union(targetMesh, tool)
-      : CSG.subtract(targetMesh, tool);
-    result.updateMatrixWorld(true);
-    const baked = result.geometry.clone();
-    baked.applyMatrix4(result.matrixWorld);
-    baked.computeVertexNormals();
-    // Replace body in-place with a new group entry carrying the baked
-    // geometry — same shape groupSelected uses, so downstream code
-    // (export, properties, save) handles it uniformly. Preserve the
-    // original body as a single child so Ungroup can recover it.
-    const childClone = JSON.parse(JSON.stringify({
-      id: body.id, type: body.type, op: body.op,
-      x: body.x, y: body.y, z: body.z,
-      w: body.w, h: body.h, d: body.d,
-      rotation: body.rotation, name: body.name,
-      filletRadius: body.filletRadius, filletEdges: body.filletEdges,
-    }));
-    const groupBody = {
-      id: doc.nextBodyId++,
-      type: 'group',
-      children: [childClone],
-      geometry: baked,
-      op: body.op || 'add',
-      x: 0, y: 0, z: 0,
-      name: body.name ? `${body.name} (beveled)` : undefined,
-    };
-    doc.bodies = doc.bodies.filter(b => b.id !== body.id);
-    doc.bodies.push(groupBody);
-    // Repoint any sketch that was anchored on the source body.
-    for (const sk of doc.sketches) {
-      if (sk.sourceBodyId === body.id) sk.sourceBodyId = groupBody.id;
-    }
-    doc.selection = { kind: 'body', id: groupBody.id };
-    doc.multiSelectedBodies = [groupBody.id];
+    const newId = _bevelOnce(body, edge, kind, style, size);
+    if (!newId) { showHint('Bevel failed — try a smaller size.'); return; }
+    doc.selection = { kind: 'body', id: newId };
+    doc.multiSelectedBodies = [newId];
     if (viewer) viewer.rebuildBodies();
     renderTree(); renderProps();
     const label = (kind === 'convex' ? 'Rounded outer edge' : 'Filleted inner edge');
@@ -12713,7 +12880,54 @@ function applyBevelToBody(body, edge, kind, style, size) {
     flushAutosave();
   } catch (err) {
     console.error('Bevel CSG failed:', err);
-    showHint('Bevel failed — try a smaller size, or the edge may be too short for this body.');
+    showHint('Bevel failed — try a smaller size, or the edge may be too short.');
+  }
+}
+
+// Multi-edge batch. One pushUndo, then iterate _bevelOnce across all
+// selections, tracking each body's evolving id so successive bevels on
+// the same body land on the latest group. One redraw + one autosave at
+// the end keep this snappy and undo-friendly (single Ctrl+Z reverts the
+// whole batch).
+function applyBevelsBatch(selections, style, size) {
+  if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
+  pushUndo();
+  // Map original body id → current id (updated after each bevel) so two
+  // edges on the same body chain through the right intermediate group.
+  const idMap = new Map();
+  let okCount = 0, failCount = 0;
+  setStatus(`Beveling ${selections.length} edge${selections.length === 1 ? '' : 's'}…`);
+  try {
+    viewer.scene.updateMatrixWorld(true);
+    for (const sel of selections) {
+      const currentId = idMap.get(sel.body.id) ?? sel.body.id;
+      const currentBody = doc.bodies.find(b => b.id === currentId);
+      if (!currentBody) { failCount++; continue; }
+      const newId = _bevelOnce(currentBody, sel.edge, sel.kind, style, size);
+      if (newId) {
+        // Every edge that ever pointed to this lineage now resolves to newId.
+        idMap.set(sel.body.id, newId);
+        for (const [k, v] of idMap) if (v === currentId) idMap.set(k, newId);
+        okCount++;
+      } else {
+        failCount++;
+      }
+    }
+    // Select the last touched body so the user sees the result highlighted.
+    const lastId = [...idMap.values()].pop();
+    if (lastId) {
+      doc.selection = { kind: 'body', id: lastId };
+      doc.multiSelectedBodies = [lastId];
+    }
+    if (viewer) viewer.rebuildBodies();
+    renderTree(); renderProps();
+    flushAutosave();
+    setStatus(failCount
+      ? `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${failCount} failed (likely too large for the edge).`
+      : `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${style === 'round' ? 'round' : '45° chamfer'} of ${fmtUL(size)}`);
+  } catch (err) {
+    console.error('Batch bevel failed:', err);
+    showHint('Bevel batch failed — try a smaller size.');
   }
 }
 
@@ -13834,6 +14048,17 @@ function init() {
       if (e.key === 'j' || e.key === 'J') { startJointCreation(); return; }
     }
     // Cancel face-pick mode in 3D (also clears the bbox 6-face picker if up)
+    // Enter while picking edges = finish + open dialog.
+    if (e.key === 'Enter' && doc.bevelPickMode && doc.bevelSelected.length) {
+      e.preventDefault();
+      const sels = doc.bevelSelected.slice();
+      doc.bevelSelected = [];
+      _clearBevelHighlight();
+      doc.bevelPickMode = false;
+      if (viewer) viewer.canvas.style.cursor = '';
+      openBevelDialog(sels);
+      return;
+    }
     if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode)) {
       const wasFastener = !!doc.fastenerPlaceTarget;
       const wasBevel = !!doc.bevelPickMode;
@@ -13841,6 +14066,8 @@ function init() {
       doc.curvedPickBody = null;
       doc.fastenerPlaceTarget = null;
       doc.bevelPickMode = false;
+      doc.bevelSelected = [];
+      _clearBevelHighlight();
       if (viewer) {
         viewer.canvas.style.cursor = '';
         viewer.clearBboxFacePicker && viewer.clearBboxFacePicker();
