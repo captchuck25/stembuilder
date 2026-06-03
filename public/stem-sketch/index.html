@@ -7960,13 +7960,15 @@ function _snapshotBody(b, asChild = false) {
   for (const k of Object.keys(b)) {
     if (k === 'mesh') continue;
     if (k === 'geometry') {
-      // Top-level bodies always store their geometry (CSG groups need it to
-      // render). For NESTED CHILDREN, only persist geometry when the child
-      // is itself a group — primitive / extrude children can rebuild from
-      // their parametric props during ungroup, so storing their geometry
-      // would just bloat the doc 3–5× with no functional gain. Heavy CSG
-      // models otherwise hit multi-MB saves that freeze JSON.stringify.
-      if (asChild && b.type !== 'group' && b.type !== 'combined') continue;
+      // ONLY persist geometry on top-level bodies. Every nested-child
+      // geometry can be re-derived from its own children via CSG on
+      // ungroup — see _ensureGroupGeometry. Storing baked geometry at
+      // every nest level previously produced 30+ MB save files for the
+      // typical bevel + thread workflow because each CSG op wraps the
+      // previous body as a child and each level's geometry is several
+      // MB of triangles. Now only the TOP-level geometry rides in the
+      // save; nested groups carry just their children + ops.
+      if (asChild) continue;
       out.geometry = _serializeGeometry(b.geometry);
       out._geomSerialized = true;
       continue;
@@ -9234,6 +9236,62 @@ function buildFastenerCSGMesh(body) {
   }
   mesh.updateMatrixWorld(true);
   return mesh;
+}
+
+// Re-derive a group / combined body's baked BufferGeometry from its
+// children. Used on ungroup when the save dropped intermediate-level
+// geometries to keep the doc size bounded. Recursively walks: nested
+// group children get rebuilt first so when we run CSG at THIS level
+// every child mesh is renderable. Primitives just rebuild via the
+// normal buildBodyMesh path. Returns true on success, false if CSG
+// is unavailable or the children list is empty.
+//
+// NOTE: this can't recover thread-shell triangle merges (those were
+// concatenated into the parent's geometry, not added as a child).
+// Ungrouping a body that had merged shells will return the cuts but
+// not the helical thread visualisation — the user can re-thread if
+// they need the visual back. Live with this for now; the alternative
+// is keeping every level's geometry in the save, which is what was
+// blowing out the file size in the first place.
+function _ensureGroupGeometry(body) {
+  if (body.geometry instanceof THREE.BufferGeometry) return true;
+  if (body.type !== 'group' && body.type !== 'combined') return false;
+  if (typeof CSG === 'undefined') return false;
+  if (!Array.isArray(body.children) || !body.children.length) return false;
+  // Recurse first so every nested group has geometry before we touch CSG.
+  for (const c of body.children) {
+    if ((c.type === 'group' || c.type === 'combined') &&
+        !(c.geometry instanceof THREE.BufferGeometry)) {
+      _ensureGroupGeometry(c);
+    }
+  }
+  const meshes = body.children.map(c => ({ child: c, mesh: buildBodyMesh(c) }))
+                              .filter(m => m.mesh);
+  if (!meshes.length) return false;
+  const positives = meshes.filter(m => m.child.op !== 'subtract').map(m => m.mesh);
+  const negatives = meshes.filter(m => m.child.op === 'subtract').map(m => m.mesh);
+  if (!positives.length) return false;
+  try {
+    viewer && viewer.scene && viewer.scene.updateMatrixWorld(true);
+    let result = positives[0]; positives[0].updateMatrixWorld(true);
+    for (let i = 1; i < positives.length; i++) {
+      positives[i].updateMatrixWorld(true);
+      result = CSG.union(result, positives[i]);
+    }
+    for (const n of negatives) {
+      n.updateMatrixWorld(true);
+      result = CSG.subtract(result, n);
+    }
+    result.updateMatrixWorld(true);
+    const geo = result.geometry.clone();
+    geo.applyMatrix4(result.matrixWorld);
+    geo.computeVertexNormals();
+    body.geometry = geo;
+    return true;
+  } catch (err) {
+    console.warn('_ensureGroupGeometry CSG rebuild failed:', err);
+    return false;
+  }
 }
 
 function getCSGMesh(body) {
@@ -10752,6 +10810,14 @@ function ungroupSelected() {
         if (restored.geometry && !(restored.geometry instanceof THREE.BufferGeometry) && restored._geomSerialized) {
           restored.geometry = _deserializeGeometry(restored.geometry);
           delete restored._geomSerialized;
+        }
+        // Saves dropped nested-group geometries to keep file size sane —
+        // rebuild on demand here via CSG of THIS child's own children.
+        // Primitive children rebuild from params in buildBodyMesh and
+        // never need this branch.
+        if ((restored.type === 'group' || restored.type === 'combined')
+            && !(restored.geometry instanceof THREE.BufferGeometry)) {
+          _ensureGroupGeometry(restored);
         }
         restored.id = doc.nextBodyId++;
         restored.x = (restored.x || 0) + (group.x || 0);
