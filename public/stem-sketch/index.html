@@ -9689,6 +9689,11 @@ function processThreadMarks(sketch, marks, opts) {
   };
   const hasParent = !!sketch.sourceBodyId;
   const newSelection = [];
+  // Track auto-group outcomes so we can surface partial failures clearly
+  // — previously CSG failures were silent inside groupSelected and the
+  // user just saw orphan headless cutters piling up in the tree.
+  let groupedOk = 0;
+  let groupedFail = 0;
   for (const m of marks) {
     const markWorld = new THREE.Vector3(m.cx, m.cy, 0).applyMatrix4(planeM);
     // The shaft bottom (local y=0) needs to be at markWorld + holeAxis * depth.
@@ -9720,6 +9725,21 @@ function processThreadMarks(sketch, marks, opts) {
     if (parentNow && typeof CSG !== 'undefined') {
       doc.multiSelectedBodies = [parentNow.id, hole.id];
       groupSelected(true);
+      // groupSelected silently returns early when CSG throws — the hole
+      // body then remains in doc.bodies as a leftover negative. Detect
+      // that here so we can warn AND skip the shell-merge step (no
+      // parent geometry was actually updated, merging triangles onto
+      // the old bracket geometry would just paste a floating thread
+      // sleeve into the scene).
+      if (doc.bodies.some(b => b.id === hole.id)) {
+        groupedFail++;
+        console.warn(`Thread mark auto-group failed (CSG) at mark cx=${m.cx.toFixed(3)}, cy=${m.cy.toFixed(3)} — hole id=${hole.id} stayed as a standalone negative.`);
+      } else {
+        groupedOk++;
+      }
+    } else if (hasParent && parentNow == null) {
+      groupedFail++;
+      console.warn(`Thread mark could not find parent body id=${sketch.sourceBodyId} (the previous group consumed it but sourceBodyId wasn't repointed).`);
     }
     // Thread shell visualisation. The shell is a hollow sleeve with a
     // helical thread profile on its inner surface — sits inside the cleanly-
@@ -9819,11 +9839,16 @@ function processThreadMarks(sketch, marks, opts) {
   }
   viewer.rebuildBodies();
   renderTree(); renderProps();
-  const note = hasParent ? ' (auto-grouped)' : ' — drop them as Negative inside a body and group to cut';
-  setStatus(`Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''}${note}`);
-  // Force-flush autosave immediately — thread materialisation is a major
-  // edit, and waiting 500 ms for the debounce means a fast Cmd+R loses
-  // everything we just did.
+  let summary;
+  if (!hasParent) {
+    summary = `Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''} — drop them as Negative inside a body and group to cut`;
+  } else if (groupedFail === 0) {
+    summary = `Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''} (auto-grouped)`;
+  } else {
+    summary = `Built ${marks.length} marks — ${groupedOk} auto-grouped, ${groupedFail} couldn't (CSG failed; orphan negatives left in tree, see console). Try smaller depth/fit or simpler body.`;
+    console.warn(`Thread-mark batch: ${groupedFail} of ${marks.length} cuts did not auto-group. The body's existing CSG output is likely too noisy for another subtract — undo, simplify (fewer prior bevels / cuts), and retry.`);
+  }
+  setStatus(summary);
   flushAutosave();
 }
 
