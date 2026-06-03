@@ -611,6 +611,7 @@ export default function ClassDetailPage() {
           await fetch(`/api/teacher/locks?id=${existingLevelLock.id}`, { method: "DELETE" });
           setLocks(prev => prev.filter(l => l.id !== existingLevelLock.id));
         }
+        const wasNewAssignment = !existingAssignment;
         if (!existingAssignment) {
           const res = await fetch("/api/teacher/assignments", {
             method: "POST",
@@ -620,6 +621,14 @@ export default function ClassDetailPage() {
           if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? res.statusText); }
           const data = await res.json();
           setAssignments(prev => [...prev, data].sort((a, b) => a.level_id - b.level_id));
+        }
+        // After a fresh assignment, offer to push the same assignment to the teacher's
+        // other classes. Restoring behavior we briefly lost when the 3-state UI replaced
+        // the old toggleLevel function. Modal does nothing on cancel; on confirm it
+        // POSTs to each selected class.
+        if (wasNewAssignment && (tool === "code-lab" || tool === "block-lab") && otherClasses.length > 0) {
+          setMultiAssignSelected(new Set(otherClasses.map(c => c.id)));
+          setMultiAssignModal({ tool, levelId: levelIdx });
         }
       } else {
         // open
@@ -2236,6 +2245,25 @@ export default function ClassDetailPage() {
               </strong>{" "}
               to <strong>{cls?.name}</strong>. Select other classes to assign it to as well.
             </p>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+              marginBottom: 10, gap: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280" }}>
+                {multiAssignSelected.size} of {otherClasses.length} selected
+              </span>
+              <button
+                onClick={() => {
+                  if (multiAssignSelected.size === otherClasses.length) {
+                    setMultiAssignSelected(new Set());
+                  } else {
+                    setMultiAssignSelected(new Set(otherClasses.map(c => c.id)));
+                  }
+                }}
+                style={{ padding: "5px 12px", borderRadius: 999, border: "2px solid #2563eb",
+                  background: "#eff6ff", color: "#1e40af", fontWeight: 800, fontSize: 12,
+                  cursor: "pointer", whiteSpace: "nowrap" }}>
+                {multiAssignSelected.size === otherClasses.length ? "Deselect all" : "Select all"}
+              </button>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
               {otherClasses.map(c => (
                 <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10,
