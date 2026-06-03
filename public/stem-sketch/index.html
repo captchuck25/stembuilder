@@ -12436,52 +12436,56 @@ function enterBevelPickMode() {
 // excluded so the user only ever snaps to a real geometric edge.
 function _buildBevelEdgeIndex(mesh, creaseDeg = 20) {
   if (!mesh?.geometry?.attributes?.position) return [];
-  const geo = mesh.geometry;
+  // Pre-weld so CSG drift doesn't split one physical edge into many
+  // disconnected segments — coincident vertices that landed at slightly
+  // different float values after a boolean op now share the same INDEX,
+  // which is what triangle-adjacency hashing depends on. 0.05 mm is well
+  // below printable feature size, so we don't collapse real corners.
+  const geo = weldGeometryForEdges(mesh.geometry, 0.05);
   const pos = geo.attributes.position;
   const idx = geo.index;
   const mw = mesh.matrixWorld;
-  // Triangle list as flat vertex-index arrays
+  // After welding, edges are identified by SORTED VERTEX INDEX PAIRS —
+  // no quantization key needed because shared vertices now share their
+  // numeric index directly. Map edge → list of triangles that share it.
   const triCount = idx ? (idx.array.length / 3) | 0 : (pos.count / 3) | 0;
   const getVertIdx = (triI, j) => idx ? idx.array[triI * 3 + j] : (triI * 3 + j);
-  // Key vertices by quantized position so coincident vertices (CSG seam
-  // duplicates) share the same key. 0.001 mm is well below printable.
-  const QUANT = 1000;
-  const keyOf = (vi) => {
-    const x = Math.round(pos.array[vi * 3]     * QUANT);
-    const y = Math.round(pos.array[vi * 3 + 1] * QUANT);
-    const z = Math.round(pos.array[vi * 3 + 2] * QUANT);
-    return x + '|' + y + '|' + z;
-  };
-  // Map edge (sorted key pair) → list of triangles that share it.
   const edgeMap = new Map();
   const triNormals = new Array(triCount);
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
   const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+  // Cache welded vertices in WORLD coords once.
+  const worldVerts = new Array(pos.count);
+  for (let i = 0; i < pos.count; i++) {
+    worldVerts[i] = new THREE.Vector3(
+      pos.array[i*3], pos.array[i*3+1], pos.array[i*3+2]
+    ).applyMatrix4(mw);
+  }
   for (let t = 0; t < triCount; t++) {
     const ia = getVertIdx(t, 0), ib = getVertIdx(t, 1), ic = getVertIdx(t, 2);
-    a.set(pos.array[ia*3], pos.array[ia*3+1], pos.array[ia*3+2]).applyMatrix4(mw);
-    b.set(pos.array[ib*3], pos.array[ib*3+1], pos.array[ib*3+2]).applyMatrix4(mw);
-    c.set(pos.array[ic*3], pos.array[ic*3+1], pos.array[ic*3+2]).applyMatrix4(mw);
+    a.copy(worldVerts[ia]);
+    b.copy(worldVerts[ib]);
+    c.copy(worldVerts[ic]);
     e1.subVectors(b, a);
     e2.subVectors(c, a);
     const n = new THREE.Vector3().crossVectors(e1, e2);
     if (n.lengthSq() < 1e-12) { triNormals[t] = null; continue; }
     triNormals[t] = n.normalize();
-    const ka = keyOf(ia), kb = keyOf(ib), kc = keyOf(ic);
-    const addEdge = (kx, ky, vx, vy) => {
-      const key = kx < ky ? kx + '_' + ky : ky + '_' + kx;
+    const addEdge = (i1, i2) => {
+      const key = i1 < i2 ? i1 + '_' + i2 : i2 + '_' + i1;
       let list = edgeMap.get(key);
       if (!list) { list = []; edgeMap.set(key, list); }
-      list.push({ tri: t, p1: vx, p2: vy });
+      list.push({ tri: t, va: i1, vb: i2 });
     };
-    const pa = a.clone(), pb = b.clone(), pc = c.clone();
-    addEdge(ka, kb, pa, pb);
-    addEdge(kb, kc, pb, pc);
-    addEdge(kc, ka, pc, pa);
+    addEdge(ia, ib);
+    addEdge(ib, ic);
+    addEdge(ic, ia);
   }
   // Promote manifold edges (exactly 2 triangles) whose dihedral exceeds
   // creaseDeg to "visible edges". Coplanar shared triangles (tessellation
-  // seams on smooth surfaces) are filtered out.
+  // seams on smooth surfaces) are filtered out. We attach the shared
+  // vertex INDICES (idxA, idxB) so the expander can chain segments via
+  // exact integer matching instead of fuzzy position keys.
   const cosThresh = Math.cos(creaseDeg * Math.PI / 180);
   const out = [];
   for (const list of edgeMap.values()) {
@@ -12490,9 +12494,11 @@ function _buildBevelEdgeIndex(mesh, creaseDeg = 20) {
     const na = triNormals[ta], nb = triNormals[tb];
     if (!na || !nb) continue;
     if (na.dot(nb) > cosThresh) continue; // too flat — same face
+    const va = list[0].va, vb = list[0].vb;
     out.push({
-      p1: list[0].p1,
-      p2: list[0].p2,
+      idxA: va, idxB: vb,
+      p1: worldVerts[va].clone(),
+      p2: worldVerts[vb].clone(),
       n1: na.clone(),
       n2: nb.clone(),
     });
@@ -12533,26 +12539,24 @@ function _bevelPosKey(p) {
   return Math.round(p.x * Q) + '|' + Math.round(p.y * Q) + '|' + Math.round(p.z * Q);
 }
 
-// A CSG-baked cube edge typically arrives split into many short colinear
-// segments because the boolean engine retessellates the face. The user
-// clicks NEAR the edge and snaps to one of those segments; without
-// expansion the bevel covers only the slice between two interior
-// tessellation vertices. Walk the edge chain from the picked segment in
-// both directions, gathering every neighbouring segment that:
-//   * shares an endpoint with the chain
-//   * runs along (within ~8°) the same direction
-//   * meets the SAME two faces (n1, n2 match within ~14°, in either order)
+// A single physical edge usually arrives as a CHAIN of short colinear
+// segments because every CSG operation retessellates the face. The user
+// clicks NEAR the edge, we snap to one segment, then walk outward in both
+// directions and gather every neighbouring segment that:
+//   * shares an endpoint vertex INDEX with the chain (exact, post-weld)
+//   * runs along (within ~10°) the same direction
+//   * meets the SAME two faces (n1, n2 within ~18°, either order)
 // Then return the chain's extreme endpoints as a single logical edge.
 function expandToFullStraightEdge(seed, allEdges) {
   const seedDir = new THREE.Vector3().subVectors(seed.p2, seed.p1).normalize();
-  const DIR_DOT_MIN    = 0.99;   // ≈ 8° wiggle
-  const NORMAL_DOT_MIN = 0.97;   // ≈ 14° wiggle
-  const POS_EPS        = 0.05;   // mm — coincident-endpoint tolerance
+  const DIR_DOT_MIN    = 0.985;  // ≈ 10°
+  const NORMAL_DOT_MIN = 0.95;   // ≈ 18°
   const sameDir = (d) => Math.abs(d.dot(seedDir)) > DIR_DOT_MIN;
   const sameFaces = (a1, a2) =>
     (a1.dot(seed.n1) > NORMAL_DOT_MIN && a2.dot(seed.n2) > NORMAL_DOT_MIN) ||
     (a1.dot(seed.n2) > NORMAL_DOT_MIN && a2.dot(seed.n1) > NORMAL_DOT_MIN);
-  // Pre-filter: candidates that match direction + face pair.
+  // Pre-filter candidates by direction + face pair so the chain walk
+  // doesn't accidentally turn at a corner into a perpendicular edge.
   const candidates = [];
   for (const ed of allEdges) {
     if (ed === seed) continue;
@@ -12563,39 +12567,36 @@ function expandToFullStraightEdge(seed, allEdges) {
     if (!sameFaces(ed.n1, ed.n2)) continue;
     candidates.push(ed);
   }
-  // Index candidate edges by both of their endpoint keys for cheap lookup.
-  const byKey = new Map();
+  // Index candidates by each of their endpoint vertex indices. Post-weld
+  // these are exact integer matches — no floating-point tolerance fuss.
+  const byIdx = new Map();
   for (const ed of candidates) {
-    for (const p of [ed.p1, ed.p2]) {
-      const k = _bevelPosKey(p);
-      if (!byKey.has(k)) byKey.set(k, []);
-      byKey.get(k).push(ed);
+    for (const v of [ed.idxA, ed.idxB]) {
+      if (!byIdx.has(v)) byIdx.set(v, []);
+      byIdx.get(v).push(ed);
     }
   }
   const used = new Set([seed]);
   const chain = [seed];
-  // Extend from a given endpoint until no further match is found.
-  const extend = (startPoint) => {
-    let tip = startPoint;
+  const extend = (startIdx) => {
+    let tip = startIdx;
     while (true) {
-      const k = _bevelPosKey(tip);
-      const list = byKey.get(k) || [];
+      const list = byIdx.get(tip) || [];
       let next = null;
       for (const ed of list) {
         if (used.has(ed)) continue;
-        if (ed.p1.distanceTo(tip) < POS_EPS || ed.p2.distanceTo(tip) < POS_EPS) {
-          next = ed; break;
-        }
+        next = ed; break;
       }
       if (!next) break;
       used.add(next);
       chain.push(next);
-      tip = (next.p1.distanceTo(tip) < POS_EPS) ? next.p2 : next.p1;
+      tip = (next.idxA === tip) ? next.idxB : next.idxA;
     }
   };
-  extend(seed.p2);
-  extend(seed.p1);
-  // Chain extremes by projection along seedDir.
+  extend(seed.idxB);
+  extend(seed.idxA);
+  // Chain extremes by projection along seedDir give us the logical
+  // edge's two endpoints in world coords.
   let minProj = Infinity, maxProj = -Infinity;
   let minPt = seed.p1, maxPt = seed.p2;
   for (const ed of chain) {
