@@ -13356,8 +13356,18 @@ async function cloudSave() {
     console.warn('STEM Sketch local draft mirror failed:', err);
   }
   const docJsonGz = await gzipJsonToBase64(docJson);
-  // Prefer the compressed payload; fall back to raw if the browser can't
-  // compress for any reason. The server route accepts either field.
+  // Surface the payload size to the console so a "Save failed" can be
+  // correlated with the size at send time. Vercel's serverless body
+  // limit on this stack is around 4.5 MB.
+  const rawKB = Math.round(JSON.stringify(docJson).length / 1024);
+  const gzKB = docJsonGz ? Math.round(docJsonGz.length / 1024) : null;
+  console.log(`STEM Sketch cloud save — raw ${rawKB} KB${gzKB !== null ? `, gzipped+b64 ${gzKB} KB` : ''}`);
+  // If gzip ballooned past the API limit too, refuse early with a clear
+  // message instead of letting Vercel return an opaque 413.
+  if (gzKB !== null && gzKB > 4200) {
+    setStatus(`⚠ Design too large to cloud-save (${gzKB} KB gzipped — limit ~4500 KB). Try undoing recent CSG ops, or use Export instead.`);
+    return;
+  }
   const payload = docJsonGz
     ? { type: 'STEMSKETCH_SAVE', name, docJsonGz, units: doc.units, thumbnail }
     : { type: 'STEMSKETCH_SAVE', name, docJson,   units: doc.units, thumbnail };

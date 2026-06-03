@@ -136,17 +136,54 @@ export default function StemSketchClient() {
         const body = docJsonGz
           ? { name, docJsonGz, units, thumbnail }
           : { name, docJson, units, thumbnail };
-        const res = await fetch("/api/stem-sketch/designs", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        // Capture payload size up front so a 413 / 504 from Vercel
+        // doesn't look like a mysterious "unknown error" downstream.
+        const payloadJson = JSON.stringify(body);
+        const payloadKB = Math.round(payloadJson.length / 1024);
+        let res: Response;
+        try {
+          res = await fetch("/api/stem-sketch/designs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payloadJson,
+          });
+        } catch (netErr) {
+          // Network error before we got a status back (CORS, connection
+          // reset, request aborted because Vercel rejected it pre-handler
+          // for size). Surface it instead of silently dropping.
+          postToSketch({
+            type: "STEMSKETCH_SAVE_ERR",
+            message: `network error (${(netErr as Error).message}) at ${payloadKB} KB payload`,
+          });
+          return;
+        }
         if (res.ok) {
           dirtyRef.current = false;
           postToSketch({ type: "STEMSKETCH_SAVE_OK" });
         } else {
-          const err = await res.json().catch(() => ({ error: "unknown error" }));
-          postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: err.error });
+          // Read response as TEXT first — many failure modes (Vercel 413
+          // body-size, 504 timeout, gateway HTML pages, Supabase HTML
+          // error pages) return non-JSON. Try to JSON-parse and fall
+          // back to a truncated text snippet so the iframe shows what
+          // actually came back.
+          let msg = `HTTP ${res.status}`;
+          try {
+            const txt = await res.text();
+            try {
+              const parsed = JSON.parse(txt);
+              if (parsed?.error) msg = `${parsed.error} (HTTP ${res.status})`;
+              else msg = `${txt.slice(0, 160)} (HTTP ${res.status})`;
+            } catch {
+              msg = `${txt.slice(0, 160) || res.statusText} (HTTP ${res.status}, payload ${payloadKB} KB)`;
+            }
+          } catch {
+            /* response body wasn't readable */
+          }
+          // Common-case hint when we're clearly over Vercel's default body limit.
+          if (res.status === 413 || (res.status === 0 && payloadKB > 4000)) {
+            msg = `Design too large for the server (${payloadKB} KB — Vercel limit ~4500 KB). Try fewer bevels / simpler geometry, or undo a recent CSG step.`;
+          }
+          postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: msg });
         }
 
       } else if (type === "STEMSKETCH_REQUEST_LIST") {
