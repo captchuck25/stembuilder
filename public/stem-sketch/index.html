@@ -1307,6 +1307,7 @@ const doc = {
   faceMode: false, // when true, next 3D click picks a face for new sketch
   cutMode: null,   // { stage: 'target'|'tool', targetId } during interactive Cut
   curvedPickBody: null, // body id when 6-face bbox picker is active for a curved body
+  bevelPickMode: false, // when true, next 3D click picks an edge to round / chamfer
   orbitMode: false, // toggle: when true, plain left-drag in 3D orbits instead of selecting
   panMode: false,   // toggle: when true, plain left-drag in 3D pans the view
   spaceHeld: false, // tracked from key events — temporary orbit modifier
@@ -5294,6 +5295,40 @@ class Viewer3D {
           performBooleanCut(doc.cutMode.targetId, pickedId);
           return;
         }
+        return;
+      }
+      // Bevel-pick mode (Fillet workflow) — click anywhere on a body, we
+      // snap to the closest visible edge and open the round / chamfer dialog.
+      if (doc.bevelPickMode && e.button === 0) {
+        this.raycaster.setFromCamera(ndc(e), this.camera);
+        const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false)
+          .filter(h => {
+            const b = doc.bodies.find(x => x.id === h.object.userData.bodyId);
+            if (!b) return true;
+            // Skip thread-mark visualizers so they don't catch the click in
+            // front of the real body.
+            if (b.type === 'threadShell') return false;
+            if (b.type === 'fastener' && b._threadMarkRef) return false;
+            return true;
+          });
+        if (!hits.length) {
+          // Click on empty space cancels the mode.
+          doc.bevelPickMode = false;
+          this.canvas.style.cursor = '';
+          setStatus('Fillet cancelled');
+          return;
+        }
+        const hit = hits[0];
+        const body = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
+        if (!body) return;
+        const edge = pickClosestBevelEdge(body, hit);
+        if (!edge) {
+          showHint('No usable edge near that click — try clicking closer to a corner of the body.');
+          return;
+        }
+        doc.bevelPickMode = false;
+        this.canvas.style.cursor = '';
+        openBevelDialog(body, edge);
         return;
       }
       // Face-pick mode (Sketch on Face workflow)
@@ -12323,6 +12358,154 @@ function offsetEntity(ent, d) {
   return null;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Bevel / Fillet — click an edge in 3D, choose round or 45° chamfer + size,
+// auto-detect convex (subtract) vs concave (union), apply via CSG.
+// Works on any body type: primitives, extrudes, CSG groups. The Fillet
+// toolbar button now enters edge-pick mode; the old all-12-edges cube
+// dialog (openFillet3DDialog) is still exported for the Properties panel.
+
+function enterBevelPickMode() {
+  if (doc.mode !== '3d') {
+    showHint('Switch to 3D first, then click Fillet.');
+    return;
+  }
+  if (!doc.bodies.length) {
+    showHint('Add or import a body first — fillet picks an edge to round / chamfer.');
+    return;
+  }
+  doc.bevelPickMode = true;
+  if (viewer) viewer.canvas.style.cursor = 'crosshair';
+  setStatus('Fillet — click an edge of a body (or empty space to cancel). Esc also cancels.');
+}
+
+// Build a list of {p1, p2, n1, n2} edges in WORLD coords for a body's mesh.
+// An edge here is a manifold edge where two triangles meet at a crease
+// sharper than `creaseDeg`. Tessellation seams within smooth surfaces are
+// excluded so the user only ever snaps to a real geometric edge.
+function _buildBevelEdgeIndex(mesh, creaseDeg = 20) {
+  if (!mesh?.geometry?.attributes?.position) return [];
+  const geo = mesh.geometry;
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  const mw = mesh.matrixWorld;
+  // Triangle list as flat vertex-index arrays
+  const triCount = idx ? (idx.array.length / 3) | 0 : (pos.count / 3) | 0;
+  const getVertIdx = (triI, j) => idx ? idx.array[triI * 3 + j] : (triI * 3 + j);
+  // Key vertices by quantized position so coincident vertices (CSG seam
+  // duplicates) share the same key. 0.001 mm is well below printable.
+  const QUANT = 1000;
+  const keyOf = (vi) => {
+    const x = Math.round(pos.array[vi * 3]     * QUANT);
+    const y = Math.round(pos.array[vi * 3 + 1] * QUANT);
+    const z = Math.round(pos.array[vi * 3 + 2] * QUANT);
+    return x + '|' + y + '|' + z;
+  };
+  // Map edge (sorted key pair) → list of triangles that share it.
+  const edgeMap = new Map();
+  const triNormals = new Array(triCount);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3();
+  for (let t = 0; t < triCount; t++) {
+    const ia = getVertIdx(t, 0), ib = getVertIdx(t, 1), ic = getVertIdx(t, 2);
+    a.set(pos.array[ia*3], pos.array[ia*3+1], pos.array[ia*3+2]).applyMatrix4(mw);
+    b.set(pos.array[ib*3], pos.array[ib*3+1], pos.array[ib*3+2]).applyMatrix4(mw);
+    c.set(pos.array[ic*3], pos.array[ic*3+1], pos.array[ic*3+2]).applyMatrix4(mw);
+    e1.subVectors(b, a);
+    e2.subVectors(c, a);
+    const n = new THREE.Vector3().crossVectors(e1, e2);
+    if (n.lengthSq() < 1e-12) { triNormals[t] = null; continue; }
+    triNormals[t] = n.normalize();
+    const ka = keyOf(ia), kb = keyOf(ib), kc = keyOf(ic);
+    const addEdge = (kx, ky, vx, vy) => {
+      const key = kx < ky ? kx + '_' + ky : ky + '_' + kx;
+      let list = edgeMap.get(key);
+      if (!list) { list = []; edgeMap.set(key, list); }
+      list.push({ tri: t, p1: vx, p2: vy });
+    };
+    const pa = a.clone(), pb = b.clone(), pc = c.clone();
+    addEdge(ka, kb, pa, pb);
+    addEdge(kb, kc, pb, pc);
+    addEdge(kc, ka, pc, pa);
+  }
+  // Promote manifold edges (exactly 2 triangles) whose dihedral exceeds
+  // creaseDeg to "visible edges". Coplanar shared triangles (tessellation
+  // seams on smooth surfaces) are filtered out.
+  const cosThresh = Math.cos(creaseDeg * Math.PI / 180);
+  const out = [];
+  for (const list of edgeMap.values()) {
+    if (list.length !== 2) continue;
+    const ta = list[0].tri, tb = list[1].tri;
+    const na = triNormals[ta], nb = triNormals[tb];
+    if (!na || !nb) continue;
+    if (na.dot(nb) > cosThresh) continue; // too flat — same face
+    out.push({
+      p1: list[0].p1,
+      p2: list[0].p2,
+      n1: na.clone(),
+      n2: nb.clone(),
+    });
+  }
+  return out;
+}
+
+// Given a 3D click point (in world coords) and a body's mesh, find the
+// edge with the smallest perpendicular distance from the click to the
+// edge SEGMENT. Edges that don't have the click point in their axial
+// range are penalised. Returns null if nothing usable is nearby.
+function pickClosestBevelEdge(body, hit) {
+  if (!body.mesh) return null;
+  const edges = _buildBevelEdgeIndex(body.mesh);
+  if (!edges.length) return null;
+  const clickW = hit.point.clone();
+  let best = null;
+  let bestDist = Infinity;
+  const ab = new THREE.Vector3();
+  const ap = new THREE.Vector3();
+  for (const ed of edges) {
+    ab.subVectors(ed.p2, ed.p1);
+    const len2 = ab.lengthSq();
+    if (len2 < 1e-9) continue;
+    ap.subVectors(clickW, ed.p1);
+    let t = ap.dot(ab) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const closest = ed.p1.clone().add(ab.clone().multiplyScalar(t));
+    const d = closest.distanceTo(clickW);
+    if (d < bestDist) { bestDist = d; best = ed; }
+  }
+  // Acceptance threshold scales with the body's bbox so a giant base
+  // plate doesn't bias toward tiny detail edges in the distance.
+  const bbox = new THREE.Box3().setFromObject(body.mesh);
+  const scale = bbox.getSize(new THREE.Vector3()).length();
+  if (bestDist > scale * 0.15) return null;
+  return best;
+}
+
+// Classify an edge as convex or concave by signing the dihedral. The
+// sign of (n1 × n2)·e is reliable on properly-wound meshes, but CSG
+// output occasionally produces seam triangles with flipped winding —
+// fall back to a raycaster probe along (n1+n2) for that case.
+function classifyBevelEdge(edge, body) {
+  const e = new THREE.Vector3().subVectors(edge.p2, edge.p1).normalize();
+  const cross = new THREE.Vector3().crossVectors(edge.n1, edge.n2);
+  const dihedralSign = cross.dot(e);
+  if (Math.abs(dihedralSign) > 0.1) {
+    return dihedralSign > 0 ? 'convex' : 'concave';
+  }
+  // Near-180° dihedral or ambiguous winding — probe along bisector to
+  // see whether a tiny step past the edge lands outside the body's
+  // bounding mesh. Convex = outside (no hit going back), concave =
+  // inside (hit going back).
+  const mid = edge.p1.clone().add(edge.p2).multiplyScalar(0.5);
+  const b = edge.n1.clone().add(edge.n2).normalize();
+  const bbox = new THREE.Box3().setFromObject(body.mesh);
+  const scale = bbox.getSize(new THREE.Vector3()).length();
+  const probe = mid.clone().add(b.clone().multiplyScalar(scale * 0.001));
+  const ray = new THREE.Raycaster(probe, b.clone().negate(), 0, scale * 0.002);
+  const hits = ray.intersectObject(body.mesh, false);
+  return hits.length ? 'convex' : 'concave';
+}
+
 function openFillet3DDialog() {
   const sel = doc.selection;
   if (!sel || sel.kind !== 'body') {
@@ -12363,6 +12546,175 @@ function openFillet3DDialog() {
       setStatus(label ? `Filleted ${label} to ${fmtUL(fromUnit(v))}` : 'Cleared fillet');
     },
   });
+}
+
+// Bevel dialog — opens after edge-pick resolves an edge. Style (round or
+// 45° chamfer) and size, plus a read-only label showing whether the pick
+// classified as outer/inner so the user can confirm the auto-detect.
+function openBevelDialog(body, edge) {
+  const kind = classifyBevelEdge(edge, body);
+  const edgeLen = edge.p1.distanceTo(edge.p2);
+  const bbox = new THREE.Box3().setFromObject(body.mesh);
+  const bodyScale = bbox.getSize(new THREE.Vector3()).length();
+  // Default size = 8% of the picked edge length, capped at 25% of body scale
+  // and a minimum that's printable. Reasonable starting point on bracket-
+  // sized work; user can tune.
+  const defaultMm = Math.max(0.5, Math.min(edgeLen * 0.08, bodyScale * 0.05));
+  const u = unitLabel();
+  const defaultUL = toUnit(defaultMm).toFixed(2);
+  const kindLabel = kind === 'convex'
+    ? 'Outer edge (material will be removed)'
+    : 'Inner edge (material will be added to fill the corner)';
+  openModal({
+    title: 'Bevel edge',
+    body: `<p>${kindLabel}.</p>
+           <div class="field" style="margin-top:8px">
+             <label>Style</label>
+             <select id="bv-style">
+               <option value="round" selected>Round — quarter-circle</option>
+               <option value="chamfer">45° chamfer — flat cut</option>
+             </select>
+           </div>
+           <div class="field">
+             <label>Size (${u})</label>
+             <input id="bv-size" type="number" value="${defaultUL}" min="0.05" step="0.1"/>
+           </div>
+           <div class="hint">Edge length: ${fmtUL(edgeLen)}. Size is the bevel's reach along each adjacent face.</div>`,
+    confirmText: 'Apply',
+    onConfirm: () => {
+      const style = document.getElementById('bv-style').value || 'round';
+      const sizeVal = parseFloat(document.getElementById('bv-size').value);
+      const size = fromUnit(sizeVal);
+      if (!isFinite(size) || size <= 0) { showHint('Size must be positive.'); return; }
+      if (size >= edgeLen * 0.5) { showHint('Size is too large relative to the edge length.'); return; }
+      applyBevelToBody(body, edge, kind, style, size);
+    },
+  });
+}
+
+// Build a triangle-prism CSG tool for the bevel. The 2D cross-section in
+// (u,v) — perpendicular to the edge — is the corner sliver between a sharp
+// 90°-ish corner and the new bevel surface:
+//   - round   → bounded by u-axis (0..R), arc center (R,R) radius R, v-axis (R..0)
+//   - chamfer → triangle (0,0)–(S,0)–(0,S)
+// Extruded along the edge from p1 to p2 with small overhang on each end so
+// the boolean cleanly clips through any corner adjacent geometry.
+function buildBevelTool(edge, kind, style, size) {
+  const p1 = edge.p1, p2 = edge.p2;
+  const eDir = new THREE.Vector3().subVectors(p2, p1);
+  const len = eDir.length();
+  if (len < 1e-6) return null;
+  eDir.normalize();
+  const n1 = edge.n1.clone().normalize();
+  const n2 = edge.n2.clone().normalize();
+  const bisector = n1.clone().add(n2).normalize();
+  // t1 / t2: unit vectors perpendicular to the edge, lying in each
+  // adjacent face, chosen to point AWAY from the exterior gap so the
+  // body's body-side of each face is in the +t1 / +t2 direction.
+  const t1 = new THREE.Vector3().crossVectors(eDir, n1).normalize();
+  if (t1.dot(bisector) > 0) t1.negate();
+  const t2 = new THREE.Vector3().crossVectors(eDir, n2).normalize();
+  if (t2.dot(bisector) > 0) t2.negate();
+  // For concave edges the sliver sits in the OPPOSITE 2D quadrant — flip
+  // both basis vectors so the cross-section coordinates still place the
+  // sliver in (+u, +v).
+  const u = (kind === 'concave') ? t1.clone().negate() : t1.clone();
+  const v = (kind === 'concave') ? t2.clone().negate() : t2.clone();
+  // 2D cross-section shape
+  const shape = new THREE.Shape();
+  if (style === 'chamfer') {
+    shape.moveTo(0, 0);
+    shape.lineTo(size, 0);
+    shape.lineTo(0, size);
+    shape.lineTo(0, 0);
+  } else {
+    // Round — sliver bounded by u-axis to (size,0), the quarter-arc with
+    // centre (size,size) and radius size curving toward the origin, and
+    // the v-axis back to origin.
+    shape.moveTo(0, 0);
+    shape.lineTo(size, 0);
+    shape.absarc(size, size, size, -Math.PI / 2, Math.PI, true);
+    shape.lineTo(0, 0);
+  }
+  // Extrude along edge with a small overhang so the tool punches all the
+  // way through any near-coplanar mesh at each corner.
+  const OVER = Math.max(0.1, len * 0.02);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: len + 2 * OVER,
+    bevelEnabled: false,
+    curveSegments: style === 'round' ? 24 : 1,
+  });
+  // Move geometry so z spans [-OVER, len + OVER] before world placement.
+  geo.translate(0, 0, -OVER);
+  // Now rotate the prism so its local (x, y, z) maps to (u, v, eDir) in
+  // world space, with the prism corner anchored at p1.
+  const m = new THREE.Matrix4().makeBasis(u, v, eDir);
+  m.setPosition(p1);
+  geo.applyMatrix4(m);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+  mesh.updateMatrixWorld(true);
+  return mesh;
+}
+
+// Run the boolean. Subtract for convex edges (removes the sliver),
+// union for concave (fills the corner). Replaces the source body in
+// doc.bodies with a new combined/group result and selects it so undo
+// and visual feedback land naturally.
+function applyBevelToBody(body, edge, kind, style, size) {
+  if (typeof CSG === 'undefined') { showHint('CSG library failed to load — cannot apply bevel.'); return; }
+  pushUndo();
+  try {
+    viewer.scene.updateMatrixWorld(true);
+    const tool = buildBevelTool(edge, kind, style, size);
+    if (!tool) { showHint('Could not build bevel tool — edge too short?'); return; }
+    // Use the same cleanup path the thread-mark workflow relies on so
+    // compound bevels on a CSG bracket stay stable.
+    const targetMesh = getCSGMesh(body);
+    const result = (kind === 'concave')
+      ? CSG.union(targetMesh, tool)
+      : CSG.subtract(targetMesh, tool);
+    result.updateMatrixWorld(true);
+    const baked = result.geometry.clone();
+    baked.applyMatrix4(result.matrixWorld);
+    baked.computeVertexNormals();
+    // Replace body in-place with a new group entry carrying the baked
+    // geometry — same shape groupSelected uses, so downstream code
+    // (export, properties, save) handles it uniformly. Preserve the
+    // original body as a single child so Ungroup can recover it.
+    const childClone = JSON.parse(JSON.stringify({
+      id: body.id, type: body.type, op: body.op,
+      x: body.x, y: body.y, z: body.z,
+      w: body.w, h: body.h, d: body.d,
+      rotation: body.rotation, name: body.name,
+      filletRadius: body.filletRadius, filletEdges: body.filletEdges,
+    }));
+    const groupBody = {
+      id: doc.nextBodyId++,
+      type: 'group',
+      children: [childClone],
+      geometry: baked,
+      op: body.op || 'add',
+      x: 0, y: 0, z: 0,
+      name: body.name ? `${body.name} (beveled)` : undefined,
+    };
+    doc.bodies = doc.bodies.filter(b => b.id !== body.id);
+    doc.bodies.push(groupBody);
+    // Repoint any sketch that was anchored on the source body.
+    for (const sk of doc.sketches) {
+      if (sk.sourceBodyId === body.id) sk.sourceBodyId = groupBody.id;
+    }
+    doc.selection = { kind: 'body', id: groupBody.id };
+    doc.multiSelectedBodies = [groupBody.id];
+    if (viewer) viewer.rebuildBodies();
+    renderTree(); renderProps();
+    const label = (kind === 'convex' ? 'Rounded outer edge' : 'Filleted inner edge');
+    setStatus(`${label} — ${style === 'round' ? 'round' : '45° chamfer'} of ${fmtUL(size)}`);
+    flushAutosave();
+  } catch (err) {
+    console.error('Bevel CSG failed:', err);
+    showHint('Bevel failed — try a smaller size, or the edge may be too short for this body.');
+  }
 }
 
 // Perpendicular distance from a point to the nearest edge of a 2D entity.
@@ -13245,7 +13597,7 @@ function init() {
       case 'threaded-holes': openThreadedHolesDialog(); break;
       case 'new-sketch': openNewSketchDialog(); break;
       case 'fillet-2d': openFilletDialog(); break;
-      case 'fillet-3d': openFillet3DDialog(); break;
+      case 'fillet-3d': enterBevelPickMode(); break;
       case 'revolve': revolveCurrentSketch(); break;
       case 'array-2d': openArrayDialog(); break;
       case 'scale-2d': openScaleDialog(); break;
@@ -13482,16 +13834,20 @@ function init() {
       if (e.key === 'j' || e.key === 'J') { startJointCreation(); return; }
     }
     // Cancel face-pick mode in 3D (also clears the bbox 6-face picker if up)
-    if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody)) {
+    if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode)) {
       const wasFastener = !!doc.fastenerPlaceTarget;
+      const wasBevel = !!doc.bevelPickMode;
       doc.faceMode = false;
       doc.curvedPickBody = null;
       doc.fastenerPlaceTarget = null;
+      doc.bevelPickMode = false;
       if (viewer) {
         viewer.canvas.style.cursor = '';
         viewer.clearBboxFacePicker && viewer.clearBboxFacePicker();
       }
-      setStatus(wasFastener ? 'Fastener placement cancelled' : 'Sketch on Face cancelled');
+      setStatus(wasFastener ? 'Fastener placement cancelled'
+              : wasBevel    ? 'Fillet cancelled'
+              : 'Sketch on Face cancelled');
     }
     // Cancel align mode
     if (e.key === 'Escape' && doc.alignMode) {
