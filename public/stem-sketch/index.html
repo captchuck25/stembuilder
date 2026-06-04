@@ -7661,27 +7661,31 @@ function rebuildGroupGeometry(group) {
 function rebuildExtrudesForSketch(sketchId) {
   const sketch = doc.sketches.find(s => s.id === sketchId);
   if (!sketch) return;
-  // Walk every body recursively — a sketch's extrude can be buried any
-  // number of bevel / thread layers deep, and the old top-only search
-  // missed every nested case (the user's "alterations don't register").
-  const dependents = []; // { body, chain:[outer…inner ancestor groups] }
-  const walk = (b, chain) => {
+  // Only top-level extrudes or extrudes that are IMMEDIATE children of a
+  // top-level group are eligible. Walking the full tree + rebuilding
+  // every ancestor on the chain meant clicking Done on a sketch buried
+  // 4 layers deep in a bevel/thread bracket fired 4 sequential CSG
+  // subtracts and locked the main thread for tens of seconds — see the
+  // freeze the user reported on 2026-06-04. A deeper edit propagation
+  // path needs to be async (web worker / yielding) before it's safe
+  // here; for now keep Done snappy and accept that deeply-nested
+  // extrude edits don't cascade.
+  const dependents = []; // { body, parentGroup | null }
+  for (const b of doc.bodies) {
     if (b.type === 'extrude' && b.sourceSketchId === sketchId) {
-      dependents.push({ body: b, chain });
+      dependents.push({ body: b, parentGroup: null });
+    } else if (b.type === 'group' && Array.isArray(b.children)) {
+      for (const c of b.children) {
+        if (c.type === 'extrude' && c.sourceSketchId === sketchId) {
+          dependents.push({ body: c, parentGroup: b });
+        }
+      }
     }
-    if ((b.type === 'group' || b.type === 'combined') && Array.isArray(b.children)) {
-      const nextChain = [...chain, b];
-      for (const c of b.children) walk(c, nextChain);
-    }
-  };
-  for (const b of doc.bodies) walk(b, []);
+  }
   if (!dependents.length) return;
   const newRegions = computeSketchRegions(sketch);
-  // For each match, update the extrude's sketch + mark every ancestor on
-  // its chain as needing a CSG rebuild. groupDepth caches the deepest
-  // position each group was found at, so we can rebuild bottom-up.
-  const groupDepth = new Map();
-  for (const { body, chain } of dependents) {
+  const groupsToRebuild = new Set();
+  for (const { body, parentGroup } of dependents) {
     if (body.regionCentroid) {
       if (!newRegions.length) continue;
       let bestRegion = null, bestDist = Infinity;
@@ -7694,43 +7698,18 @@ function rebuildExtrudesForSketch(sketchId) {
       if (bestRegion) {
         body.sketch = regionToSyntheticSketch(bestRegion, sketch);
         body.regionCentroid = regionCentroidOf(bestRegion);
-      } else continue;
+        if (parentGroup) groupsToRebuild.add(parentGroup);
+      }
     } else {
       const sketchCopy = JSON.parse(JSON.stringify(sketch));
       sketchCopy.entities = (sketchCopy.entities || []).filter(e => !e.construction && e.type !== 'dimension');
-      if (!sketchCopy.entities.length) continue;
-      body.sketch = sketchCopy;
-    }
-    // Record each ancestor's depth (= index in chain). When the same group
-    // shows up via two different chains we keep the deepest index so the
-    // rebuild order still respects the deepest-first rule.
-    for (let i = 0; i < chain.length; i++) {
-      const g = chain[i];
-      const prev = groupDepth.get(g);
-      if (prev === undefined || i > prev) groupDepth.set(g, i);
+      if (sketchCopy.entities.length) {
+        body.sketch = sketchCopy;
+        if (parentGroup) groupsToRebuild.add(parentGroup);
+      }
     }
   }
-  // Rebuild ancestor groups bottom-up so a shallower group's rebuild
-  // sees its deeper child's updated geometry.
-  const ordered = [...groupDepth.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([g]) => g);
-  for (const g of ordered) {
-    const hadGeom = g.geometry instanceof THREE.BufferGeometry;
-    rebuildGroupGeometry(g);
-    const stillHasGeom = g.geometry instanceof THREE.BufferGeometry;
-    // Surface the failure mode that produced the user's "body is gone"
-    // symptom: rebuildGroupGeometry catches CSG exceptions silently, and
-    // if it never assigned a fresh geometry the group is now visually
-    // empty even though it still appears in the project tree.
-    if (hadGeom && !stillHasGeom) {
-      console.warn(
-        `Sketch-edit rebuild left group id=${g.id} with no geometry — ` +
-        `CSG of {positives: ${(g.children || []).filter(c => c.op !== 'subtract').length}, ` +
-        `negatives: ${(g.children || []).filter(c => c.op === 'subtract').length}} failed. ` +
-        `The body will be invisible until you undo or re-CSG.`);
-    }
-  }
+  for (const g of groupsToRebuild) rebuildGroupGeometry(g);
   if (viewer) viewer.rebuildBodies();
 }
 
