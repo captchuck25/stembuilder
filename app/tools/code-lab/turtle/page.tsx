@@ -22,6 +22,7 @@ type Cmd =
   | { t: "F"; pts: [number, number][]; c: string }
   | { t: "BG"; c: string }
   | { t: "CLR" }
+  | { t: "TXT"; x: number; y: number; text: string; c: string; size: number }
   | { t: "T"; x: number; y: number; h: number; v: boolean };
 
 interface TV { x: number; y: number; h: number; v: boolean; }
@@ -48,7 +49,7 @@ function transpile(src: string): string {
     "setx","sety","begin_fill","end_fill","bgcolor","clear","reset",
     "hideturtle","ht","showturtle","st","xcor","ycor","heading","isdown",
     "abs","min","max","sqrt","sin","cos","floor","round","pi","PI","range",
-    "print","i","True","False","None","and","or","not","in","for","while",
+    "print","write","i","True","False","None","and","or","not","in","for","while",
     "if","elif","else","def","return","pass",
   ]);
   for (const line of lines) {
@@ -183,6 +184,11 @@ function runTurtle(code: string): { cmds: Cmd[]; prints: string[]; error: string
     hideturtle() { visible=false; pushT(); }, showturtle() { visible=true; pushT(); },
     xcor: ()=>wx, ycor: ()=>wy, heading: ()=>heading, isdown: ()=>penDown,
     print(...args: unknown[]) { prints.push(args.map(a=>String(a)).join(" ")); },
+    write(text: unknown, size: number=12) {
+      tick();
+      const [cx,cy]=w2c(wx,wy);
+      cmds.push({t:"TXT",x:cx,y:cy,text:String(text),c:penClr,size:Math.max(4,size)});
+    },
     fd(d:number){api.forward(d);}, bk(d:number){api.backward(d);}, back(d:number){api.backward(d);},
     rt(a:number){api.right(a);}, lt(a:number){api.left(a);},
     turn_right(a:number){api.right(a);}, turn_left(a:number){api.left(a);},
@@ -330,6 +336,11 @@ function applyCmd(
     }
     case "BG": bgColorRef.current=cmd.c; bgCtx.fillStyle=cmd.c; bgCtx.fillRect(0,0,CS,CS); break;
     case "CLR": bgCtx.fillStyle=bgColorRef.current; bgCtx.fillRect(0,0,CS,CS); break;
+    case "TXT":
+      bgCtx.fillStyle=cmd.c;
+      bgCtx.font=`bold ${cmd.size}px Arial, sans-serif`;
+      bgCtx.textBaseline="alphabetic";
+      bgCtx.fillText(cmd.text,cmd.x,cmd.y); break;
     case "T":   tvRef.current={x:cmd.x,y:cmd.y,h:cmd.h,v:cmd.v}; break;
   }
 }
@@ -473,6 +484,7 @@ const CMD_REF = [
     { cmd: "pensize(width)",    desc: "Set line thickness" },
     { cmd: "begin_fill()",      desc: "Start filling a shape" },
     { cmd: "end_fill()",        desc: "Finish filling" },
+    { cmd: 'write("Hi", 18)',   desc: "Draw text at the turtle" },
   ]},
   { group: "Screen", items: [
     { cmd: 'bgcolor("white")',  desc: "Background color" },

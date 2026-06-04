@@ -478,8 +478,8 @@ color("purple")
     id: "school-bus",
     category: "challenge",
     title: "School Bus",
-    description: "Build a school bus! The yellow body is done — add wheels and windows to finish it.",
-    hint: "Wheels are filled circles drawn with forward(1) + left(4) x 90. Windows are filled squares — same 4-step square loop you used in tutorial 3.",
+    description: "Build a school bus! The yellow body is done — add wheels, windows, and your school's name on the side using write().",
+    hint: 'Wheels are filled circles drawn with forward(1) + left(4) x 90. Windows are filled squares — same 4-step square loop you used in tutorial 3. To label the bus, write("text", size) draws text where the turtle is: penup(), color("black"), goto() to position it, then write() with YOUR school\'s name, e.g. write("Lincoln Elementary", 14).',
     previewLines: 24,
     solutionCode: `# School Bus
 color("black")
@@ -584,6 +584,12 @@ for i in range(4):
     left(90)
 end_fill()
 
+# Your school's name on the side
+penup()
+color("black")
+goto(-110, -8)
+write("Lincoln Elementary", 14)
+
 penup()
 goto(100,100)`,
     starterCode: `# School Bus
@@ -614,6 +620,15 @@ end_fill()
 
 
 # ── TODO: Add windows along the top of the bus ──
+
+
+
+# ── TODO: Put YOUR school's name on the side ─────
+# Use write() — type your real school between the quotes!
+# penup()
+# color("black")
+# goto(-110, -8)
+# write("Your School Name", 14)
 `,
   },
 ];
