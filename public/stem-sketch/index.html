@@ -6177,6 +6177,25 @@ class Viewer3D {
     }
     for (const body of doc.bodies) {
       if (body.hidden) { body.mesh = null; continue; }
+      // Auto-recovery for top-level groups whose baked geometry got lost
+      // (e.g. a pre-fix save that captured the body mid-rebuild, or an
+      // earlier rebuildGroupGeometry that nulled the geometry on a CSG
+      // exception). Without this, the body shows up in the project tree
+      // but is invisible in the canvas and the user has no path back
+      // short of undo. Recovery runs CSG on the children — this won't
+      // restore bevels / thread shells whose parameters weren't recorded
+      // on the child, but it always recovers the un-beveled silhouette
+      // which is enough to keep editing.
+      if ((body.type === 'group' || body.type === 'combined') &&
+          !(body.geometry instanceof THREE.BufferGeometry) &&
+          Array.isArray(body.children) && body.children.length &&
+          typeof _ensureGroupGeometry === 'function') {
+        const recovered = _ensureGroupGeometry(body);
+        if (recovered) {
+          console.warn(`Recovered missing geometry for top-level group id=${body.id} by re-running CSG on its children. ` +
+            `Any bevels / thread-shell visuals from earlier sessions won't be in the recovered shape.`);
+        }
+      }
       const mesh = buildBodyMesh(body);
       if (mesh) {
         body.mesh = mesh;
