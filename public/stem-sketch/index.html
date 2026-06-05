@@ -7643,6 +7643,10 @@ function rebuildGroupGeometry(group) {
     // would render as a vanished body without this guard.
     if (baked.attributes?.position?.count > 0) {
       group.geometry = baked;
+      // Re-merge any thread shells the user had merged into this body.
+      // Without this the rebuild silently drops the helical thread visual
+      // every time the user opens / exits a face sketch.
+      _remergeStoredShells(group);
     } else {
       console.warn(`rebuildGroupGeometry: CSG produced an empty result for group id=${group.id}; keeping previous geometry.`);
     }
@@ -9284,6 +9288,40 @@ function buildFastenerCSGMesh(body) {
   return mesh;
 }
 
+// Merge one thread shell's triangles into the given body's geometry,
+// using the spec stored on the body. Returns true on success. Body must
+// already have a valid BufferGeometry — this only ADDS the shell, it
+// does not produce the underlying cut hole.
+function _mergeOneShellInto(body, spec) {
+  if (!body || !(body.geometry instanceof THREE.BufferGeometry)) return false;
+  const tempShellBody = {
+    type: 'threadShell',
+    size: spec.size,
+    length: spec.length,
+    fit: spec.fit,
+    x: spec.x, y: spec.y, z: spec.z,
+    rotation: spec.rotation,
+  };
+  const tempMesh = buildBodyMesh(tempShellBody);
+  if (!tempMesh) return false;
+  tempMesh.updateMatrixWorld(true);
+  const shellGeo = tempMesh.geometry.clone();
+  shellGeo.applyMatrix4(tempMesh.matrixWorld);
+  body.geometry = _mergeBufferGeometries([body.geometry, shellGeo]);
+  body.geometry.computeVertexNormals();
+  tempMesh.geometry.dispose();
+  return true;
+}
+
+// Re-apply every stored shell spec onto a body whose geometry was just
+// reassigned by a CSG rebuild. Called from rebuildGroupGeometry and
+// _ensureGroupGeometry so editing the source sketch (or ungrouping)
+// doesn't silently strip the helical thread visual the user added.
+function _remergeStoredShells(body) {
+  if (!body || !Array.isArray(body._mergedShells) || !body._mergedShells.length) return;
+  for (const spec of body._mergedShells) _mergeOneShellInto(body, spec);
+}
+
 // Re-derive a group / combined body's baked BufferGeometry from its
 // children. Used on ungroup when the save dropped intermediate-level
 // geometries to keep the doc size bounded. Recursively walks: nested
@@ -9333,6 +9371,9 @@ function _ensureGroupGeometry(body) {
     geo.applyMatrix4(result.matrixWorld);
     geo.computeVertexNormals();
     body.geometry = geo;
+    // Re-merge stored thread shells onto the freshly-baked geometry so
+    // ungroup of a threaded body keeps the helical thread visual.
+    _remergeStoredShells(body);
     return true;
   } catch (err) {
     console.warn('_ensureGroupGeometry CSG rebuild failed:', err);
@@ -9858,25 +9899,24 @@ function processThreadMarks(sketch, marks, opts) {
       ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
       : null;
     if (parentAfterCut && parentAfterCut.geometry) {
-      const tempShellBody = {
-        type: 'threadShell',
+      const shellSpec = {
         size: opts.size,
         length: opts.depth,
         fit: opts.fit,
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
       };
-      const tempMesh = buildBodyMesh(tempShellBody);
-      if (tempMesh) {
-        tempMesh.updateMatrixWorld(true);
-        const shellGeo = tempMesh.geometry.clone();
-        shellGeo.applyMatrix4(tempMesh.matrixWorld);
-        // Both inputs to _mergeBufferGeometries must have normals — both do
-        // (parent's geometry got computeVertexNormals in groupSelected, the
-        // shell got it in buildThreadShellGeo).
-        parentAfterCut.geometry = _mergeBufferGeometries([parentAfterCut.geometry, shellGeo]);
-        parentAfterCut.geometry.computeVertexNormals();
-        tempMesh.geometry.dispose();
+      const ok = _mergeOneShellInto(parentAfterCut, shellSpec);
+      if (ok) {
+        // Persist the spec so any later CSG rebuild (rebuildGroupGeometry
+        // off a face-sketch Done, _ensureGroupGeometry on ungroup, an undo
+        // restore) can re-merge the shells onto the freshly-baked
+        // geometry. Without this every rebuild silently drops the
+        // helical thread visual — the cut survived because the cutter
+        // IS a child, but the shell is concatenated triangles with no
+        // CSG record, so the rebuild path had no idea to put it back.
+        parentAfterCut._mergedShells = parentAfterCut._mergedShells || [];
+        parentAfterCut._mergedShells.push(shellSpec);
         m._mergedShellInBodyId = parentAfterCut.id;
       }
     } else {
@@ -10710,6 +10750,17 @@ function groupSelected(skipUndo) {
       children, geometry,
       op: 'add', x: 0, y: 0, z: 0,
     };
+    // Forward any thread-shell metadata from the consumed positives onto
+    // the new wrapper so successive thread cuts / bevels don't strand
+    // earlier shells deep in the child tree where the rebuild path
+    // couldn't see them.
+    const mergedShells = [];
+    for (const src of positives) {
+      if (Array.isArray(src._mergedShells)) {
+        for (const s of src._mergedShells) mergedShells.push({ ...s, rotation: { ...s.rotation } });
+      }
+    }
+    if (mergedShells.length) group._mergedShells = mergedShells;
     doc.bodies = doc.bodies.filter(b => !ids.includes(b.id));
     doc.bodies.push(group);
     // Re-point every sketch that was anchored to one of the consumed bodies
@@ -13004,6 +13055,15 @@ function _bevelOnce(body, edge, kind, style, size) {
     x: 0, y: 0, z: 0,
     name: body.name ? `${body.name} (beveled)` : undefined,
   };
+  // Carry any thread-shell metadata from the body being beveled forward
+  // onto the new wrapper. The bevel CSG already preserved the shells in
+  // baked (CSG.subtract leaves non-intersected triangles intact), but
+  // without the metadata a later rebuild — say, the user edits the
+  // source sketch and Done triggers rebuildGroupGeometry — would silently
+  // strip them off the rebuilt geometry.
+  if (Array.isArray(body._mergedShells) && body._mergedShells.length) {
+    groupBody._mergedShells = body._mergedShells.map(s => ({ ...s, rotation: { ...s.rotation } }));
+  }
   doc.bodies = doc.bodies.filter(b => b.id !== body.id);
   doc.bodies.push(groupBody);
   for (const sk of doc.sketches) {
