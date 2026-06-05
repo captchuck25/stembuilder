@@ -9307,8 +9307,20 @@ function _mergeOneShellInto(body, spec) {
   tempMesh.updateMatrixWorld(true);
   const shellGeo = tempMesh.geometry.clone();
   shellGeo.applyMatrix4(tempMesh.matrixWorld);
+  const prevGeo = body.geometry;
   body.geometry = _mergeBufferGeometries([body.geometry, shellGeo]);
   body.geometry.computeVertexNormals();
+  // Critical: keep body.mesh.geometry in lockstep with body.geometry.
+  // The next CSG operation (next thread cut in the same batch, a later
+  // bevel, etc.) goes through getCSGMesh → _cleanedCSGInputMesh which
+  // reads body.mesh.geometry. Without this re-sync that's the PRE-merge
+  // reference, so the new boolean uses a stale input and silently drops
+  // every shell merged since the last viewer.rebuildBodies pass — exactly
+  // why only the last of N batch marks showed threads.
+  if (body.mesh) {
+    body.mesh.geometry = body.geometry;
+    if (prevGeo && prevGeo !== body.geometry) prevGeo.dispose();
+  }
   tempMesh.geometry.dispose();
   return true;
 }
