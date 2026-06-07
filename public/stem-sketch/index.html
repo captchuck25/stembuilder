@@ -8089,7 +8089,59 @@ function applySnapshot(s) {
   hideExtrudeTooltip && hideExtrudeTooltip();
   if (sketchEng) sketchEng.render();
   renderTree(); renderProps();
+  // Post-restore sanity check — surface any top-level body that came back
+  // without a renderable mesh so the user isn't staring at a blank canvas
+  // wondering whether undo did anything. Common cause: an earlier session
+  // committed a CSG failure into a snapshot (before the recent guards
+  // landed). The fix is to call _stemRecover() from the browser console.
+  const invisible = doc.bodies.filter(b => {
+    if (b.hidden) return false;
+    if (b.type === 'group' || b.type === 'combined') {
+      return !(b.geometry instanceof THREE.BufferGeometry) ||
+             !(b.geometry.attributes?.position?.count > 0);
+    }
+    if (b.type === 'extrude') {
+      return !b.sketch || !Array.isArray(b.sketch.entities) || !b.sketch.entities.length;
+    }
+    return false;
+  });
+  if (invisible.length) {
+    console.warn(`After applySnapshot: ${invisible.length} top-level body${invisible.length === 1 ? ' is' : 'ies are'} invisible. Run _stemRecover() in this console to attempt a CSG rebuild from their children.`);
+    setStatus(`⚠ ${invisible.length} body${invisible.length === 1 ? '' : 'ies'} restored without geometry — type _stemRecover() in DevTools console to try a CSG repair, or undo / redo to a different state.`);
+  }
 }
+// Manual recovery — find every top-level group with no renderable mesh
+// and re-run CSG on its children to rebuild the geometry. Exposed via
+// window for console invocation since auto-running this on every render
+// pass would hang the app on deeply-nested brackets (we tried that, the
+// freeze was bad enough to revert). Use sparingly — runs synchronously.
+function _stemRecover() {
+  if (typeof CSG === 'undefined' || typeof _ensureGroupGeometry !== 'function') {
+    console.warn('_stemRecover: CSG library or recovery helper not loaded yet.');
+    return 0;
+  }
+  let recovered = 0;
+  setStatus('Attempting CSG recovery — UI may freeze for a few seconds…');
+  for (const b of doc.bodies) {
+    if (b.hidden) continue;
+    if (b.type !== 'group' && b.type !== 'combined') continue;
+    if (b.geometry instanceof THREE.BufferGeometry && b.geometry.attributes?.position?.count > 0) continue;
+    if (!Array.isArray(b.children) || !b.children.length) continue;
+    const ok = _ensureGroupGeometry(b);
+    if (ok) recovered++;
+    console.log(`_stemRecover: body id=${b.id} → ${ok ? 'recovered' : 'failed'}`);
+  }
+  if (viewer) viewer.rebuildBodies();
+  renderTree(); renderProps();
+  if (recovered) {
+    setStatus(`Recovered ${recovered} body${recovered === 1 ? '' : 'ies'} via CSG rebuild (bevels / thread shells from the pre-recovery state are NOT restored).`);
+    flushAutosave && flushAutosave();
+  } else {
+    setStatus('Recovery attempted, no bodies could be rebuilt — see console for per-body reasons.');
+  }
+  return recovered;
+}
+if (typeof window !== 'undefined') window._stemRecover = _stemRecover;
 let _docDirty = false;
 function setDirty(v) {
   // ALWAYS reschedule autosave on every dirty edit — the previous early-return
