@@ -13030,13 +13030,33 @@ function _bevelOnce(body, edge, kind, style, size) {
   // getCSGMesh handles the cleanup pass for group/combined bodies so
   // compound bevels on a CSG bracket stay stable across iterations.
   const targetMesh = getCSGMesh(body);
-  const result = (kind === 'concave')
-    ? CSG.union(targetMesh, tool)
-    : CSG.subtract(targetMesh, tool);
+  if (!targetMesh?.geometry?.attributes?.position?.count) {
+    console.warn(`_bevelOnce: source body id=${body.id} has no renderable geometry — refusing to bevel.`);
+    return null;
+  }
+  let result;
+  try {
+    result = (kind === 'concave')
+      ? CSG.union(targetMesh, tool)
+      : CSG.subtract(targetMesh, tool);
+  } catch (err) {
+    console.error(`_bevelOnce: CSG ${kind === 'concave' ? 'union' : 'subtract'} threw on body id=${body.id}:`, err);
+    return null;
+  }
   result.updateMatrixWorld(true);
   const baked = result.geometry.clone();
   baked.applyMatrix4(result.matrixWorld);
   baked.computeVertexNormals();
+  // Refuse to commit a zero-position result — that's what's been
+  // producing invisible-body-but-tree-entry-stays states the user can't
+  // undo out of cleanly. CSG can silently return an empty mesh when the
+  // bevel tool intersects in a degenerate way; better to fail noisily and
+  // leave the body unchanged than to bake the failure into the doc.
+  if (!baked.attributes?.position?.count) {
+    console.warn(`_bevelOnce: CSG returned a zero-position result for body id=${body.id}; keeping the source body unchanged. ` +
+      `Try a smaller bevel size, or a different edge.`);
+    return null;
+  }
   // Wrap the result as a single-child group so Ungroup recovers the
   // pre-bevel body. Mirror groupSelected's cloneChild so EVERY field
   // survives — the old hardcoded list dropped extrude-specific keys
@@ -13111,9 +13131,12 @@ function applyBevelToBody(body, edge, kind, style, size) {
 // whole batch).
 function applyBevelsBatch(selections, style, size) {
   if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
-  pushUndo();
-  // Map original body id → current id (updated after each bevel) so two
-  // edges on the same body chain through the right intermediate group.
+  // Stash the undo snapshot BEFORE any work so we can roll back if nothing
+  // succeeds — pushing an undo entry for a no-op bevel was creating a
+  // confusing "nothing happened, but undo blanks my body" loop where the
+  // user's first undo restored a state from BEFORE the bracket existed
+  // (because the failed bevel filled the undo slot).
+  const undoSnapshot = snapshotDoc();
   const idMap = new Map();
   let okCount = 0, failCount = 0;
   setStatus(`Beveling ${selections.length} edge${selections.length === 1 ? '' : 's'}…`);
@@ -13125,7 +13148,6 @@ function applyBevelsBatch(selections, style, size) {
       if (!currentBody) { failCount++; continue; }
       const newId = _bevelOnce(currentBody, sel.edge, sel.kind, style, size);
       if (newId) {
-        // Every edge that ever pointed to this lineage now resolves to newId.
         idMap.set(sel.body.id, newId);
         for (const [k, v] of idMap) if (v === currentId) idMap.set(k, newId);
         okCount++;
@@ -13133,18 +13155,30 @@ function applyBevelsBatch(selections, style, size) {
         failCount++;
       }
     }
-    // Select the last touched body so the user sees the result highlighted.
-    const lastId = [...idMap.values()].pop();
-    if (lastId) {
-      doc.selection = { kind: 'body', id: lastId };
-      doc.multiSelectedBodies = [lastId];
+    if (okCount > 0) {
+      // Only push undo when at least one bevel actually committed.
+      undoStack.push(undoSnapshot);
+      if (undoStack.length > MAX_UNDO) undoStack.shift();
+      redoStack.length = 0;
+      updateUndoRedoButtons();
+      setDirty(true);
+      const lastId = [...idMap.values()].pop();
+      if (lastId) {
+        doc.selection = { kind: 'body', id: lastId };
+        doc.multiSelectedBodies = [lastId];
+      }
+      if (viewer) viewer.rebuildBodies();
+      renderTree(); renderProps();
+      flushAutosave();
+      setStatus(failCount
+        ? `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${failCount} failed (CSG couldn't carve those — see console).`
+        : `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${style === 'round' ? 'round' : '45° chamfer'} of ${fmtUL(size)}`);
+    } else {
+      // Total failure — no doc state changed. Don't pollute the undo stack
+      // and surface a clear message so the user knows nothing happened.
+      setStatus(`Fillet did nothing — CSG couldn't carve ${selections.length === 1 ? 'that edge' : 'any of the picked edges'}. Try a smaller size or a different edge. (See console for the per-edge reasons.)`);
+      showHint('Fillet failed — try a smaller bevel size or a different edge. Check the browser console for details.');
     }
-    if (viewer) viewer.rebuildBodies();
-    renderTree(); renderProps();
-    flushAutosave();
-    setStatus(failCount
-      ? `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${failCount} failed (likely too large for the edge).`
-      : `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${style === 'round' ? 'round' : '45° chamfer'} of ${fmtUL(size)}`);
   } catch (err) {
     console.error('Batch bevel failed:', err);
     showHint('Bevel batch failed — try a smaller size.');
