@@ -13181,7 +13181,7 @@ function applyBevelToBody(body, edge, kind, style, size) {
 // the same body land on the latest group. One redraw + one autosave at
 // the end keep this snappy and undo-friendly (single Ctrl+Z reverts the
 // whole batch).
-function applyBevelsBatch(selections, style, size) {
+async function applyBevelsBatch(selections, style, size) {
   if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
   // Stash the undo snapshot BEFORE any work so we can roll back if nothing
   // succeeds — pushing an undo entry for a no-op bevel was creating a
@@ -13190,21 +13190,44 @@ function applyBevelsBatch(selections, style, size) {
   // (because the failed bevel filled the undo slot).
   const undoSnapshot = snapshotDoc();
   const idMap = new Map();
+  const perEdge = []; // { idx, label, status, info }
   let okCount = 0, failCount = 0;
+  // Yield to the event loop so each setStatus actually paints between
+  // iterations. Without this the whole synchronous loop blocks the UI
+  // and the user just sees "Beveling…" until the final state appears.
+  const yieldFrame = () => new Promise(r => requestAnimationFrame(r));
   setStatus(`Beveling ${selections.length} edge${selections.length === 1 ? '' : 's'}…`);
+  await yieldFrame();
   try {
     viewer.scene.updateMatrixWorld(true);
-    for (const sel of selections) {
+    for (let i = 0; i < selections.length; i++) {
+      const sel = selections[i];
+      const N = selections.length;
+      const edgeLabel = `${sel.kind === 'convex' ? 'outer' : 'inner'} edge ${i + 1}/${N}`;
+      setStatus(`Beveling ${edgeLabel}…`);
+      await yieldFrame();
       const currentId = idMap.get(sel.body.id) ?? sel.body.id;
       const currentBody = doc.bodies.find(b => b.id === currentId);
-      if (!currentBody) { failCount++; continue; }
+      if (!currentBody) {
+        failCount++;
+        perEdge.push({ i, kind: sel.kind, ok: false, reason: 'source body not found' });
+        console.warn(`Bevel ${i + 1}/${N}: source body id=${currentId} disappeared between picks and apply — skipped.`);
+        continue;
+      }
       const newId = _bevelOnce(currentBody, sel.edge, sel.kind, style, size);
       if (newId) {
         idMap.set(sel.body.id, newId);
         for (const [k, v] of idMap) if (v === currentId) idMap.set(k, newId);
         okCount++;
+        perEdge.push({ i, kind: sel.kind, ok: true, reason: `→ body id=${newId}` });
+        console.log(`Bevel ${i + 1}/${N} (${sel.kind}, ${style}) → ok, new body id=${newId}`);
+        // Show what's been done so far so the user can see incremental progress.
+        if (viewer) viewer.rebuildBodies();
+        await yieldFrame();
       } else {
         failCount++;
+        perEdge.push({ i, kind: sel.kind, ok: false, reason: 'CSG carved nothing — see prior console line' });
+        console.warn(`Bevel ${i + 1}/${N} (${sel.kind}, ${style}) → failed (CSG returned an empty / unusable result).`);
       }
     }
     if (okCount > 0) {
@@ -13222,9 +13245,10 @@ function applyBevelsBatch(selections, style, size) {
       if (viewer) viewer.rebuildBodies();
       renderTree(); renderProps();
       flushAutosave();
+      const sizeLabel = `${style === 'round' ? 'round' : '45° chamfer'} of ${fmtUL(size)}`;
       setStatus(failCount
-        ? `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${failCount} failed (CSG couldn't carve those — see console).`
-        : `Beveled ${okCount} edge${okCount === 1 ? '' : 's'} — ${style === 'round' ? 'round' : '45° chamfer'} of ${fmtUL(size)}`);
+        ? `Beveled ${okCount}/${selections.length} edges (${sizeLabel}). ${failCount} failed — see console for which.`
+        : `Beveled ${okCount}/${selections.length} edges (${sizeLabel}).`);
     } else {
       // Total failure — no doc state changed. Don't pollute the undo stack
       // and surface a clear message so the user knows nothing happened.
