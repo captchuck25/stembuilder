@@ -12708,9 +12708,12 @@ function _buildBevelEdgeIndex(mesh, creaseDeg = 20) {
   // Pre-weld so CSG drift doesn't split one physical edge into many
   // disconnected segments — coincident vertices that landed at slightly
   // different float values after a boolean op now share the same INDEX,
-  // which is what triangle-adjacency hashing depends on. 0.05 mm is well
-  // below printable feature size, so we don't collapse real corners.
-  const geo = weldGeometryForEdges(mesh.geometry, 0.05);
+  // which is what triangle-adjacency hashing depends on. 0.15 mm is just
+  // under FDM line width (~0.4 mm nozzle / 0.2 mm layer) so we don't
+  // collapse real corners, but it's wide enough to absorb the drift that
+  // a stack of CSG ops accumulates (extrude → bevel → thread → bevel…),
+  // which was breaking the chain walker on the user's heavier brackets.
+  const geo = weldGeometryForEdges(mesh.geometry, 0.15);
   const pos = geo.attributes.position;
   const idx = geo.index;
   const mw = mesh.matrixWorld;
@@ -13092,9 +13095,19 @@ function buildBevelTool(edge, kind, style, size) {
     shape.absarc(size, size, size, -Math.PI / 2, Math.PI, true);
     shape.lineTo(0, 0);
   }
-  // Extrude along edge with a small overhang so the tool punches all the
-  // way through any near-coplanar mesh at each corner.
-  const OVER = Math.max(0.1, len * 0.02);
+  // Overhang policy by edge kind:
+  //   * Convex (subtract): keep a small overhang so the cut punches cleanly
+  //     through any near-coplanar tessellation noise at the corners. The
+  //     overhang lives in empty space outside the body, so there's nothing
+  //     to over-subtract — safe.
+  //   * Concave (union): NO overhang. The bevel tool ADDS material here,
+  //     and any extension past the edge endpoints adds material into open
+  //     space — that's the small triangular protrusions the user reported
+  //     sticking off the ends of each step's fillet on the stepped pyramid.
+  //     Zero overhang means the union ends exactly at p1 and p2; a tiny
+  //     gap from tessellation noise is far less visible than a protruding
+  //     blade of added material.
+  const OVER = (kind === 'concave') ? 0 : Math.max(0.1, len * 0.02);
   const geo = new THREE.ExtrudeGeometry(shape, {
     depth: len + 2 * OVER,
     bevelEnabled: false,
