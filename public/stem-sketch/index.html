@@ -5332,6 +5332,18 @@ class Viewer3D {
         const body = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
         if (!body) return;
         const allEdges = _buildBevelEdgeIndex(body.mesh);
+        // Double-click → select every edge around the face the user clicked
+        // on. Detected by timing — two clicks on the same body within 380 ms
+        // count as a face-loop request, no extra UI surface needed.
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const isDouble = (this._lastBevelClickBody === body.id) &&
+                         (now - (this._lastBevelClickTime || 0) < 380);
+        this._lastBevelClickTime = now;
+        this._lastBevelClickBody = body.id;
+        if (isDouble) {
+          _selectFaceLoopFromHit(body, hit, allEdges);
+          return;
+        }
         const seed = _pickClosestSegment(allEdges, hit.point, body.mesh);
         if (!seed) {
           showHint('No usable edge near that click — try clicking closer to a corner.');
@@ -12947,6 +12959,64 @@ function _clearBevelHighlight() {
 // sign of (n1 × n2)·e is reliable on properly-wound meshes, but CSG
 // output occasionally produces seam triangles with flipped winding —
 // fall back to a raycaster probe along (n1+n2) for that case.
+// Face-loop selection from a double-click. Find every edge whose adjacent
+// faces include the triangle the user clicked on, expand each to its full
+// straight chain, dedupe, and push into doc.bevelSelected. For a flat
+// rectangular face like a cube's top, this gives 4 edges in one click;
+// for an L-shaped face it gives 6, etc. Toggle-deselect on the second
+// click is honoured — a face loop where every edge is already selected
+// gets cleared instead.
+function _selectFaceLoopFromHit(body, hit, allEdges) {
+  if (!hit.face) return;
+  const localNormal = hit.face.normal.clone();
+  const faceNormal = localNormal.transformDirection(hit.object.matrixWorld).normalize();
+  // Same tolerance as the chain walker uses for matching face normals.
+  const FACE_DOT_MIN = 0.90;
+  const boundary = allEdges.filter(ed =>
+    ed.n1.dot(faceNormal) > FACE_DOT_MIN || ed.n2.dot(faceNormal) > FACE_DOT_MIN
+  );
+  if (!boundary.length) {
+    showHint('No edges found around that face. Click an edge directly instead.');
+    return;
+  }
+  // Expand each to its logical edge and dedupe against itself + the
+  // current selection. We use endpoint distance (either order) to match.
+  const POS_TOL = 0.2;
+  const isSameEdge = (a, b) =>
+    (a.p1.distanceTo(b.p1) < POS_TOL && a.p2.distanceTo(b.p2) < POS_TOL) ||
+    (a.p1.distanceTo(b.p2) < POS_TOL && a.p2.distanceTo(b.p1) < POS_TOL);
+  const expanded = [];
+  for (const seg of boundary) {
+    const full = expandToFullStraightEdge(seg, allEdges);
+    if (!expanded.some(e => isSameEdge(e, full))) expanded.push(full);
+  }
+  if (!expanded.length) return;
+  // If every edge in the loop is ALREADY in the selection, treat the
+  // double-click as deselect-the-whole-loop. Otherwise add the missing
+  // ones (so partial-loop states converge to fully-selected on click).
+  const allAlreadySelected = expanded.every(full =>
+    doc.bevelSelected.some(s => s.bodyId === body.id && isSameEdge(s.edge, full))
+  );
+  if (allAlreadySelected) {
+    doc.bevelSelected = doc.bevelSelected.filter(s =>
+      !(s.bodyId === body.id && expanded.some(full => isSameEdge(s.edge, full)))
+    );
+    _renderBevelHighlight();
+    setStatus(`Fillet — face loop deselected (${doc.bevelSelected.length} edge${doc.bevelSelected.length === 1 ? '' : 's'} remaining).`);
+    return;
+  }
+  let added = 0;
+  for (const full of expanded) {
+    const alreadyIn = doc.bevelSelected.some(s => s.bodyId === body.id && isSameEdge(s.edge, full));
+    if (alreadyIn) continue;
+    const kind = classifyBevelEdge(full, body);
+    doc.bevelSelected.push({ bodyId: body.id, edge: full, kind });
+    added++;
+  }
+  _renderBevelHighlight();
+  setStatus(`Fillet — added ${added} edge${added === 1 ? '' : 's'} from the face loop (${doc.bevelSelected.length} total selected). Click empty space / press Enter to apply.`);
+}
+
 function classifyBevelEdge(edge, body) {
   const e = new THREE.Vector3().subVectors(edge.p2, edge.p1).normalize();
   const cross = new THREE.Vector3().crossVectors(edge.n1, edge.n2);
