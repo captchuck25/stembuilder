@@ -1165,7 +1165,11 @@
         <button class="tool" data-action="mirror-3d" title="Mirror body across XY/YZ/XZ plane"><svg class="ico"><use href="#i-mirror-3d"/></svg><span class="tool-label">Mirror</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
-        <button class="tool" data-action="fillet-3d" title="Fillet — round all 12 edges of a selected cube with a typed radius"><svg class="ico"><use href="#i-fillet-3d"/></svg><span class="tool-label">Fillet</span></button>
+        <!-- 3D Fillet temporarily hidden — the CSG-prism approach (enterBevelPickMode /
+             _bevelOnce / applyBevelsBatch) is preserved in the JS but pulled from the
+             toolbar pending a composite-tool rewrite. STEM workflow: round corners in
+             2D BEFORE Extrude / Revolve. See action 'fillet-3d' (still wired) if you
+             want to reach it from the console. -->
         <button class="tool" data-action="revolve" title="Revolve / Lathe — spin a polyline profile around the sketch's Y axis"><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
       </div>
     </div>
