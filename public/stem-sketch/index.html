@@ -1313,6 +1313,8 @@ const doc = {
   curvedPickBody: null, // body id when 6-face bbox picker is active for a curved body
   bevelPickMode: false, // when true, 3D clicks accumulate edges for the Fillet tool
   bevelSelected: [],    // [{ bodyId, edge:{p1,p2,n1,n2}, kind:'convex'|'concave' }]
+  filletPickMode: false,      // when true, 2D clicks pick polyline / rect corners to fillet
+  filletSelectedCorners: [],  // [{ entityId, vertexIdx, x, y }] world-space x/y for highlight render
   orbitMode: false, // toggle: when true, plain left-drag in 3D orbits instead of selecting
   panMode: false,   // toggle: when true, plain left-drag in 3D pans the view
   spaceHeld: false, // tracked from key events — temporary orbit modifier
@@ -1890,6 +1892,38 @@ class SketchEngine {
     // Clicking the canvas should release focus from any overlay input
     const li = $('length-input');
     if (li && document.activeElement === li) li.blur();
+
+    // Fillet corner-pick mode runs BEFORE every other interaction so a
+    // pick click can't get hijacked by drag-handle / dim-pill / draw-tool
+    // handlers. Each click either snaps to a corner (toggle) or, on empty
+    // space, opens the dialog if anything is picked.
+    if (doc.filletPickMode && e.button === 0) {
+      e.preventDefault(); e.stopPropagation();
+      const [wx, wy] = this.pointerWorld(e);
+      const corner = _pickNearestCorner(wx, wy);
+      if (corner) {
+        const exists = _isCornerSelected(corner);
+        if (exists) {
+          doc.filletSelectedCorners = doc.filletSelectedCorners.filter(c =>
+            !(c.entityId === corner.entityId && c.vertexIdx === corner.vertexIdx));
+        } else {
+          doc.filletSelectedCorners.push(corner);
+        }
+        const n = doc.filletSelectedCorners.length;
+        setStatus(n
+          ? `Fillet — ${n} corner${n === 1 ? '' : 's'} selected. Click more, click a selected corner again to remove, or click empty space / press Enter to apply.`
+          : `Fillet — selection cleared. Click a corner to start, Esc to cancel.`);
+        this.render();
+        return;
+      }
+      // Empty-space click: open dialog if anything's picked, else cancel.
+      if (doc.filletSelectedCorners.length) {
+        openFilletDialog();
+      } else {
+        _exitFilletPickMode('Fillet cancelled');
+      }
+      return;
+    }
 
     // Active sketch lock — block any editing interactions (dim-pill, bbox
     // handle, draw tool, eraser, trim, node-edit, move drag) but still allow
@@ -3144,6 +3178,24 @@ class SketchEngine {
         if (inPlane) cls.push('in-plane');
         if (seg._cut) cls.push('cut'); // dashed — shows interior holes/cuts
         svg += `<line class="${cls.join(' ')}" x1="${sx1}" y1="${sy1}" x2="${sx2}" y2="${sy2}"/>`;
+      }
+    }
+
+    // Fillet pick mode — draw a ring around every selectable corner so the
+    // student can SEE where they can pick, plus a filled dot at each one
+    // they've already picked. Done in screen space so the ring stays the
+    // same size at any zoom.
+    if (doc.filletPickMode) {
+      const corners = _enumerateFilletableCorners();
+      for (const c of corners) {
+        const [sx, sy] = this.worldToScreen(c.x, c.y);
+        const picked = doc.filletSelectedCorners.some(p =>
+          p.entityId === c.entityId && p.vertexIdx === c.vertexIdx);
+        // Outer ring shows the pickable target; inner dot only when picked.
+        svg += `<circle cx="${sx}" cy="${sy}" r="6" fill="none" stroke="${picked ? '#ff9000' : 'rgba(80,120,200,0.55)'}" stroke-width="1.5"/>`;
+        if (picked) {
+          svg += `<circle cx="${sx}" cy="${sy}" r="3.5" fill="#ff9000"/>`;
+        }
       }
     }
 
@@ -12613,35 +12665,100 @@ function filletPolylineCorner(poly, idx, r) {
   return true;
 }
 
-function openFilletDialog() {
-  const sel = doc.selection;
-  if (!sel || sel.kind !== 'sketch') { showHint('Select a polyline first.'); return; }
-  let ent = doc.sketch.entities.find(e => e.id === sel.id);
-  if (!ent) return;
-  // Convert rect to polyline so it can be filleted
-  if (ent.type === 'rect') {
-    const r2p = {
-      id: ent.id, type: 'polyline', closed: true, construction: ent.construction,
-      points: [
-        { x: ent.x, y: ent.y },
-        { x: ent.x + ent.w, y: ent.y },
-        { x: ent.x + ent.w, y: ent.y + ent.h },
-        { x: ent.x, y: ent.y + ent.h },
-      ],
-    };
-    const i = doc.sketch.entities.findIndex(e => e.id === ent.id);
-    doc.sketch.entities[i] = r2p;
-    ent = r2p;
+// ──────────────────────────────────────────────────────────────────────────
+// Per-corner Fillet picking — student clicks each corner they want softened
+// (a rect corner, a polyline vertex), then opens the dialog to pick style +
+// size. The bulk-fillet-all-corners path is gone: openFilletDialog is now
+// only reached after corners are selected.
+
+function enterFilletPickMode() {
+  if (doc.mode !== '2d') {
+    showHint('Switch to a 2D sketch first, then click Fillet.');
+    return;
   }
-  if (ent.type !== 'polyline') {
-    showHint('Fillet works on polylines and rectangles. (Circles already have round edges.)');
+  const ents = (doc.sketch?.entities || []).filter(e =>
+    !e.construction && (e.type === 'polyline' || e.type === 'rect'));
+  if (!ents.length) {
+    showHint('Draw a rectangle or polyline first — Fillet rounds / chamfers its corners.');
+    return;
+  }
+  doc.filletPickMode = true;
+  doc.filletSelectedCorners = [];
+  if (sketchEng) {
+    sketchEng.svg.style.cursor = 'crosshair';
+    sketchEng.render();
+  }
+  setStatus('Fillet — click each corner to soften. Click empty space (or press Enter) when done. Esc cancels. Click a selected corner again to remove it.');
+}
+
+// Return every reachable corner (vertex) from rect / polyline entities in the
+// active sketch as { entityId, vertexIdx, x, y }. Closed polylines expose
+// every vertex; open polylines skip endpoints (they only have one adjacent
+// edge so there's nothing to fillet). Rects expose all 4 corners.
+function _enumerateFilletableCorners() {
+  const out = [];
+  const ents = (doc.sketch?.entities || []);
+  for (const e of ents) {
+    if (e.construction) continue;
+    if (e.type === 'rect') {
+      out.push({ entityId: e.id, vertexIdx: 0, x: e.x,         y: e.y });
+      out.push({ entityId: e.id, vertexIdx: 1, x: e.x + e.w,   y: e.y });
+      out.push({ entityId: e.id, vertexIdx: 2, x: e.x + e.w,   y: e.y + e.h });
+      out.push({ entityId: e.id, vertexIdx: 3, x: e.x,         y: e.y + e.h });
+    } else if (e.type === 'polyline' && Array.isArray(e.points)) {
+      const n = e.points.length;
+      if (n < 3) continue;
+      for (let i = 0; i < n; i++) {
+        // Open polyline endpoints have only one adjacent edge → not a corner.
+        if (!e.closed && (i === 0 || i === n - 1)) continue;
+        out.push({ entityId: e.id, vertexIdx: i, x: e.points[i].x, y: e.points[i].y });
+      }
+    }
+  }
+  return out;
+}
+
+// Find the nearest filletable corner to (wx, wy) within snap distance.
+// snapPxRadius is in screen pixels so the snap feels right at any zoom.
+function _pickNearestCorner(wx, wy, snapPxRadius = 14) {
+  if (!sketchEng) return null;
+  const ppm = sketchEng.view.pxPerMm || 1;
+  const snapMm = snapPxRadius / ppm;
+  let best = null, bestD = Infinity;
+  for (const c of _enumerateFilletableCorners()) {
+    const d = Math.hypot(c.x - wx, c.y - wy);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  if (!best || bestD > snapMm) return null;
+  return best;
+}
+
+function _isCornerSelected(corner) {
+  return doc.filletSelectedCorners.some(c =>
+    c.entityId === corner.entityId && c.vertexIdx === corner.vertexIdx);
+}
+
+function _exitFilletPickMode(reason) {
+  doc.filletPickMode = false;
+  doc.filletSelectedCorners = [];
+  if (sketchEng) {
+    sketchEng.svg.style.cursor = '';
+    sketchEng.render();
+  }
+  if (reason) setStatus(reason);
+}
+
+function openFilletDialog() {
+  const corners = doc.filletSelectedCorners.slice();
+  if (!corners.length) {
+    showHint('Click at least one corner first.');
     return;
   }
   const u = unitLabel();
   const defaultSize = doc.units === 'in' ? 0.1 : 2;
   openModal({
-    title: 'Soften corners',
-    body: `<p>Replace every corner of this polyline with either a round arc (fillet) or a straight cut (chamfer). Works on any angle between two lines, not just 90°.</p>
+    title: `Soften ${corners.length} corner${corners.length === 1 ? '' : 's'}`,
+    body: `<p>Replace each picked corner with either a round arc (fillet) or a straight cut (chamfer). Works on any angle between two lines, not just 90°.</p>
            <div class="field" style="margin-top:8px">
              <label>Style</label>
              <select id="fil-style">
@@ -12656,25 +12773,58 @@ function openFilletDialog() {
            <p style="color:var(--ink-soft);font-size:12px;margin:4px 0 0">
              <b>Round:</b> arc radius. <b>Chamfer:</b> leg length along each adjacent edge — the cut sits symmetrically across the corner so it's at 45° on a 90° corner, otherwise it bisects the angle.
            </p>`,
+    confirmText: `Apply to ${corners.length}`,
     onConfirm: () => {
       const v = parseFloat($('fil-r').value);
       if (!(v > 0)) return;
       const style = $('fil-style').value === 'chamfer' ? 'chamfer' : 'round';
       pushUndo();
       const r = fromUnit(v);
-      const start = ent.closed ? ent.points.length - 1 : ent.points.length - 2;
-      const end = ent.closed ? 0 : 1;
-      let processed = 0;
-      for (let i = start; i >= end; i--) {
-        const ok = (style === 'chamfer')
-          ? chamferPolylineCorner(ent, i, r)
-          : filletPolylineCorner(ent, i, r);
-        if (ok) processed++;
+      // Group selected corners by entity so we can convert each rect ONCE
+      // and process its corners in DESCENDING vertex order (so the
+      // splice-in-place inside the corner replacers doesn't shift indices
+      // we haven't visited yet).
+      const byEnt = new Map();
+      for (const c of corners) {
+        if (!byEnt.has(c.entityId)) byEnt.set(c.entityId, []);
+        byEnt.get(c.entityId).push(c.vertexIdx);
       }
+      let processed = 0;
+      for (const [entId, indices] of byEnt) {
+        let ent = doc.sketch.entities.find(e => e.id === entId);
+        if (!ent) continue;
+        // Rects get promoted to a 4-vertex closed polyline so the same
+        // corner replacer works on them. The vertex indices we recorded
+        // when picking (0=bl,1=br,2=tr,3=tl) line up with this polyline
+        // by construction.
+        if (ent.type === 'rect') {
+          const r2p = {
+            id: ent.id, type: 'polyline', closed: true, construction: ent.construction,
+            points: [
+              { x: ent.x, y: ent.y },
+              { x: ent.x + ent.w, y: ent.y },
+              { x: ent.x + ent.w, y: ent.y + ent.h },
+              { x: ent.x, y: ent.y + ent.h },
+            ],
+          };
+          const i = doc.sketch.entities.findIndex(e => e.id === ent.id);
+          doc.sketch.entities[i] = r2p;
+          ent = r2p;
+        }
+        if (ent.type !== 'polyline') continue;
+        indices.sort((a, b) => b - a); // descending — splices later first
+        for (const i of indices) {
+          const ok = (style === 'chamfer')
+            ? chamferPolylineCorner(ent, i, r)
+            : filletPolylineCorner(ent, i, r);
+          if (ok) processed++;
+        }
+      }
+      _exitFilletPickMode(null);
       sketchEng.render(); renderProps();
       const verb = style === 'chamfer' ? 'Chamfered' : 'Filleted';
-      if (processed > 0) setStatus(`${verb} ${processed} corner${processed > 1 ? 's' : ''}`);
-      else showHint(`No corners ${style === 'chamfer' ? 'chamfered' : 'filleted'} — size too large for the geometry.`);
+      if (processed > 0) setStatus(`${verb} ${processed} corner${processed > 1 ? 's' : ''}.`);
+      else showHint(`No corners ${style === 'chamfer' ? 'chamfered' : 'filleted'} — size too large for the geometry at every pick.`);
     },
   });
 }
@@ -14409,7 +14559,7 @@ function init() {
       case 'add-fastener': openFastenerDialog(); break;
       case 'threaded-holes': openThreadedHolesDialog(); break;
       case 'new-sketch': openNewSketchDialog(); break;
-      case 'fillet-2d': openFilletDialog(); break;
+      case 'fillet-2d': enterFilletPickMode(); break;
       case 'fillet-3d': enterBevelPickMode(); break;
       case 'revolve': revolveCurrentSketch(); break;
       case 'array-2d': openArrayDialog(); break;
@@ -14658,21 +14808,31 @@ function init() {
       openBevelDialog(sels);
       return;
     }
-    if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode)) {
+    // Enter while in 2D fillet pick mode opens the dialog (only if anything
+    // is picked — Enter on an empty selection is a no-op, not a cancel).
+    if (e.key === 'Enter' && doc.filletPickMode && doc.filletSelectedCorners.length) {
+      e.preventDefault();
+      openFilletDialog();
+      return;
+    }
+    if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode || doc.filletPickMode)) {
       const wasFastener = !!doc.fastenerPlaceTarget;
       const wasBevel = !!doc.bevelPickMode;
+      const wasFillet = !!doc.filletPickMode;
       doc.faceMode = false;
       doc.curvedPickBody = null;
       doc.fastenerPlaceTarget = null;
       doc.bevelPickMode = false;
       doc.bevelSelected = [];
       _clearBevelHighlight();
+      if (wasFillet) _exitFilletPickMode(null);
       if (viewer) {
         viewer.canvas.style.cursor = '';
         viewer.clearBboxFacePicker && viewer.clearBboxFacePicker();
       }
       setStatus(wasFastener ? 'Fastener placement cancelled'
               : wasBevel    ? 'Fillet cancelled'
+              : wasFillet   ? 'Fillet cancelled'
               : 'Sketch on Face cancelled');
     }
     // Cancel align mode
