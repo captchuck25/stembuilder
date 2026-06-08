@@ -12960,17 +12960,18 @@ function _clearBevelHighlight() {
 // output occasionally produces seam triangles with flipped winding —
 // fall back to a raycaster probe along (n1+n2) for that case.
 // Face-loop selection from a double-click. Find every edge whose adjacent
-// faces include the triangle the user clicked on, expand each to its full
-// straight chain, dedupe, and push into doc.bevelSelected. For a flat
-// rectangular face like a cube's top, this gives 4 edges in one click;
-// for an L-shaped face it gives 6, etc. Toggle-deselect on the second
-// click is honoured — a face loop where every edge is already selected
-// gets cleared instead.
+// faces include the triangle the user clicked on, CLUSTER segments that
+// lie on the same 3D line (which is what makes the chain walker's
+// fragmentation invisible to the user), filter out tessellation-noise
+// stubs, and push the clean logical edges into doc.bevelSelected. For
+// a flat rectangular face like a cube's top, this gives 4 edges in one
+// click; for an L-shaped face it gives 6, etc. Toggle-deselect on the
+// second click is honoured — a face loop where every edge is already
+// selected gets cleared instead.
 function _selectFaceLoopFromHit(body, hit, allEdges) {
   if (!hit.face) return;
   const localNormal = hit.face.normal.clone();
   const faceNormal = localNormal.transformDirection(hit.object.matrixWorld).normalize();
-  // Same tolerance as the chain walker uses for matching face normals.
   const FACE_DOT_MIN = 0.90;
   const boundary = allEdges.filter(ed =>
     ed.n1.dot(faceNormal) > FACE_DOT_MIN || ed.n2.dot(faceNormal) > FACE_DOT_MIN
@@ -12979,18 +12980,65 @@ function _selectFaceLoopFromHit(body, hit, allEdges) {
     showHint('No edges found around that face. Click an edge directly instead.');
     return;
   }
-  // Expand each to its logical edge and dedupe against itself + the
-  // current selection. We use endpoint distance (either order) to match.
+  // Cluster all boundary segments by 3D line — two segments belong to the
+  // same logical edge if their direction is parallel (within 14°) AND
+  // their lines are within 0.3 mm of each other in the perpendicular
+  // direction. This catches the CSG-retessellation fragmentation that
+  // the chain walker can't always bridge: every fragment of the same
+  // physical edge clusters together regardless of whether its endpoints
+  // happen to share an exact vertex index with its neighbours.
+  const DIR_PARALLEL = 0.97;   // ~14°
+  const LINE_PERP_TOL = 0.3;   // mm — perpendicular distance for "same line"
+  const clusters = []; // { dir, refPoint, segments[], faceMatch }
+  for (const ed of boundary) {
+    const v = new THREE.Vector3().subVectors(ed.p2, ed.p1);
+    if (v.lengthSq() < 1e-9) continue;
+    const dir = v.normalize();
+    let target = null;
+    for (const c of clusters) {
+      if (Math.abs(c.dir.dot(dir)) < DIR_PARALLEL) continue;
+      // Perpendicular distance from this edge's p1 to the cluster's line.
+      const off = new THREE.Vector3().subVectors(ed.p1, c.refPoint);
+      const along = off.dot(c.dir);
+      const perp = off.sub(c.dir.clone().multiplyScalar(along));
+      if (perp.length() < LINE_PERP_TOL) { target = c; break; }
+    }
+    if (target) target.segments.push(ed);
+    else clusters.push({ dir: dir.clone(), refPoint: ed.p1.clone(), segments: [ed] });
+  }
+  // Drop clusters that are too short to be a real edge (CSG tessellation
+  // stubs at corners). Threshold scales with the body so tiny detail
+  // edges on big brackets aren't accidentally filtered.
+  const bbox = new THREE.Box3().setFromObject(body.mesh);
+  const scale = bbox.getSize(new THREE.Vector3()).length();
+  const MIN_LEN = Math.max(0.5, scale * 0.005);
+  const expanded = [];
+  for (const c of clusters) {
+    // Extract the cluster's logical edge — extreme endpoints along dir.
+    let minProj = Infinity, maxProj = -Infinity;
+    let minPt = null, maxPt = null;
+    for (const seg of c.segments) {
+      for (const p of [seg.p1, seg.p2]) {
+        const proj = p.dot(c.dir);
+        if (proj < minProj) { minProj = proj; minPt = p; }
+        if (proj > maxProj) { maxProj = proj; maxPt = p; }
+      }
+    }
+    if (!minPt || !maxPt) continue;
+    if (maxProj - minProj < MIN_LEN) continue; // noise stub
+    expanded.push({
+      p1: minPt.clone(), p2: maxPt.clone(),
+      n1: c.segments[0].n1, n2: c.segments[0].n2,
+    });
+  }
+  if (!expanded.length) {
+    showHint('No clean edges around that face — try clicking each edge individually.');
+    return;
+  }
   const POS_TOL = 0.2;
   const isSameEdge = (a, b) =>
     (a.p1.distanceTo(b.p1) < POS_TOL && a.p2.distanceTo(b.p2) < POS_TOL) ||
     (a.p1.distanceTo(b.p2) < POS_TOL && a.p2.distanceTo(b.p1) < POS_TOL);
-  const expanded = [];
-  for (const seg of boundary) {
-    const full = expandToFullStraightEdge(seg, allEdges);
-    if (!expanded.some(e => isSameEdge(e, full))) expanded.push(full);
-  }
-  if (!expanded.length) return;
   // If every edge in the loop is ALREADY in the selection, treat the
   // double-click as deselect-the-whole-loop. Otherwise add the missing
   // ones (so partial-loop states converge to fully-selected on click).
