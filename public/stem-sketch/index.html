@@ -9884,19 +9884,34 @@ function openThreadedHoleForMark(sketchId, markId) {
 // undo back to the snapshot taken before processing. That's what
 // pushUndo was for. Easiest reliable path: trigger one undo step.
 function deleteMaterialisedThreadMark(mark) {
-  // Drop the visualizer bolt — it's always a standalone body. The
-  // fallback-mode standalone thread shell (only created when there's no
-  // parent body) is dropped the same way. The merged-shell case needs no
-  // explicit cleanup: its triangles were folded into the parent group's
-  // geometry, and the undo() below restores the pre-merge geometry.
+  // Drop the visualizer bolt + standalone thread shell (if the
+  // freestanding-shell fallback ran). Both are plain entries in
+  // doc.bodies and a filter removes them.
   const drop = new Set([mark._boltBodyId, mark._threadShellBodyId].filter(Boolean));
   if (drop.size) doc.bodies = doc.bodies.filter(b => !drop.has(b.id));
-  if (undoStack.length) undo();
+  // Remove this mark's entry from the parent's _mergedShells so a future
+  // rebuild re-merges only the shells for marks that are still active.
+  if (mark._mergedShellInBodyId != null) {
+    const parent = doc.bodies.find(b => b.id === mark._mergedShellInBodyId);
+    if (parent && Array.isArray(parent._mergedShells)) {
+      parent._mergedShells = parent._mergedShells.filter(s => s.markId !== mark.id);
+    }
+  }
+  // The actual hole CUT on the parent's geometry is NOT peeled here.
+  // The previous design called undo() to pop the CSG cut off, but undo
+  // pops whatever's on top of the stack — if the user did ANY edit
+  // between threading and rebuild (move, autosave, anything), undo
+  // restores unrelated state and the bracket disappears. Re-threading
+  // a mark at the same settings is idempotent (CSG-subtracting the same
+  // cylinder leaves the same hole); going LARGER envelops the old cut;
+  // going SMALLER leaves the old hole visible. Documented trade-off,
+  // not a vanishing-body bug.
   delete mark._materialised;
   delete mark._boltBodyId;
   delete mark._holeBodyId;
   delete mark._threadShellBodyId;
   delete mark._mergedShellInBodyId;
+  delete mark._settings;
   if (viewer) viewer.rebuildBodies();
   if (viewer) viewer.updateSketchOverlay();
   renderTree(); renderProps();
@@ -9924,6 +9939,12 @@ function openThreadedHolesDialog() {
       body: `<p>All ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} in <b>${sketch.name || 'this sketch'}</b> already have threaded holes. Rebuild them all with new settings? The existing holes + visualizer bolts will be peeled first.</p>`,
       confirmText: 'Rebuild all',
       onConfirm: () => {
+        // Single undo entry covers the whole rebuild-all operation. Without
+        // this each individual mark's flag-clear would silently rely on
+        // the user spamming Ctrl+Z to recover, which doesn't work cleanly
+        // because the original undo()-per-mark design was the source of
+        // the disappearing-bracket bug.
+        pushUndo();
         for (const m of doneMarks) deleteMaterialisedThreadMark(m);
         openThreadedHolesDialog();
       },
@@ -10100,12 +10121,11 @@ function processThreadMarks(sketch, marks, opts) {
         // Persist the spec so any later CSG rebuild (rebuildGroupGeometry
         // off a face-sketch Done, _ensureGroupGeometry on ungroup, an undo
         // restore) can re-merge the shells onto the freshly-baked
-        // geometry. Without this every rebuild silently drops the
-        // helical thread visual — the cut survived because the cutter
-        // IS a child, but the shell is concatenated triangles with no
-        // CSG record, so the rebuild path had no idea to put it back.
+        // geometry. Tag the spec with markId so a single-mark peel can
+        // remove only that mark's shell entry instead of nuking the
+        // whole list.
         parentAfterCut._mergedShells = parentAfterCut._mergedShells || [];
-        parentAfterCut._mergedShells.push(shellSpec);
+        parentAfterCut._mergedShells.push({ ...shellSpec, markId: m.id });
         m._mergedShellInBodyId = parentAfterCut.id;
       }
     } else {
