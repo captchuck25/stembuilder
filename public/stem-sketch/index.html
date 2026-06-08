@@ -9883,6 +9883,40 @@ function openThreadedHoleForMark(sketchId, markId) {
 // (consumed by CSG) so we can't surgically remove just the hole — we
 // undo back to the snapshot taken before processing. That's what
 // pushUndo was for. Easiest reliable path: trigger one undo step.
+// Walk every top-level group's children tree, find the cloned hole that
+// matches mark._holeBodyId, and splice it out. Also null the geometry of
+// EVERY group on the path from the top-level body down to (and including)
+// the group that held the hole — so the next _ensureGroupGeometry pass
+// regenerates the chain via CSG without the cut. Returns the top-level
+// body whose tree was modified, or null if no match.
+//
+// NOTE: bevel ops on this body that happened AFTER the thread cut don't
+// have children-tracked parameters; rebuilding the chain via CSG will
+// silently lose them. Documented at the dialog level.
+function _stripMarkHoleFromTree(mark) {
+  if (mark._holeBodyId == null) return null;
+  const visit = (group) => {
+    if (!Array.isArray(group.children)) return false;
+    for (let i = 0; i < group.children.length; i++) {
+      const c = group.children[i];
+      if (c.id === mark._holeBodyId) {
+        group.children.splice(i, 1);
+        group.geometry = null;
+        return true;
+      }
+      if ((c.type === 'group' || c.type === 'combined') && visit(c)) {
+        group.geometry = null;
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const b of doc.bodies) {
+    if ((b.type === 'group' || b.type === 'combined') && visit(b)) return b;
+  }
+  return null;
+}
+
 function deleteMaterialisedThreadMark(mark) {
   // Drop the visualizer bolt + standalone thread shell (if the
   // freestanding-shell fallback ran). Both are plain entries in
@@ -9932,21 +9966,44 @@ function openThreadedHolesDialog() {
   const freshMarks = allMarks.filter(m => !m._materialised);
   const doneMarks  = allMarks.filter(m =>  m._materialised);
   if (!freshMarks.length && doneMarks.length) {
-    // All marks are already done. Offer to rebuild them with new settings —
-    // single call so the user doesn't have to click each mark individually.
+    // All marks done — let the user choose what to do.
     openModal({
       title: 'All marks already threaded',
-      body: `<p>All ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} in <b>${sketch.name || 'this sketch'}</b> already have threaded holes. Rebuild them all with new settings? The existing holes + visualizer bolts will be peeled first.</p>`,
-      confirmText: 'Rebuild all',
+      body: `<p>All ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} in <b>${sketch.name || 'this sketch'}</b> already have threaded holes.</p>
+             <div class="field" style="margin-top:8px">
+               <label>What do you want to do?</label>
+               <select id="th-bulk-action">
+                 <option value="rebuild" selected>Rebuild with new settings — visualizer bolts + shells refresh; existing CUTS stay on the body and new cuts overlay (idempotent for same size, envelops for larger, leaves old hole for smaller)</option>
+                 <option value="remove">Remove all threads — strips the thread CUTS out of the body too. Resets marks to fresh, ready to re-thread.</option>
+               </select>
+             </div>
+             <p style="color:var(--ink-soft);font-size:12px;margin-top:8px">
+               <b>Remove all threads</b> rebuilds the body via CSG of its remaining children. Any bevels applied to this body AFTER the thread cuts will be lost in the rebuild (the bevel parameters aren't recorded on the children, so the rebuild can't reproduce them). Re-apply bevels after if needed.
+             </p>`,
+      confirmText: 'Apply',
       onConfirm: () => {
-        // Single undo entry covers the whole rebuild-all operation. Without
-        // this each individual mark's flag-clear would silently rely on
-        // the user spamming Ctrl+Z to recover, which doesn't work cleanly
-        // because the original undo()-per-mark design was the source of
-        // the disappearing-bracket bug.
+        const action = $('th-bulk-action').value === 'remove' ? 'remove' : 'rebuild';
         pushUndo();
-        for (const m of doneMarks) deleteMaterialisedThreadMark(m);
-        openThreadedHolesDialog();
+        const touchedRoots = new Set();
+        for (const m of doneMarks) {
+          if (action === 'remove') {
+            const root = _stripMarkHoleFromTree(m);
+            if (root) touchedRoots.add(root);
+          }
+          deleteMaterialisedThreadMark(m);
+        }
+        if (action === 'remove') {
+          // Re-derive geometry for every top-level body whose tree was
+          // modified — _ensureGroupGeometry walks bottom-up and rebuilds
+          // each chain link that we nulled.
+          for (const root of touchedRoots) _ensureGroupGeometry(root);
+          if (viewer) viewer.rebuildBodies();
+          renderTree(); renderProps();
+          flushAutosave();
+          setStatus(`Removed thread cuts from ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} — body rebuilt without the holes.`);
+        } else {
+          openThreadedHolesDialog();
+        }
       },
     });
     return;
