@@ -12543,6 +12543,36 @@ function download(content, filename, mime) {
 }
 
 // ---------- Fillet a polyline corner ----------
+// Symmetric chamfer at a polyline corner — trim back the same distance
+// `d` along each adjacent edge and connect the two trim points with a
+// straight segment. Works at any non-degenerate angle; for a 90° corner
+// the chamfer line is at 45° to both edges, for other angles it's
+// symmetric to the corner's bisector. Returns true if the corner was
+// replaced, false if it was too tight or the edges too short.
+function chamferPolylineCorner(poly, idx, d) {
+  const n = poly.points.length;
+  if (n < 3) return false;
+  const prev = poly.points[(idx - 1 + n) % n];
+  const curr = poly.points[idx];
+  const next = poly.points[(idx + 1) % n];
+  const v1x = prev.x - curr.x, v1y = prev.y - curr.y;
+  const v2x = next.x - curr.x, v2y = next.y - curr.y;
+  const len1 = Math.hypot(v1x, v1y), len2 = Math.hypot(v2x, v2y);
+  if (len1 < 1e-6 || len2 < 1e-6) return false;
+  const u1x = v1x / len1, u1y = v1y / len1;
+  const u2x = v2x / len2, u2y = v2y / len2;
+  const cosA = clamp(u1x * u2x + u1y * u2y, -1, 1);
+  const angle = Math.acos(cosA);
+  if (angle < 0.05 || angle > Math.PI - 0.05) return false;
+  if (d > len1 * 0.95 || d > len2 * 0.95) return false;
+  const t1 = { x: curr.x + u1x * d, y: curr.y + u1y * d };
+  const t2 = { x: curr.x + u2x * d, y: curr.y + u2y * d };
+  // Replace the corner vertex with two trim points; the polyline renders
+  // the straight cut between them automatically.
+  poly.points.splice(idx, 1, t1, t2);
+  return true;
+}
+
 function filletPolylineCorner(poly, idx, r) {
   const n = poly.points.length;
   if (n < 3) return false;
@@ -12608,24 +12638,43 @@ function openFilletDialog() {
     return;
   }
   const u = unitLabel();
+  const defaultSize = doc.units === 'in' ? 0.1 : 2;
   openModal({
-    title: 'Fillet corners',
-    body: `<p>Round all corners of this polyline with the given radius.</p>
-           <div class="field"><label>Radius (${u})</label><input id="fil-r" type="number" value="${doc.units === 'in' ? 0.1 : 2}" min="0.01" step="0.5"/></div>`,
+    title: 'Soften corners',
+    body: `<p>Replace every corner of this polyline with either a round arc (fillet) or a straight cut (chamfer). Works on any angle between two lines, not just 90°.</p>
+           <div class="field" style="margin-top:8px">
+             <label>Style</label>
+             <select id="fil-style">
+               <option value="round" selected>Round — tangent arc (fillet)</option>
+               <option value="chamfer">Chamfer — symmetric straight cut</option>
+             </select>
+           </div>
+           <div class="field">
+             <label>Size (${u})</label>
+             <input id="fil-r" type="number" value="${defaultSize}" min="0.01" step="0.5"/>
+           </div>
+           <p style="color:var(--ink-soft);font-size:12px;margin:4px 0 0">
+             <b>Round:</b> arc radius. <b>Chamfer:</b> leg length along each adjacent edge — the cut sits symmetrically across the corner so it's at 45° on a 90° corner, otherwise it bisects the angle.
+           </p>`,
     onConfirm: () => {
       const v = parseFloat($('fil-r').value);
       if (!(v > 0)) return;
+      const style = $('fil-style').value === 'chamfer' ? 'chamfer' : 'round';
       pushUndo();
       const r = fromUnit(v);
       const start = ent.closed ? ent.points.length - 1 : ent.points.length - 2;
       const end = ent.closed ? 0 : 1;
       let processed = 0;
       for (let i = start; i >= end; i--) {
-        if (filletPolylineCorner(ent, i, r)) processed++;
+        const ok = (style === 'chamfer')
+          ? chamferPolylineCorner(ent, i, r)
+          : filletPolylineCorner(ent, i, r);
+        if (ok) processed++;
       }
       sketchEng.render(); renderProps();
-      if (processed > 0) setStatus(`Filleted ${processed} corner${processed > 1 ? 's' : ''}`);
-      else showHint('No corners filleted — radius too large for the geometry.');
+      const verb = style === 'chamfer' ? 'Chamfered' : 'Filleted';
+      if (processed > 0) setStatus(`${verb} ${processed} corner${processed > 1 ? 's' : ''}`);
+      else showHint(`No corners ${style === 'chamfer' ? 'chamfered' : 'filleted'} — size too large for the geometry.`);
     },
   });
 }
