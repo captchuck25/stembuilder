@@ -8142,6 +8142,48 @@ function _stemRecover() {
   return recovered;
 }
 if (typeof window !== 'undefined') window._stemRecover = _stemRecover;
+
+// Dump the current undo / redo stacks plus a summary of each entry. Lets
+// us tell which snapshot Ctrl+Z would restore to and whether its top-level
+// bodies look healthy. Use sparingly — pretty-prints whole-doc structure.
+function _stemDumpUndo() {
+  const summary = (s, label) => {
+    console.log(`--- ${label} (${s.length} entr${s.length === 1 ? 'y' : 'ies'}) ---`);
+    s.forEach((snap, i) => {
+      const bodies = snap.bodies || [];
+      const lines = bodies.map(b => {
+        let geomInfo = '';
+        if (b.type === 'group' || b.type === 'combined') {
+          const g = b.geometry;
+          if (g?._bin) geomInfo = ` geometry=binary(pos=${g.position ? Math.round(g.position.length * 3 / 4) : 0}b)`;
+          else if (g) geomInfo = ` geometry=present(${typeof g})`;
+          else geomInfo = ` geometry=MISSING`;
+        } else if (b.type === 'extrude') {
+          const ents = b.sketch?.entities?.length ?? 0;
+          geomInfo = ` sketch=${ents}ent`;
+        }
+        return `    id=${b.id} type=${b.type}${geomInfo}${b.hidden ? ' [hidden]' : ''}`;
+      });
+      console.log(`  [${i}] ${bodies.length} body${bodies.length === 1 ? '' : 'ies'}${lines.length ? '\n' + lines.join('\n') : ''}`);
+    });
+  };
+  summary(undoStack, 'undoStack (Ctrl+Z applies the LAST entry)');
+  summary(redoStack, 'redoStack (Ctrl+Y applies the LAST entry)');
+  console.log('--- current doc.bodies ---');
+  doc.bodies.forEach(b => {
+    let info = `  id=${b.id} type=${b.type}`;
+    if (b.geometry instanceof THREE.BufferGeometry) {
+      info += ` geometry=BufferGeometry(${b.geometry.attributes?.position?.count || 0} verts)`;
+    } else if (b.geometry) {
+      info += ` geometry=${typeof b.geometry}`;
+    } else {
+      info += ` geometry=NONE`;
+    }
+    if (b.hidden) info += ' [hidden]';
+    console.log(info);
+  });
+}
+if (typeof window !== 'undefined') window._stemDumpUndo = _stemDumpUndo;
 let _docDirty = false;
 function setDirty(v) {
   // ALWAYS reschedule autosave on every dirty edit — the previous early-return
