@@ -5340,19 +5340,34 @@ class Viewer3D {
         // Expand the picked segment to the full straight edge chain so the
         // bevel covers the whole edge instead of one tessellation sliver.
         const fullEdge = expandToFullStraightEdge(seed, allEdges);
-        // Skip duplicates — if the same edge was already picked, ignore.
-        const isDuplicate = doc.bevelSelected.some(s =>
-          s.bodyId === body.id &&
-          s.edge.p1.distanceTo(fullEdge.p1) < 0.05 &&
-          s.edge.p2.distanceTo(fullEdge.p2) < 0.05);
-        if (isDuplicate) {
-          setStatus(`Already selected (${doc.bevelSelected.length} edge${doc.bevelSelected.length === 1 ? '' : 's'} — click empty space or press Enter to apply).`);
+        // Toggle behaviour — if the picked edge matches one already in the
+        // selection, REMOVE it instead of ignoring the click. Lets the user
+        // recover from a mispick without dropping the rest of the batch.
+        // Match tolerance bumped to 0.2 mm so a re-click that lands on a
+        // slightly different tessellation seam still matches the previous
+        // pick of the same physical edge.
+        const POS_TOL = 0.2;
+        const existingIdx = doc.bevelSelected.findIndex(s => {
+          if (s.bodyId !== body.id) return false;
+          const aMatch = s.edge.p1.distanceTo(fullEdge.p1) < POS_TOL &&
+                         s.edge.p2.distanceTo(fullEdge.p2) < POS_TOL;
+          const bMatch = s.edge.p1.distanceTo(fullEdge.p2) < POS_TOL &&
+                         s.edge.p2.distanceTo(fullEdge.p1) < POS_TOL;
+          return aMatch || bMatch;
+        });
+        if (existingIdx >= 0) {
+          doc.bevelSelected.splice(existingIdx, 1);
+          _renderBevelHighlight();
+          const n = doc.bevelSelected.length;
+          setStatus(n
+            ? `Fillet — removed that edge (${n} still selected). Click more, click empty space / press Enter to apply, Esc to cancel.`
+            : `Fillet — selection cleared. Click an edge to start, Esc to cancel.`);
           return;
         }
         const kind = classifyBevelEdge(fullEdge, body);
         doc.bevelSelected.push({ bodyId: body.id, edge: fullEdge, kind });
         _renderBevelHighlight();
-        setStatus(`Fillet — ${doc.bevelSelected.length} edge${doc.bevelSelected.length === 1 ? '' : 's'} selected. Click more, or click empty space / press Enter to apply.`);
+        setStatus(`Fillet — ${doc.bevelSelected.length} edge${doc.bevelSelected.length === 1 ? '' : 's'} selected. Click more, click an edge again to deselect, or click empty space / press Enter to apply.`);
         return;
       }
       // Face-pick mode (Sketch on Face workflow)
@@ -12821,8 +12836,12 @@ function _bevelPosKey(p) {
 // Then return the chain's extreme endpoints as a single logical edge.
 function expandToFullStraightEdge(seed, allEdges) {
   const seedDir = new THREE.Vector3().subVectors(seed.p2, seed.p1).normalize();
-  const DIR_DOT_MIN    = 0.985;  // ≈ 10°
-  const NORMAL_DOT_MIN = 0.95;   // ≈ 18°
+  // Looser tolerances than v1 — heavier CSG output drifts the seam
+  // normals enough that 18° was clipping real chain extensions on a
+  // bracket that had been through several boolean ops. 14° / 25° still
+  // excludes coplanar / wrong-edge candidates.
+  const DIR_DOT_MIN    = 0.97;   // ≈ 14°
+  const NORMAL_DOT_MIN = 0.90;   // ≈ 26°
   const sameDir = (d) => Math.abs(d.dot(seedDir)) > DIR_DOT_MIN;
   const sameFaces = (a1, a2) =>
     (a1.dot(seed.n1) > NORMAL_DOT_MIN && a2.dot(seed.n2) > NORMAL_DOT_MIN) ||
@@ -13162,6 +13181,20 @@ function _bevelOnce(body, edge, kind, style, size) {
   if (!baked.attributes?.position?.count) {
     console.warn(`_bevelOnce: CSG returned a zero-position result for body id=${body.id}; keeping the source body unchanged. ` +
       `Try a smaller bevel size, or a different edge.`);
+    return null;
+  }
+  // Sanity-check the result vs the source. CSG's BSP tree occasionally
+  // misclassifies the inside / outside of a complex body and returns the
+  // CUTTING TOOL instead of the difference — visible as 'my pyramid got
+  // replaced by a 0.25 in × 0.02 in × 0.02 in stick.' If the baked result
+  // is dramatically smaller than the source mesh, something went wrong;
+  // refuse to commit and surface the failure so the source body stays
+  // visible.
+  const srcVerts = targetMesh.geometry?.attributes?.position?.count || 0;
+  const bakedVerts = baked.attributes.position.count;
+  if (srcVerts > 100 && bakedVerts < srcVerts * 0.2) {
+    console.warn(`_bevelOnce: CSG result is suspiciously small (${bakedVerts} verts vs ${srcVerts} in source) on body id=${body.id}. ` +
+      `Likely BSP classification flipped; refusing to commit. Try a different edge or a larger bevel size — tiny bevels on complex bodies stress CSG precision.`);
     return null;
   }
   // Wrap the result as a single-child group so Ungroup recovers the
