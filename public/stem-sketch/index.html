@@ -1668,9 +1668,20 @@ class SketchEngine {
   }
 
   computeSnap(wx, wy, ignoreId = null) {
+    // When grid snap is ON it means GRID ONLY. Hovering over an existing
+    // line's endpoint, midpoint, intersection, face boundary, etc. used to
+    // PULL the cursor off the grid (those candidates have strength 1.3+,
+    // dominating the grid candidate at 0.05). The user's expectation is
+    // 'snap on = lock to the grid spacing no matter what' — so we
+    // short-circuit before building any other candidate.
+    if (doc.grid.snap) {
+      const step = doc.grid.spacing;
+      const gx = Math.round(wx / step) * step;
+      const gy = Math.round(wy / step) * step;
+      return { x: gx, y: gy, kind: 'grid', strength: 0.05 };
+    }
     // Pixel-level snap threshold for ENDPOINTS — slightly larger than the
-    // generic tolerance so it's easy to lock onto an existing line's end
-    // even when grid snap is also active.
+    // generic tolerance so it's easy to lock onto an existing line's end.
     const tolMm = 8 / this.view.pxPerMm;
     const endpointTolMm = 12 / this.view.pxPerMm;
     const candidates = [];
@@ -1758,16 +1769,10 @@ class SketchEngine {
       }
     }
 
-    // Snap to grid (spacing controlled by user). When the snap toggle is on,
-    // the cursor snaps to the nearest grid intersection AS A FALLBACK — any
-    // higher-priority snap (endpoint, edge, face corner, origin) wins because
-    // they have larger strength values.
-    if (doc.grid.snap) {
-      const step = doc.grid.spacing;
-      const gx = Math.round(wx / step) * step;
-      const gy = Math.round(wy / step) * step;
-      candidates.push({ x: gx, y: gy, kind: 'grid', strength: 0.05 });
-    }
+    // Grid snap is handled at the top of this function as an exclusive
+    // 'grid only' mode — when it's on the function returned early. Reaching
+    // here means doc.grid.snap is FALSE: entity / boundary / origin snaps
+    // are the only ones in play, with no grid candidate added.
 
     // Snap to the face boundary (only present when sketching on a body face).
     // Corners get highest priority, then mid-edge points, then anywhere along
