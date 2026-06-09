@@ -8144,13 +8144,45 @@ function applySnapshot(s) {
   const restore = (b) => {
     const c = JSON.parse(JSON.stringify(b));
     if (c.geometry && !(c.geometry instanceof THREE.BufferGeometry)) {
-      c.geometry = _deserializeGeometry(c.geometry);
+      try {
+        c.geometry = _deserializeGeometry(c.geometry);
+      } catch (err) {
+        console.warn(`applySnapshot: _deserializeGeometry threw for body id=${c.id}, type=${c.type}:`, err);
+        c.geometry = null;
+      }
     }
     if (Array.isArray(c.children)) c.children = c.children.map(restore);
     return c;
   };
   doc.sketches = JSON.parse(JSON.stringify(s.sketches));
   doc.bodies = s.bodies.map(restore);
+  // Post-load recovery: if any top-level group came back with no
+  // BufferGeometry but does have children, try to re-derive its
+  // geometry from those children via CSG. This catches the case where
+  // a save serialised a body during a transient null-geometry window
+  // (e.g. mid-batch op crash, deserialization corruption). Runs ONCE
+  // per applySnapshot — not per render — so the freeze it costs is
+  // bounded to the load. Without it the user sees a tree row with no
+  // body and the only recourse was the _stemRecover() console command.
+  if (typeof _ensureGroupGeometry === 'function') {
+    let recovered = 0;
+    for (const b of doc.bodies) {
+      if (b.type !== 'group' && b.type !== 'combined') continue;
+      if (b.geometry instanceof THREE.BufferGeometry) continue;
+      if (!Array.isArray(b.children) || !b.children.length) continue;
+      try {
+        if (_ensureGroupGeometry(b)) {
+          recovered++;
+          console.log(`applySnapshot: recovered geometry for top-level body id=${b.id} via CSG of children.`);
+        }
+      } catch (err) {
+        console.warn(`applySnapshot: recovery for body id=${b.id} threw:`, err);
+      }
+    }
+    if (recovered > 0) {
+      setStatus(`Restored ${recovered} body${recovered === 1 ? '' : 'ies'} whose saved geometry was missing — rebuilt from children.`);
+    }
+  }
   doc.activeSketchId = s.activeSketchId;
   doc.nextSketchId = s.nextSketchId;
   doc.nextBodyId = s.nextBodyId;
