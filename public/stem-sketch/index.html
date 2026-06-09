@@ -10118,14 +10118,43 @@ function openThreadedHolesDialog() {
           _clearAllMergedShellsRecursive(b);
         }
         // Belt-and-braces bolt sweep: catch any leftover thread-mark
-        // visualizers that the per-mark bookkeeping missed (older
-        // brackets where mark._boltBodyId wasn't recorded).
+        // visualizer. Three layers of matching so an older bracket
+        // whose bookkeeping is partial still gets fully cleaned:
+        //   (1) per-mark _boltBodyId (cleared in deleteMaterialisedThreadMark)
+        //   (2) _threadMarkRef tag pointing at any mark in this sketch
+        //   (3) POSITION match — any fastener / threadShell within ~30 mm
+        //       of a mark's expected shaft position. Catches the visualizer
+        //       bolts on brackets created before _threadMarkRef tagging.
         const sketchMarkIds = new Set((sketch.entities || [])
           .filter(e => e.type === 'threadMark')
           .map(e => e.id));
+        // Compute expected world positions for every mark in this sketch
+        // (the markWorld point itself — fasteners typically sit within
+        // depth of this; 30 mm is generous enough to catch them at any
+        // realistic depth without flagging manual fasteners across the
+        // bracket).
+        const POS_MATCH_MM = 30;
+        const markPositions = [];
+        if (sketch.plane && typeof makePlaneMatrix === 'function') {
+          const planeM = makePlaneMatrix(sketch.plane);
+          for (const e of (sketch.entities || [])) {
+            if (e.type !== 'threadMark') continue;
+            markPositions.push(new THREE.Vector3(e.cx, e.cy, 0).applyMatrix4(planeM));
+          }
+        }
+        const nearAnyMark = (b) => {
+          if (typeof b.x !== 'number') return false;
+          const p = new THREE.Vector3(b.x, b.y, b.z);
+          for (const mp of markPositions) {
+            if (p.distanceTo(mp) < POS_MATCH_MM) return true;
+          }
+          return false;
+        };
         doc.bodies = doc.bodies.filter(b => {
-          if (b.type === 'fastener' && b._threadMarkRef && sketchMarkIds.has(b._threadMarkRef.markId)) return false;
-          if (b.type === 'threadShell' && b._threadMarkRef && sketchMarkIds.has(b._threadMarkRef.markId)) return false;
+          const isVisualType = (b.type === 'fastener' || b.type === 'threadShell');
+          if (!isVisualType) return true;
+          if (b._threadMarkRef && sketchMarkIds.has(b._threadMarkRef.markId)) return false;
+          if (nearAnyMark(b)) return false;
           return true;
         });
         // Re-derive geometry for every top-level body whose tree was
