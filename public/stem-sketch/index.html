@@ -7087,6 +7087,14 @@ function buildBodyMesh(body) {
   };
   let geo = null, mesh = null;
   if (body.type === 'combined' || body.type === 'group') {
+    // Guard against a transient null geometry — a batch op that's stripped
+    // a group's geometry before re-deriving it can call rebuildBodies in
+    // the middle, and three.js throws 'cannot read isBufferGeometry of
+    // null' on render. Returning null here makes rebuildBodies skip this
+    // mesh until the next pass (after the geometry is restored / rebuilt).
+    if (!(body.geometry instanceof THREE.BufferGeometry)) {
+      return null;
+    }
     mesh = new THREE.Mesh(body.geometry, matSolid);
     mesh.position.set(body.x || 0, body.y || 0, body.z || 0);
     applyRotation(mesh);
@@ -9956,7 +9964,7 @@ function _stripMarkHoleFromTree(mark) {
   return null;
 }
 
-function deleteMaterialisedThreadMark(mark) {
+function deleteMaterialisedThreadMark(mark, opts = {}) {
   // Drop the visualizer bolt + standalone thread shell. mark._boltBodyId
   // is sometimes stale across sessions (older brackets created before the
   // _threadMarkRef tagging didn't record it). Fall back to a sweep across
@@ -9996,6 +10004,13 @@ function deleteMaterialisedThreadMark(mark) {
   delete mark._threadShellBodyId;
   delete mark._mergedShellInBodyId;
   delete mark._settings;
+  // Caller can opt out of mid-flight rendering during batch operations
+  // (Remove threads runs N of these in a row before the geometries get
+  // re-derived; rendering between iterations tries to draw groups whose
+  // _stripMarkHoleFromTree just nulled the geometry on, and three.js
+  // throws 'cannot read isBufferGeometry of null' before we ever reach
+  // the rebuild step).
+  if (opts.skipRender) return;
   if (viewer) viewer.rebuildBodies();
   if (viewer) viewer.updateSketchOverlay();
   renderTree(); renderProps();
@@ -10049,7 +10064,11 @@ function openThreadedHolesDialog() {
         for (const m of doneMarks) {
           const root = _stripMarkHoleFromTree(m);
           if (root) { touchedRoots.add(root); strippedRootIds.add(root.id); }
-          deleteMaterialisedThreadMark(m);
+          // skipRender — we'll do ONE rebuild at the end. Without this,
+          // every iteration tries to render bodies whose group geometry
+          // is currently null (just stripped, not yet re-derived) and
+          // three.js throws on isBufferGeometry of null.
+          deleteMaterialisedThreadMark(m, { skipRender: true });
         }
         // Belt-and-braces bolt sweep: catch any leftover thread-mark
         // visualizers that the per-mark bookkeeping missed (older
