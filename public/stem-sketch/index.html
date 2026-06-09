@@ -9971,44 +9971,64 @@ function openThreadedHolesDialog() {
   const freshMarks = allMarks.filter(m => !m._materialised);
   const doneMarks  = allMarks.filter(m =>  m._materialised);
   if (!freshMarks.length && doneMarks.length) {
-    // All marks done — let the user choose what to do.
+    // All marks done — single, clear action: strip the cuts off the body
+    // so the student can adjust mark positions in 2D (or just re-run with
+    // different size/depth) and re-thread fresh. The two-option dialog we
+    // had before was confusing the workflow more than it helped.
     openModal({
-      title: 'All marks already threaded',
+      title: 'Remove existing threads?',
       body: `<p>All ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} in <b>${sketch.name || 'this sketch'}</b> already have threaded holes.</p>
-             <div class="field" style="margin-top:8px">
-               <label>What do you want to do?</label>
-               <select id="th-bulk-action">
-                 <option value="rebuild" selected>Rebuild with new settings — visualizer bolts + shells refresh; existing CUTS stay on the body and new cuts overlay (idempotent for same size, envelops for larger, leaves old hole for smaller)</option>
-                 <option value="remove">Remove all threads — strips the thread CUTS out of the body too. Resets marks to fresh, ready to re-thread.</option>
-               </select>
-             </div>
+             <p>This will strip the thread <b>cuts</b> off the body and reset every mark to "fresh." After that:</p>
+             <ul style="margin:6px 0 6px 20px;padding:0;color:var(--ink-soft);font-size:13px">
+               <li>Switch to 2D if you want to move or delete mark positions.</li>
+               <li>Click <b>Thd Holes</b> again to re-cut with new size / depth / fit / head.</li>
+             </ul>
              <p style="color:var(--ink-soft);font-size:12px;margin-top:8px">
-               <b>Remove all threads</b> rebuilds the body via CSG of its remaining children. Any bevels applied to this body AFTER the thread cuts will be lost in the rebuild (the bevel parameters aren't recorded on the children, so the rebuild can't reproduce them). Re-apply bevels after if needed.
+               Heads-up: this rebuilds the body via CSG of its remaining children. Any <b>bevels applied AFTER threading</b> will be lost (their parameters aren't recorded on the children). Re-bevel after re-threading if needed.
              </p>`,
-      confirmText: 'Apply',
+      confirmText: 'Remove threads & rebuild',
       onConfirm: () => {
-        const action = $('th-bulk-action').value === 'remove' ? 'remove' : 'rebuild';
+        // Snapshot BEFORE any mutation. If the rebuild path can't
+        // reproduce a renderable body, we restore this so the bracket
+        // never disappears on the user, even when CSG fails.
+        const preOpSnapshot = snapshotDoc();
         pushUndo();
         const touchedRoots = new Set();
         for (const m of doneMarks) {
-          if (action === 'remove') {
-            const root = _stripMarkHoleFromTree(m);
-            if (root) touchedRoots.add(root);
-          }
+          const root = _stripMarkHoleFromTree(m);
+          if (root) touchedRoots.add(root);
           deleteMaterialisedThreadMark(m);
         }
-        if (action === 'remove') {
-          // Re-derive geometry for every top-level body whose tree was
-          // modified — _ensureGroupGeometry walks bottom-up and rebuilds
-          // each chain link that we nulled.
-          for (const root of touchedRoots) _ensureGroupGeometry(root);
+        // Re-derive geometry for every top-level body whose tree was
+        // modified — _ensureGroupGeometry walks bottom-up and rebuilds
+        // each chain link that we nulled.
+        let rebuildFailed = false;
+        const failed = [];
+        for (const root of touchedRoots) {
+          const ok = _ensureGroupGeometry(root);
+          const hasGeom = root.geometry instanceof THREE.BufferGeometry &&
+                          (root.geometry.attributes?.position?.count || 0) > 0;
+          if (!ok || !hasGeom) {
+            rebuildFailed = true;
+            failed.push(root.id);
+            console.error(`Remove threads: _ensureGroupGeometry returned ${ok} but body id=${root.id} has ${hasGeom ? 'geometry' : 'NO geometry / zero positions'} — restoring pre-op state.`);
+          }
+        }
+        if (rebuildFailed) {
+          // Safety net: bring the bracket back. Better to fail loudly
+          // with the body intact than silently leave the user staring
+          // at a blank canvas with a 'group' entry in the tree.
+          applySnapshot(preOpSnapshot);
           if (viewer) viewer.rebuildBodies();
           renderTree(); renderProps();
-          flushAutosave();
-          setStatus(`Removed thread cuts from ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} — body rebuilt without the holes.`);
-        } else {
-          openThreadedHolesDialog();
+          showHint(`Couldn't remove threads — CSG rebuild from children failed for body id=${failed.join(',')}. Bracket restored. If this body has been beveled since threading, the bevel children are likely confusing CSG — undo the bevels first, then retry the thread removal, then re-bevel.`);
+          setStatus('⚠ Thread removal aborted — bracket restored to its pre-removal state. See console for details.');
+          return;
         }
+        if (viewer) viewer.rebuildBodies();
+        renderTree(); renderProps();
+        flushAutosave();
+        setStatus(`Removed thread cuts from ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'}. Marks are still in the sketch — click Thd Holes again to re-cut with new settings.`);
       },
     });
     return;
