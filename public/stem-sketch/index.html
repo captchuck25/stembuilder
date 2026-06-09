@@ -9940,6 +9940,43 @@ function openThreadedHoleForMark(sketchId, markId) {
 // NOTE: bevel ops on this body that happened AFTER the thread cut don't
 // have children-tracked parameters; rebuilding the chain via CSG will
 // silently lose them. Documented at the dialog level.
+// Walk every nested level of a body and clear out _mergedShells. When the
+// CSG rebuild path (_remergeStoredShells) runs after a Remove threads it
+// reads these per-body lists; stale entries from previous thread cycles
+// at deep nest levels then get re-merged as hollow helical tubes inside
+// the rebuilt geometry. Clearing them all up-front makes the rebuild
+// produce a clean solid.
+function _clearAllMergedShellsRecursive(body) {
+  if (!body) return;
+  if (Array.isArray(body._mergedShells)) body._mergedShells = [];
+  if (Array.isArray(body.children)) {
+    for (const c of body.children) _clearAllMergedShellsRecursive(c);
+  }
+}
+
+// Walk every nested level of a body and remove any 'headless fastener' /
+// op=subtract child — those are thread-cutter cylinders left behind by
+// older threading cycles whose marks don't track them with _holeBodyId
+// anymore. Recursive belt-and-braces during Remove threads so old
+// remnants don't survive the rebuild as visible voids.
+function _stripStaleThreadCuttersRecursive(group) {
+  if (!Array.isArray(group.children)) return false;
+  let touched = false;
+  for (let i = group.children.length - 1; i >= 0; i--) {
+    const c = group.children[i];
+    if (c.type === 'fastener' && c.headType === 'none' && c.op === 'subtract') {
+      group.children.splice(i, 1);
+      touched = true;
+      continue;
+    }
+    if ((c.type === 'group' || c.type === 'combined') && _stripStaleThreadCuttersRecursive(c)) {
+      touched = true;
+    }
+  }
+  if (touched) group.geometry = null;
+  return touched;
+}
+
 function _stripMarkHoleFromTree(mark) {
   if (mark._holeBodyId == null) return null;
   const visit = (group) => {
@@ -10069,6 +10106,16 @@ function openThreadedHolesDialog() {
           // is currently null (just stripped, not yet re-derived) and
           // three.js throws on isBufferGeometry of null.
           deleteMaterialisedThreadMark(m, { skipRender: true });
+        }
+        // Belt-and-braces sweep across every top-level body for stale
+        // headless-fastener cutters from older thread cycles whose
+        // _holeBodyId bookkeeping is gone, AND wipe _mergedShells at
+        // every nested level so the rebuild doesn't re-add the helical
+        // thread tubes as floating fragments inside the solid.
+        for (const b of doc.bodies) {
+          if ((b.type !== 'group' && b.type !== 'combined') || !Array.isArray(b.children)) continue;
+          if (_stripStaleThreadCuttersRecursive(b)) touchedRoots.add(b);
+          _clearAllMergedShellsRecursive(b);
         }
         // Belt-and-braces bolt sweep: catch any leftover thread-mark
         // visualizers that the per-mark bookkeeping missed (older
