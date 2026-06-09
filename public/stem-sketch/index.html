@@ -12788,13 +12788,48 @@ function exportSVG(opts = {}) {
 }
 
 // Build ASCII STL text from a list of body meshes.
+// Mesh cleanup tuned for STL export. CSG.js (the boolean engine behind
+// every threaded / beveled body in this app) leaves drift across cut
+// seams — vertices that SHOULD be shared between two faces land at
+// slightly-different float values, so each face owns its own copy and
+// the edge between them becomes 'non-manifold' (an edge with only one
+// adjacent face on each side instead of one truly shared edge between
+// two faces). Slicers like Bambu Studio flag those. Two-pass fix:
+//   1) Weld vertices within EXPORT_WELD_MM. 0.02 mm is 1/10 of the
+//      finest printable layer (0.2 mm on a typical FDM printer with a
+//      0.4 mm nozzle), so we can't accidentally collapse real features.
+//      Catches every CSG seam drift we've seen so far on bracket-scale
+//      models.
+//   2) Strip degenerate triangles whose 2x signed area is below
+//      DEGEN_EPS_MM2. After welding, two triangles can share two
+//      vertices and end up zero-area (knife-blade slivers — the other
+//      common non-manifold cause). Cross-product squared length < 1e-6
+//      is well below any meaningful geometry.
+const EXPORT_WELD_MM   = 0.02;
+const EXPORT_DEGEN_EPS = 1e-6;
+function _cleanGeometryForExport(geo) {
+  let cleaned = weldGeometryForEdges(geo, EXPORT_WELD_MM);
+  cleaned = _stripDegenerateTriangles(cleaned, EXPORT_DEGEN_EPS);
+  cleaned.computeVertexNormals();
+  return cleaned;
+}
+
 function _bodiesToSTL(bodies, solidName = 'mini_cad') {
   let stl = `solid ${solidName}\n`;
+  let cleanupStats = { totalBefore: 0, totalAfter: 0, bodies: 0 };
   for (const body of bodies) {
     const mesh = body.mesh;
     if (!mesh) continue;
-    const geo = mesh.geometry.clone();
+    let geo = mesh.geometry.clone();
     geo.applyMatrix4(mesh.matrixWorld);
+    // Capture vertex count before cleanup so we can report the welding
+    // ratio to the user — useful when they're debugging an actual print.
+    const beforeVerts = geo.attributes.position?.count || 0;
+    geo = _cleanGeometryForExport(geo);
+    const afterVerts = geo.attributes.position?.count || 0;
+    cleanupStats.totalBefore += beforeVerts;
+    cleanupStats.totalAfter  += afterVerts;
+    cleanupStats.bodies++;
     const pos = geo.attributes.position;
     const idx = geo.index;
     const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
@@ -12805,6 +12840,11 @@ function _bodiesToSTL(bodies, solidName = 'mini_cad') {
       const ab = new THREE.Vector3().subVectors(b, a);
       const ac = new THREE.Vector3().subVectors(c, a);
       const n = new THREE.Vector3().crossVectors(ab, ac).normalize();
+      // Skip degenerate triangles that survived cleanup (normal is NaN /
+      // length 0 when the cross product is zero — vertices collinear or
+      // coincident). Writing them produces 'facet normal NaN NaN NaN'
+      // lines which slicers reject the whole file over.
+      if (!isFinite(n.x) || !isFinite(n.y) || !isFinite(n.z)) return;
       stl += `  facet normal ${n.x.toFixed(6)} ${n.y.toFixed(6)} ${n.z.toFixed(6)}\n    outer loop\n`;
       stl += `      vertex ${a.x.toFixed(6)} ${a.y.toFixed(6)} ${a.z.toFixed(6)}\n`;
       stl += `      vertex ${b.x.toFixed(6)} ${b.y.toFixed(6)} ${b.z.toFixed(6)}\n`;
@@ -12817,6 +12857,10 @@ function _bodiesToSTL(bodies, solidName = 'mini_cad') {
       for (let i = 0; i < pos.count; i += 3) writeTri(i, i + 1, i + 2);
     }
     geo.dispose();
+  }
+  if (cleanupStats.bodies > 0) {
+    const collapsed = cleanupStats.totalBefore - cleanupStats.totalAfter;
+    console.log(`STL export cleanup: ${cleanupStats.bodies} bod${cleanupStats.bodies === 1 ? 'y' : 'ies'}, ${cleanupStats.totalBefore} → ${cleanupStats.totalAfter} verts (${collapsed} welded together at ${EXPORT_WELD_MM} mm tolerance).`);
   }
   stl += `endsolid ${solidName}\n`;
   return stl;
