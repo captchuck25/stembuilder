@@ -9516,6 +9516,40 @@ function _remergeStoredShells(body) {
   for (const spec of body._mergedShells) _mergeOneShellInto(body, spec);
 }
 
+// Will rendering this body produce ANYTHING visible? Catches the cases
+// _ensureGroupGeometry calls 'success' but actually returns a degenerate
+// result — empty geometry, zero-volume bounding sphere, NaN positions.
+// Returns { ok, reason }. Used as a sanity gate after a CSG rebuild.
+function _isBodyRenderable(body) {
+  if (body.hidden) return { ok: true, reason: 'hidden' };
+  if (body.type === 'group' || body.type === 'combined') {
+    if (!(body.geometry instanceof THREE.BufferGeometry)) {
+      return { ok: false, reason: 'no BufferGeometry on the group' };
+    }
+    const pos = body.geometry.attributes?.position;
+    if (!pos || pos.count === 0) {
+      return { ok: false, reason: 'geometry has zero positions' };
+    }
+    // NaN check — CSG can produce NaN-laced output that has positions but
+    // doesn't render. Sample the first triangle's vertices.
+    const a = pos.array;
+    for (let i = 0; i < Math.min(9, a.length); i++) {
+      if (!isFinite(a[i])) return { ok: false, reason: 'geometry contains NaN positions' };
+    }
+    // Bounding sphere with finite, non-zero radius means the geometry
+    // actually occupies space.
+    body.geometry.computeBoundingSphere();
+    const bs = body.geometry.boundingSphere;
+    if (!bs || !isFinite(bs.radius) || bs.radius < 1e-4) {
+      return { ok: false, reason: 'bounding sphere is degenerate (radius=' + (bs?.radius) + ')' };
+    }
+    return { ok: true, reason: 'renderable' };
+  }
+  // For non-group bodies the build path is parametric (sketch, primitive
+  // dims) so we trust buildBodyMesh; a non-null mesh means renderable.
+  return { ok: true, reason: 'parametric' };
+}
+
 // Re-derive a group / combined body's baked BufferGeometry from its
 // children. Used on ungroup when the save dropped intermediate-level
 // geometries to keep the doc size bounded. Recursively walks: nested
@@ -9923,10 +9957,21 @@ function _stripMarkHoleFromTree(mark) {
 }
 
 function deleteMaterialisedThreadMark(mark) {
-  // Drop the visualizer bolt + standalone thread shell (if the
-  // freestanding-shell fallback ran). Both are plain entries in
-  // doc.bodies and a filter removes them.
+  // Drop the visualizer bolt + standalone thread shell. mark._boltBodyId
+  // is sometimes stale across sessions (older brackets created before the
+  // _threadMarkRef tagging didn't record it). Fall back to a sweep across
+  // doc.bodies looking for any fastener whose _threadMarkRef points at
+  // this mark — that catches the bolts the user still sees on screen even
+  // when the bookkeeping id is missing.
   const drop = new Set([mark._boltBodyId, mark._threadShellBodyId].filter(Boolean));
+  for (const b of doc.bodies) {
+    if (b.type === 'fastener' && b._threadMarkRef && b._threadMarkRef.markId === mark.id) {
+      drop.add(b.id);
+    }
+    if (b.type === 'threadShell' && b._threadMarkRef && b._threadMarkRef.markId === mark.id) {
+      drop.add(b.id);
+    }
+  }
   if (drop.size) doc.bodies = doc.bodies.filter(b => !drop.has(b.id));
   // Remove this mark's entry from the parent's _mergedShells so a future
   // rebuild re-merges only the shells for marks that are still active.
@@ -9978,13 +10023,19 @@ function openThreadedHolesDialog() {
     openModal({
       title: 'Remove existing threads?',
       body: `<p>All ${doneMarks.length} mark${doneMarks.length === 1 ? '' : 's'} in <b>${sketch.name || 'this sketch'}</b> already have threaded holes.</p>
-             <p>This will strip the thread <b>cuts</b> off the body and reset every mark to "fresh." After that:</p>
+             <p>This will:</p>
              <ul style="margin:6px 0 6px 20px;padding:0;color:var(--ink-soft);font-size:13px">
-               <li>Switch to 2D if you want to move or delete mark positions.</li>
+               <li>Strip the thread holes back off the body.</li>
+               <li>Remove every visualizer bolt placed by the thread tool.</li>
+               <li>Reset each mark in the sketch so you can re-thread fresh.</li>
+             </ul>
+             <p>Then:</p>
+             <ul style="margin:6px 0 6px 20px;padding:0;color:var(--ink-soft);font-size:13px">
+               <li>Switch to 2D if you want to move or delete the mark positions.</li>
                <li>Click <b>Thd Holes</b> again to re-cut with new size / depth / fit / head.</li>
              </ul>
              <p style="color:var(--ink-soft);font-size:12px;margin-top:8px">
-               Heads-up: this rebuilds the body via CSG of its remaining children. Any <b>bevels applied AFTER threading</b> will be lost (their parameters aren't recorded on the children). Re-bevel after re-threading if needed.
+               Note: if you've added bevels (rounded / chamfered edges) since the threads went in, those bevels will be lost — the original shape comes back without them. Re-apply bevels after re-threading if you need them.
              </p>`,
       confirmText: 'Remove threads & rebuild',
       onConfirm: () => {
@@ -9994,35 +10045,50 @@ function openThreadedHolesDialog() {
         const preOpSnapshot = snapshotDoc();
         pushUndo();
         const touchedRoots = new Set();
+        const strippedRootIds = new Set();
         for (const m of doneMarks) {
           const root = _stripMarkHoleFromTree(m);
-          if (root) touchedRoots.add(root);
+          if (root) { touchedRoots.add(root); strippedRootIds.add(root.id); }
           deleteMaterialisedThreadMark(m);
         }
+        // Belt-and-braces bolt sweep: catch any leftover thread-mark
+        // visualizers that the per-mark bookkeeping missed (older
+        // brackets where mark._boltBodyId wasn't recorded).
+        const sketchMarkIds = new Set((sketch.entities || [])
+          .filter(e => e.type === 'threadMark')
+          .map(e => e.id));
+        doc.bodies = doc.bodies.filter(b => {
+          if (b.type === 'fastener' && b._threadMarkRef && sketchMarkIds.has(b._threadMarkRef.markId)) return false;
+          if (b.type === 'threadShell' && b._threadMarkRef && sketchMarkIds.has(b._threadMarkRef.markId)) return false;
+          return true;
+        });
         // Re-derive geometry for every top-level body whose tree was
-        // modified — _ensureGroupGeometry walks bottom-up and rebuilds
+        // modified. _ensureGroupGeometry walks bottom-up and rebuilds
         // each chain link that we nulled.
         let rebuildFailed = false;
-        const failed = [];
+        const failedIds = [];
         for (const root of touchedRoots) {
-          const ok = _ensureGroupGeometry(root);
-          const hasGeom = root.geometry instanceof THREE.BufferGeometry &&
-                          (root.geometry.attributes?.position?.count || 0) > 0;
-          if (!ok || !hasGeom) {
+          let ok = false;
+          try { ok = _ensureGroupGeometry(root); }
+          catch (err) {
+            console.error(`Remove threads: _ensureGroupGeometry threw on body id=${root.id}:`, err);
+          }
+          const renderable = _isBodyRenderable(root);
+          if (!ok || !renderable.ok) {
             rebuildFailed = true;
-            failed.push(root.id);
-            console.error(`Remove threads: _ensureGroupGeometry returned ${ok} but body id=${root.id} has ${hasGeom ? 'geometry' : 'NO geometry / zero positions'} — restoring pre-op state.`);
+            failedIds.push(root.id);
+            console.error(`Remove threads: rebuild failed for body id=${root.id} — ensureOk=${ok}, ${renderable.reason}`);
           }
         }
         if (rebuildFailed) {
           // Safety net: bring the bracket back. Better to fail loudly
           // with the body intact than silently leave the user staring
-          // at a blank canvas with a 'group' entry in the tree.
+          // at a blank canvas.
           applySnapshot(preOpSnapshot);
           if (viewer) viewer.rebuildBodies();
           renderTree(); renderProps();
-          showHint(`Couldn't remove threads — CSG rebuild from children failed for body id=${failed.join(',')}. Bracket restored. If this body has been beveled since threading, the bevel children are likely confusing CSG — undo the bevels first, then retry the thread removal, then re-bevel.`);
-          setStatus('⚠ Thread removal aborted — bracket restored to its pre-removal state. See console for details.');
+          showHint(`Couldn't rebuild the body without the threads (id ${failedIds.join(', ')}). The bracket has been restored to exactly how it was before. If you've added bevels since threading, try undoing those first, then remove threads, then re-bevel.`);
+          setStatus('⚠ Thread removal aborted — bracket restored. See console for details.');
           return;
         }
         if (viewer) viewer.rebuildBodies();
