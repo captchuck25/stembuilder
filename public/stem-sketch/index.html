@@ -8166,21 +8166,35 @@ function applySnapshot(s) {
   // body and the only recourse was the _stemRecover() console command.
   if (typeof _ensureGroupGeometry === 'function') {
     let recovered = 0;
+    const stillBroken = [];
     for (const b of doc.bodies) {
       if (b.type !== 'group' && b.type !== 'combined') continue;
       if (b.geometry instanceof THREE.BufferGeometry) continue;
-      if (!Array.isArray(b.children) || !b.children.length) continue;
+      if (!Array.isArray(b.children) || !b.children.length) {
+        stillBroken.push({ id: b.id, reason: `no children (${(b.children || []).length})` });
+        continue;
+      }
       try {
         if (_ensureGroupGeometry(b)) {
           recovered++;
-          console.log(`applySnapshot: recovered geometry for top-level body id=${b.id} via CSG of children.`);
+          console.log(`applySnapshot: recovered geometry for body id=${b.id} via CSG of ${b.children.length} children.`);
+        } else {
+          // Drill into WHY the recovery couldn't run — useful when the
+          // user reports 'bracket still missing after load.'
+          const childInfo = b.children.map(c => `${c.type}${c.op === 'subtract' ? '/sub' : ''}`).join(', ');
+          const positives = b.children.filter(c => c.op !== 'subtract').length;
+          stillBroken.push({ id: b.id, reason: `_ensureGroupGeometry returned false. children=[${childInfo}], positives=${positives}` });
         }
       } catch (err) {
-        console.warn(`applySnapshot: recovery for body id=${b.id} threw:`, err);
+        stillBroken.push({ id: b.id, reason: `_ensureGroupGeometry threw: ${err.message}` });
       }
     }
     if (recovered > 0) {
       setStatus(`Restored ${recovered} body${recovered === 1 ? '' : 'ies'} whose saved geometry was missing — rebuilt from children.`);
+    }
+    if (stillBroken.length > 0) {
+      for (const b of stillBroken) console.warn(`applySnapshot: body id=${b.id} still has no geometry after recovery attempt — ${b.reason}`);
+      setStatus(`⚠ ${stillBroken.length} body${stillBroken.length === 1 ? '' : 'ies'} loaded without geometry — see console. Recover manually with _stemRecover() or rebuild from scratch.`);
     }
   }
   doc.activeSketchId = s.activeSketchId;
@@ -14390,6 +14404,50 @@ async function cloudSave() {
     btn.classList.add('saving');
     btn.textContent = '⋯';
   }
+  // Pre-save validation: refuse to save if any top-level group/combined
+  // has missing geometry. Without this check the save can silently
+  // capture a transient null-geometry state (mid-operation, mid-rebuild,
+  // CSG just nulled but didn't re-derive yet) — the cloud then has a
+  // doc the load path can't render and the user sees a tree row with
+  // no body on another computer. Try to recover via _ensureGroupGeometry
+  // first; only error out if that fails too.
+  const brokenBodies = [];
+  for (const b of doc.bodies) {
+    if (b.type !== 'group' && b.type !== 'combined') continue;
+    if (b.geometry instanceof THREE.BufferGeometry &&
+        b.geometry.attributes?.position?.count > 0) continue;
+    // Geometry missing or empty — try to rebuild before bailing.
+    if (Array.isArray(b.children) && b.children.length && typeof _ensureGroupGeometry === 'function') {
+      try {
+        if (_ensureGroupGeometry(b) &&
+            b.geometry instanceof THREE.BufferGeometry &&
+            b.geometry.attributes?.position?.count > 0) {
+          console.log(`cloudSave: pre-save recovery succeeded for body id=${b.id}.`);
+          continue;
+        }
+      } catch (err) {
+        console.warn(`cloudSave: pre-save recovery for body id=${b.id} threw:`, err);
+      }
+    }
+    brokenBodies.push(b.id);
+  }
+  if (brokenBodies.length) {
+    const btnElem = document.getElementById('cloud-save-btn');
+    if (btnElem) {
+      btnElem.classList.remove('saving');
+      btnElem.classList.add('failed');
+      btnElem.textContent = '!';
+      btnElem._resetT = setTimeout(() => {
+        btnElem.classList.remove('failed');
+        btnElem.textContent = btnElem.dataset.origText || '☁';
+      }, 3500);
+    }
+    showHint(`Save blocked — body id ${brokenBodies.join(', ')} has no geometry and can't be rebuilt from children. Saving now would produce a file that loads as a blank canvas. Fix or delete the affected body first.`);
+    setStatus(`⚠ Save blocked — ${brokenBodies.length} body${brokenBodies.length === 1 ? ' has' : 'ies have'} no geometry. See hint.`);
+    return;
+  }
+  // If we got here, every top-level group renders. Safe to snapshot + send.
+  if (viewer) viewer.rebuildBodies();
   setStatus('Saving to cloud…');
   const name = getProjectName() || 'Untitled';
   const thumbnail = await captureThumbnailAsync();
