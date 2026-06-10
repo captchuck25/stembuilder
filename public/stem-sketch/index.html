@@ -14411,14 +14411,21 @@ async function cloudSave() {
     btn.textContent = '⋯';
   }
   // Pre-save validation: refuse to save if any top-level group/combined
-  // has missing geometry. Without this check the save can silently
-  // capture a transient null-geometry state (mid-operation, mid-rebuild,
-  // CSG just nulled but didn't re-derive yet) — the cloud then has a
-  // doc the load path can't render and the user sees a tree row with
-  // no body on another computer. Try to recover via _ensureGroupGeometry
-  // first; only error out if that fails too.
+  // has missing geometry, OR if there are standalone threadShell bodies
+  // (which usually means processThreadMarks' merge-into-parent fallback
+  // fired — the design state is incomplete and on load the user sees
+  // the parent bracket plus orphan shell fragments floating in space).
   const brokenBodies = [];
+  const orphanShells = [];
   for (const b of doc.bodies) {
+    // Catch standalone threadShells. These are visible in the canvas
+    // as helical tube fragments — they belong INSIDE the parent
+    // bracket's geometry but the merge didn't happen. Saving + reloading
+    // is what made the user notice; the actual bug was earlier.
+    if (b.type === 'threadShell') {
+      orphanShells.push(b.id);
+      continue;
+    }
     if (b.type !== 'group' && b.type !== 'combined') continue;
     if (b.geometry instanceof THREE.BufferGeometry &&
         b.geometry.attributes?.position?.count > 0) continue;
@@ -14437,7 +14444,7 @@ async function cloudSave() {
     }
     brokenBodies.push(b.id);
   }
-  if (brokenBodies.length) {
+  if (brokenBodies.length || orphanShells.length) {
     const btnElem = document.getElementById('cloud-save-btn');
     if (btnElem) {
       btnElem.classList.remove('saving');
@@ -14448,8 +14455,15 @@ async function cloudSave() {
         btnElem.textContent = btnElem.dataset.origText || '☁';
       }, 3500);
     }
-    showHint(`Save blocked — body id ${brokenBodies.join(', ')} has no geometry and can't be rebuilt from children. Saving now would produce a file that loads as a blank canvas. Fix or delete the affected body first.`);
-    setStatus(`⚠ Save blocked — ${brokenBodies.length} body${brokenBodies.length === 1 ? ' has' : 'ies have'} no geometry. See hint.`);
+    const parts = [];
+    if (brokenBodies.length) {
+      parts.push(`body id ${brokenBodies.join(', ')} has no geometry and can't be rebuilt from children`);
+    }
+    if (orphanShells.length) {
+      parts.push(`${orphanShells.length} orphan thread-shell fragment${orphanShells.length === 1 ? '' : 's'} (id ${orphanShells.join(', ')}) — these usually mean a previous threading operation didn't fully merge into the bracket`);
+    }
+    showHint(`Save blocked — ${parts.join('; ')}. Saving now would load as a broken design on another computer. Delete the affected bodies (right-click → Delete in the tree) or use Remove threads + re-thread to clean up.`);
+    setStatus(`⚠ Save blocked — see hint. Fix or delete affected bodies first.`);
     return;
   }
   // If we got here, every top-level group renders. Safe to snapshot + send.
