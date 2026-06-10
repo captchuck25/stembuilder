@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
-import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign } from "@/lib/achievements";
+import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, fetchBlueprintLabDesigns, deleteBlueprintLabDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign, BlueprintLabDesign } from "@/lib/achievements";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 
 // ─── Static metadata ──────────────────────────────────────────────────────────
@@ -577,27 +577,124 @@ function StemSketchSection({ designs, onDeleted }: {
           {designs.map(d => (
             <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e5e7eb", background: "#f9fafb",
               overflow: "hidden", width: 200, flexShrink: 0, display: "flex", flexDirection: "column" }}>
-              {/* Thumbnail */}
-              <div style={{ width: "100%", height: 130, background: "#eef0f6", overflow: "hidden",
-                display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {/* Thumbnail — click or double-click to open the design in the editor */}
+              <Link
+                href={`/tools/stem-sketch?id=${d.id}`}
+                title={`Open "${d.name}"`}
+                style={{ display: "block", width: "100%", height: 130, background: "#eef0f6",
+                  overflow: "hidden", cursor: "pointer", textDecoration: "none",
+                  position: "relative" }}
+              >
                 {d.thumbnail ? (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img src={d.thumbnail} alt={d.name}
                     style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                 ) : (
-                  <span style={{ fontSize: 36, opacity: 0.25 }}>✏️</span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center",
+                    width: "100%", height: "100%" }}>
+                    <span style={{ fontSize: 36, opacity: 0.25 }}>✏️</span>
+                  </div>
                 )}
-              </div>
-              {/* Info + delete */}
+              </Link>
+              {/* Info + delete — name is also a link for keyboard / accessibility users */}
               <div style={{ padding: "10px 12px", display: "flex", alignItems: "flex-start",
                 justifyContent: "space-between", gap: 6 }}>
                 <div style={{ minWidth: 0 }}>
+                  <Link href={`/tools/stem-sketch?id=${d.id}`}
+                    style={{ textDecoration: "none", color: "#111" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                  </Link>
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
+                    {d.units} · {new Date(d.updated_at).toLocaleDateString()}
+                  </div>
+                </div>
+                {confirmId === d.id ? (
+                  <button
+                    onClick={() => handleDelete(d.id)}
+                    disabled={deleting === d.id}
+                    style={{ padding: "4px 10px", borderRadius: 6, border: "2px solid #dc2626",
+                      background: "#dc2626", color: "#fff", fontWeight: 800, fontSize: 11, flexShrink: 0,
+                      cursor: "pointer", whiteSpace: "nowrap" }}>
+                    Sure?
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => requestDelete(d.id)}
+                    disabled={deleting === d.id}
+                    style={{ padding: "4px 10px", borderRadius: 6, border: "2px solid #e5e7eb",
+                      background: "#fff", color: "#888", fontWeight: 700, fontSize: 11, flexShrink: 0,
+                      cursor: deleting === d.id ? "not-allowed" : "pointer", opacity: deleting === d.id ? 0.5 : 1 }}>
+                    {deleting === d.id ? "…" : "✕"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Blueprint Lab section ────────────────────────────────────────────────────
+
+function BlueprintLabSection({ designs, onDeleted }: {
+  designs: BlueprintLabDesign[];
+  onDeleted: (id: string) => void;
+}) {
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function requestDelete(id: string) {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmId(id);
+    confirmTimerRef.current = setTimeout(() => setConfirmId(null), 3000);
+  }
+
+  async function handleDelete(id: string) {
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmId(null);
+    setDeleting(id);
+    await deleteBlueprintLabDesign(id);
+    onDeleted(id);
+    setDeleting(null);
+  }
+
+  return (
+    <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
+      <SectionHeader icon="📐" title="Blueprint Lab" href="/tools/blueprint-lab" linkLabel="Open Blueprint Lab" />
+      {designs.length === 0 ? (
+        <p style={{ fontSize: 14, color: "#888", margin: 0 }}>
+          No saved plans yet. Open Blueprint Lab and save your first design!
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+          {designs.map(d => (
+            <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e5e7eb", background: "#f9fafb",
+              overflow: "hidden", width: 200, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+              <Link href={`/tools/blueprint-lab?id=${d.id}`}
+                style={{ textDecoration: "none",
+                  width: "100%", height: 130, background: "#eef0f6", overflow: "hidden",
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {d.thumbnail ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={d.thumbnail} alt={d.name}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                ) : (
+                  <span style={{ fontSize: 36, opacity: 0.25 }}>📐</span>
+                )}
+              </Link>
+              <div style={{ padding: "10px 12px", display: "flex", alignItems: "flex-start",
+                justifyContent: "space-between", gap: 6 }}>
+                <Link href={`/tools/blueprint-lab?id=${d.id}`} style={{ textDecoration: "none", minWidth: 0, flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
                   <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
                     {d.units} · {new Date(d.updated_at).toLocaleDateString()}
                   </div>
-                </div>
+                </Link>
                 {confirmId === d.id ? (
                   <button
                     onClick={() => handleDelete(d.id)}
@@ -635,6 +732,7 @@ export default function AchievementsPage() {
   const [measScores,     setMeasScores]     = useState<ScoreRow[]>([]);
   const [bridgeDesigns,  setBridgeDesigns]  = useState<BridgeDesign[]>([]);
   const [sketchDesigns,  setSketchDesigns]  = useState<StemSketchDesign[]>([]);
+  const [bpDesigns,      setBpDesigns]      = useState<BlueprintLabDesign[]>([]);
   const [dataLoading,    setDataLoading]    = useState(true);
   const [turtleCompleted,    setTurtleCompleted]    = useState<Set<string>>(new Set());
   const [turtleSubmissions,  setTurtleSubmissions]  = useState<TurtleSubmission[]>([]);
@@ -657,13 +755,15 @@ export default function AchievementsPage() {
       fetchBridgeDesigns(uid),
       fetchTurtleSubmissions(uid),
       fetchStemSketchDesigns(),
-    ]).then(([cl, bl, ms, bd, ts, sk]) => {
+      fetchBlueprintLabDesigns(),
+    ]).then(([cl, bl, ms, bd, ts, sk, bp]) => {
       setCodeLabRows(cl);
       setBlockLabRows(bl);
       setMeasScores(ms);
       setBridgeDesigns(bd);
       setTurtleSubmissions(ts);
       setSketchDesigns(sk);
+      setBpDesigns(bp);
       setDataLoading(false);
     });
   }, [status, session?.user?.id]);
@@ -723,6 +823,10 @@ export default function AchievementsPage() {
               <StemSketchSection
                 designs={sketchDesigns}
                 onDeleted={id => setSketchDesigns(prev => prev.filter(d => d.id !== id))}
+              />
+              <BlueprintLabSection
+                designs={bpDesigns}
+                onDeleted={id => setBpDesigns(prev => prev.filter(d => d.id !== id))}
               />
               <MeasurementSection scores={measScores} />
             </>

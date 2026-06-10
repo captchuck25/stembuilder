@@ -281,6 +281,28 @@ export default function StemSketchClient() {
           // exists (iframe's own restore handles that path).
           if (isDemoMode) return;
           if (!session?.user?.id) return;
+          // If the URL specifies a design id (e.g. opened from My Work), load
+          // THAT design directly — overrides both the localStorage-draft check
+          // and the most-recent fallback. Without this, double-clicking a
+          // thumbnail in My Work landed in the canvas with whatever was last
+          // edited, not the design the user clicked on.
+          if (demoDesignId) {
+            try {
+              const designRes = await fetch(`/api/stem-sketch/designs/${encodeURIComponent(demoDesignId)}`);
+              if (designRes.ok) {
+                const design = await designRes.json();
+                postToSketch({
+                  type: "STEMSKETCH_LOAD",
+                  name: design.name,
+                  docJson: design.doc_json,
+                  units: design.units,
+                });
+              }
+            } catch (err) {
+              console.warn("STEM Sketch open-by-id failed:", err);
+            }
+            return;
+          }
           let hasDraft = false;
           try { hasDraft = !!localStorage.getItem("stem-sketch:draft"); } catch {}
           if (hasDraft) return;
