@@ -1668,18 +1668,18 @@ class SketchEngine {
   }
 
   computeSnap(wx, wy, ignoreId = null) {
-    // When grid snap is ON it means GRID ONLY. Hovering over an existing
-    // line's endpoint, midpoint, intersection, face boundary, etc. used to
-    // PULL the cursor off the grid (those candidates have strength 1.3+,
-    // dominating the grid candidate at 0.05). The user's expectation is
-    // 'snap on = lock to the grid spacing no matter what' — so we
-    // short-circuit before building any other candidate.
-    if (doc.grid.snap) {
-      const step = doc.grid.spacing;
-      const gx = Math.round(wx / step) * step;
-      const gy = Math.round(wy / step) * step;
-      return { x: gx, y: gy, kind: 'grid', strength: 0.05 };
-    }
+    // Snap behaviour by grid-snap toggle:
+    //   ON  → grid + KEY FEATURE points only (endpoint, midpoint,
+    //         intersection, center, face corner / mid, origin). The
+    //         "anywhere along an edge" candidate is suppressed so the
+    //         cursor can't drift off-grid by hovering on a line —
+    //         BUT a feature like a midpoint that happens to be
+    //         off-grid is still reachable, which is what the user
+    //         wants when placing thread marks on construction-line
+    //         midpoints that don't fall on a grid intersection.
+    //   OFF → everything (endpoint, midpoint, intersection, edge,
+    //         face boundary, origin). No grid candidate added.
+    const snapOn = !!doc.grid.snap;
     // Pixel-level snap threshold for ENDPOINTS — slightly larger than the
     // generic tolerance so it's easy to lock onto an existing line's end.
     const tolMm = 8 / this.view.pxPerMm;
@@ -1726,7 +1726,11 @@ class SketchEngine {
         if (t < 0 || t > 1) continue;
         const cx = s.a.x + t * dx, cy = s.a.y + t * dy;
         const d = Math.hypot(wx - cx, wy - cy);
-        if (d < tolMm) {
+        // Generic 'anywhere along an edge' snap — suppressed when grid
+        // snap is on so the cursor doesn't drift off-grid by hovering
+        // over a line. Midpoint snap below is NOT suppressed because
+        // midpoints are real geometric features.
+        if (!snapOn && d < tolMm) {
           candidates.push({ x: cx, y: cy, kind: 'edge', strength: 0.7 - 0.5 * (d / tolMm) });
         }
         if (denseMid) continue;
@@ -1769,10 +1773,19 @@ class SketchEngine {
       }
     }
 
-    // Grid snap is handled at the top of this function as an exclusive
-    // 'grid only' mode — when it's on the function returned early. Reaching
-    // here means doc.grid.snap is FALSE: entity / boundary / origin snaps
-    // are the only ones in play, with no grid candidate added.
+    // Grid candidate — added when snap is on. Strength of 1.0 sits BELOW
+    // endpoint (1.6), intersection (1.5), midpoint (1.3), center, and
+    // face features, so the cursor still locks to those real geometric
+    // points when they're within range. When nothing else is close,
+    // grid wins. This is what makes 'place a thread mark on the midpoint
+    // of a construction line' work even if that midpoint doesn't fall
+    // on a grid intersection.
+    if (snapOn) {
+      const step = doc.grid.spacing;
+      const gx = Math.round(wx / step) * step;
+      const gy = Math.round(wy / step) * step;
+      candidates.push({ x: gx, y: gy, kind: 'grid', strength: 1.0 });
+    }
 
     // Snap to the face boundary (only present when sketching on a body face).
     // Corners get highest priority, then mid-edge points, then anywhere along
@@ -1805,32 +1818,24 @@ class SketchEngine {
         const d = Math.hypot(wx - m.x, wy - m.y);
         if (d < faceTolMm) candidates.push({ x: m.x, y: m.y, kind: 'face-mid', strength: 1.8 - 0.8 * (d / faceTolMm) });
       }
-      // Project onto the four edges. When grid snap is on, also round the
-      // along-edge coordinate to the grid — otherwise the cursor locks to
-      // the edge at an arbitrary off-grid position, which defeats the
-      // "snap to 1/8 inch" expectation. Result: cursor sits at the
-      // intersection of the edge AND a grid line.
-      const gridSnapOn = doc.grid?.snap && doc.grid.spacing > 0;
-      const step = gridSnapOn ? doc.grid.spacing : 0;
+      // Project onto the four edges. When grid-snap is ON these
+      // along-the-edge candidates are suppressed (handled by the
+      // snapOn guard inside each handler) so the cursor doesn't drift
+      // off-grid along a face boundary; the corner / midpoint snaps
+      // below stay available so the user can still lock to key points.
       const onEdgeX = (yEdge) => {
+        if (snapOn) return; // along-the-edge candidates suppressed when grid-snap is on
         const d = Math.abs(wy - yEdge);
         if (d < faceTolMm && wx >= b.x - faceTolMm && wx <= b.x + b.w + faceTolMm) {
-          let cx = Math.min(Math.max(wx, b.x), b.x + b.w);
-          if (gridSnapOn) {
-            cx = Math.round(cx / step) * step;
-            cx = Math.min(Math.max(cx, b.x), b.x + b.w);
-          }
+          const cx = Math.min(Math.max(wx, b.x), b.x + b.w);
           candidates.push({ x: cx, y: yEdge, kind: 'face-edge', strength: 1.7 - 0.9 * (d / faceTolMm) });
         }
       };
       const onEdgeY = (xEdge) => {
+        if (snapOn) return;
         const d = Math.abs(wx - xEdge);
         if (d < faceTolMm && wy >= b.y - faceTolMm && wy <= b.y + b.h + faceTolMm) {
-          let cy = Math.min(Math.max(wy, b.y), b.y + b.h);
-          if (gridSnapOn) {
-            cy = Math.round(cy / step) * step;
-            cy = Math.min(Math.max(cy, b.y), b.y + b.h);
-          }
+          const cy = Math.min(Math.max(wy, b.y), b.y + b.h);
           candidates.push({ x: xEdge, y: cy, kind: 'face-edge', strength: 1.7 - 0.9 * (d / faceTolMm) });
         }
       };
@@ -1852,10 +1857,11 @@ class SketchEngine {
         const d = Math.hypot(wx - c.x, wy - c.y);
         if (d < faceTolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-mid', strength: 1.8 - 0.8 * (d / faceTolMm) });
       }
-      // Snap to any point on the perimeter
+      // Snap to any point on the perimeter — suppressed when grid-snap
+      // is on so the cursor can't drift off-grid along the circle.
       const dCenter = Math.hypot(wx - b.cx, wy - b.cy);
       const distFromPerim = Math.abs(dCenter - b.r);
-      if (distFromPerim < faceTolMm && dCenter > 1e-6) {
+      if (!snapOn && distFromPerim < faceTolMm && dCenter > 1e-6) {
         const cx = b.cx + (wx - b.cx) / dCenter * b.r;
         const cy = b.cy + (wy - b.cy) / dCenter * b.r;
         candidates.push({ x: cx, y: cy, kind: 'face-edge', strength: 1.7 - 0.9 * (distFromPerim / faceTolMm) });
