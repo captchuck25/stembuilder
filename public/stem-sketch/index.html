@@ -4880,7 +4880,9 @@ function projectBodiesOntoPlane(plane) {
       const spec = getFastenerSpec(child.size);
       if (!spec) return;
       const fit = child.fit || 'tight';
-      const clearance = FASTENER_FIT_CLEARANCE[fit] || 0;
+      // True-size bolts: only a cut tool (op === 'subtract') gets the fit
+      // clearance in its silhouette; a real bolt projects at its true radius.
+      const clearance = child.op === 'subtract' ? (FASTENER_FIT_CLEARANCE[fit] || 0) : 0;
       const r = (spec.d / 2) + clearance;
       const lengthBolt = child.length || (spec.d * 4);
       const cx = (child.x || 0) + (parentOffset?.x || 0);
@@ -8332,6 +8334,42 @@ function _stemDumpUndo() {
   });
 }
 if (typeof window !== 'undefined') window._stemDumpUndo = _stemDumpUndo;
+
+// Deeper-than-_stemDumpUndo body dump: walks each top-level body's children
+// tree, prints _mergedShells / _threadMarkRef linkage, flags standalone
+// threadShells. Used to diagnose the bracket-loads-as-fragments bug — call
+// before and after Save to compare what's actually in doc.bodies.
+function _stemDumpBodies() {
+  const fmt = (b, depth) => {
+    const pad = '  '.repeat(depth);
+    const op = b.op === 'subtract' ? ' op=SUBTRACT' : (b.op === 'add' ? ' op=add' : '');
+    let geom = '';
+    if (b.geometry instanceof THREE.BufferGeometry) {
+      const n = b.geometry.attributes?.position?.count || 0;
+      geom = ` geom=Buffer(${n}v)`;
+    } else if (b.geometry?._bin) {
+      geom = ` geom=binary(serialized)`;
+    } else if (b.geometry) {
+      geom = ` geom=${typeof b.geometry}`;
+    } else {
+      geom = ` geom=NONE`;
+    }
+    const tag = b.type === 'threadShell' ? ' ⚠ STANDALONE-SHELL' : '';
+    let extra = '';
+    if (Array.isArray(b._mergedShells) && b._mergedShells.length) extra += ` _mergedShells=${b._mergedShells.length}`;
+    if (b._threadMarkRef) extra += ` _threadMarkRef={sketch:${b._threadMarkRef.sketchId},mark:${b._threadMarkRef.markId}}`;
+    if (b.headType) extra += ` head=${b.headType}`;
+    console.log(`${pad}id=${b.id} type=${b.type}${op}${geom}${extra}${tag}`);
+    if (Array.isArray(b.children)) for (const c of b.children) fmt(c, depth + 1);
+  };
+  console.log(`=== doc.bodies (${doc.bodies.length} top-level) ===`);
+  for (const b of doc.bodies) fmt(b, 0);
+  const orphans = doc.bodies.filter(b => b.type === 'threadShell').map(b => b.id);
+  if (orphans.length) console.warn(`⚠ ${orphans.length} standalone threadShell bodies (id=${orphans.join(', ')}) — these are the "shell fragments" that appear on reload. The bracket's merge fallback fired during threading.`);
+  else console.log(`No standalone threadShell bodies — save should round-trip cleanly.`);
+}
+if (typeof window !== 'undefined') window._stemDumpBodies = _stemDumpBodies;
+
 let _docDirty = false;
 function setDirty(v) {
   // ALWAYS reschedule autosave on every dirty edit — the previous early-return
@@ -8362,6 +8400,23 @@ let _autosaveTimer = null;
 function flushAutosave() {
   clearTimeout(_autosaveTimer);
   _autosaveTimer = null;
+  // Same guard as cloudSave's pre-save validation: refuse to autosave a
+  // corrupt state (orphan threadShells, top-level group with no rebuildable
+  // geometry). Without this, the cloud save validation could block but the
+  // autosave silently wrote the same bad state to localStorage — reload
+  // then restored the broken bracket the user thought they'd avoided.
+  for (const b of doc.bodies) {
+    if (b.type === 'threadShell') {
+      console.warn(`Autosave skipped — orphan threadShell body id=${b.id} (would load as a fragment on reopen). Run Remove threads + re-thread to clean up, or undo to the pre-thread state.`);
+      return;
+    }
+    if ((b.type === 'group' || b.type === 'combined') &&
+        !(b.geometry instanceof THREE.BufferGeometry && b.geometry.attributes?.position?.count > 0) &&
+        !(Array.isArray(b.children) && b.children.length)) {
+      console.warn(`Autosave skipped — body id=${b.id} has no geometry and no children to rebuild from.`);
+      return;
+    }
+  }
   try {
     const name = (typeof getProjectName === 'function' ? getProjectName() : '') || 'Untitled';
     const draft = {
@@ -9386,7 +9441,12 @@ function buildFastenerGeometry(body) {
   const length  = body.length || (spec.d * 4);
   const headType = body.headType || 'hex';
   const fit = body.fit || 'tight';
-  const clearance = FASTENER_FIT_CLEARANCE[fit] || 0;
+  // Phase 1 — true-size bolts: fit/clearance is a HOLE property only. A real
+  // bolt renders at its exact catalog size regardless of fit; only a fastener
+  // acting as a cut tool (op === 'subtract') carries the tolerance, so its
+  // ghost silhouette matches the oversized bore it will cut. The hole's actual
+  // cut size lives in buildFastenerCSGMesh, which keeps clearance unchanged.
+  const clearance = body.op === 'subtract' ? (FASTENER_FIT_CLEARANCE[fit] || 0) : 0;
   const pitch = spec.p;
   const rMajor = (spec.d / 2) + clearance;
   const rMinor = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance * 0.4);
@@ -9464,7 +9524,10 @@ function buildFastenerCSGMesh(body) {
   const length  = body.length || (spec.d * 4);
   const headType = body.headType || 'hex';
   const fit = body.fit || 'tight';
-  const clearance = FASTENER_FIT_CLEARANCE[fit] || 0;
+  // True-size bolts: clearance applies only when this fastener is a cut tool
+  // (op === 'subtract'), which is what sizes the hole. A bolt unioned as a
+  // positive stays at its exact catalog size.
+  const clearance = body.op === 'subtract' ? (FASTENER_FIT_CLEARANCE[fit] || 0) : 0;
   const pitch = spec.p;
   const rMajor = (spec.d / 2) + clearance;
   const rMinor = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance * 0.4);
