@@ -17,6 +17,27 @@ export async function deleteStemSketchDesign(id: string): Promise<void> {
   await fetch(`/api/stem-sketch/designs/${id}`, { method: 'DELETE' })
 }
 
+// ─── Blueprint Lab ────────────────────────────────────────────────────────────
+
+export interface BlueprintLabDesign {
+  id: string;
+  name: string;
+  units: string;
+  thumbnail: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+export async function fetchBlueprintLabDesigns(): Promise<BlueprintLabDesign[]> {
+  const res = await fetch('/api/blueprint-lab/designs')
+  if (!res.ok) return []
+  return res.json()
+}
+
+export async function deleteBlueprintLabDesign(id: string): Promise<void> {
+  await fetch(`/api/blueprint-lab/designs/${id}`, { method: 'DELETE' })
+}
+
 export interface BridgeDesign {
   id: string;
   user_id: string;
