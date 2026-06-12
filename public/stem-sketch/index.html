@@ -9228,7 +9228,7 @@ const FASTENER_SPECS = [
   { key: 'M12', label: 'M12', d: 12, af: 19,   p: 1.75, system: 'Metric' },
 ];
 const FASTENER_HEAD_TYPES = ['hex', 'phillips', 'cap', 'flat', 'none'];
-const FASTENER_FIT_CLEARANCE = { tight: 0, normal: 0.1, loose: 0.25 }; // mm radial
+const FASTENER_FIT_CLEARANCE = { tight: 0.35, normal: 0.5, loose: 0.65 }; // mm radial — FDM-tuned: a printed bolt in a printed nut needs generous clearance (printed holes shrink, printed bolts grow). Earlier 0/0.1/0.25 was far too tight to start.
 const FASTENER_HEAD_LABELS = {
   hex: 'Hex bolt', phillips: 'Phillips screw', cap: 'Socket cap', flat: 'Machine screw',
   none: 'Headless (threaded shaft only — for cut-out holes)',
@@ -9338,7 +9338,7 @@ function buildThreadedShaftGeo(rMinor, rMajor, pitch, length, segPerTurn = 24, a
     for (let j = 0; j < N; j++) {
       const theta = (j / N) * 2 * Math.PI;
       // Thread phase = signed axial distance to the helical crest at this θ
-      let phase = (z - theta * pitch / (2 * Math.PI)) % pitch;
+      let phase = (z + theta * pitch / (2 * Math.PI)) % pitch;  // +θ = right-handed (standard); −θ was left-handed
       if (phase >  halfPitch) phase -= pitch;
       else if (phase < -halfPitch) phase += pitch;
       const r = rMajor - (rMajor - rMinor) * Math.abs(phase) / halfPitch;
@@ -9397,7 +9397,7 @@ function buildThreadShellGeo(rMinor, rMajor, rOuter, pitch, length, segPerTurn =
     const z = (i / totalAxialSteps) * length;
     for (let j = 0; j < N; j++) {
       const theta = (j / N) * 2 * Math.PI;
-      let phase = (z - theta * pitch / (2 * Math.PI)) % pitch;
+      let phase = (z + theta * pitch / (2 * Math.PI)) % pitch;  // +θ = right-handed (standard); −θ was left-handed
       if (phase >  halfPitch) phase -= pitch;
       else if (phase < -halfPitch) phase += pitch;
       const rIn = rMajor - (rMajor - rMinor) * Math.abs(phase) / halfPitch;
@@ -10062,9 +10062,9 @@ function openThreadedHoleForMark(sketchId, markId) {
     `<option value="${k}"${k === curHead ? ' selected' : ''}>${FASTENER_HEAD_LABELS[k]}</option>`
   ).join('');
   const fitOpts = [
-    ['tight',  'Tight — actual size'],
-    ['normal', 'Normal — +0.1 mm clearance'],
-    ['loose',  'Loose — +0.25 mm clearance (FDM-friendly)'],
+    ['tight',  'Tight — +0.35 mm (snug FDM)'],
+    ['normal', 'Normal — +0.5 mm (FDM)'],
+    ['loose',  'Loose — +0.65 mm (easy FDM)'],
   ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
 
   openModal({
@@ -10405,9 +10405,9 @@ function openThreadedHolesDialog() {
     `<option value="${k}"${k === curHead ? ' selected' : ''}>${FASTENER_HEAD_LABELS[k]}</option>`
   ).join('');
   const fitOpts = [
-    ['tight',  'Tight — actual size'],
-    ['normal', 'Normal — +0.1 mm clearance'],
-    ['loose',  'Loose — +0.25 mm clearance (FDM-friendly)'],
+    ['tight',  'Tight — +0.35 mm (snug FDM)'],
+    ['normal', 'Normal — +0.5 mm (FDM)'],
+    ['loose',  'Loose — +0.65 mm (easy FDM)'],
   ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
   const titleCount = freshMarks.length;
   const doneNote = doneMarks.length
@@ -10678,9 +10678,9 @@ function openFastenerDialog() {
            <div class="field">
              <label>Fit</label>
              <select id="fastener-fit">
-               <option value="tight" selected>Tight — actual bolt size</option>
-               <option value="normal">Normal — +0.1 mm clearance for printed holes</option>
-               <option value="loose">Loose — +0.25 mm clearance for FDM printed holes</option>
+               <option value="tight" selected>Tight — +0.35 mm (snug FDM)</option>
+               <option value="normal">Normal — +0.5 mm (FDM)</option>
+               <option value="loose">Loose — +0.65 mm (easy FDM)</option>
              </select>
            </div>
            <div class="hint">Tip: drop a Loose fastener inside a body, set its <b>Operation</b> to Negative, then Group → printable threaded hole.</div>`,
@@ -12701,9 +12701,9 @@ function renderProps() {
       ).join('');
       const fit = body.fit || 'tight';
       const fitOpts = `
-        <option value="tight"${fit === 'tight' ? ' selected' : ''}>Tight — actual bolt size</option>
-        <option value="normal"${fit === 'normal' ? ' selected' : ''}>Normal — +0.1 mm clearance</option>
-        <option value="loose"${fit === 'loose' ? ' selected' : ''}>Loose — +0.25 mm clearance (FDM)</option>`;
+        <option value="tight"${fit === 'tight' ? ' selected' : ''}>Tight — +0.35 mm (snug FDM)</option>
+        <option value="normal"${fit === 'normal' ? ' selected' : ''}>Normal — +0.5 mm (FDM)</option>
+        <option value="loose"${fit === 'loose' ? ' selected' : ''}>Loose — +0.65 mm (easy FDM)</option>`;
       dimFields = `<h4>Fastener</h4>
         <div class="field"><label>Head</label><select data-k="headType">${headOpts}</select></div>
         <div class="field"><label>Thread size</label><select data-k="size">${sizeOpts}</select></div>
