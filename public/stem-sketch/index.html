@@ -7286,7 +7286,13 @@ function buildBodyMesh(body) {
     // the CSG-cut hole wall (which sits at exactly (spec.d/2)+clearance).
     const rOuter = (spec.d / 2) + clearance - 0.005;
     const rCrest = Math.max(0.3, rOuter - 0.04);      // thread crest sits just inside the wall
-    const rRoot  = Math.max(0.2, (spec.d / 2) - 0.5413 * pitch);
+    // Phase 3 (mating threads): the internal thread is the BOLT's profile
+    // offset radially OUTWARD by `clearance` everywhere, so a printed bolt
+    // screws into a printed nut with a uniform gap. The bolt is true-size
+    // (rRoot_bolt = d/2 − 0.5413·p); adding `clearance` here gives the nut's
+    // inward ridge the same gap the groove already has. Without the
+    // `+ clearance` the ridge met the bolt's valley at zero gap and bound up.
+    const rRoot  = Math.max(0.2, (spec.d / 2) - 0.5413 * pitch + clearance);
     const shellGeo = buildThreadShellGeo(rRoot, rCrest, rOuter, pitch, body.length);
     // Match the body colour so the shell reads as a feature of the part,
     // not a separate hardware piece (which is the bolt's job).
