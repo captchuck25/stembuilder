@@ -306,6 +306,11 @@ export default function StemSketchClient() {
           let hasDraft = false;
           try { hasDraft = !!localStorage.getItem("stem-sketch:draft"); } catch {}
           if (hasDraft) return;
+          // TEMP (thread-refactor testing): skip auto-loading the most-recent
+          // cloud design. A corrupted/oversized design here was hanging the page
+          // on every reload. Explicit opens (My Work thumbnail → ?id=) above
+          // still work. Remove once Phase 5 (safe load) lands.
+          return;
           try {
             const listRes = await fetch("/api/stem-sketch/designs");
             if (!listRes.ok) return;

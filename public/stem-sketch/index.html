@@ -6280,6 +6280,34 @@ class Viewer3D {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.bodyGroup.add(mesh);
+        // Phase 2 — render this body's threaded holes as helical overlays built
+        // from _mergedShells metadata. They live only in the scene (never in
+        // doc.bodies, never baked into body.geometry, never a CSG input), so
+        // saves stay tiny and thread cuts never ingest shell triangles. Marked
+        // non-raycastable so clicks/picks pass straight through to the body
+        // beneath. Disposed with the rest of bodyGroup on the next rebuild.
+        if (Array.isArray(body._mergedShells) && body._mergedShells.length) {
+          // Parent overlays to the body's OWN mesh so they inherit the group's
+          // position/rotation — the transform the baked shell used to get for
+          // free by living inside body.geometry. The spec is in world coords,
+          // so convert it into the mesh's local frame (inverse(meshWorld) ×
+          // worldShell); adding to bodyGroup at world coords ignored the
+          // group's transform and floated the threads off-centre in the bore.
+          mesh.updateMatrixWorld(true);
+          const invParent = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+          for (const spec of body._mergedShells) {
+            const shellMesh = _buildShellMeshFromSpec(spec);
+            if (shellMesh) {
+              shellMesh.updateMatrix();                 // local = world shaftBottom transform
+              shellMesh.matrix.premultiply(invParent);  // → mesh-local frame
+              shellMesh.matrixAutoUpdate = false;
+              shellMesh.userData.bodyId = body.id;
+              shellMesh.userData.isThreadOverlay = true;
+              shellMesh.raycast = () => {};
+              mesh.add(shellMesh);
+            }
+          }
+        }
         // Edge overlay — only for non-CSG primitives / single extrudes.
         // CSG output is too tessellation-noisy for EdgesGeometry to extract
         // a clean line set: fans around cut cylinders, near-coplanar seams
@@ -7702,9 +7730,12 @@ function rebuildGroupGeometry(group) {
   const positives = group.children.filter(c => c.op !== 'subtract');
   const negatives = group.children.filter(c => c.op === 'subtract');
   if (!positives.length) return;
-  // Build fresh meshes for each child (none of them are in the scene)
+  // Build fresh meshes for each child (none of them are in the scene).
+  // Fasteners MUST use the smooth CSG envelope (buildFastenerCSGMesh), not
+  // buildBodyMesh — the latter returns the non-manifold helical visual mesh,
+  // which makes the boolean explode (same bug fixed in _ensureGroupGeometry).
   const buildMeshFor = (c) => {
-    const m = buildBodyMesh(c);
+    const m = c.type === 'fastener' ? buildFastenerCSGMesh(c) : buildBodyMesh(c);
     if (m) m.updateMatrixWorld(true);
     return m;
   };
@@ -7747,10 +7778,9 @@ function rebuildGroupGeometry(group) {
     // would render as a vanished body without this guard.
     if (baked.attributes?.position?.count > 0) {
       group.geometry = baked;
-      // Re-merge any thread shells the user had merged into this body.
-      // Without this the rebuild silently drops the helical thread visual
-      // every time the user opens / exits a face sketch.
-      _remergeStoredShells(group);
+      // Phase 2 — do NOT re-bake thread shells here. Threads live as
+      // _mergedShells metadata and render via overlay + export only, so the
+      // rebuilt geometry stays shell-free and CSG never re-ingests them.
     } else {
       console.warn(`rebuildGroupGeometry: CSG produced an empty result for group id=${group.id}; keeping previous geometry.`);
     }
@@ -8450,6 +8480,18 @@ function restoreLocalDraft() {
   try { raw = localStorage.getItem(LOCAL_DRAFT_KEY); }
   catch (err) { console.warn('STEM Sketch localStorage read failed:', err); return false; }
   if (!raw) return false;
+  // Safe-load guard (Phase 5 down-payment): a corrupted / over-cut design
+  // rebuilds for minutes via applySnapshot and hangs the whole page on every
+  // reload. If the draft is implausibly large, SKIP the auto-restore (don't
+  // delete it — the user can still open it explicitly from the cloud) and
+  // start empty. A healthy design is KB to a few hundred KB; >8 MB means the
+  // CSG geometry exploded.
+  const LOCAL_DRAFT_MAX_BYTES = 2_000_000;
+  if (raw.length > LOCAL_DRAFT_MAX_BYTES) {
+    console.warn(`STEM Sketch: local draft is ${(raw.length / 1e6).toFixed(1)} MB — too large to auto-restore safely (CSG geometry likely exploded). Starting empty; the draft is kept, open it via 📂 Load if needed.`);
+    setStatus('⚠ Last session too large to auto-restore — started empty. Use 📂 Load to open a design.');
+    return false;
+  }
   let draft;
   try { draft = JSON.parse(raw); }
   catch (err) {
@@ -9639,6 +9681,26 @@ function _remergeStoredShells(body) {
   for (const spec of body._mergedShells) _mergeOneShellInto(body, spec);
 }
 
+// Phase 2 — threads are parametric, never baked. Build a positioned thread-
+// shell mesh from a stored _mergedShells spec WITHOUT touching any body
+// geometry. Used to render the helix as a viewport overlay (rebuildBodies)
+// and to weld threads into the STL at export (_bodiesToSTL). Keeping shell
+// triangles out of body.geometry is what fixes the save-bloat / BSP-explosion
+// corruption: no thread mesh is ever a CSG input or part of a saved snapshot.
+// (_mergeOneShellInto / _remergeStoredShells above are now legacy — no live
+// caller bakes shells into geometry anymore.)
+function _buildShellMeshFromSpec(spec) {
+  if (!spec) return null;
+  return buildBodyMesh({
+    type: 'threadShell',
+    size: spec.size,
+    length: spec.length,
+    fit: spec.fit,
+    x: spec.x, y: spec.y, z: spec.z,
+    rotation: spec.rotation,
+  });
+}
+
 // Will rendering this body produce ANYTHING visible? Catches the cases
 // _ensureGroupGeometry calls 'success' but actually returns a degenerate
 // result — empty geometry, zero-volume bounding sphere, NaN positions.
@@ -9700,8 +9762,17 @@ function _ensureGroupGeometry(body) {
       _ensureGroupGeometry(c);
     }
   }
-  const meshes = body.children.map(c => ({ child: c, mesh: buildBodyMesh(c) }))
-                              .filter(m => m.mesh);
+  // CRITICAL: fastener cutters MUST use the smooth CSG envelope
+  // (buildFastenerCSGMesh), NOT buildBodyMesh. buildBodyMesh returns a
+  // fastener's HELICAL VISUAL mesh, which is non-manifold and makes the BSP
+  // boolean explode (a 4-hole reload rebuilt to 215k→898k→2.24M→4.7M verts and
+  // hung the page for minutes). The fresh-draw path already routes fasteners
+  // through getCSGMesh → buildFastenerCSGMesh; this rebuild-on-load path was
+  // the one place that didn't, so reloaded threaded designs re-exploded.
+  const meshes = body.children.map(c => ({
+    child: c,
+    mesh: c.type === 'fastener' ? buildFastenerCSGMesh(c) : buildBodyMesh(c),
+  })).filter(m => m.mesh);
   if (!meshes.length) return false;
   const positives = meshes.filter(m => m.child.op !== 'subtract').map(m => m.mesh);
   const negatives = meshes.filter(m => m.child.op === 'subtract').map(m => m.mesh);
@@ -9722,9 +9793,11 @@ function _ensureGroupGeometry(body) {
     geo.applyMatrix4(result.matrixWorld);
     geo.computeVertexNormals();
     body.geometry = geo;
-    // Re-merge stored thread shells onto the freshly-baked geometry so
-    // ungroup of a threaded body keeps the helical thread visual.
-    _remergeStoredShells(body);
+    // Phase 2 — threads are NOT baked into geometry anymore; the viewport
+    // overlay + STL export regenerate them from _mergedShells metadata, which
+    // rides the snapshot untouched. Leave the rebuilt geometry shell-free —
+    // this also stops the rebuild from re-ingesting non-manifold shells (the
+    // corruption root cause).
     return true;
   } catch (err) {
     console.warn('_ensureGroupGeometry CSG rebuild failed:', err);
@@ -10412,16 +10485,25 @@ function processThreadMarks(sketch, marks, opts) {
     // The shaft bottom (local y=0) needs to be at markWorld + holeAxis * depth.
     // Mesh origin = shaft bottom, so body.x/y/z = that point.
     const shaftBottom = markWorld.clone().add(holeAxis.clone().multiplyScalar(opts.depth));
-    // Headless negative — the actual cut tool. Length = depth so the
-    // thread fully occupies the hole.
+    // Headless negative — the actual cut tool. Overshoot BOTH ends by
+    // CUT_OVERSHOOT so neither cap is coplanar with a body face: the entry
+    // (top) surface AND the exit (bottom) face for a through-hole. A coplanar
+    // cap makes the BSP boolean (csg.js) shatter the cut region into thousands
+    // of sliver triangles — the driver of the per-cut vertex explosion (a
+    // through-cut was 107k verts; a blind cut with only the top fixed was a
+    // clean ~1k). The functional thread region is still exactly `depth` (the
+    // visual shell uses depth); the cutter just pokes ~1mm past each surface it
+    // crosses — air above the entry, clearance below a blind bottom.
+    const CUT_OVERSHOOT = 1; // mm
+    const cutBottom = shaftBottom.clone().add(holeAxis.clone().multiplyScalar(CUT_OVERSHOOT));
     const hole = {
       id: doc.nextBodyId++,
       type: 'fastener',
       headType: 'none',
       size: opts.size,
-      length: opts.depth,
+      length: opts.depth + 2 * CUT_OVERSHOOT,
       fit: opts.fit,
-      x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
+      x: cutBottom.x, y: cutBottom.y, z: cutBottom.z,
       rotation: { ...rotDeg },
       op: 'subtract',
     };
@@ -10474,18 +10556,17 @@ function processThreadMarks(sketch, marks, opts) {
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
       };
-      const ok = _mergeOneShellInto(parentAfterCut, shellSpec);
-      if (ok) {
-        // Persist the spec so any later CSG rebuild (rebuildGroupGeometry
-        // off a face-sketch Done, _ensureGroupGeometry on ungroup, an undo
-        // restore) can re-merge the shells onto the freshly-baked
-        // geometry. Tag the spec with markId so a single-mark peel can
-        // remove only that mark's shell entry instead of nuking the
-        // whole list.
-        parentAfterCut._mergedShells = parentAfterCut._mergedShells || [];
-        parentAfterCut._mergedShells.push({ ...shellSpec, markId: m.id });
-        m._mergedShellInBodyId = parentAfterCut.id;
-      }
+      // Phase 2 — record the thread as lightweight metadata only; do NOT bake
+      // it into the parent's geometry. The viewport overlay (rebuildBodies) and
+      // the STL export both regenerate the helix from this spec. Keeping shell
+      // triangles out of body.geometry is the fix for the save-bloat / BSP-
+      // explosion corruption: the next thread cut's CSG input stays a clean
+      // smooth-bore body, and the saved snapshot carries ~8 numbers per hole
+      // instead of a non-manifold mesh. Tag with markId so a single-mark peel
+      // removes only that mark's entry.
+      parentAfterCut._mergedShells = parentAfterCut._mergedShells || [];
+      parentAfterCut._mergedShells.push({ ...shellSpec, markId: m.id });
+      m._mergedShellInBodyId = parentAfterCut.id;
     } else {
       // No parent body (the sketch is freestanding) — fall back to a
       // standalone shell body so the user still gets a thread visual.
@@ -12937,6 +13018,24 @@ function _bodiesToSTL(bodies, solidName = 'mini_cad') {
     if (!mesh) continue;
     let geo = mesh.geometry.clone();
     geo.applyMatrix4(mesh.matrixWorld);
+    // Phase 2 — threads are no longer baked into body.geometry; regenerate them
+    // from _mergedShells metadata and weld them in here so printed parts keep
+    // their threads. This merge is a pure triangle concat (never a CSG boolean)
+    // and runs only at export, so it can't bloat the save or destabilise a
+    // later cut. The _cleanGeometryForExport weld below fuses shell to bore.
+    if (Array.isArray(body._mergedShells) && body._mergedShells.length) {
+      const parts = [geo];
+      for (const spec of body._mergedShells) {
+        const sm = _buildShellMeshFromSpec(spec);
+        if (!sm) continue;
+        sm.updateMatrixWorld(true);
+        const sg = sm.geometry.clone();
+        sg.applyMatrix4(sm.matrixWorld);
+        parts.push(sg);
+        sm.geometry.dispose();
+      }
+      if (parts.length > 1) geo = _mergeBufferGeometries(parts);
+    }
     // Capture vertex count before cleanup so we can report the welding
     // ratio to the user — useful when they're debugging an actual print.
     const beforeVerts = geo.attributes.position?.count || 0;
@@ -14685,6 +14784,19 @@ window.addEventListener('beforeunload', (e) => {
 window.addEventListener('message', (e) => {
   const data = e.data || {};
   if (data.type === 'STEMSKETCH_LOAD') {
+    // Safe-load guard: refuse to apply an over-large cloud design. A design
+    // whose CSG geometry exploded (2M+ verts) makes loadDesignFromJson →
+    // applySnapshot hang the whole page for minutes. This is the cloud-side
+    // twin of the localStorage-draft guard in restoreLocalDraft — together they
+    // cover every load path. The bloated design is left in the cloud; the user
+    // just can't open it until it's been rebuilt/repaired (Phase 5 migration).
+    let loadBytes = 0;
+    try { loadBytes = JSON.stringify(data.docJson || '').length; } catch (_) {}
+    if (loadBytes > 2_000_000) {
+      console.warn(`STEMSKETCH_LOAD: refusing "${data.name}" — ${(loadBytes / 1e6).toFixed(1)} MB (CSG geometry likely exploded). Canvas left unchanged.`);
+      setStatus(`⚠ "${data.name || 'Design'}" is too large to open safely (${(loadBytes / 1e6).toFixed(1)} MB) — left it closed.`);
+      return;
+    }
     // Loading a cloud design replaces the local autosave draft so refresh
     // restores the cloud content, not the previous in-progress draft.
     loadDesignFromJson(data.name, data.docJson, data.units);
