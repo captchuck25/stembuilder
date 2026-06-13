@@ -154,6 +154,7 @@ export default function ClassDetailPage() {
 
   // Class settings state
   const [showSettings, setShowSettings] = useState(false);
+  const [showClassSwitcher, setShowClassSwitcher] = useState(false);
   const [editName, setEditName] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState("");
@@ -1284,8 +1285,63 @@ export default function ClassDetailPage() {
           {/* Class header */}
           <div style={{ ...CARD, padding: "22px 28px", marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-              <div>
-                <h1 style={{ fontSize: 28, fontWeight: 900, color: "#111", margin: "0 0 10px" }}>{cls.name}</h1>
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowClassSwitcher(s => !s)}
+                  style={{ fontSize: 28, fontWeight: 900, color: "#111", margin: "0 0 10px",
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", gap: 10, lineHeight: 1.1,
+                    fontFamily: "inherit" }}
+                  title="Switch class"
+                  aria-haspopup="listbox"
+                  aria-expanded={showClassSwitcher}>
+                  {cls.name}
+                  <span style={{ fontSize: 18, color: "#6b7280", fontWeight: 800,
+                    transform: showClassSwitcher ? "rotate(180deg)" : "none", transition: "transform 120ms" }}>▾</span>
+                </button>
+                {showClassSwitcher && (
+                  <>
+                    {/* Click-away overlay */}
+                    <div
+                      onClick={() => setShowClassSwitcher(false)}
+                      style={{ position: "fixed", inset: 0, zIndex: 50, background: "transparent" }} />
+                    <div role="listbox" style={{ position: "absolute", top: "100%", left: 0, marginTop: 4,
+                      minWidth: 260, maxHeight: 360, overflowY: "auto",
+                      background: "#fff", border: "2px solid #1f1f1f", borderRadius: 12,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.20)", zIndex: 51,
+                      padding: 6 }}>
+                      {/* Current class — non-clickable, just to show selection */}
+                      <div style={{ padding: "10px 14px", borderRadius: 8, background: "#eff6ff",
+                        color: "#1d4ed8", fontWeight: 800, fontSize: 14, display: "flex",
+                        alignItems: "center", gap: 8 }}>
+                        <span>✓</span> {cls.name}
+                      </div>
+                      {[...otherClasses].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { setShowClassSwitcher(false); router.push(`/teachers/classes/${c.id}`); }}
+                          style={{ display: "block", width: "100%", textAlign: "left",
+                            padding: "10px 14px", borderRadius: 8, border: "none", background: "transparent",
+                            color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer",
+                            fontFamily: "inherit" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#f3f4f6"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                          {c.name}
+                        </button>
+                      ))}
+                      <Link
+                        href="/teachers/dashboard"
+                        onClick={() => setShowClassSwitcher(false)}
+                        style={{ display: "block", marginTop: 6, padding: "10px 14px",
+                          borderTop: "1px solid #e5e7eb", color: "#2563eb", fontWeight: 800,
+                          fontSize: 13, textDecoration: "none" }}>
+                        ← All classes
+                      </Link>
+                    </div>
+                  </>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
                   <div style={{ background: "#f0f4ff", border: "2px solid #c7d7fd", borderRadius: 10,
                     padding: "6px 16px", display: "inline-flex", alignItems: "center", gap: 8 }}>
