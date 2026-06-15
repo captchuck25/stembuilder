@@ -31,6 +31,9 @@ interface Progress {
   completedChallenges: Record<string, boolean>; // "levelIdx_chalIdx"
   completedLevels: Record<number, boolean>;
   savedCode: Record<string, string>;           // "levelIdx_chalIdx" → last code
+  // Quiz scores by level_idx. Kept in localStorage too so a failed cloud sync
+  // doesn't lose the score forever — the next sign-in merge can re-push it.
+  quizScores?: Record<number, number>;
   migrationVersion?: number;                   // bump to invalidate stale savedCode
 }
 
@@ -103,14 +106,17 @@ async function loadProgressFromCloud(_userId: string): Promise<Progress> {
   const res = await fetch("/api/progress?tool=code-lab-python");
   const data = res.ok ? await res.json() : [];
 
-  const p: Progress = { completedChallenges: {}, completedLevels: {}, savedCode: {} };
+  const p: Progress = { completedChallenges: {}, completedLevels: {}, savedCode: {}, quizScores: {} };
   for (const row of data ?? []) {
     if (row.challenge_idx !== null && row.challenge_idx >= 0) {
       const key = `${row.level_idx}_${row.challenge_idx}`;
       if (row.completed) p.completedChallenges[key] = true;
       if (row.saved_code) p.savedCode[key] = row.saved_code;
-    } else if (row.completed) {
-      p.completedLevels[row.level_idx] = true;
+    } else {
+      if (row.completed) p.completedLevels[row.level_idx] = true;
+      if (row.quiz_score !== null && row.quiz_score !== undefined) {
+        p.quizScores![row.level_idx] = row.quiz_score;
+      }
     }
   }
   return p;
@@ -1444,6 +1450,7 @@ export default function PythonMazePage() {
           completedChallenges: { ...cloudP.completedChallenges, ...localP.completedChallenges },
           completedLevels:     { ...cloudP.completedLevels,     ...localP.completedLevels },
           savedCode:           { ...cloudP.savedCode,           ...localP.savedCode },
+          quizScores:          { ...(cloudP.quizScores ?? {}),  ...(localP.quizScores ?? {}) },
           migrationVersion:    localP.migrationVersion,
         };
         progressRef.current = merged;
@@ -1462,6 +1469,16 @@ export default function PythonMazePage() {
           const li = parseInt(liStr, 10);
           if (localP.completedLevels[li] && !cloudP.completedLevels[li]) {
             syncProgressToCloud(userId, li, null, true);
+          }
+        }
+        // Back-fill quiz scores that are in localStorage but missing from cloud
+        // (or where the cloud quiz_score got clobbered by a prior sync bug).
+        for (const liStr of Object.keys(localP.quizScores ?? {})) {
+          const li = parseInt(liStr, 10);
+          const localScore = localP.quizScores?.[li];
+          const cloudScore = cloudP.quizScores?.[li];
+          if (typeof localScore === "number" && cloudScore !== localScore) {
+            syncProgressToCloud(userId, li, null, true, undefined, localScore);
           }
         }
       });
@@ -1542,6 +1559,14 @@ export default function PythonMazePage() {
   } else if (phase.tag === "quiz") {
     view = (
       <QuizView li={phase.li} onComplete={(score,total) => {
+        // Persist the score locally FIRST so a failed cloud sync can be
+        // recovered on next login (see merge logic in loadProgressFromCloud).
+        const newProgress: Progress = {
+          ...progressRef.current,
+          completedLevels: { ...progressRef.current.completedLevels, [phase.li]: true },
+          quizScores: { ...(progressRef.current.quizScores ?? {}), [phase.li]: score },
+        };
+        updateProgress(newProgress);
         if (userId) syncProgressToCloud(userId, phase.li, null, true, undefined, score);
         setPhase({tag:"complete",li:phase.li,score,total});
       }}/>
