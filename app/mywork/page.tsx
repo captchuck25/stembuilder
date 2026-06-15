@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, fetchBlueprintLabDesigns, deleteBlueprintLabDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign, BlueprintLabDesign } from "@/lib/achievements";
+import { runTurtleBackfillOnce } from "@/lib/turtle-backfill";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 
 // ─── Static metadata ──────────────────────────────────────────────────────────
@@ -747,6 +748,9 @@ export default function AchievementsPage() {
   useEffect(() => {
     if (status === "loading" || !session?.user?.id) { setDataLoading(false); return; }
     const uid = session.user.id;
+    // Sync any localStorage-only turtle tutorial completions to the server —
+    // gated by a per-user flag so it runs at most once per device.
+    void runTurtleBackfillOnce(uid);
 
     Promise.all([
       fetchCodeLabProgress(uid),

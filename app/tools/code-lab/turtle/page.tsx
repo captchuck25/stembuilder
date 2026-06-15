@@ -7,6 +7,7 @@ import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { CHALLENGES, type TurtleChallenge } from "./challenges";
 import { saveTurtleWork, submitTurtleWork, fetchTurtleSubmission } from "@/lib/achievements";
+import { runTurtleBackfillOnce } from "@/lib/turtle-backfill";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CS      = 500;
@@ -552,43 +553,12 @@ export default function TurtlePage() {
     } catch {}
   }, []);
 
-  // One-time backfill: tutorial completions used to be localStorage-only, so any
-  // student who finished tutorials before server sync existed has nothing on the
-  // teacher dashboard. On the next page load after sign-in, push those completions
-  // up so the teacher sees them. Server-side lock enforcement on /api/turtle will
-  // reject currently-locked items, which is the correct behavior.
+  // One-time backfill of localStorage-only tutorial completions. Logic lives
+  // in lib/turtle-backfill so other entry points can call it too.
   useEffect(() => {
-    if (!session?.user || !userId) return;
-    const FLAG_KEY = `turtle_backfill_done:${userId}`;
-    if (localStorage.getItem(FLAG_KEY) === "1") return;
-    let localIds: string[] = [];
-    try {
-      const saved = localStorage.getItem("turtle_completed");
-      if (saved) localIds = JSON.parse(saved) as string[];
-    } catch {}
-    // Only backfill tutorials — challenges have their own explicit save/submit flow.
-    const tutorialIdSet = new Set(CHALLENGES.filter(c => c.category === "tutorial").map(c => c.id));
-    const toBackfill = localIds.filter(id => tutorialIdSet.has(id));
-    if (toBackfill.length === 0) {
-      localStorage.setItem(FLAG_KEY, "1");
-      return;
-    }
-    (async () => {
-      try {
-        const res = await fetch("/api/turtle");
-        const existing: Array<{ challenge_id: string }> = res.ok ? await res.json() : [];
-        const existingIds = new Set(existing.map(s => s.challenge_id));
-        const missing = toBackfill.filter(id => !existingIds.has(id));
-        for (const id of missing) {
-          const ch = CHALLENGES.find(c => c.id === id);
-          if (!ch) continue;
-          await saveTurtleWork(userId, id, ch.starterCode, "").catch(() => {});
-        }
-      } finally {
-        localStorage.setItem(FLAG_KEY, "1");
-      }
-    })();
-  }, [userId, session?.user]);
+    if (!userId) return;
+    void runTurtleBackfillOnce(userId);
+  }, [userId]);
 
   // Check if student is enrolled in any class
   useEffect(() => {
