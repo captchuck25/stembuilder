@@ -1667,7 +1667,9 @@ export default function ClassDetailPage() {
                   row.push(sub ? "Completed" : "—");
                 }
                 for (const ch of challenges) {
-                  const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
+                  // Only treat as a submission when submitted_at is set — drafts and
+                  // tutorial completions also live in turtle_submissions.
+                  const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id && !!x.submitted_at);
                   row.push(
                     !sub ? "No submission"
                     : sub.approved === true ? "Approved"
@@ -1860,7 +1862,10 @@ export default function ClassDetailPage() {
                               );
                             })}
                             {assignedChallenges.map((ch, i) => {
-                              const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
+                              // For challenges, only treat as a submission when submitted_at is set.
+                              // The endpoint now returns all rows (including tutorial completions and
+                              // challenge auto-save drafts), so we filter here per category.
+                              const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id && !!x.submitted_at);
                               if (!sub) {
                                 return (
                                   <td key={ch.id} style={{ ...TD, textAlign: "center", verticalAlign: "middle", color: "#ccc",
