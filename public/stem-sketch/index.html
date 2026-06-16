@@ -4882,7 +4882,7 @@ function projectBodiesOntoPlane(plane) {
       const fit = child.fit || 'tight';
       // True-size bolts: only a cut tool (op === 'subtract') gets the fit
       // clearance in its silhouette; a real bolt projects at its true radius.
-      const clearance = child.op === 'subtract' ? (FASTENER_FIT_CLEARANCE[fit] || 0) : 0;
+      const clearance = child.op === 'subtract' ? _threadClearance(fit, spec.p) : 0;
       const r = (spec.d / 2) + clearance;
       const lengthBolt = child.length || (spec.d * 4);
       const cx = (child.x || 0) + (parentOffset?.x || 0);
@@ -7279,8 +7279,8 @@ function buildBodyMesh(body) {
   if (body.type === 'threadShell') {
     const spec = getFastenerSpec(body.size);
     if (!spec) return null;
-    const fit = body.fit || 'loose';
-    const clearance = FASTENER_FIT_CLEARANCE[fit] || 0;
+    const fit = body.fit || 'normal';
+    const clearance = _threadClearance(fit, spec.p);
     const pitch = spec.p;
     // Inset rOuter by a hair so the smooth shell wall doesn't z-fight with
     // the CSG-cut hole wall (which sits at exactly (spec.d/2)+clearance).
@@ -9228,7 +9228,16 @@ const FASTENER_SPECS = [
   { key: 'M12', label: 'M12', d: 12, af: 19,   p: 1.75, system: 'Metric' },
 ];
 const FASTENER_HEAD_TYPES = ['hex', 'phillips', 'cap', 'flat', 'none'];
-const FASTENER_FIT_CLEARANCE = { tight: 0.35, normal: 0.5, loose: 0.65 }; // mm radial — FDM-tuned: a printed bolt in a printed nut needs generous clearance (printed holes shrink, printed bolts grow). Earlier 0/0.1/0.25 was far too tight to start.
+const FASTENER_FIT_CLEARANCE = { tight: 0.3, normal: 0.35, loose: 0.4 }; // mm radial — FDM-tuned from 1/4-20 test prints: <0.25 won't start, ~0.3-0.35 is the sweet spot, >0.45 stops gripping.
+// Effective hole clearance for a fit + thread pitch. FDM print error is
+// ABSOLUTE, so the base clearance is constant across bolt SIZES. But thread
+// depth = 0.5413*pitch, and if clearance nears that depth the thread vanishes
+// — so cap at 70% of thread depth. No effect on coarse threads (1/4-20 cap is
+// ~0.48mm); only protects fine/small pitches (~M5 and below) from losing grip.
+function _threadClearance(fit, pitch) {
+  const base = FASTENER_FIT_CLEARANCE[fit] || 0;
+  return Math.min(base, 0.7 * 0.5413 * (pitch || 1));
+}
 const FASTENER_HEAD_LABELS = {
   hex: 'Hex bolt', phillips: 'Phillips screw', cap: 'Socket cap', flat: 'Machine screw',
   none: 'Headless (threaded shaft only — for cut-out holes)',
@@ -9494,7 +9503,7 @@ function buildFastenerGeometry(body) {
   // acting as a cut tool (op === 'subtract') carries the tolerance, so its
   // ghost silhouette matches the oversized bore it will cut. The hole's actual
   // cut size lives in buildFastenerCSGMesh, which keeps clearance unchanged.
-  const clearance = body.op === 'subtract' ? (FASTENER_FIT_CLEARANCE[fit] || 0) : 0;
+  const clearance = body.op === 'subtract' ? _threadClearance(fit, spec.p) : 0;
   const pitch = spec.p;
   const rMajor = (spec.d / 2) + clearance;
   const rMinor = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance * 0.4);
@@ -9575,7 +9584,7 @@ function buildFastenerCSGMesh(body) {
   // True-size bolts: clearance applies only when this fastener is a cut tool
   // (op === 'subtract'), which is what sizes the hole. A bolt unioned as a
   // positive stays at its exact catalog size.
-  const clearance = body.op === 'subtract' ? (FASTENER_FIT_CLEARANCE[fit] || 0) : 0;
+  const clearance = body.op === 'subtract' ? _threadClearance(fit, spec.p) : 0;
   const pitch = spec.p;
   const rMajor = (spec.d / 2) + clearance;
   const rMinor = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance * 0.4);
@@ -10048,7 +10057,7 @@ function openThreadedHoleForMark(sketchId, markId) {
   const defDepthUnits = doc.units === 'in' ? 0.5 : 12;
   const curSize     = prev.size     || 'M5';
   const curDepthUL  = (typeof prev.depth === 'number') ? toUnit(prev.depth) : defDepthUnits;
-  const curFit      = prev.fit      || 'loose';
+  const curFit      = prev.fit      || 'normal';
   const curHead     = prev.boltHead || 'hex';
   const curPlaceBolt = (prev.placeBolt !== undefined) ? !!prev.placeBolt : true;
 
@@ -10062,9 +10071,9 @@ function openThreadedHoleForMark(sketchId, markId) {
     `<option value="${k}"${k === curHead ? ' selected' : ''}>${FASTENER_HEAD_LABELS[k]}</option>`
   ).join('');
   const fitOpts = [
-    ['tight',  'Tight — +0.35 mm (snug FDM)'],
-    ['normal', 'Normal — +0.5 mm (FDM)'],
-    ['loose',  'Loose — +0.65 mm (easy FDM)'],
+    ['tight',  'Tight — +0.3 mm (firm)'],
+    ['normal', 'Normal — +0.35 mm (recommended)'],
+    ['loose',  'Loose — +0.4 mm (easy)'],
   ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
 
   openModal({
@@ -10395,7 +10404,7 @@ function openThreadedHolesDialog() {
   const u = unitLabel();
   const defDepthUL = (typeof seed.depth === 'number') ? toUnit(seed.depth) : (doc.units === 'in' ? 0.5 : 12);
   const curSize  = seed.size     || 'M5';
-  const curFit   = seed.fit      || 'loose';
+  const curFit   = seed.fit      || 'normal';
   const curHead  = seed.boltHead || 'hex';
   const curBolt  = (seed.placeBolt !== undefined) ? !!seed.placeBolt : true;
   const sizeOpts = FASTENER_SPECS.map(s =>
@@ -10405,9 +10414,9 @@ function openThreadedHolesDialog() {
     `<option value="${k}"${k === curHead ? ' selected' : ''}>${FASTENER_HEAD_LABELS[k]}</option>`
   ).join('');
   const fitOpts = [
-    ['tight',  'Tight — +0.35 mm (snug FDM)'],
-    ['normal', 'Normal — +0.5 mm (FDM)'],
-    ['loose',  'Loose — +0.65 mm (easy FDM)'],
+    ['tight',  'Tight — +0.3 mm (firm)'],
+    ['normal', 'Normal — +0.35 mm (recommended)'],
+    ['loose',  'Loose — +0.4 mm (easy)'],
   ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
   const titleCount = freshMarks.length;
   const doneNote = doneMarks.length
@@ -10678,9 +10687,9 @@ function openFastenerDialog() {
            <div class="field">
              <label>Fit</label>
              <select id="fastener-fit">
-               <option value="tight" selected>Tight — +0.35 mm (snug FDM)</option>
-               <option value="normal">Normal — +0.5 mm (FDM)</option>
-               <option value="loose">Loose — +0.65 mm (easy FDM)</option>
+               <option value="tight">Tight — +0.3 mm (firm)</option>
+               <option value="normal" selected>Normal — +0.35 mm (recommended)</option>
+               <option value="loose">Loose — +0.4 mm (easy)</option>
              </select>
            </div>
            <div class="hint">Tip: drop a Loose fastener inside a body, set its <b>Operation</b> to Negative, then Group → printable threaded hole.</div>`,
@@ -12701,9 +12710,9 @@ function renderProps() {
       ).join('');
       const fit = body.fit || 'tight';
       const fitOpts = `
-        <option value="tight"${fit === 'tight' ? ' selected' : ''}>Tight — +0.35 mm (snug FDM)</option>
-        <option value="normal"${fit === 'normal' ? ' selected' : ''}>Normal — +0.5 mm (FDM)</option>
-        <option value="loose"${fit === 'loose' ? ' selected' : ''}>Loose — +0.65 mm (easy FDM)</option>`;
+        <option value="tight"${fit === 'tight' ? ' selected' : ''}>Tight — +0.3 mm (firm)</option>
+        <option value="normal"${fit === 'normal' ? ' selected' : ''}>Normal — +0.35 mm (recommended)</option>
+        <option value="loose"${fit === 'loose' ? ' selected' : ''}>Loose — +0.4 mm (easy)</option>`;
       dimFields = `<h4>Fastener</h4>
         <div class="field"><label>Head</label><select data-k="headType">${headOpts}</select></div>
         <div class="field"><label>Thread size</label><select data-k="size">${sizeOpts}</select></div>
