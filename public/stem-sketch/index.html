@@ -13100,11 +13100,16 @@ function exportSTL(opts = {}) {
     showHint('No 3D bodies yet — extrude a sketch or add a cube.');
     return;
   }
-  // Default: every positive body. Negatives are exclude (they're cut-tools,
-  // already represented by holes in the combined body).
+  // Default: every VISIBLE positive body. Negatives are excluded (cut-tools,
+  // already represented by holes in the combined body). HIDDEN bodies are
+  // excluded too — most importantly the visualizer bolts that sit inside each
+  // threaded hole: if hidden they shouldn't print, but the old filter exported
+  // them anyway, so they showed up as threaded tubes poking out of the holes in
+  // the slicer. (Explicit opts.bodyIds still exports exactly what's requested —
+  // e.g. select a bolt and export it on purpose.)
   const bodies = opts.bodyIds
     ? opts.bodyIds.map(id => doc.bodies.find(b => b.id === id)).filter(Boolean)
-    : doc.bodies.filter(b => b.op !== 'subtract');
+    : doc.bodies.filter(b => b.op !== 'subtract' && !b.hidden);
   if (!bodies.length) { showHint('Pick at least one body to export.'); return; }
   if (opts.combine) {
     download(_bodiesToSTL(bodies), getProjectName() + '.stl', 'model/stl');
