@@ -27,7 +27,10 @@ import {
   formatImperial, formatJoistLabel,
 } from './types';
 import { T } from './theme';
-import { buildRoofTopology, roofHeightAt } from './roofTopology';
+import {
+  buildRoofTopology, roofHeightAt,
+  buildRoofTiers, hasSetback, roofHeightAtAbsolute,
+} from './roofTopology';
 
 // Re-exported for back-compat with consumers that imported these from this
 // module. New code should import directly from './types'.
@@ -502,20 +505,84 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
   // is the real pitch only for a gable, and 0 otherwise (so walls/CJ get the
   // flat treatment while the roof block draws the true surface separately).
   const roofOverhang = Math.max(0, project.roof.overhang || 0);
-  const roofShape = classifySectionRoof(
+  let roofShape = classifySectionRoof(
     project, cut, cutAnalysis, halfBuildingWidth, roofOverhang, stack.topOfWallsY,
   );
-  // EQUAL-HEIGHT convention (matches the elevations): a gable section draws its
-  // ridge at the building's tallest-ridge height H, so two sections through
-  // different-width parts of the house come out the SAME height. The pitch is
-  // back-solved to reach H over THIS section's half-width — the widest (primary)
-  // section keeps ~the design pitch; narrower sections get a steeper one.
-  const effectiveRoofPitch = (() => {
-    if (roofShape.kind !== 'gable') return 0;
-    const H = roofShape.equalAboveWalls;
-    if (!(H > 0) || halfBuildingWidth <= 0) return roofShape.pitch;
-    return (12 * H) / halfBuildingWidth;
-  })();
+
+  // ── Setback (smaller upper floor) detection ────────────────────────────────
+  // When the cut crosses a genuine setback, the upper floor occupies only PART
+  // of the section width: the covered sub-span draws full (2-story) height, the
+  // rest draws one story, and the roof steps. Everything below is GATED on
+  // `setbackCut` so single-story and identical-footprint two-story sections stay
+  // byte-identical. The upper-floor span is found by re-running the cut analysis
+  // against ONLY the upper level, mapped into the same section frame as the
+  // first-floor walls ((planPos − centerPlanX) × dirSign).
+  const fullLeftIn = -halfBuildingWidth;
+  const fullRightIn = +halfBuildingWidth;
+  let setbackCut = false;       // cut crosses the step: part 2-story, part 1-story
+  let oneStoryCut = false;      // cut lies entirely in a one-story region of a setback house
+  let upperLeftIn = fullLeftIn;     // section-X span of the upper floor (= full when not setback)
+  let upperRightIn = fullRightIn;
+  if (useCut && cut && secondFloor && hasSetback(project)) {
+    const tiers = buildRoofTiers(project);
+    const upper = project.levels.reduce((a, b) => (b.elevation > a.elevation ? b : a));
+    const caU = analyzeSectionCut({ ...project, activeLevelId: upper.id }, cut);
+    if (caU.leftHit && caU.rightHit) {
+      const e1 = (caU.leftHit.pos - cutAnalysis!.centerPlanX) * dirSign;
+      const e2 = (caU.rightHit.pos - cutAnalysis!.centerPlanX) * dirSign;
+      const uL = Math.min(e1, e2), uR = Math.max(e1, e2);
+      // Genuine setback only when the upper span is meaningfully narrower than
+      // the full section width (one or both sides drop to a single story).
+      if (uR - uL < (fullRightIn - fullLeftIn) - 6) {
+        setbackCut = true;
+        upperLeftIn = Math.max(uL, fullLeftIn);
+        upperRightIn = Math.min(uR, fullRightIn);
+      }
+    } else {
+      // The upper floor doesn't span this cut at all → the section is entirely
+      // in a one-story region (e.g. a transverse cut through the wing). Drop the
+      // second floor and ceil/roof at the first-floor plate.
+      oneStoryCut = true;
+    }
+    if (setbackCut || oneStoryCut) {
+      // Honest roof surface from the tiers (main roof + lower wing roof tying
+      // into the 2-story wall, or just the wing roof for a one-story cut).
+      // Sampled in the PRE-dirSign frame (planPos = centerPlanX + sx) to match
+      // the profile renderer, which re-applies dirSign. Absolute world Y comes
+      // straight from roofHeightAtAbsolute.
+      const towY = oneStoryCut ? stack.firstFloorPlateTopY : stack.topOfWallsY;
+      const center = cutAnalysis!.centerPlanX;
+      const planAt = (sx: number): Vec2 =>
+        cut.axis === 'y' ? { x: cut.position, y: center + sx } : { x: center + sx, y: cut.position };
+      const surface: Vec2[] = [];
+      let maxAbs = -Infinity;
+      for (let sx = fullLeftIn - roofOverhang; sx <= fullRightIn + roofOverhang + 0.001; sx += 4) {
+        const y = roofHeightAtAbsolute(tiers, planAt(sx));
+        if (y == null) continue;
+        surface.push({ x: sx, y });
+        if (y > maxAbs) maxAbs = y;
+      }
+      if (surface.length >= 2 && Number.isFinite(maxAbs)) {
+        const maxAboveWalls = maxAbs - towY;
+        roofShape = { kind: 'profile', pitch: roofShape.pitch, maxAboveWalls, equalAboveWalls: roofShape.equalAboveWalls, surface };
+      }
+      // else (no tier roof over the cut → flat-roof building): keep the flat
+      // shape from classifySectionRoof; the roof block draws it at `towY`.
+    }
+  }
+  // Whether THIS section draws a second floor, and the top-of-walls datum the
+  // ceiling/roof/T-O reference. Both collapse to the legacy values unless this
+  // is a one-story cut through a setback house, keeping all other output identical.
+  const drawSecondFloor = !!secondFloor && !oneStoryCut;
+  const towY = oneStoryCut ? stack.firstFloorPlateTopY : stack.topOfWallsY;
+  // A gable section is drawn at the roof's TRUE pitch (the design pitch), so a
+  // 6:12 roof draws and labels 6:12 regardless of how wide this particular cut
+  // is. Its ridge height then follows honestly from that pitch over the
+  // section's half-width. (Earlier an "equal-height" convention back-solved a
+  // steeper pitch so every section reached the building's tallest ridge — but
+  // that mislabels the pitch and is plain wrong when a house genuinely has
+  // roofs at different heights, e.g. a setback wing.)
+  const effectiveRoofPitch = roofShape.kind === 'gable' ? roofShape.pitch : 0;
   const roofPitchRatio = effectiveRoofPitch / 12;
 
   // Constants used inside the section (matched to the legacy draw function).
@@ -737,12 +804,20 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
     //                                           band to meet the 2nd-floor
     //                                           wall sheathing (continuous).
     //   • flat roof / no pitch               → stop at wall top.
-    const isTopFloor1 = !secondFloor;
-    const sheathTopY1 = isTopFloor1
-      ? (roofPitchRatio > 0
+    // A side is "top floor" (1 story) when there is no second floor above it.
+    // For a setback cut each side is decided independently: the one-story wing
+    // wall is top-floor even though the building has a second floor over the
+    // other side. When not a setback this collapses to the legacy whole-floor
+    // `!secondFloor` test, so output is unchanged.
+    const leftHas2  = drawSecondFloor && (!setbackCut || upperLeftIn  <= fullLeftIn + 3);
+    const rightHas2 = drawSecondFloor && (!setbackCut || upperRightIn >= fullRightIn - 3);
+    const sheathTopFor = (has2: boolean) => has2
+      ? stack.secondJoistBandTopY!
+      : (roofPitchRatio > 0
           ? wallTopY - (PLATE_WIDTH + WALL_SHEATHING_THICKNESS) * roofPitchRatio
-          : wallTopY)
-      : stack.secondJoistBandTopY!;
+          : wallTopY);
+    const sheathTopY1L = sheathTopFor(leftHas2);
+    const sheathTopY1R = sheathTopFor(rightHas2);
     // First-floor wall sheathing extends DOWN past the sill plate to just
     // past the top of the foundation wall (slab-on-grade now has a stem
     // wall too, so this applies to all foundation types with wallHeight > 0).
@@ -755,7 +830,7 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
     const drywallBotY1 = s.foundation.type === 'slab'
       ? stack.foundationWallTopY
       : wallBotY;
-    line({ x: studLeftIn   - WALL_SHEATHING_THICKNESS, y: sheathTopY1 }, { x: studLeftIn   - WALL_SHEATHING_THICKNESS, y: sheathBotY1 }, 'sheathing', 'sheath-l-1');
+    line({ x: studLeftIn   - WALL_SHEATHING_THICKNESS, y: sheathTopY1L }, { x: studLeftIn   - WALL_SHEATHING_THICKNESS, y: sheathBotY1 }, 'sheathing', 'sheath-l-1');
     line({ x: studRightIn  + SHEETROCK_THICKNESS,      y: wallTopY    }, { x: studRightIn  + SHEETROCK_THICKNESS,      y: drywallBotY1 }, 'sheathing', 'drywall-l-1');
 
     // RIGHT envelope (mirror)
@@ -765,22 +840,22 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
     }
     closedRect(rStudLeftIn, tpMidY,   rStudRightIn, tpTopY,   'lumber-x', 'tp-r-1-top');
     closedRect(rStudLeftIn, tpBotY,   rStudRightIn, tpMidY,   'lumber-x', 'tp-r-1-bot');
-    line({ x: rStudRightIn + WALL_SHEATHING_THICKNESS, y: sheathTopY1 }, { x: rStudRightIn + WALL_SHEATHING_THICKNESS, y: sheathBotY1 }, 'sheathing', 'sheath-r-1');
+    line({ x: rStudRightIn + WALL_SHEATHING_THICKNESS, y: sheathTopY1R }, { x: rStudRightIn + WALL_SHEATHING_THICKNESS, y: sheathBotY1 }, 'sheathing', 'sheath-r-1');
     line({ x: rStudLeftIn  - SHEETROCK_THICKNESS,      y: wallTopY    }, { x: rStudLeftIn  - SHEETROCK_THICKNESS,      y: drywallBotY1 }, 'sheathing', 'drywall-r-1');
     // Sheathing termination ticks — tiny horizontal marks at the end(s) of
     // the wall sheathing, pointing INWARD just to the structural face (no
     // overshoot into the framing). Length = sheathing thickness (0.5") so
     // the tick stops exactly at the outside face of the framing/foundation.
-    if (isTopFloor1 && roofPitchRatio > 0) {
+    if (roofPitchRatio > 0) {
       const tickLen = WALL_SHEATHING_THICKNESS;
-      line(
-        { x: studLeftIn  - WALL_SHEATHING_THICKNESS,           y: sheathTopY1 },
-        { x: studLeftIn  - WALL_SHEATHING_THICKNESS + tickLen, y: sheathTopY1 },
+      if (!leftHas2) line(
+        { x: studLeftIn  - WALL_SHEATHING_THICKNESS,           y: sheathTopY1L },
+        { x: studLeftIn  - WALL_SHEATHING_THICKNESS + tickLen, y: sheathTopY1L },
         'sheathing', 'sheath-l-1-tick-top',
       );
-      line(
-        { x: rStudRightIn + WALL_SHEATHING_THICKNESS,           y: sheathTopY1 },
-        { x: rStudRightIn + WALL_SHEATHING_THICKNESS - tickLen, y: sheathTopY1 },
+      if (!rightHas2) line(
+        { x: rStudRightIn + WALL_SHEATHING_THICKNESS,           y: sheathTopY1R },
+        { x: rStudRightIn + WALL_SHEATHING_THICKNESS - tickLen, y: sheathTopY1R },
         'sheathing', 'sheath-r-1-tick-top',
       );
     }
@@ -806,24 +881,35 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
   }
 
   // ── Second-floor stack (optional) ───────────────────────────────────────
-  if (secondFloor && stack.secondJoistBandTopY !== undefined && stack.secondFloorPlateTopY !== undefined) {
+  if (drawSecondFloor && stack.secondJoistBandTopY !== undefined && stack.secondFloorPlateTopY !== undefined) {
     const joistActual = LUMBER_ACTUAL_DEPTH[secondFloor.joistDepth];
     const joistBotY = stack.secondJoistBandBottomY!;
     const joistTopY = joistBotY + joistActual;
 
-    closedRect(wallLeftIn, joistBotY, wallLeftIn + RIM_THICKNESS, joistTopY, 'lumber-x', 'rim-l-2');
-    closedRect(rWallOutIn - RIM_THICKNESS, joistBotY, rWallOutIn, joistTopY, 'lumber-x', 'rim-r-2');
+    // Setback: the upper floor (and its floor system) spans only the covered
+    // sub-range [upperLeftIn, upperRightIn]; otherwise the full building width.
+    // Stud columns are derived from those edges. When not a setback cut these
+    // all equal the legacy full-width values, so output is byte-identical.
+    const u2WallLeft   = setbackCut ? upperLeftIn  : wallLeftIn;
+    const u2WallRight  = setbackCut ? upperRightIn : rWallOutIn;
+    const u2StudLeftIn   = u2WallLeft;
+    const u2StudRightIn  = u2WallLeft + PLATE_WIDTH;
+    const ru2StudRightIn = u2WallRight;
+    const ru2StudLeftIn  = u2WallRight - PLATE_WIDTH;
 
-    const fjLeftIn  = wallLeftIn  + RIM_THICKNESS;
-    const fjRightIn = rWallOutIn  - RIM_THICKNESS;
+    closedRect(u2WallLeft, joistBotY, u2WallLeft + RIM_THICKNESS, joistTopY, 'lumber-x', 'rim-l-2');
+    closedRect(u2WallRight - RIM_THICKNESS, joistBotY, u2WallRight, joistTopY, 'lumber-x', 'rim-r-2');
+
+    const fjLeftIn  = u2WallLeft  + RIM_THICKNESS;
+    const fjRightIn = u2WallRight - RIM_THICKNESS;
     closedRect(fjLeftIn, joistBotY, fjRightIn, joistTopY, 'normal', 'fj-band-2');
     text(
-      { x: wallLeftIn + 18, y: (joistTopY + joistBotY) / 2 },
+      { x: u2WallLeft + 18, y: (joistTopY + joistBotY) / 2 },
       `${formatJoistLabel(secondFloor.joistDepth)} F.J. @ 16 O.C.`,
       { align: 'left', baseline: 'middle' },
       'fj-label-2',
     );
-    closedRect(wallLeftIn, joistTopY, rWallOutIn, stack.secondJoistBandTopY, 'normal', 'subfloor-2');
+    closedRect(u2WallLeft, joistTopY, u2WallRight, stack.secondJoistBandTopY, 'normal', 'subfloor-2');
 
     const wallTopY = stack.secondFloorPlateTopY;
     const wallBotY = stack.secondJoistBandTopY;
@@ -833,42 +919,47 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
     const soleTopY = stack.secondJoistBandTopY + PLATE_THICK;
     const soleBotY = stack.secondJoistBandTopY;
 
-    closedRect(studLeftIn, wallBotY,  studRightIn, wallTopY, 'normal',   'wall-env-l-2');
-    closedRect(studLeftIn, soleBotY,  studRightIn, soleTopY, 'lumber-x', 'sole-l-2');
-    closedRect(studLeftIn, tpMidY,    studRightIn, tpTopY,   'lumber-x', 'tp-l-2-top');
-    closedRect(studLeftIn, tpBotY,    studRightIn, tpMidY,   'lumber-x', 'tp-l-2-bot');
+    closedRect(u2StudLeftIn, wallBotY,  u2StudRightIn, wallTopY, 'normal',   'wall-env-l-2');
+    closedRect(u2StudLeftIn, soleBotY,  u2StudRightIn, soleTopY, 'lumber-x', 'sole-l-2');
+    closedRect(u2StudLeftIn, tpMidY,    u2StudRightIn, tpTopY,   'lumber-x', 'tp-l-2-top');
+    closedRect(u2StudLeftIn, tpBotY,    u2StudRightIn, tpMidY,   'lumber-x', 'tp-l-2-bot');
     // Second-floor walls always have the rafter above, so the sheathing top
     // is trimmed to the rafter's natural-slope bottom at the sheathing X
     // (one sheathing thickness outside the wall framing).
     const sheathTopY2 = roofPitchRatio > 0
       ? wallTopY - (PLATE_WIDTH + WALL_SHEATHING_THICKNESS) * roofPitchRatio
       : wallTopY;
-    line({ x: studLeftIn   - WALL_SHEATHING_THICKNESS, y: sheathTopY2 }, { x: studLeftIn   - WALL_SHEATHING_THICKNESS, y: wallBotY }, 'sheathing', 'sheath-l-2');
-    line({ x: studRightIn  + SHEETROCK_THICKNESS,      y: wallTopY    }, { x: studRightIn  + SHEETROCK_THICKNESS,      y: wallBotY }, 'sheathing', 'drywall-l-2');
+    line({ x: u2StudLeftIn   - WALL_SHEATHING_THICKNESS, y: sheathTopY2 }, { x: u2StudLeftIn   - WALL_SHEATHING_THICKNESS, y: wallBotY }, 'sheathing', 'sheath-l-2');
+    line({ x: u2StudRightIn  + SHEETROCK_THICKNESS,      y: wallTopY    }, { x: u2StudRightIn  + SHEETROCK_THICKNESS,      y: wallBotY }, 'sheathing', 'drywall-l-2');
 
-    closedRect(rStudLeftIn, wallBotY, rStudRightIn, wallTopY, 'normal',   'wall-env-r-2');
-    closedRect(rStudLeftIn, soleBotY, rStudRightIn, soleTopY, 'lumber-x', 'sole-r-2');
-    closedRect(rStudLeftIn, tpMidY,   rStudRightIn, tpTopY,   'lumber-x', 'tp-r-2-top');
-    closedRect(rStudLeftIn, tpBotY,   rStudRightIn, tpMidY,   'lumber-x', 'tp-r-2-bot');
-    line({ x: rStudRightIn + WALL_SHEATHING_THICKNESS, y: sheathTopY2 }, { x: rStudRightIn + WALL_SHEATHING_THICKNESS, y: wallBotY }, 'sheathing', 'sheath-r-2');
-    line({ x: rStudLeftIn  - SHEETROCK_THICKNESS,      y: wallTopY    }, { x: rStudLeftIn  - SHEETROCK_THICKNESS,      y: wallBotY }, 'sheathing', 'drywall-r-2');
+    closedRect(ru2StudLeftIn, wallBotY, ru2StudRightIn, wallTopY, 'normal',   'wall-env-r-2');
+    closedRect(ru2StudLeftIn, soleBotY, ru2StudRightIn, soleTopY, 'lumber-x', 'sole-r-2');
+    closedRect(ru2StudLeftIn, tpMidY,   ru2StudRightIn, tpTopY,   'lumber-x', 'tp-r-2-top');
+    closedRect(ru2StudLeftIn, tpBotY,   ru2StudRightIn, tpMidY,   'lumber-x', 'tp-r-2-bot');
+    line({ x: ru2StudRightIn + WALL_SHEATHING_THICKNESS, y: sheathTopY2 }, { x: ru2StudRightIn + WALL_SHEATHING_THICKNESS, y: wallBotY }, 'sheathing', 'sheath-r-2');
+    line({ x: ru2StudLeftIn  - SHEETROCK_THICKNESS,      y: wallTopY    }, { x: ru2StudLeftIn  - SHEETROCK_THICKNESS,      y: wallBotY }, 'sheathing', 'drywall-r-2');
     if (roofPitchRatio > 0) {
       const tickLen = WALL_SHEATHING_THICKNESS;
       line(
-        { x: studLeftIn  - WALL_SHEATHING_THICKNESS,           y: sheathTopY2 },
-        { x: studLeftIn  - WALL_SHEATHING_THICKNESS + tickLen, y: sheathTopY2 },
+        { x: u2StudLeftIn  - WALL_SHEATHING_THICKNESS,           y: sheathTopY2 },
+        { x: u2StudLeftIn  - WALL_SHEATHING_THICKNESS + tickLen, y: sheathTopY2 },
         'sheathing', 'sheath-l-2-tick',
       );
       line(
-        { x: rStudRightIn + WALL_SHEATHING_THICKNESS,           y: sheathTopY2 },
-        { x: rStudRightIn + WALL_SHEATHING_THICKNESS - tickLen, y: sheathTopY2 },
+        { x: ru2StudRightIn + WALL_SHEATHING_THICKNESS,           y: sheathTopY2 },
+        { x: ru2StudRightIn + WALL_SHEATHING_THICKNESS - tickLen, y: sheathTopY2 },
         'sheathing', 'sheath-r-2-tick',
       );
     }
 
     // Interior walls (second floor) — same plan positions as first floor in v1.
+    // For a setback cut, skip any partition at/outside the upper-floor edges
+    // (the step itself is drawn as the upper exterior wall above, and walls in
+    // the one-story wing have no second floor over them).
     for (let i = 0; i < interiorWallSectionXs.length; i++) {
-      addInteriorWallBlock(interiorWallSectionXs[i].x, i, 2);
+      const ix = interiorWallSectionXs[i].x;
+      if (setbackCut && (ix <= upperLeftIn + 2 || ix >= upperRightIn - 2)) continue;
+      addInteriorWallBlock(ix, i, 2);
     }
   }
 
@@ -876,10 +967,42 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
   // pitched roof) ─────────────────────────────────────────────────────────
   {
     const cjActual = LUMBER_ACTUAL_DEPTH[s.ceiling.joistDepth];
-    const cjBotY = stack.topOfWallsY;
-    const cjTopY = stack.topOfWallsY + cjActual;
+    const cjBotY = towY;
+    const cjTopY = towY + cjActual;
     const pitchForCJ = effectiveRoofPitch / 12;
-    if (pitchForCJ > 0) {
+    if (setbackCut) {
+      // Stepped ceiling: the 2-story portion ceils at the top of walls; each
+      // one-story wing ceils at the first-floor plate (its own roof springs
+      // from there and dies into the 2-story wall). Flat bands — a setback cut
+      // uses the honest profile roof (pitch 0 here), so no bevels.
+      const cjLabel = `2×${s.ceiling.joistDepth} C.J. @ 16 O.C.`;
+      const mainL = upperLeftIn + PLATE_WIDTH;
+      const mainR = upperRightIn - PLATE_WIDTH;
+      if (mainR - mainL > 1) {
+        closedRect(mainL, cjBotY, mainR, cjTopY, 'normal', 'ceiling-joist');
+        text({ x: mainL + 8, y: (cjTopY + cjBotY) / 2 }, cjLabel, { align: 'left', baseline: 'middle' }, 'cj-label');
+        line(
+          { x: mainL + SHEETROCK_THICKNESS, y: cjBotY - SHEETROCK_THICKNESS },
+          { x: mainR - SHEETROCK_THICKNESS, y: cjBotY - SHEETROCK_THICKNESS },
+          'sheathing', 'ceiling-drywall',
+        );
+      }
+      const wBotY = stack.firstFloorPlateTopY;
+      const wTopY = stack.firstFloorPlateTopY + cjActual;
+      const wings: [number, number, string][] = [];
+      if (upperLeftIn  > fullLeftIn  + 3) wings.push([studRightIn, upperLeftIn,  'wL']);
+      if (upperRightIn < fullRightIn - 3) wings.push([upperRightIn, rStudLeftIn, 'wR']);
+      for (const [a, b, tag] of wings) {
+        const lo = Math.min(a, b), hi = Math.max(a, b);
+        closedRect(lo, wBotY, hi, wTopY, 'normal', `ceiling-joist-${tag}`);
+        text({ x: lo + 8, y: (wTopY + wBotY) / 2 }, cjLabel, { align: 'left', baseline: 'middle' }, `cj-label-${tag}`);
+        line(
+          { x: lo + SHEETROCK_THICKNESS, y: wBotY - SHEETROCK_THICKNESS },
+          { x: hi - SHEETROCK_THICKNESS, y: wBotY - SHEETROCK_THICKNESS },
+          'sheathing', `ceiling-drywall-${tag}`,
+        );
+      }
+    } else if (pitchForCJ > 0) {
       const slopeRunRaw = cjActual / pitchForCJ;
       const slopeRun = Math.min(slopeRunRaw, Math.max(0, halfBuildingWidth - 8));
       // CJ ends at the inside face of the top plate (= studRightIn / rStudLeftIn),
@@ -912,8 +1035,9 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
     }
     // 1/2" sheetrock ceiling line — terminates at each wall's drywall line
     // (studRightIn + SHEETROCK_THICKNESS on the LEFT, rStudLeftIn − SHEETROCK_THICKNESS
-    // on the RIGHT), forming a clean inside corner.
-    line(
+    // on the RIGHT), forming a clean inside corner. (Setback drew its own
+    // stepped ceiling-drywall lines per portion above.)
+    if (!setbackCut) line(
       { x: studRightIn + SHEETROCK_THICKNESS, y: cjBotY - SHEETROCK_THICKNESS },
       { x: rStudLeftIn - SHEETROCK_THICKNESS, y: cjBotY - SHEETROCK_THICKNESS },
       'sheathing', 'ceiling-drywall',
@@ -1132,12 +1256,12 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
       }
     } else {
       // Flat roof — single horizontal lumber band
-      const topY = stack.topOfWallsY + rafterActual;
+      const topY = towY + rafterActual;
       const leftIn  = wallLeftIn - overhang;
       const rightIn = rWallOutIn + overhang;
-      closedRect(leftIn, stack.topOfWallsY, rightIn, topY, 'normal', 'roof-flat');
+      closedRect(leftIn, towY, rightIn, topY, 'normal', 'roof-flat');
       text(
-        { x: wallLeftIn + 18, y: (topY + stack.topOfWallsY) / 2 },
+        { x: wallLeftIn + 18, y: (topY + towY) / 2 },
         `2×${rafterNom} R.R. @ 16 O.C.`,
         { align: 'left', baseline: 'middle' },
         'roof-label',
@@ -1161,7 +1285,7 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
   tos.push({ y: stack.joistBandTopY - gradeToFirstFloor, label: 'GRADE' });
   tos.push({ y: stack.joistBandTopY, label: 'T/O 1ST FLOOR' });
   tos.push({ y: stack.firstFloorPlateTopY, label: 'T/O 1st FLOOR PLATE' });
-  if (secondFloor && stack.secondJoistBandTopY !== undefined && stack.secondFloorPlateTopY !== undefined) {
+  if (drawSecondFloor && stack.secondJoistBandTopY !== undefined && stack.secondFloorPlateTopY !== undefined) {
     tos.push({ y: stack.secondJoistBandTopY, label: 'T/O 2nd FLOOR' });
     tos.push({ y: stack.secondFloorPlateTopY, label: 'T/O 2nd FLOOR PLATE' });
   }
@@ -1182,9 +1306,9 @@ export function buildSectionPrimitives(project: Project, cut?: SectionCut): Sect
       tos.push({ y: ridgeBoardTopY, label: 'T/O ROOF' });
     } else if (roofShape.kind === 'profile') {
       // True high point of the sampled roof surface (+ rafter depth above it).
-      tos.push({ y: stack.topOfWallsY + roofShape.maxAboveWalls + rafterActual, label: 'T/O ROOF' });
+      tos.push({ y: towY + roofShape.maxAboveWalls + rafterActual, label: 'T/O ROOF' });
     } else {
-      tos.push({ y: stack.topOfWallsY + rafterActual, label: 'T/O ROOF' });
+      tos.push({ y: towY + rafterActual, label: 'T/O ROOF' });
     }
   }
   tos.sort((a, b) => b.y - a.y);
