@@ -771,6 +771,45 @@ export default function Canvas2D({
 
   const snap = useCallback((p: Vec2, drawingStart?: Vec2): Vec2 => snapWithInfo(p, drawingStart).point, [snapWithInfo]);
 
+  // Move tool DROP snap: where the grabbed handle lands. Priority — discrete
+  // points first (wall outline corners + face midpoints + line endpoints/
+  // midpoints), then wall centerline endpoint/midpoint, then SLIDE along a wall
+  // face/edge, else free. `feature` is true when it locked onto real geometry.
+  const moveDropSnap = useCallback((p: Vec2): { point: Vec2; feature: boolean } => {
+    const tol = 9 / vp.pxPerInch;
+    const lf = snapToLineFeatures(level.lines ?? [], p, tol, level.walls);
+    if (lf) return { point: lf.point, feature: true };
+    let s = snapToWallEndpoint(p, level.walls, tol);
+    if (s !== p) return { point: s, feature: true };
+    s = snapToWallMidpoint(p, level.walls, tol);
+    if (s !== p) return { point: s, feature: true };
+    s = snapToWallEdge(p, level.walls, tol);
+    if (s !== p) return { point: s, feature: true };
+    return { point: p, feature: false };
+  }, [level.lines, level.walls, vp.pxPerInch]);
+
+  // The selected stair/furniture "grab handles" (own corners + edge midpoints)
+  // the Move tool picks the piece up by.
+  const moveGrabHandles = useCallback((): Vec2[] => [
+    ...selectedStairs.flatMap(s => { const { hx, hy } = stairHalfExtents(s); return rectHandlePoints(s.position, hx, hy, s.rotation); }),
+    ...selectedFurniture.flatMap(f => rectHandlePoints(f.position, f.width / 2, f.depth / 2, f.rotation)),
+  ], [selectedStairs, selectedFurniture]);
+
+  // Move-tool snap marker: BEFORE the grab click it rings the nearest object
+  // handle (the point you'd pick up); DURING the move it rings the drop snap.
+  const moveSnapMarker = useMemo((): { p: Vec2; kind: 'grab' | 'drop' } | null => {
+    if (tool !== 'move' || !hoverWorld) return null;
+    if (moveState) {
+      let q = hoverWorld;
+      if (orthoOn) q = snapOrtho(moveState.basePoint, q);
+      const ds = moveDropSnap(q);
+      return ds.feature ? { p: ds.point, kind: 'drop' } : null;
+    }
+    if (selections.length === 0) return null;
+    const g = nearestPoint(hoverWorld, moveGrabHandles(), 14 / vp.pxPerInch);
+    return g ? { p: g, kind: 'grab' } : null;
+  }, [tool, hoverWorld, moveState, orthoOn, moveDropSnap, moveGrabHandles, selections.length, vp.pxPerInch]);
+
   // Wall tool: marker on the endpoint/corner the cursor has locked onto
   // (current floor or the floor-below ghost), so you can place walls exactly on
   // the floor below.
@@ -1489,9 +1528,24 @@ export default function Canvas2D({
       ctx.stroke();
       ctx.restore();
     }
+
+    // Move-tool snap marker — green ring on the grab handle (before pickup) or
+    // the drop snap (during the move), so the user can see what it's locking to.
+    if (moveSnapMarker) {
+      const s = worldToScreen(moveSnapMarker.p, viewport);
+      ctx.save();
+      ctx.strokeStyle = moveSnapMarker.kind === 'grab' ? '#16A34A' : T.accent;
+      ctx.fillStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
   }, [vp, level, floorBelow, showFloorBelow, gridInches, gridVisible, displaySelections, drawing, effectiveEnd,
       defaultWallThickness, dragBox, tool, selectedWallIds, hoveredHandle,
-      offsetSource, offsetPreview, doorGhost, windowGhost, wallSnapMarker, openEndpoints,
+      offsetSource, offsetPreview, doorGhost, windowGhost, wallSnapMarker, moveSnapMarker, openEndpoints,
       dimDraft, hoverWorld, stairDefaults, activeFurnitureKind, furnitureSettings,
       defaultLineStyle, defaultLineWeight, defaultLineColor, lineSnapHit, trimHover,
       extendHover, mirrorAxis, selections, filletFirst, filletEnds,
@@ -1857,14 +1911,10 @@ export default function Canvas2D({
       // object's OWN handles (a stair/furniture corner or edge midpoint) so the
       // user picks the piece up by that point; fall back to a wall corner /
       // endpoint. Second click drops that grab point at the target.
-      const grabTol = 12 / vp.pxPerInch;
-      const handlePts: Vec2[] = [
-        ...selectedStairs.flatMap(s => { const { hx, hy } = stairHalfExtents(s); return rectHandlePoints(s.position, hx, hy, s.rotation); }),
-        ...selectedFurniture.flatMap(f => rectHandlePoints(f.position, f.width / 2, f.depth / 2, f.rotation)),
-      ];
+      const grabTol = 14 / vp.pxPerInch;
       const snapped = moveState
-        ? snapToWallCorner(snapToWallEndpoint(world, level.walls, 10 / vp.pxPerInch), level.walls, 10 / vp.pxPerInch)
-        : (nearestPoint(world, handlePts, grabTol)
+        ? moveDropSnap(world).point
+        : (nearestPoint(world, moveGrabHandles(), grabTol)
             ?? snapToWallCorner(snapToWallEndpoint(world, level.walls, 10 / vp.pxPerInch), level.walls, 10 / vp.pxPerInch));
       if (!moveState) {
         // Linked staircase in the selection → warn once before starting a move.
@@ -2279,24 +2329,22 @@ export default function Canvas2D({
         dx = dirX * parsed.length;
         dy = dirY * parsed.length;
       } else {
-        // Snap target: wall OUTSIDE corner → endpoint → EDGE (face), ortho if
-        // on. This lets the grabbed handle be dropped on a wall's outside
-        // corner OR flush along a wall edge. With no feature lock the delta is
+        // Snap target: wall outline corner / face midpoint / line endpoint /
+        // midpoint, then wall centerline endpoint/midpoint, then SLIDE along a
+        // wall face — so the grabbed handle drops onto a corner/endpoint or
+        // slides flush down a wall edge. With no feature lock the delta is
         // quantized to 1/8" so moved entities stay on the base grid.
         let target = world;
         if (orthoOn) target = snapOrtho(moveState.basePoint, target);
-        const stol = 8 / vp.pxPerInch;
-        let cornerSnap = snapToWallCorner(target, level.walls, stol);
-        if (cornerSnap === target) cornerSnap = snapToWallEndpoint(target, level.walls, stol);
-        if (cornerSnap === target) cornerSnap = snapToWallEdge(target, level.walls, stol);
-        if (cornerSnap === target) {
+        const ds = moveDropSnap(target);
+        if (!ds.feature) {
           // free move — quantize the delta
           dx = quantizeInches(target.x - moveState.basePoint.x);
           dy = quantizeInches(target.y - moveState.basePoint.y);
         } else {
           // locked to existing geometry — keep the exact landing
-          dx = cornerSnap.x - moveState.basePoint.x;
-          dy = cornerSnap.y - moveState.basePoint.y;
+          dx = ds.point.x - moveState.basePoint.x;
+          dy = ds.point.y - moveState.basePoint.y;
         }
       }
       // Apply delta to each entity from its ORIGINAL position. Selected walls
