@@ -381,10 +381,14 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
     // X-component of the world delta rotated by the view's rotation — matching
     // the render transform (drawn about each block's center, then rotated).
     const refPc = raw.floorPlans.length ? planCenterOf(raw.floorPlans[0].lb) : { x: 0, y: 0 };
+    // ΔCx = the sheet-X shift that keeps a plan world-aligned with the reference
+    // under the view's rotation. Derived from blockToSheet's rotation
+    // (x' = cx + u·c + v·s, with the plan Y-flip already in v): ΔCx =
+    // Δpc.x·cos(rot) − Δpc.y·sin(rot) = rotateVec({Δpc.x, Δpc.y}, rot).x.
     const alignDx = (lb: SheetBounds, isRef: boolean): number => {
       if (isRef) return 0;
       const pc = planCenterOf(lb);
-      return rotateVec({ x: pc.x - refPc.x, y: -(pc.y - refPc.y) }, rot).x;
+      return rotateVec({ x: pc.x - refPc.x, y: pc.y - refPc.y }, rot).x;
     };
     const planPlace = raw.floorPlans.map((fp, i) => ({ fp, dx: alignDx(fp.lb, i === 0), half: halfExtents('plan', fp.lb, rot) }));
     const roofDx = raw.roof ? alignDx(raw.roof.lb, raw.floorPlans.length === 0) : 0;
