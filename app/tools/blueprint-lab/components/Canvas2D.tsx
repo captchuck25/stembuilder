@@ -875,6 +875,15 @@ export default function Canvas2D({
     return out;
   }, [level.walls]);
 
+  // User-dismissed open-corner warnings (session-scoped), keyed by rounded
+  // position. Clicking a red ring adds it here so the false alarm goes away.
+  const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(new Set());
+  const warnKey = (p: Vec2) => `${Math.round(p.x)},${Math.round(p.y)}`;
+  const visibleWarnings = useMemo(
+    () => openEndpoints.filter(ep => !dismissedWarnings.has(warnKey(ep))),
+    [openEndpoints, dismissedWarnings],
+  );
+
   // While the line tool is active, expose the CURRENT snap hit so the
   // renderer can draw a CAD-style marker (square = endpoint, triangle =
   // midpoint, X = on-edge). Computed from hoverWorld so it lives even
@@ -1498,14 +1507,14 @@ export default function Canvas2D({
     }
 
     // Open-corner warning markers: hollow red rings on wall endpoints that
-    // aren't actually connected. Drawn under the snap marker so an active snap
-    // still reads on top.
-    if (openEndpoints.length > 0) {
+    // aren't actually connected. Click one to dismiss the false alarm. Drawn
+    // under the snap marker so an active snap still reads on top.
+    if (visibleWarnings.length > 0) {
       ctx.save();
       ctx.strokeStyle = '#dc2626';
       ctx.fillStyle = 'rgba(220,38,38,0.12)';
       ctx.lineWidth = 1.6;
-      for (const ep of openEndpoints) {
+      for (const ep of visibleWarnings) {
         const s = worldToScreen(ep, viewport);
         ctx.beginPath();
         ctx.arc(s.x, s.y, 5.5, 0, Math.PI * 2);
@@ -1546,7 +1555,7 @@ export default function Canvas2D({
     }
   }, [vp, level, floorBelow, showFloorBelow, gridInches, gridVisible, displaySelections, drawing, effectiveEnd,
       defaultWallThickness, dragBox, tool, selectedWallIds, hoveredHandle,
-      offsetSource, offsetPreview, doorGhost, windowGhost, wallSnapMarker, moveSnapMarker, openEndpoints,
+      offsetSource, offsetPreview, doorGhost, windowGhost, wallSnapMarker, moveSnapMarker, visibleWarnings,
       dimDraft, hoverWorld, stairDefaults, activeFurnitureKind, furnitureSettings,
       defaultLineStyle, defaultLineWeight, defaultLineColor, lineSnapHit, trimHover,
       extendHover, mirrorAxis, selections, filletFirst, filletEnds,
@@ -1581,6 +1590,18 @@ export default function Canvas2D({
     if (e.button !== 0) return;
 
     const world = getWorld(e);
+
+    // Click a red open-corner warning ring (Select tool) to dismiss it — for
+    // false alarms where the walls really do meet. Checked first so the small
+    // ring is easy to hit; it doesn't interfere with the drawing tools.
+    if (tool === 'select' && visibleWarnings.length > 0) {
+      const ringTol = 9 / vp.pxPerInch;
+      const hit = visibleWarnings.find(ep => Math.hypot(ep.x - world.x, ep.y - world.y) <= ringTol);
+      if (hit) {
+        setDismissedWarnings(prev => { const n = new Set(prev); n.add(warnKey(hit)); return n; });
+        return;
+      }
+    }
 
     // Boundary-draft mode short-circuits every tool: every left-click is a
     // vertex on the polyline (or a close-on-start commit).
