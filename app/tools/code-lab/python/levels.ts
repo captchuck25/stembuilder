@@ -524,7 +524,7 @@ The plasma travels along the corridor until it hits an alien or a wall. If there
   challenges: [
     {
       title: "Loop Warm-Up",
-      hint: "6 Steps forward! Use aloop to keep your coding task short...",
+      hint: "5 Steps forward! Use aloop to keep your coding task short...",
       grid: [
         [1,1,1,1,1,1],
         [0,0,0,0,0,0],
@@ -537,9 +537,9 @@ The plasma travels along the corridor until it hits an alien or a wall. If there
         cellPx: 50,
         originX: 205, originY: 205,
       },
-      starterCode: `#6 Steps forward! Use aloop to keep your coding task short...
+      starterCode: `#5 Steps forward! Use aloop to keep your coding task short...
 
-for i in range(6):
+for i in range(?):
     forward()
 `,
     },
@@ -582,11 +582,9 @@ for i in range(6):
       starterCode: `# Same maze as Level 1 — but this time use a loop.
 # Pattern: forward, right, forward, left.
 
-for i in range(3):
+for i in range(?):
     forward()
     turn_right()
-    forward()
-    turn_left()
 `,
     },
     {

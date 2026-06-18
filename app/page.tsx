@@ -26,6 +26,11 @@ const tiles = [
     href: "/tools/stem-sketch",
     src: "/ui/stem-sketch.png",
   },
+  {
+    label: "Blueprint Lab",
+    href: "/tools/blueprint-lab",
+    src: "/ui/blueprint_lab.png",
+  },
 ];
 
 export default async function Home() {
