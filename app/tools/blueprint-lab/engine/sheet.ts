@@ -108,6 +108,14 @@ function halfExtents(space: BlockSpace, lb: SheetBounds, rotationDeg: number): {
   return { hw: swap ? hh0 : hw0, hh: swap ? hw0 : hh0 };
 }
 
+// Rotate a vector by a 90°-step angle (degrees, clockwise on screen — matches
+// the render's ctx.rotate). Used to align stacked floor plans in Projected mode.
+function rotateVec(v: Vec2, deg: number): Vec2 {
+  const r = (deg * Math.PI) / 180;
+  const c = Math.cos(r), s = Math.sin(r);
+  return { x: v.x * c - v.y * s, y: v.x * s + v.y * c };
+}
+
 // Local center of a box, mapped into sheet-world (pre-rotation).
 function sheetCenterOf(space: BlockSpace, lb: SheetBounds, offset: Vec2): Vec2 {
   const clx = (lb.minX + lb.maxX) / 2;
@@ -359,12 +367,32 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
   }
 
   // MIDDLE: each elevation in the line, with rotated roof-above / plan(s)-below.
+  const planCenterOf = (lb: SheetBounds): Vec2 => ({ x: (lb.minX + lb.maxX) / 2, y: (lb.minY + lb.maxY) / 2 });
   for (const e of raw.elevations) {
     const rot = ROT_FOR_DIR[e.dir];
     const elevHalfW = (e.lb.maxX - e.lb.minX) / 2;
-    const planHalfMax = raw.floorPlans.reduce((m, fp) => Math.max(m, halfExtents('plan', fp.lb, rot).hw), 0);
     const roofHalf = raw.roof ? halfExtents('plan', raw.roof.lb, rot) : null;
-    const colHalfW = Math.max(elevHalfW, planHalfMax, roofHalf?.hw ?? 0);
+
+    // Horizontal alignment for the stacked plans + roof: the FIRST (lowest)
+    // floor plan is the reference and sits at the column center; every other
+    // plan (and the roof) is shifted so the SAME world coordinate maps to the
+    // same sheet-X (rather than each view self-centering, which left an
+    // offset upper floor centered instead of aligned). The shift is the
+    // X-component of the world delta rotated by the view's rotation — matching
+    // the render transform (drawn about each block's center, then rotated).
+    const refPc = raw.floorPlans.length ? planCenterOf(raw.floorPlans[0].lb) : { x: 0, y: 0 };
+    const alignDx = (lb: SheetBounds, isRef: boolean): number => {
+      if (isRef) return 0;
+      const pc = planCenterOf(lb);
+      return rotateVec({ x: pc.x - refPc.x, y: -(pc.y - refPc.y) }, rot).x;
+    };
+    const planPlace = raw.floorPlans.map((fp, i) => ({ fp, dx: alignDx(fp.lb, i === 0), half: halfExtents('plan', fp.lb, rot) }));
+    const roofDx = raw.roof ? alignDx(raw.roof.lb, raw.floorPlans.length === 0) : 0;
+
+    // Column must fit the elevation AND every (shifted) plan / roof copy.
+    const planSpan = planPlace.reduce((m, p) => Math.max(m, Math.abs(p.dx) + p.half.hw), 0);
+    const roofSpan = roofHalf ? Math.abs(roofDx) + roofHalf.hw : 0;
+    const colHalfW = Math.max(elevHalfW, planSpan, roofSpan);
     const centerX = runningX + colHalfW;
 
     const elevCenterY = (e.lb.minY + e.lb.maxY) / 2;       // → offset.y = 0 (datum row)
@@ -375,21 +403,21 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
     blocks.push(elev);
 
     if (raw.roof && roofHalf) {
-      const center: Vec2 = { x: centerX, y: elev.sheetBounds.maxY + BLOCK_GUTTER_IN + roofHalf.hh };
+      const center: Vec2 = { x: centerX + roofDx, y: elev.sheetBounds.maxY + BLOCK_GUTTER_IN + roofHalf.hh };
       blocks.push(makeBlock(
         { id: `roof-${e.dir}`, title: `ROOF ▸ ${e.dir.toUpperCase()}`, space: 'plan', kind: 'primitives', primitives: raw.roof.prims, lb: raw.roof.lb },
         offsetForCenter('plan', raw.roof.lb, center), rot,
       ));
     }
     // Floor plans stacked BELOW the elevation (Floor 1 nearest, upper floors
-    // beneath it), each rotated so the viewed face is nearest the elevation.
+    // beneath it), each rotated so the viewed face is nearest the elevation and
+    // shifted to stay world-aligned with the reference plan + elevation above.
     let belowY = elev.sheetBounds.minY;
-    for (const fp of raw.floorPlans) {
-      const half = halfExtents('plan', fp.lb, rot);
-      const center: Vec2 = { x: centerX, y: belowY - BLOCK_GUTTER_IN - half.hh };
+    for (const p of planPlace) {
+      const center: Vec2 = { x: centerX + p.dx, y: belowY - BLOCK_GUTTER_IN - p.half.hh };
       const b = makeBlock(
-        { id: `plan-${e.dir}-${fp.level.id}`, title: `PLAN ▸ ${e.dir.toUpperCase()} — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb },
-        offsetForCenter('plan', fp.lb, center), rot,
+        { id: `plan-${e.dir}-${p.fp.level.id}`, title: `PLAN ▸ ${e.dir.toUpperCase()} — ${p.fp.level.name}`, space: 'plan', kind: 'plan-scene', level: p.fp.level, primitives: p.fp.planPrims, lb: p.fp.lb },
+        offsetForCenter('plan', p.fp.lb, center), rot,
       );
       blocks.push(b);
       belowY = b.sheetBounds.minY;
