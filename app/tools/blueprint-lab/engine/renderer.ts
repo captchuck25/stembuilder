@@ -1553,39 +1553,48 @@ export function stairWorldCorners(s: Stair): Vec2[] {
 export function stairStepEdgePoints(s: Stair, outset = 0): Vec2[] {
   const { pieces } = stairPieces(s);
   const treadsBase = s.treads ?? STAIR_DEFAULTS.treads;
-  // local point + outward normal (local frame, pointing away from the stair).
+  // local point + outward normal (local frame). Each component is -1/0/+1 and
+  // is multiplied by `outset` WITHOUT normalizing — so a CORNER (±1,±1) lands at
+  // the corner of the offset (centerline) rectangle, where the side wall and the
+  // end wall meet exactly. (Normalizing would shorten the corner offset and the
+  // two walls wouldn't join → open endpoints / the red warning.)
   const local: { x: number; y: number; nx: number; ny: number }[] = [];
   for (const p of pieces) {
     if (p.kind === 'landing') {
-      // Corners: outward = the diagonal toward that corner (sign of x,y).
       local.push(
         { x: p.x, y: p.y, nx: -1, ny: -1 }, { x: p.x + p.w, y: p.y, nx: 1, ny: -1 },
         { x: p.x + p.w, y: p.y + p.h, nx: 1, ny: 1 }, { x: p.x, y: p.y + p.h, nx: -1, ny: 1 },
       );
       continue;
     }
-    // Tread count for this run (matches drawStair's division), then place a
-    // point on BOTH long edges at every tread line (i = 0..n, so endpoints +
-    // each step). treadAxis 'x' → treads cross X, long edges are the verticals
-    // (outward ±x); treadAxis 'y' → long edges are the horizontals (outward ±y).
+    // Tread count for this run (matches drawStair's division). Place a point on
+    // BOTH long edges at every tread line (i = 0..n). The two END rows (i=0,n)
+    // are CORNERS → their normal gets the perpendicular (short-edge) component
+    // too, so the end wall joins the side wall there. Also add a point at the
+    // MIDDLE of each short (end) edge so the end wall can snap along it.
     const runLen = p.treadAxis === 'x' ? p.h : p.w;
     const n = Math.max(2, Math.round(treadsBase * (runLen / Math.max(s.length, 24))));
     for (let i = 0; i <= n; i++) {
+      const endSign = i === 0 ? -1 : i === n ? 1 : 0;   // short-edge normal at the run ends
       if (p.treadAxis === 'x') {
         const y = p.y + (i * p.h) / n;
-        local.push({ x: p.x, y, nx: -1, ny: 0 }, { x: p.x + p.w, y, nx: 1, ny: 0 });
+        local.push({ x: p.x, y, nx: -1, ny: endSign }, { x: p.x + p.w, y, nx: 1, ny: endSign });
       } else {
         const x = p.x + (i * p.w) / n;
-        local.push({ x, y: p.y, nx: 0, ny: -1 }, { x, y: p.y + p.h, nx: 0, ny: 1 });
+        local.push({ x, y: p.y, nx: endSign, ny: -1 }, { x, y: p.y + p.h, nx: endSign, ny: 1 });
       }
+    }
+    // Midpoint of each short (end) edge.
+    if (p.treadAxis === 'x') {
+      local.push({ x: p.x + p.w / 2, y: p.y, nx: 0, ny: -1 }, { x: p.x + p.w / 2, y: p.y + p.h, nx: 0, ny: 1 });
+    } else {
+      local.push({ x: p.x, y: p.y + p.h / 2, nx: -1, ny: 0 }, { x: p.x + p.w, y: p.y + p.h / 2, nx: 1, ny: 0 });
     }
   }
   const c = Math.cos(s.rotation), si = Math.sin(s.rotation);
   return local.map(pt => {
-    // Normalize the (diagonal) normal so the outset distance is consistent.
-    const nlen = Math.hypot(pt.nx, pt.ny) || 1;
-    const lx = pt.x + (pt.nx / nlen) * outset;
-    const ly = pt.y + (pt.ny / nlen) * outset;
+    const lx = pt.x + pt.nx * outset;     // per-axis offset (no normalization)
+    const ly = pt.y + pt.ny * outset;
     return { x: s.position.x + c * lx - si * ly, y: s.position.y + si * lx + c * ly };
   });
 }
