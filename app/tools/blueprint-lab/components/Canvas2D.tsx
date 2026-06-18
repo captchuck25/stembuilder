@@ -754,9 +754,10 @@ export default function Canvas2D({
     // Staircase OUTSIDE edges — a snap point on each long edge at every step
     // (tread line) plus the corners, so a wall can be traced down the side of a
     // stair and stop flush at any individual step (and stay straight via ortho).
-    // Points sit on the edges, never the centerline, so the wall runs ALONG the
-    // edge rather than across the middle of the stair.
-    const stairPts = level.stairs.flatMap(st => stairStepEdgePoints(st));
+    // The points are pushed OUTWARD by half the wall thickness, so the wall's
+    // centerline lands outside and its inside face sits flush on the stair edge
+    // (wall fully outside the stair, not straddling the edge).
+    const stairPts = level.stairs.flatMap(st => stairStepEdgePoints(st, defaultWallThickness / 2));
     const sp = nearestPoint(q, stairPts, TOL);
     if (sp) return { point: sp, feature: true };
     // Then the floor-below ghost (when shown) so walls stack on the floor below.
@@ -767,7 +768,7 @@ export default function Canvas2D({
       if (s !== q) return { point: s, feature: true };
     }
     return { point: snapToGridOn ? snapToGrid(q, gridInches) : quantizeToBase(q), feature: false };
-  }, [orthoOn, snapToGridOn, gridInches, level.walls, level.lines, level.stairs, vp.pxPerInch, tool, showFloorBelow, floorBelow]);
+  }, [orthoOn, snapToGridOn, gridInches, level.walls, level.lines, level.stairs, vp.pxPerInch, tool, showFloorBelow, floorBelow, defaultWallThickness]);
 
   const snap = useCallback((p: Vec2, drawingStart?: Vec2): Vec2 => snapWithInfo(p, drawingStart).point, [snapWithInfo]);
 

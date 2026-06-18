@@ -1546,36 +1546,48 @@ export function stairWorldCorners(s: Stair): Vec2[] {
 // Snap points along the stair's OUTSIDE edges, at every step (tread division)
 // plus the corners — so the wall tool can trace a wall down the side of a
 // staircase and stop flush at any individual step. World coords (after
-// rotation + translation). Points sit ON the long run edges (never the
-// centerline), so drawing between them runs ALONG the edge, not across it.
-export function stairStepEdgePoints(s: Stair): Vec2[] {
+// rotation + translation). Each point carries the edge's OUTWARD normal, and
+// `outset` pushes the point that far outward (away from the stair) — pass half
+// the wall thickness so the wall's CENTERLINE lands outside and its inside face
+// sits exactly on the stair edge (wall fully outside, not straddling).
+export function stairStepEdgePoints(s: Stair, outset = 0): Vec2[] {
   const { pieces } = stairPieces(s);
   const treadsBase = s.treads ?? STAIR_DEFAULTS.treads;
-  const local: Vec2[] = [];
+  // local point + outward normal (local frame, pointing away from the stair).
+  const local: { x: number; y: number; nx: number; ny: number }[] = [];
   for (const p of pieces) {
     if (p.kind === 'landing') {
-      // No treads — just the four corners of the landing.
-      local.push({ x: p.x, y: p.y }, { x: p.x + p.w, y: p.y }, { x: p.x + p.w, y: p.y + p.h }, { x: p.x, y: p.y + p.h });
+      // Corners: outward = the diagonal toward that corner (sign of x,y).
+      local.push(
+        { x: p.x, y: p.y, nx: -1, ny: -1 }, { x: p.x + p.w, y: p.y, nx: 1, ny: -1 },
+        { x: p.x + p.w, y: p.y + p.h, nx: 1, ny: 1 }, { x: p.x, y: p.y + p.h, nx: -1, ny: 1 },
+      );
       continue;
     }
     // Tread count for this run (matches drawStair's division), then place a
     // point on BOTH long edges at every tread line (i = 0..n, so endpoints +
-    // each step). treadAxis 'x' → treads cross X, long edges are the verticals;
-    // treadAxis 'y' → treads cross Y, long edges are the horizontals.
+    // each step). treadAxis 'x' → treads cross X, long edges are the verticals
+    // (outward ±x); treadAxis 'y' → long edges are the horizontals (outward ±y).
     const runLen = p.treadAxis === 'x' ? p.h : p.w;
     const n = Math.max(2, Math.round(treadsBase * (runLen / Math.max(s.length, 24))));
     for (let i = 0; i <= n; i++) {
       if (p.treadAxis === 'x') {
         const y = p.y + (i * p.h) / n;
-        local.push({ x: p.x, y }, { x: p.x + p.w, y });
+        local.push({ x: p.x, y, nx: -1, ny: 0 }, { x: p.x + p.w, y, nx: 1, ny: 0 });
       } else {
         const x = p.x + (i * p.w) / n;
-        local.push({ x, y: p.y }, { x, y: p.y + p.h });
+        local.push({ x, y: p.y, nx: 0, ny: -1 }, { x, y: p.y + p.h, nx: 0, ny: 1 });
       }
     }
   }
   const c = Math.cos(s.rotation), si = Math.sin(s.rotation);
-  return local.map(pt => ({ x: s.position.x + c * pt.x - si * pt.y, y: s.position.y + si * pt.x + c * pt.y }));
+  return local.map(pt => {
+    // Normalize the (diagonal) normal so the outset distance is consistent.
+    const nlen = Math.hypot(pt.nx, pt.ny) || 1;
+    const lx = pt.x + (pt.nx / nlen) * outset;
+    const ly = pt.y + (pt.ny / nlen) * outset;
+    return { x: s.position.x + c * lx - si * ly, y: s.position.y + si * lx + c * ly };
+  });
 }
 
 export function drawStair(ctx: CanvasRenderingContext2D, s: Stair, vp: Viewport, selected: boolean) {
