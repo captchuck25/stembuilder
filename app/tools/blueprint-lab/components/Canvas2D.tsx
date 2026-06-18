@@ -21,7 +21,8 @@ import {
   quantizeInches, quantizeToBase,
   snapDimOffsetToParallel,
   snapOrtho, snapToDimAnchor, snapToGrid,
-  snapToLineFeatures, snapToWallCorner, snapToWallEndpoint, snapToWallMidpoint, stairHalfExtents,
+  snapToLineFeatures, snapToWallCorner, snapToWallEdge, snapToWallEndpoint, snapToWallMidpoint, stairHalfExtents,
+  rectHandlePoints, nearestPoint,
   wallFullyInsideBox, wallPolygon, wallTouchesBox,
   LineSnapHit,
 } from '../engine/geometry';
@@ -30,6 +31,9 @@ import {
   drawScene, drawSectionCutSymbol, drawStair, drawStairCornerHandles, drawWallPreview, drawWindow,
   screenToWorld, worldToScreen,
 } from '../engine/renderer';
+// Shared drafting math — the SAME extend/mirror used by the section, roof,
+// elevation, and sandbox surfaces, so the tools behave identically here.
+import { ExtendBoundary, extendEndpoint, filletEndpoint, infiniteLineIntersection, mirrorReflector } from '../engine/sectionEdit';
 import { T } from '../engine/theme';
 
 interface CanvasState {
@@ -94,6 +98,9 @@ export interface Canvas2DProps {
   activeWindowType: WindowType;
   windowTypeSettings: Record<WindowType, WindowTypeSettings>;
   onAddWall: (w: Wall) => void;
+  // Bulk wall add for the Mirror tool — reflected copies as ONE undoable edit,
+  // no intersection auto-split.
+  onAddWalls: (ws: Wall[]) => void;
   onUpdateWalls: (ids: string[], patch: Partial<Wall>) => void;
   onAddDoor: (d: Door) => void;
   onUpdateDoors: (ids: string[], patch: Partial<Door>) => void;
@@ -111,6 +118,9 @@ export interface Canvas2DProps {
   onAddStair: (s: Stair) => void;
   onAddFurniture: (f: FurnitureItem) => void;
   onAddLine: (l: LineEntity) => void;
+  // Bulk line add for the Mirror tool — reflected copies committed as ONE
+  // undoable edit, with no intersection auto-split.
+  onAddLines: (ls: LineEntity[]) => void;
   onUpdateStairs: (ids: string[], patch: Partial<Stair>) => void;
   onUpdateDimensions: (ids: string[], patch: Partial<Dimension>) => void;
   onUpdateRoomLabels: (ids: string[], patch: Partial<RoomLabel>) => void;
@@ -244,11 +254,11 @@ export default function Canvas2D({
   defaultWallThickness, defaultWallHeight, defaultWallType, defaultWallStatus,
   activeDoorType, doorTypeSettings,
   activeWindowType, windowTypeSettings,
-  onAddWall, onUpdateWalls, onAddDoor, onUpdateDoors,
+  onAddWall, onAddWalls, onUpdateWalls, onAddDoor, onUpdateDoors,
   onAddWindow, onUpdateWindows,
   dimensionOffset, roomLabelDefaultName, textDefaultText, stairDefaults, activeFurnitureKind, furnitureSettings,
   defaultLineStyle, defaultLineWeight, defaultLineColor,
-  onAddDimension, onAddRoomLabel, onAddText, onAddStair, onAddFurniture, onAddLine, onUpdateStairs,
+  onAddDimension, onAddRoomLabel, onAddText, onAddStair, onAddFurniture, onAddLine, onAddLines, onUpdateStairs,
   onUpdateDimensions, onUpdateRoomLabels, onUpdateTexts, onUpdateFurniture, onUpdateLines,
   onTrimWall, onTrimLine,
   onChangeTool,
@@ -309,6 +319,86 @@ export default function Canvas2D({
     sectionCuts:  Map<string, { position: number; start: number; end: number; axis: 'x' | 'y' }>;
   }
   const [directDrag, setDirectDrag] = useState<{ worldStart: Vec2; originals: DirectDragOriginals } | null>(null);
+
+  // Mirror tool: y = vertical axis (flip L/R), x = horizontal (flip top/bottom).
+  // Same convention as the section / roof / elevation / sandbox mirror.
+  const [mirrorAxis, setMirrorAxis] = useState<'x' | 'y'>('y');
+  // Fillet tool: the first picked wall/line (and the point clicked on it). The
+  // second click joins them into a corner. Cleared after the join or on Esc.
+  const [filletFirst, setFilletFirst] = useState<{ kind: 'wall' | 'line'; id: string; pick: Vec2 } | null>(null);
+
+  // Endpoints (centerline for walls) of the wall/line with this id, or null.
+  const filletEnds = useCallback((kind: 'wall' | 'line', id: string): { a: Vec2; b: Vec2 } | null => {
+    if (kind === 'wall') {
+      const w = level.walls.find(x => x.id === id);
+      return w ? { a: w.start, b: w.end } : null;
+    }
+    const l = (level.lines ?? []).find(x => x.id === id);
+    return l ? { a: l.start, b: l.end } : null;
+  }, [level.walls, level.lines]);
+
+  // Compute how the WALL or LINE under the cursor would EXTEND — its nearer end
+  // grown to the closest boundary. Shared math with the other drafting surfaces
+  // (sectionEdit.extendEndpoint). Walls take priority over lines for the hit
+  // (same as Trim). Boundaries: for a line, every OTHER line + every wall face;
+  // for a wall, every OTHER wall centerline + every line (so a wall extends to
+  // meet another wall's run). Returns the target kind/id, the moved end
+  // ('a' = start, 'b' = end), the from point, and the landing point.
+  const computeExtendAt = useCallback((world: Vec2, tol: number): {
+    kind: 'wall' | 'line'; id: string; end: 'a' | 'b'; from: Vec2; point: Vec2;
+  } | null => {
+    const wallHit = hitWall(level.walls, world, tol);
+    if (wallHit) {
+      const boundaries: ExtendBoundary[] = [];
+      for (const other of level.walls) {
+        if (other.id === wallHit.id) continue;
+        boundaries.push({ c: other.start, d: other.end, infinite: false });
+      }
+      for (const ln of level.lines ?? []) boundaries.push({ c: ln.start, d: ln.end, infinite: false });
+      const res = extendEndpoint(wallHit.start, wallHit.end, boundaries, world);
+      if (!res) return null;
+      return { kind: 'wall', id: wallHit.id, end: res.end, from: res.end === 'b' ? wallHit.end : wallHit.start, point: res.point };
+    }
+    const lineId = hitLine(level.lines ?? [], world, tol);
+    if (!lineId) return null;
+    const line = (level.lines ?? []).find(l => l.id === lineId);
+    if (!line) return null;
+    const boundaries: ExtendBoundary[] = [];
+    for (const other of level.lines ?? []) {
+      if (other.id === line.id) continue;
+      boundaries.push({ c: other.start, d: other.end, infinite: false });
+    }
+    for (const w of level.walls) {
+      const poly = wallPolygon(w);
+      for (let i = 0; i < poly.length; i++) boundaries.push({ c: poly[i], d: poly[(i + 1) % poly.length], infinite: false });
+    }
+    const res = extendEndpoint(line.start, line.end, boundaries, world);
+    if (!res) return null;
+    return { kind: 'line', id: line.id, end: res.end, from: res.end === 'b' ? line.end : line.start, point: res.point };
+  }, [level.lines, level.walls]);
+
+  // Extend tool hover ghost — derived from the cursor (same pattern as
+  // trimHover). Shows where the hovered wall/line's end would land.
+  const extendHover = useMemo(() => {
+    if (tool !== 'extend' || !hoverWorld) return null;
+    const r = computeExtendAt(hoverWorld, 10 / vp.pxPerInch);
+    return r ? { from: r.from, to: r.point } : null;
+  }, [tool, hoverWorld, vp.pxPerInch, computeExtendAt]);
+
+  // Cross-floor stair move warning: shown at most ONCE per session. Returns
+  // true if the move may proceed (already warned, the stair isn't linked, or
+  // the user confirmed); false if the user cancelled.
+  const linkedStairWarnedRef = useRef(false);
+  const confirmStairLink = (stairId: string | undefined): boolean => {
+    if (!stairId) return true;
+    const s = level.stairs.find(x => x.id === stairId);
+    if (!s?.linkGroup || linkedStairWarnedRef.current) return true;
+    const ok = window.confirm(
+      'This staircase is linked across floors. Moving it also moves the matching flight on the other floor so they stay aligned. (You won’t be asked again this session.)',
+    );
+    if (ok) linkedStairWarnedRef.current = true;
+    return ok;
+  };
 
   // Trim tool: hover preview (which entity will be cut) for the user to see
   // what their click will hit. Single-click splits at every crossing.
@@ -443,6 +533,7 @@ export default function Canvas2D({
     setStairCornerDrag(null);
     setHoveredStairCorner(null);
     setMoveState(null);
+    setFilletFirst(null);
   }
 
   // Driving dimensions (type a value to move the selected element so the
@@ -624,6 +715,10 @@ export default function Canvas2D({
     () => level.stairs.filter(s => selectedStairIds.has(s.id)),
     [level.stairs, selectedStairIds],
   );
+  const selectedFurniture = useMemo(() => {
+    const ids = new Set(selections.filter(s => s.kind === 'furniture').map(s => s.id));
+    return level.furniture.filter(f => ids.has(f.id));
+  }, [level.furniture, selections]);
 
   // ─── Resize observer ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -656,6 +751,14 @@ export default function Canvas2D({
     if (s !== q) return { point: s, feature: true };
     s = snapToWallMidpoint(q, level.walls, TOL);
     if (s !== q) return { point: s, feature: true };
+    // Staircase perimeter — corners + edge midpoints of every stair on the
+    // level, so the user can draw walls that wrap exactly around a stairwell.
+    const stairPts = level.stairs.flatMap(st => {
+      const { hx, hy } = stairHalfExtents(st);
+      return rectHandlePoints(st.position, hx, hy, st.rotation);
+    });
+    const sp = nearestPoint(q, stairPts, TOL);
+    if (sp) return { point: sp, feature: true };
     // Then the floor-below ghost (when shown) so walls stack on the floor below.
     if (showFloorBelow && floorBelow) {
       s = snapToWallEndpoint(q, floorBelow.walls, TOL);
@@ -664,7 +767,7 @@ export default function Canvas2D({
       if (s !== q) return { point: s, feature: true };
     }
     return { point: snapToGridOn ? snapToGrid(q, gridInches) : quantizeToBase(q), feature: false };
-  }, [orthoOn, snapToGridOn, gridInches, level.walls, level.lines, vp.pxPerInch, tool, showFloorBelow, floorBelow]);
+  }, [orthoOn, snapToGridOn, gridInches, level.walls, level.lines, level.stairs, vp.pxPerInch, tool, showFloorBelow, floorBelow]);
 
   const snap = useCallback((p: Vec2, drawingStart?: Vec2): Vec2 => snapWithInfo(p, drawingStart).point, [snapWithInfo]);
 
@@ -1013,6 +1116,108 @@ export default function Canvas2D({
       ctx.restore();
     }
 
+    // Extend tool: green dashed ghost from the line's current end to the
+    // boundary it would reach + a marker at the landing point.
+    if (tool === 'extend' && extendHover) {
+      const f = worldToScreen(extendHover.from, viewport);
+      const t = worldToScreen(extendHover.to, viewport);
+      ctx.save();
+      ctx.strokeStyle = '#16A34A';
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(t.x, t.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#16A34A'; ctx.fill();
+      ctx.restore();
+    }
+
+    // Fillet tool: highlight the first picked wall/line (amber). When a valid
+    // second target is hovered, ghost the resulting corner — both adjusted
+    // centerlines meeting at the intersection + a dot at the corner.
+    if (tool === 'fillet' && filletFirst) {
+      const e1 = filletEnds(filletFirst.kind, filletFirst.id);
+      if (e1) {
+        const a = worldToScreen(e1.a, viewport), b = worldToScreen(e1.b, viewport);
+        ctx.save();
+        ctx.strokeStyle = T.warm;
+        ctx.lineWidth = 2.4;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.setLineDash([]);
+        // Live corner preview against the hovered second target.
+        if (hoverWorld) {
+          const tol = 10 / vp.pxPerInch;
+          const wh = hitWall(level.walls, hoverWorld, tol);
+          const lh = wh ? null : hitLine(level.lines ?? [], hoverWorld, tol);
+          const hover = wh ? { kind: 'wall' as const, id: wh.id } : lh ? { kind: 'line' as const, id: lh } : null;
+          if (hover && !(hover.kind === filletFirst.kind && hover.id === filletFirst.id)) {
+            const e2 = filletEnds(hover.kind, hover.id);
+            const corner = e2 ? infiniteLineIntersection(e1.a, e1.b, e2.a, e2.b) : null;
+            if (e2 && corner) {
+              const cs = worldToScreen(corner, viewport);
+              const m1 = filletEndpoint(e1.a, e1.b, filletFirst.pick, corner);
+              const m2 = filletEndpoint(e2.a, e2.b, hoverWorld, corner);
+              const keep1 = m1 === 'a' ? e1.b : e1.a;   // the endpoint that stays
+              const keep2 = m2 === 'a' ? e2.b : e2.a;
+              const k1 = worldToScreen(keep1, viewport), k2 = worldToScreen(keep2, viewport);
+              ctx.strokeStyle = T.accent;
+              ctx.setLineDash([6, 4]);
+              ctx.lineWidth = 1.6;
+              ctx.beginPath();
+              ctx.moveTo(k1.x, k1.y); ctx.lineTo(cs.x, cs.y);
+              ctx.moveTo(k2.x, k2.y); ctx.lineTo(cs.x, cs.y);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.beginPath(); ctx.arc(cs.x, cs.y, 4, 0, Math.PI * 2);
+              ctx.fillStyle = T.accent; ctx.fill();
+            }
+          }
+        }
+        ctx.restore();
+      }
+    }
+
+    // Mirror tool: violet axis line at the cursor + a ghost of the reflected
+    // selected walls + lines, so the user sees where the copies land.
+    if (tool === 'mirror' && hoverWorld) {
+      const selWallIds = new Set(selections.filter(s => s.kind === 'wall').map(s => s.id));
+      const selLineIds = new Set(selections.filter(s => s.kind === 'line').map(s => s.id));
+      if (selWallIds.size > 0 || selLineIds.size > 0) {
+        const pos = mirrorAxis === 'x' ? hoverWorld.y : hoverWorld.x;
+        const R = mirrorReflector(mirrorAxis, pos);
+        ctx.save();
+        ctx.strokeStyle = '#7C3AED';
+        ctx.lineWidth = 1.25;
+        ctx.setLineDash([10, 5]);
+        ctx.beginPath();
+        if (mirrorAxis === 'x') { const y = worldToScreen({ x: 0, y: pos }, viewport).y; ctx.moveTo(0, y); ctx.lineTo(vp.width, y); }
+        else { const x = worldToScreen({ x: pos, y: 0 }, viewport).x; ctx.moveTo(x, 0); ctx.lineTo(x, vp.height); }
+        ctx.stroke();
+        ctx.strokeStyle = T.accent;
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1.5;
+        // Reflected wall ghosts (outline of the mirrored wall polygon).
+        for (const w of level.walls) {
+          if (!selWallIds.has(w.id)) continue;
+          const corners = wallPolygon({ ...w, start: R(w.start), end: R(w.end) }).map(p => worldToScreen(p, viewport));
+          ctx.beginPath();
+          ctx.moveTo(corners[0].x, corners[0].y);
+          for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i].x, corners[i].y);
+          ctx.closePath();
+          ctx.stroke();
+        }
+        // Reflected line ghosts.
+        for (const l of level.lines ?? []) {
+          if (!selLineIds.has(l.id)) continue;
+          const a = worldToScreen(R(l.start), viewport), b = worldToScreen(R(l.end), viewport);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+    }
+
     // Offset tool: dashed orange outline on source, ghost preview on cursor side.
     if (offsetSource) {
       ctx.strokeStyle = T.warm;
@@ -1289,6 +1494,7 @@ export default function Canvas2D({
       offsetSource, offsetPreview, doorGhost, windowGhost, wallSnapMarker, openEndpoints,
       dimDraft, hoverWorld, stairDefaults, activeFurnitureKind, furnitureSettings,
       defaultLineStyle, defaultLineWeight, defaultLineColor, lineSnapHit, trimHover,
+      extendHover, mirrorAxis, selections, filletFirst, filletEnds,
       roomLabelDefaultName, selectedStairs, hoveredStairCorner,
       sectionCuts, sectionDraft, boundaryDraftRoomId, boundaryPoints, boundaryCloseHover,
       boundaryPreviewPoint, boundarySnapHit]);
@@ -1377,6 +1583,87 @@ export default function Canvas2D({
       if (wallHit) { onTrimWall(wallHit.id, world); return; }
       const lineId = hitLine(level.lines ?? [], world, tol);
       if (lineId) { onTrimLine(lineId, world); return; }
+      return;
+    }
+
+    if (tool === 'extend') {
+      // Counterpart to Trim: click a WALL or LINE near the end you want to grow
+      // — it extends to the nearest boundary. Walls take priority over lines
+      // (same as Trim).
+      const tol = 10 / vp.pxPerInch;
+      const r = computeExtendAt(world, tol);
+      if (r) {
+        const patch = r.end === 'a' ? { start: r.point } : { end: r.point };
+        if (r.kind === 'wall') onUpdateWalls([r.id], patch);
+        else onUpdateLines([r.id], patch);
+      }
+      return;
+    }
+
+    if (tool === 'mirror') {
+      // Reflect the SELECTED walls + lines across an X/Y axis placed at the
+      // click, ADDING mirrored copies (originals kept). Wall copies carry their
+      // geometry/type/thickness but NOT their openings (doors/windows are a
+      // later refinement). Needs a wall or line selection.
+      const selWallIds = new Set(selections.filter(s => s.kind === 'wall').map(s => s.id));
+      const selLineIds = new Set(selections.filter(s => s.kind === 'line').map(s => s.id));
+      if (selWallIds.size > 0 || selLineIds.size > 0) {
+        const pos = mirrorAxis === 'x' ? world.y : world.x;
+        const R = mirrorReflector(mirrorAxis, pos);
+        const wallCopies: Wall[] = level.walls
+          .filter(w => selWallIds.has(w.id))
+          .map(w => ({ ...w, id: makeId('wall'), start: R(w.start), end: R(w.end) }));
+        const lineCopies: LineEntity[] = (level.lines ?? [])
+          .filter(l => selLineIds.has(l.id))
+          .map(l => ({ ...l, id: makeId('line'), start: R(l.start), end: R(l.end) }));
+        if (wallCopies.length > 0 || lineCopies.length > 0) {
+          // Collapse both adds into one undo entry.
+          onBeginLiveOp();
+          if (wallCopies.length > 0) onAddWalls(wallCopies);
+          if (lineCopies.length > 0) onAddLines(lineCopies);
+          onEndLiveOp();
+          onSelectionsChange([
+            ...wallCopies.map(w => ({ kind: 'wall' as const, id: w.id })),
+            ...lineCopies.map(l => ({ kind: 'line' as const, id: l.id })),
+          ]);
+        }
+      }
+      return;
+    }
+
+    if (tool === 'fillet') {
+      // Two-click corner join: click the first wall/line (the side to keep),
+      // then the second. Both near ends move to the intersection of their
+      // centerlines — extending the short one and trimming the long one — so
+      // they meet at a clean corner AND share that point (clears the
+      // disconnected-wall warning). Walls take priority over lines for the hit.
+      const tol = 10 / vp.pxPerInch;
+      const wallHit = hitWall(level.walls, world, tol);
+      const lineId = wallHit ? null : hitLine(level.lines ?? [], world, tol);
+      const hit = wallHit ? { kind: 'wall' as const, id: wallHit.id }
+        : lineId ? { kind: 'line' as const, id: lineId } : null;
+      if (!hit) return;   // missed — keep the first pick (if any) so the user can retry
+      if (!filletFirst || (filletFirst.kind === hit.kind && filletFirst.id === hit.id)) {
+        // First pick, or re-picking the same entity → (re)set it as the first.
+        setFilletFirst({ ...hit, pick: world });
+        return;
+      }
+      const e1 = filletEnds(filletFirst.kind, filletFirst.id);
+      const e2 = filletEnds(hit.kind, hit.id);
+      const corner = e1 && e2 ? infiniteLineIntersection(e1.a, e1.b, e2.a, e2.b) : null;
+      if (e1 && e2 && corner) {
+        const m1 = filletEndpoint(e1.a, e1.b, filletFirst.pick, corner);
+        const m2 = filletEndpoint(e2.a, e2.b, world, corner);
+        const apply = (kind: 'wall' | 'line', id: string, end: 'a' | 'b') => {
+          const patch = end === 'a' ? { start: corner } : { end: corner };
+          if (kind === 'wall') onUpdateWalls([id], patch); else onUpdateLines([id], patch);
+        };
+        onBeginLiveOp();
+        apply(filletFirst.kind, filletFirst.id, m1);
+        apply(hit.kind, hit.id, m2);
+        onEndLiveOp();
+      }
+      setFilletFirst(null);
       return;
     }
 
@@ -1566,12 +1853,23 @@ export default function Canvas2D({
     }
 
     if (tool === 'move' && selections.length > 0) {
-      // First click captures base point + originals. Second click commits.
-      const snapped = snapToWallCorner(
-        snapToWallEndpoint(world, level.walls, 10 / vp.pxPerInch),
-        level.walls, 10 / vp.pxPerInch,
-      );
+      // First click captures the GRAB point. Prefer one of the selected
+      // object's OWN handles (a stair/furniture corner or edge midpoint) so the
+      // user picks the piece up by that point; fall back to a wall corner /
+      // endpoint. Second click drops that grab point at the target.
+      const grabTol = 12 / vp.pxPerInch;
+      const handlePts: Vec2[] = [
+        ...selectedStairs.flatMap(s => { const { hx, hy } = stairHalfExtents(s); return rectHandlePoints(s.position, hx, hy, s.rotation); }),
+        ...selectedFurniture.flatMap(f => rectHandlePoints(f.position, f.width / 2, f.depth / 2, f.rotation)),
+      ];
+      const snapped = moveState
+        ? snapToWallCorner(snapToWallEndpoint(world, level.walls, 10 / vp.pxPerInch), level.walls, 10 / vp.pxPerInch)
+        : (nearestPoint(world, handlePts, grabTol)
+            ?? snapToWallCorner(snapToWallEndpoint(world, level.walls, 10 / vp.pxPerInch), level.walls, 10 / vp.pxPerInch));
       if (!moveState) {
+        // Linked staircase in the selection → warn once before starting a move.
+        const linkedStair = selectedStairs.find(s => s.linkGroup);
+        if (linkedStair && !confirmStairLink(linkedStair.id)) return;
         const originals: MoveOriginals = {
           walls: new Map(), doors: new Map(), windows: new Map(),
           dimensions: new Map(),
@@ -1745,6 +2043,7 @@ export default function Canvas2D({
       // Stair corner handles next.
       const cornerHit = hitStairCorner(selectedStairs, world, 8 / vp.pxPerInch);
       if (cornerHit) {
+        if (!confirmStairLink(cornerHit.stairId)) return;
         onBeginLiveOp();
         setStairCornerDrag(cornerHit);
         return;
@@ -1846,6 +2145,8 @@ export default function Canvas2D({
       const stairId = hitStair(level.stairs, world, tol);
       if (stairId) {
         click('stair', stairId);
+        // Linked staircase (mirrored across floors): warn once before a move.
+        if (!confirmStairLink(stairId)) return;   // selected, but drag not started
         setMouseDown({
           worldStart: world, screenStart: getScreen(e),
           hitWallId: null, hitDoorId: null, hitWindowId: null, hitDimId: null,
@@ -1978,15 +2279,16 @@ export default function Canvas2D({
         dx = dirX * parsed.length;
         dy = dirY * parsed.length;
       } else {
-        // Snap target: wall corner / endpoint, ortho if on. With no feature
-        // lock the delta itself is quantized to 1/8" so moved entities (already
-        // on the base grid) stay on it instead of drifting onto hundredths.
+        // Snap target: wall OUTSIDE corner → endpoint → EDGE (face), ortho if
+        // on. This lets the grabbed handle be dropped on a wall's outside
+        // corner OR flush along a wall edge. With no feature lock the delta is
+        // quantized to 1/8" so moved entities stay on the base grid.
         let target = world;
         if (orthoOn) target = snapOrtho(moveState.basePoint, target);
-        const epSnap = snapToWallEndpoint(target, level.walls, 8 / vp.pxPerInch);
-        const cornerSnap = epSnap === target
-          ? snapToWallCorner(target, level.walls, 8 / vp.pxPerInch)
-          : epSnap;
+        const stol = 8 / vp.pxPerInch;
+        let cornerSnap = snapToWallCorner(target, level.walls, stol);
+        if (cornerSnap === target) cornerSnap = snapToWallEndpoint(target, level.walls, stol);
+        if (cornerSnap === target) cornerSnap = snapToWallEdge(target, level.walls, stol);
         if (cornerSnap === target) {
           // free move — quantize the delta
           dx = quantizeInches(target.x - moveState.basePoint.x);
@@ -2504,6 +2806,7 @@ export default function Canvas2D({
         }
         if (typedLength) { setTypedLength(''); return; }
         if (drawing) { setDrawing(null); return; }
+        if (filletFirst) { setFilletFirst(null); return; }
         if (offsetSource) { setOffsetSource(null); return; }
         if (dimDraft.start || dimDraft.end) { setDimDraft({ start: null, end: null }); return; }
         if (moveState) {
@@ -2663,6 +2966,7 @@ export default function Canvas2D({
       tool, offsetSource, dimDraft, onChangeTool, moveState, commitOffset,
       onUpdateWalls, onUpdateDimensions, onUpdateRoomLabels, onUpdateTexts, onUpdateStairs, onUpdateFurniture, onUpdateLines,
       onEndLiveOp, onCancelLiveOp, sectionCuts, onUpdateSectionCuts,
+      filletFirst,
       boundaryDraftRoomId, boundaryPoints, onCommitBoundary, onCancelBoundaryDraft]);
 
   // ─── Typed-length tag ─────────────────────────────────────────────────────
@@ -2716,6 +3020,9 @@ export default function Canvas2D({
     : tool === 'furniture' ? 'crosshair'
     : tool === 'line' ? LINE_APERTURE_CURSOR
     : tool === 'trim' ? 'crosshair'
+    : tool === 'extend' ? 'crosshair'
+    : tool === 'fillet' ? 'crosshair'
+    : tool === 'mirror' ? 'crosshair'
     : tool === 'section' ? 'crosshair'
     : tool === 'erase' ? 'crosshair'
     : tool === 'select' ? 'default'
@@ -2864,6 +3171,60 @@ export default function Canvas2D({
             : moveState
               ? 'Click to place · type distance (or distance@angle) · Esc to cancel'
               : 'Click a base point to start moving the selection'}
+        </div>
+      )}
+
+      {tool === 'extend' && (
+        <div style={{
+          position: 'absolute', top: 12, left: 12, padding: '6px 12px',
+          background: 'rgba(31,37,64,0.85)', color: '#fff',
+          fontSize: 11, fontFamily: 'ui-monospace, monospace',
+          borderRadius: 6, boxShadow: T.shadow, pointerEvents: 'none',
+        }}>
+          {extendHover
+            ? 'Click to extend to the boundary'
+            : 'Hover a wall or line near the end you want to grow'}
+        </div>
+      )}
+
+      {tool === 'fillet' && (
+        <div style={{
+          position: 'absolute', top: 12, left: 12, padding: '6px 12px',
+          background: 'rgba(31,37,64,0.85)', color: '#fff',
+          fontSize: 11, fontFamily: 'ui-monospace, monospace',
+          borderRadius: 6, boxShadow: T.shadow, pointerEvents: 'none',
+        }}>
+          {filletFirst
+            ? 'Click the second wall/line — they join at the corner'
+            : 'Click the first wall/line (the side to keep)'}
+        </div>
+      )}
+
+      {tool === 'mirror' && (
+        <div style={{
+          position: 'absolute', top: 12, left: 12, padding: '6px 8px',
+          background: 'rgba(31,37,64,0.9)', color: '#fff',
+          fontSize: 11, fontFamily: 'ui-monospace, monospace',
+          borderRadius: 6, boxShadow: T.shadow,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <span style={{ pointerEvents: 'none' }}>Mirror axis:</span>
+          {([['y', 'Vertical'], ['x', 'Horizontal']] as const).map(([ax, label]) => (
+            <button
+              key={ax}
+              type="button"
+              onClick={() => setMirrorAxis(ax)}
+              style={{
+                pointerEvents: 'auto', cursor: 'pointer', fontFamily: 'inherit',
+                padding: '3px 9px', fontSize: 11, fontWeight: 700, borderRadius: 4,
+                border: mirrorAxis === ax ? `1px solid ${T.accent}` : '1px solid rgba(255,255,255,0.3)',
+                background: mirrorAxis === ax ? T.accent : 'transparent', color: '#fff',
+              }}
+            >{label}</button>
+          ))}
+          <span style={{ pointerEvents: 'none', color: 'rgba(255,255,255,0.6)' }}>
+            {selections.some(s => s.kind === 'line' || s.kind === 'wall') ? 'click to place axis' : 'select walls or lines first'}
+          </span>
         </div>
       )}
 

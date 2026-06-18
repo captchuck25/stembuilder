@@ -181,20 +181,32 @@ const ELEVATION_ORDER: { dir: ElevationDirection; title: string }[] = [
 ];
 
 // Raw (unplaced) building blocks shared by both layout modes.
-interface RawBlocks {
-  elevations: { dir: ElevationDirection; title: string; prims: SectionPrimitive[]; lb: SheetBounds }[];
-  sections: { id: string; title: string; prims: SectionPrimitive[]; lb: SheetBounds }[];
-  floorPlanLb: SheetBounds | null;
-  level: Level | undefined;
+interface RawFloorPlan {
+  level: Level;
   // Plan geometry as primitives (walls + lines + labels + section cut lines) —
   // used for DXF export of the floor plan (on screen the plan uses drawScene).
   planPrims: SectionPrimitive[];
+  lb: SheetBounds;
+}
+
+interface RawBlocks {
+  elevations: { dir: ElevationDirection; title: string; prims: SectionPrimitive[]; lb: SheetBounds }[];
+  sections: { id: string; title: string; prims: SectionPrimitive[]; lb: SheetBounds }[];
+  // One entry per level (LOW→HIGH), so a two-story design composites BOTH floor
+  // plans into the sandbox — not just the active level.
+  floorPlans: RawFloorPlan[];
   roof: { prims: SectionPrimitive[]; lb: SheetBounds } | null;
 }
 
 function gatherRaw(project: Project): RawBlocks {
-  const level = project.levels.find(l => l.id === project.activeLevelId) ?? project.levels[0];
-  const planPrims = level ? planExportPrimitives(level, project.sectionCuts ?? []) : [];
+  // Floor plans for EVERY level, ordered low→high (Floor 1 first).
+  const floorPlans: RawFloorPlan[] = [...project.levels]
+    .sort((a, b) => a.elevation - b.elevation)
+    .map(lv => {
+      const lb = planWallBounds(lv);
+      return lb ? { level: lv, planPrims: planExportPrimitives(lv, project.sectionCuts ?? []), lb } : null;
+    })
+    .filter((x): x is RawFloorPlan => x !== null);
 
   const elevations: RawBlocks['elevations'] = [];
   for (const { dir, title } of ELEVATION_ORDER) {
@@ -212,25 +224,36 @@ function gatherRaw(project: Project): RawBlocks {
     if (lb) sections.push({ id: `section-${cut.id}`, title: `SECTION ${cut.name}-${cut.name}'`, prims, lb });
   }
 
-  const floorPlanLb = level ? planWallBounds(level) : null;
-
-  const footprint = level ? buildRoofFootprint(level, project.roof.overhang ?? 12) : null;
-  const eaveBb = footprint ? bboxOf(footprint.eave) : null;
+  // Roof plan = EVERY tier's footprint (perimeter + overhang) plus the drafted
+  // ridges. For a setback this draws the lower roof's eave/wall AND the upper
+  // roof's eave/wall, not just the active level + ridges. Tiers are drawn
+  // low→high so the smaller upper roof reads on top.
+  const overhang = project.roof.overhang ?? 12;
+  const tierFootprints = [...project.levels]
+    .sort((a, b) => a.elevation - b.elevation)
+    .map(lv => buildRoofFootprint(lv, overhang))
+    .filter((fp): fp is NonNullable<typeof fp> => fp != null);
   let roof: RawBlocks['roof'] = null;
-  if (footprint && eaveBb) {
-    roof = {
-      prims: [
-        { id: 'rp-eave', kind: 'polyline', verts: footprint.eave, closed: true, style: 'normal' },
-        { id: 'rp-wall', kind: 'polyline', verts: footprint.wallOuter, closed: true, style: 'thin' },
-        ...(project.roof.drafting ?? []),
-      ],
-      lb: {
-        minX: eaveBb.minX - PLAN_PAD_IN, maxX: eaveBb.maxX + PLAN_PAD_IN,
-        minY: eaveBb.minY - PLAN_PAD_IN, maxY: eaveBb.maxY + PLAN_PAD_IN,
-      },
+  if (tierFootprints.length > 0) {
+    const roofPrims: SectionPrimitive[] = [];
+    tierFootprints.forEach((fp, i) => {
+      roofPrims.push({ id: `rp-eave-${i}`, kind: 'polyline', verts: fp.eave, closed: true, style: 'normal' });
+      roofPrims.push({ id: `rp-wall-${i}`, kind: 'polyline', verts: fp.wallOuter, closed: true, style: 'thin' });
+    });
+    roofPrims.push(...(project.roof.drafting ?? []));
+    // Bounds = union of every tier's eave (the lowest tier is the largest).
+    let bb: SheetBounds | null = null;
+    for (const fp of tierFootprints) {
+      const e = bboxOf(fp.eave);
+      if (!e) continue;
+      bb = bb ? { minX: Math.min(bb.minX, e.minX), minY: Math.min(bb.minY, e.minY), maxX: Math.max(bb.maxX, e.maxX), maxY: Math.max(bb.maxY, e.maxY) } : { ...e };
+    }
+    if (bb) roof = {
+      prims: roofPrims,
+      lb: { minX: bb.minX - PLAN_PAD_IN, maxX: bb.maxX + PLAN_PAD_IN, minY: bb.minY - PLAN_PAD_IN, maxY: bb.maxY + PLAN_PAD_IN },
     };
   }
-  return { elevations, sections, floorPlanLb, level, planPrims, roof };
+  return { elevations, sections, floorPlans, roof };
 }
 
 function buildDatums(project: Project, elevBlocks: SheetBlock[]): { datums: SheetDatum[]; datumXRange: [number, number] | null } {
@@ -282,9 +305,9 @@ function buildRow(project: Project, raw: RawBlocks): SheetLayout {
     runningX = block.sheetBounds.maxX + BLOCK_GUTTER_IN;
   };
 
-  // LEFT: floor plan, then sections.
-  if (raw.level && raw.floorPlanLb) {
-    place({ id: 'floor-plan', title: `FLOOR PLAN — ${raw.level.name}`, space: 'plan', kind: 'plan-scene', level: raw.level, primitives: raw.planPrims, lb: raw.floorPlanLb });
+  // LEFT: every floor plan (Floor 1, Floor 2, …), then sections.
+  for (const fp of raw.floorPlans) {
+    place({ id: `floor-plan-${fp.level.id}`, title: `FLOOR PLAN — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb });
   }
   for (const sec of raw.sections) {
     place({ id: sec.id, title: sec.title, space: 'elevation', kind: 'primitives', primitives: sec.prims, lb: sec.lb });
@@ -318,11 +341,11 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
 
   let runningX = 0;
 
-  // LEFT reference: the un-rotated floor plan, centered on the row.
-  if (raw.level && raw.floorPlanLb) {
+  // LEFT reference: the un-rotated floor plans (one per level), centered on row.
+  for (const fp of raw.floorPlans) {
     const b = makeBlock(
-      { id: 'floor-plan', title: `FLOOR PLAN — ${raw.level.name}`, space: 'plan', kind: 'plan-scene', level: raw.level, primitives: raw.planPrims, lb: raw.floorPlanLb },
-      offsetForRow('plan', raw.floorPlanLb, runningX, 0, rowCenterY), 0,
+      { id: `floor-plan-${fp.level.id}`, title: `FLOOR PLAN — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb },
+      offsetForRow('plan', fp.lb, runningX, 0, rowCenterY), 0,
     );
     blocks.push(b); runningX = b.sheetBounds.maxX + BLOCK_GUTTER_IN;
   }
@@ -335,13 +358,13 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
     blocks.push(b); runningX = b.sheetBounds.maxX + BLOCK_GUTTER_IN;
   }
 
-  // MIDDLE: each elevation in the line, with rotated roof-above / plan-below.
+  // MIDDLE: each elevation in the line, with rotated roof-above / plan(s)-below.
   for (const e of raw.elevations) {
     const rot = ROT_FOR_DIR[e.dir];
     const elevHalfW = (e.lb.maxX - e.lb.minX) / 2;
-    const planHalf = raw.floorPlanLb ? halfExtents('plan', raw.floorPlanLb, rot) : null;
+    const planHalfMax = raw.floorPlans.reduce((m, fp) => Math.max(m, halfExtents('plan', fp.lb, rot).hw), 0);
     const roofHalf = raw.roof ? halfExtents('plan', raw.roof.lb, rot) : null;
-    const colHalfW = Math.max(elevHalfW, planHalf?.hw ?? 0, roofHalf?.hw ?? 0);
+    const colHalfW = Math.max(elevHalfW, planHalfMax, roofHalf?.hw ?? 0);
     const centerX = runningX + colHalfW;
 
     const elevCenterY = (e.lb.minY + e.lb.maxY) / 2;       // → offset.y = 0 (datum row)
@@ -358,12 +381,18 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
         offsetForCenter('plan', raw.roof.lb, center), rot,
       ));
     }
-    if (raw.level && raw.floorPlanLb && planHalf) {
-      const center: Vec2 = { x: centerX, y: elev.sheetBounds.minY - BLOCK_GUTTER_IN - planHalf.hh };
-      blocks.push(makeBlock(
-        { id: `plan-${e.dir}`, title: `PLAN ▸ ${e.dir.toUpperCase()}`, space: 'plan', kind: 'plan-scene', level: raw.level, primitives: raw.planPrims, lb: raw.floorPlanLb },
-        offsetForCenter('plan', raw.floorPlanLb, center), rot,
-      ));
+    // Floor plans stacked BELOW the elevation (Floor 1 nearest, upper floors
+    // beneath it), each rotated so the viewed face is nearest the elevation.
+    let belowY = elev.sheetBounds.minY;
+    for (const fp of raw.floorPlans) {
+      const half = halfExtents('plan', fp.lb, rot);
+      const center: Vec2 = { x: centerX, y: belowY - BLOCK_GUTTER_IN - half.hh };
+      const b = makeBlock(
+        { id: `plan-${e.dir}-${fp.level.id}`, title: `PLAN ▸ ${e.dir.toUpperCase()} — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb },
+        offsetForCenter('plan', fp.lb, center), rot,
+      );
+      blocks.push(b);
+      belowY = b.sheetBounds.minY;
     }
     runningX = centerX + colHalfW + BLOCK_GUTTER_IN;
   }

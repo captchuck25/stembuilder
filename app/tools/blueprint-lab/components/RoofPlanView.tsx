@@ -26,12 +26,12 @@ import {
   findSnap, drawSnapIndicator, SnapResult,
 } from '../engine/sectionSnap';
 import {
-  computeBoxSelection,
+  ExtendBoundary, computeBoxSelection, computeLineExtend,
   drawDimGhost, drawLineGhost, drawLineHandles,
   drawOffsetSource, drawSelectionBox, drawSelectionOverlay,
-  hitTestLineHandle, hitTestTopmost,
+  drawFilletGhost, filletLines, hitTestLineHandle, hitTestTopmost,
   makeUserDimLinear, makeUserLine, makeUserPrimId, makeUserText,
-  signedPerpendicularOffset,
+  mirrorReflector, reflectPrimitives, signedPerpendicularOffset,
 } from '../engine/sectionEdit';
 import { renderSectionPrimitives, Projector } from '../engine/sectionPrimitives';
 import { T } from '../engine/theme';
@@ -480,6 +480,13 @@ export default function RoofPlanView({
   const [cursorWorld, setCursorWorld] = useState<Vec2 | null>(null);
   const [snap, setSnap] = useState<SnapResult | null>(null);
   const [shiftHeld, setShiftHeld] = useState(false);
+  // Mirror tool: y = vertical axis (flip L/R), x = horizontal axis (flip top/bottom).
+  // Matches the Sandbox mirror axis convention so the tool behaves identically.
+  const [mirrorAxis, setMirrorAxis] = useState<'x' | 'y'>('y');
+  // Extend tool hover ghost — the line's current end → the boundary it reaches.
+  const [extendPreview, setExtendPreview] = useState<{ from: Vec2; to: Vec2 } | null>(null);
+  // Fillet tool: first picked line + the point clicked on it. Second click joins.
+  const [filletFirst, setFilletFirst] = useState<{ id: string; pick: Vec2 } | null>(null);
   // Selected eave edge for per-wall overhang editing. Side panel surfaces
   // a numeric input when this is set. Cleared by Esc, by selecting a
   // PrimLine, by box selection, or by clicking empty space.
@@ -594,6 +601,28 @@ export default function RoofPlanView({
       }
     }));
   }, [setDraftingPrims, roof.drafting, selection]);
+
+  // Extend boundaries beyond the drafting lines: the footprint edges (eave /
+  // wallOuter / centerline) and upper-floor outlines, as finite segments — the
+  // SAME cutting set the Trim tool uses, so a ridge extends to the roof edge.
+  const extendExtra = useCallback((): ExtendBoundary[] => {
+    const out: ExtendBoundary[] = [];
+    const polys: Vec2[][] = [];
+    if (footprint) polys.push(footprint.eave, footprint.wallOuter, footprint.centerline);
+    for (const fp of upperFootprints) polys.push(fp.eave, fp.wallOuter, fp.centerline);
+    for (const poly of polys) {
+      for (let i = 0; i < poly.length; i++) out.push({ c: poly[i], d: poly[(i + 1) % poly.length], infinite: false });
+    }
+    return out;
+  }, [footprint, upperFootprints]);
+
+  // Compute how the clicked line would extend (shared by hover preview + commit).
+  const computeExtendAt = useCallback((raw: Vec2, world: Vec2, tol: number) => {
+    const hit = hitTestTopmost(roof.drafting ?? [], raw, tol);
+    if (!hit || hit.kind !== 'line') return null;
+    const r = computeLineExtend(hit, roof.drafting ?? [], world, extendExtra());
+    return r ? { id: hit.id, ...r } : null;
+  }, [roof.drafting, extendExtra]);
 
   // ── Mouse handlers ───────────────────────────────────────────────────────
   const panningRef = useRef<{ x: number; y: number } | null>(null);
@@ -765,6 +794,47 @@ export default function RoofPlanView({
       return;
     }
 
+    if (tool === 'extend') {
+      // Extend the clicked line's nearer end out to the closest boundary —
+      // other drafting lines plus the footprint edges (counterpart to Trim).
+      const r = computeExtendAt(raw, world, bodyTol);
+      if (r) {
+        updateLine(r.id, { ...(roof.drafting ?? []).find(p => p.id === r.id) as PrimLine, [r.end]: r.point });
+        setExtendPreview(null);
+      }
+      return;
+    }
+
+    if (tool === 'mirror') {
+      // Reflect the current selection across an X/Y axis placed at the
+      // (snapped) click, ADDING mirrored copies and keeping the originals.
+      // Needs an existing selection (same as the Sandbox mirror).
+      if (selection.size > 0) {
+        const pos = mirrorAxis === 'x' ? world.y : world.x;
+        const { copies, newIds } = reflectPrimitives(roof.drafting ?? [], selection, mirrorAxis, pos);
+        if (copies.length) {
+          setDraftingPrims([...(roof.drafting ?? []), ...copies]);
+          setSelection(new Set(newIds));
+        }
+      }
+      return;
+    }
+
+    if (tool === 'fillet') {
+      // Two-click corner join: pick line 1 (side to keep), then line 2 — both
+      // near ends move to where the two lines intersect (any angle).
+      const hit = hitTestTopmost(roof.drafting ?? [], raw, bodyTol);
+      if (!hit || hit.kind !== 'line') return;
+      if (!filletFirst || filletFirst.id === hit.id) {
+        setFilletFirst({ id: hit.id, pick: raw });
+        return;
+      }
+      const next = filletLines(roof.drafting ?? [], filletFirst.id, filletFirst.pick, hit.id, raw);
+      if (next) setDraftingPrims(next);
+      setFilletFirst(null);
+      return;
+    }
+
     // Select tool ----------------------------------------------------------
     // 1. Endpoint drag on a selected line.
     for (const p of roof.drafting ?? []) {
@@ -814,7 +884,7 @@ export default function RoofPlanView({
       setSelection(new Set());
       setEaveSel(null);
     }
-  }, [tool, draft, roof.drafting, selection, screenToWorld, resolveCursor, view.zoom, addPrim, removeIds, setDraftingPrims, offsetDistance, lineType, onBeginLiveOp, footprint, upperFootprints]);
+  }, [tool, draft, roof.drafting, selection, screenToWorld, resolveCursor, view.zoom, addPrim, removeIds, setDraftingPrims, offsetDistance, lineType, onBeginLiveOp, footprint, upperFootprints, updateLine, computeExtendAt, mirrorAxis, filletFirst]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const canvas = canvasRef.current;
@@ -863,7 +933,15 @@ export default function RoofPlanView({
     if (draft?.kind === 'dim-points') setDraft({ ...draft, preview: world });
     // Offset doesn't need preview state — the cursor position drives the
     // ghost rendering via `cursorWorld` directly.
-  }, [draft, handleDrag, bodyDrag, boxSel, screenToWorld, resolveCursor, roof.drafting, updateLine, translateSelected]);
+
+    // Extend hover ghost — show where the line under the cursor would land.
+    if (tool === 'extend') {
+      const r = computeExtendAt(raw, world, BODY_HIT_PX / view.zoom);
+      setExtendPreview(r ? { from: r.from, to: r.point } : null);
+    } else if (extendPreview) {
+      setExtendPreview(null);
+    }
+  }, [draft, handleDrag, bodyDrag, boxSel, screenToWorld, resolveCursor, roof.drafting, updateLine, translateSelected, tool, computeExtendAt, view.zoom, extendPreview]);
 
   const onMouseUp = useCallback((e: React.MouseEvent) => {
     if (panningRef.current && (e.button === 1 || e.button === 2)) {
@@ -942,6 +1020,7 @@ export default function RoofPlanView({
         if (handleDrag) { setHandleDrag(null); onEndLiveOp?.(); return; }
         if (bodyDrag)   { setBodyDrag(null);   onEndLiveOp?.(); return; }
         if (boxSel)     { setBoxSel(null); return; }
+        if (filletFirst){ setFilletFirst(null); return; }
         if (draft)      { setDraft(null); setOffsetInput(''); return; }
         if (eaveSel)    { setEaveSel(null); return; }
         setSelection(new Set());
@@ -967,7 +1046,10 @@ export default function RoofPlanView({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [draft, handleDrag, bodyDrag, boxSel, selection, eaveSel, removeIds, fitToCanvas, onChangeTool, onEndLiveOp]);
+  }, [draft, handleDrag, bodyDrag, boxSel, filletFirst, selection, eaveSel, removeIds, fitToCanvas, onChangeTool, onEndLiveOp]);
+
+  // Drop a pending fillet first-pick when leaving the Fillet tool.
+  useEffect(() => { if (tool !== 'fillet') setFilletFirst(null); }, [tool]);
 
   // ── Canvas rendering ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -1080,9 +1162,60 @@ export default function RoofPlanView({
       drawSelectionBox(ctx, boxSel.start, boxSel.current, p => toScreen(p));
     }
 
+    // Extend ghost — dashed line from the current end to the boundary it
+    // reaches, plus a marker at the landing point (matches the Sandbox look).
+    if (tool === 'extend' && extendPreview) {
+      const f = toScreen(extendPreview.from), t = toScreen(extendPreview.to);
+      ctx.save();
+      ctx.strokeStyle = '#16A34A';
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(t.x, t.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#16A34A'; ctx.fill();
+      ctx.restore();
+    }
+
+    // Mirror preview — the axis line at the (snapped) cursor + a ghost of the
+    // reflected selection, so the user sees where the copy lands.
+    if (tool === 'mirror' && selection.size > 0 && cursorWorld) {
+      const pos = mirrorAxis === 'x' ? cursorWorld.y : cursorWorld.x;
+      const R = mirrorReflector(mirrorAxis, pos);
+      ctx.save();
+      // Axis line (violet, long-dash) across the canvas.
+      ctx.strokeStyle = '#7C3AED';
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([10, 5]);
+      ctx.beginPath();
+      if (mirrorAxis === 'x') { const y = toScreen({ x: 0, y: pos }).y; ctx.moveTo(0, y); ctx.lineTo(size.w, y); }
+      else { const x = toScreen({ x: pos, y: 0 }).x; ctx.moveTo(x, 0); ctx.lineTo(x, size.h); }
+      ctx.stroke();
+      // Reflected ghost of the selected lines.
+      ctx.strokeStyle = T.accent;
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 1.5;
+      for (const p of drafting) {
+        if (!selection.has(p.id) || p.kind !== 'line') continue;
+        const a = toScreen(R(p.a)), b = toScreen(R(p.b));
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Fillet ghost — first pick highlighted + live corner against the hovered line.
+    if (tool === 'fillet' && filletFirst) {
+      let hoverId: string | null = null;
+      if (cursorWorld) {
+        const h = hitTestTopmost(drafting, cursorWorld, BODY_HIT_PX / view.zoom);
+        if (h && h.kind === 'line') hoverId = h.id;
+      }
+      drawFilletGhost(ctx, drafting, filletFirst.id, filletFirst.pick, hoverId, cursorWorld, p => toScreen(p));
+    }
+
     // 6. Snap indicator (top-most so it's always visible).
     if (snap) drawSnapIndicator(ctx, snap, p => toScreen(p));
-  }, [size, view, footprint, upperFootprints, drafting, selection, draft, boxSel, snap, toScreen, cursorWorld, offsetInput, offsetDistance, showFloorBelow, activeLevel, effectiveEaveSel]);
+  }, [size, view, footprint, upperFootprints, drafting, selection, draft, boxSel, snap, toScreen, cursorWorld, offsetInput, offsetDistance, showFloorBelow, activeLevel, effectiveEaveSel, tool, extendPreview, mirrorAxis, filletFirst]);
 
   // ── UI ──────────────────────────────────────────────────────────────────
   const hint = useMemo(() => {
@@ -1095,6 +1228,9 @@ export default function RoofPlanView({
     if (draft?.kind === 'offset-dialog')          return 'Type the offset distance — positive / negative pick the side';
     if (tool === 'offset')                        return 'Click a line to offset';
     if (tool === 'trim')                          return 'Click a line span to trim it back to the nearest crossing (no crossing = removes the line)';
+    if (tool === 'extend')                        return 'Click a line near the end to grow — it extends to the nearest line or roof edge';
+    if (tool === 'mirror')                        return selection.size > 0 ? 'Click to place the mirror axis — a reflected copy is added' : 'Select shapes first, then click to place the mirror axis';
+    if (tool === 'fillet')                        return filletFirst ? 'Click the second line — they join where they intersect' : 'Click the first line (the side to keep)';
     if (tool === 'erase')                         return 'Click any shape to delete it';
     if (tool === 'text')                          return 'Click where to place text';
     if (tool === 'dimension')                     return 'Click the first dim point';
@@ -1105,7 +1241,7 @@ export default function RoofPlanView({
     if (effectiveEaveSel)                         return 'Soffit edge selected — edit overhang in the side panel';
     if (selection.size > 0)                       return `${selection.size} selected — drag to move, Delete to remove`;
     return 'Pick a tool from the left palette — Wheel zooms, Right-drag pans';
-  }, [draft, tool, selection.size, lineType, effectiveEaveSel]);
+  }, [draft, tool, selection.size, lineType, effectiveEaveSel, filletFirst]);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: T.bg }}>
@@ -1160,6 +1296,22 @@ export default function RoofPlanView({
                   onClick={() => setLineStyle(soleSelectedLine.id, o.style)}
                 />
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Mirror axis toggle — only while the Mirror tool is active. Y axis =
+            vertical line (flip left/right), X axis = horizontal (flip top/bottom).
+            Same control + convention as the Sandbox mirror. */}
+        {tool === 'mirror' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: T.inkSoft }}>Mirror axis:</span>
+            <div style={{
+              display: 'flex', gap: 2, padding: 3, background: T.bg,
+              border: `1px solid ${T.line}`, borderRadius: 8,
+            }}>
+              <LineTypeButton label="Vertical" active={mirrorAxis === 'y'} onClick={() => setMirrorAxis('y')} />
+              <LineTypeButton label="Horizontal" active={mirrorAxis === 'x'} onClick={() => setMirrorAxis('x')} />
             </div>
           </div>
         )}
@@ -1228,7 +1380,7 @@ export default function RoofPlanView({
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
                 cursor:
                   tool === 'line' || tool === 'dimension' || tool === 'text' ? 'crosshair'
-                  : tool === 'offset' || tool === 'trim' || tool === 'erase' ? 'pointer' : 'default',
+                  : tool === 'offset' || tool === 'trim' || tool === 'extend' || tool === 'mirror' || tool === 'fillet' || tool === 'erase' ? 'pointer' : 'default',
                 display: 'block',
               }}
               onMouseDown={onMouseDown}

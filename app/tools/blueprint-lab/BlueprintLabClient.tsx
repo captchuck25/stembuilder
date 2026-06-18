@@ -39,6 +39,7 @@ import {
   Window, WindowType, WindowTypeSettings, emptyLevel, makeId, newProject,
 } from './engine/types';
 import { autoDetectRoomBoundary, driveDimension, polygonAreaSqFt, wallPolygon } from './engine/geometry';
+import { syncLinkedStairs, linkedGeometryPatch } from './engine/stairs';
 import { buildPrimarySectionCut } from './engine/sectionPrimitives';
 import { T } from './engine/theme';
 
@@ -516,6 +517,14 @@ export default function BlueprintLabClient() {
     }));
   }, []);
 
+  // Keep cross-floor stair mirrors in sync whenever the floor count changes
+  // (covers loading an existing multi-story project AND adding a floor).
+  // `syncLinkedStairs` is idempotent and returns the SAME object when nothing
+  // is missing, so this never loops.
+  useEffect(() => {
+    setProject(p => syncLinkedStairs(p));
+  }, [project.levels.length]);
+
   // Section cuts are project-wide, not per-level — they apply to every floor
   // at the same plan position. Appends one cut to project.sectionCuts.
   const handleAddSectionCut = useCallback((cut: SectionCut) => {
@@ -733,6 +742,19 @@ export default function BlueprintLabClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateLevel]);
 
+  // Bulk-append walls in ONE edit (one undo entry) WITHOUT the intersection
+  // auto-split handleAddWall performs. Used by the Mirror tool so reflected
+  // copies land exactly mirrored rather than being chopped at crossings. Each
+  // wall is stamped with the active level id. (Openings are NOT copied — the
+  // mirror covers wall geometry; carrying doors/windows is a later refinement.)
+  const handleAddWalls = useCallback((walls: Wall[]) => {
+    if (walls.length === 0) return;
+    updateLevel(l => ({
+      ...l,
+      walls: [...l.walls, ...walls.map(w => ({ ...w, levelId: l.id }))],
+    }));
+  }, [updateLevel]);
+
   const handleUpdateWalls = useCallback((ids: string[], patch: Partial<Wall>) => {
     const idSet = new Set(ids);
     updateLevel(l => ({
@@ -923,15 +945,36 @@ export default function BlueprintLabClient() {
   }, [updateLevel]);
 
   const handleAddStair = useCallback((s: Stair) => {
-    updateLevel(l => ({ ...l, stairs: [...l.stairs, s] }));
-  }, [updateLevel]);
+    // Add to the active level, then mirror onto the floor above (linked DN copy).
+    setProject(p => syncLinkedStairs({
+      ...p,
+      levels: p.levels.map(l => l.id === p.activeLevelId ? { ...l, stairs: [...l.stairs, s] } : l),
+    }));
+  }, []);
 
   const handleUpdateStairs = useCallback((ids: string[], patch: Partial<Stair>) => {
     const idSet = new Set(ids);
-    updateLevel(l => ({
-      ...l,
-      stairs: l.stairs.map(s => idSet.has(s.id) ? { ...s, ...patch } : s),
-    }));
+    setProject(p => {
+      const active = p.levels.find(l => l.id === p.activeLevelId);
+      // linkGroups of the stairs being edited → propagate geometry to their
+      // mirrors on OTHER floors so the linked flights stay vertically aligned.
+      const groups = new Set(
+        (active?.stairs ?? []).filter(s => idSet.has(s.id) && s.linkGroup).map(s => s.linkGroup as string),
+      );
+      const geom = linkedGeometryPatch(patch);
+      const hasGeom = Object.keys(geom).length > 0;
+      return {
+        ...p,
+        levels: p.levels.map(l => ({
+          ...l,
+          stairs: l.stairs.map(s => {
+            if (l.id === p.activeLevelId && idSet.has(s.id)) return { ...s, ...patch };
+            if (hasGeom && s.linkGroup && groups.has(s.linkGroup)) return { ...s, ...geom };
+            return s;
+          }),
+        })),
+      };
+    });
     if (patch.width != null || patch.length != null || patch.direction != null || patch.shape != null) {
       setStairDefaults(prev => ({
         width: patch.width ?? prev.width,
@@ -940,7 +983,7 @@ export default function BlueprintLabClient() {
         shape: patch.shape ?? prev.shape,
       }));
     }
-  }, [updateLevel]);
+  }, []);
 
   const handleAddFurniture = useCallback((f: FurnitureItem) => {
     updateLevel(l => ({ ...l, furniture: [...l.furniture, f] }));
@@ -1009,6 +1052,19 @@ export default function BlueprintLabClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [updateLevel]);
 
+  // Bulk-append lines in ONE edit (one undo entry) WITHOUT the intersection
+  // auto-split that handleAddLine performs. Used by the Mirror tool: a reflected
+  // copy should land exactly mirrored, not get chopped where it happens to cross
+  // a wall (which would be a surprising edit to the wall engine). Each line is
+  // stamped with the active level id.
+  const handleAddLines = useCallback((lines: LineEntity[]) => {
+    if (lines.length === 0) return;
+    updateLevel(l => ({
+      ...l,
+      lines: [...(l.lines ?? []), ...lines.map(ln => ({ ...ln, levelId: l.id }))],
+    }));
+  }, [updateLevel]);
+
   // ─── Trim tool: one-click ────────────────────────────────────────────────
   // Click a target wall or line. The target is split at EVERY crossing with
   // any other wall or line. Openings on a split wall are re-assigned to the
@@ -1050,34 +1106,35 @@ export default function BlueprintLabClient() {
       const clickT = Math.max(0, Math.min(wL, proj * wL));
       // Boundaries divide the wall into intervals; find which one contains
       // the click and that's the one to remove.
-      const bounds = [0, ...cuts, wL];
-      let removeIdx = -1;
-      for (let i = 0; i < bounds.length - 1; i++) {
-        if (clickT >= bounds[i] - 0.001 && clickT <= bounds[i + 1] + 0.001) {
-          removeIdx = i;
-          break;
-        }
+      // Traditional CAD trim: remove ONLY the span between the two crossings
+      // that bracket the click; keep the outer portions as WHOLE walls (they
+      // span intermediate crossings rather than splitting at every one), so
+      // trimming an end stub leaves the rest as one continuous wall. Openings
+      // are reassigned to whichever surviving segment they land on; ones in the
+      // removed span (or straddling a cut) are dropped.
+      let prev = 0;     // nearest crossing below the click (or the wall start)
+      let next = wL;    // nearest crossing above the click (or the wall end)
+      for (const c of cuts) {
+        if (c < clickT) prev = c;
+        else if (c > clickT) { next = c; break; }
       }
-      if (removeIdx === -1) return l;
-      // Rebuild every OTHER interval as a new wall. Reassign openings to
-      // whichever surviving segment they land on; drop ones that straddle a
-      // cut or landed in the removed interval.
       const ux = wDx / wL, uy = wDy / wL;
+      const pointAt = (t: number): Vec2 => ({ x: w.start.x + ux * t, y: w.start.y + uy * t });
       const newWalls: Wall[] = [];
       const segRanges: { id: string; t0: number; t1: number }[] = [];
-      for (let i = 0; i < bounds.length - 1; i++) {
-        if (i === removeIdx) continue;
-        const t0 = bounds[i], t1 = bounds[i + 1];
-        if (t1 - t0 < 1) continue; // skip slivers <1"
+      const addSeg = (t0: number, t1: number, atStart: boolean, atEnd: boolean) => {
+        if (t1 - t0 < 1) return; // skip slivers <1"
         const sw: Wall = {
           ...w,
           id: makeId('wall'),
-          start: i === 0 ? { ...w.start } : { x: w.start.x + ux * t0, y: w.start.y + uy * t0 },
-          end:   i === bounds.length - 2 ? { ...w.end } : { x: w.start.x + ux * t1, y: w.start.y + uy * t1 },
+          start: atStart ? { ...w.start } : pointAt(t0),
+          end:   atEnd   ? { ...w.end }   : pointAt(t1),
         };
         newWalls.push(sw);
         segRanges.push({ id: sw.id, t0, t1 });
-      }
+      };
+      if (prev > 1)      addSeg(0, prev, true, false);
+      if (next < wL - 1) addSeg(next, wL, false, true);
       const reassign = <T extends { wallId: string; positionAlong: number; width: number }>(op: T): T | null => {
         if (op.wallId !== w.id) return op;
         const opStart = op.positionAlong - op.width / 2;
@@ -1123,27 +1180,25 @@ export default function BlueprintLabClient() {
       if (cuts.length === 0) return l;
       const proj = ((clickPoint.x - target.start.x) * tDx + (clickPoint.y - target.start.y) * tDy) / (tL * tL);
       const clickT = Math.max(0, Math.min(tL, proj * tL));
-      const bounds = [0, ...cuts, tL];
-      let removeIdx = -1;
-      for (let i = 0; i < bounds.length - 1; i++) {
-        if (clickT >= bounds[i] - 0.001 && clickT <= bounds[i + 1] + 0.001) {
-          removeIdx = i;
-          break;
-        }
+      // Traditional CAD trim: remove ONLY the span between the two crossings
+      // that bracket the click, and keep the outer portions as WHOLE lines.
+      // The kept pieces span any intermediate crossings instead of being split
+      // at every one — so trimming an end stub leaves the rest as a single
+      // continuous line (not shattered into a piece per crossing).
+      let prev = 0;     // nearest crossing below the click (or the line start)
+      let next = tL;    // nearest crossing above the click (or the line end)
+      for (const c of cuts) {
+        if (c < clickT) prev = c;
+        else if (c > clickT) { next = c; break; }
       }
-      if (removeIdx === -1) return l;
       const ux = tDx / tL, uy = tDy / tL;
+      const pointAt = (t: number): Vec2 => ({ x: target.start.x + ux * t, y: target.start.y + uy * t });
       const newLines: LineEntity[] = [];
-      for (let i = 0; i < bounds.length - 1; i++) {
-        if (i === removeIdx) continue;
-        const t0 = bounds[i], t1 = bounds[i + 1];
-        if (t1 - t0 < 0.5) continue;
-        newLines.push({
-          ...target,
-          id: makeId('line'),
-          start: i === 0 ? { ...target.start } : { x: target.start.x + ux * t0, y: target.start.y + uy * t0 },
-          end:   i === bounds.length - 2 ? { ...target.end } : { x: target.start.x + ux * t1, y: target.start.y + uy * t1 },
-        });
+      if (prev > 0.5) {
+        newLines.push({ ...target, id: makeId('line'), start: { ...target.start }, end: pointAt(prev) });
+      }
+      if (next < tL - 0.5) {
+        newLines.push({ ...target, id: makeId('line'), start: pointAt(next), end: { ...target.end } });
       }
       return {
         ...l,
@@ -1199,7 +1254,8 @@ export default function BlueprintLabClient() {
         newName = `Floor ${p.levels.length + 1}`;
       }
       const level = emptyLevel(newName, newElevation);
-      return { ...p, levels: [...p.levels, level], activeLevelId: level.id };
+      // Mirror any existing staircases onto/around the new floor (linked DN copy).
+      return syncLinkedStairs({ ...p, levels: [...p.levels, level], activeLevelId: level.id });
     });
     setSelections([]);
   }, []);
@@ -1455,6 +1511,7 @@ export default function BlueprintLabClient() {
               activeWindowType={activeWindowType}
               windowTypeSettings={windowTypeSettings}
               onAddWall={handleAddWall}
+              onAddWalls={handleAddWalls}
               onUpdateWalls={handleUpdateWalls}
               onAddDoor={handleAddDoor}
               onUpdateDoors={handleUpdateDoors}
@@ -1472,6 +1529,7 @@ export default function BlueprintLabClient() {
               onAddStair={handleAddStair}
               onAddFurniture={handleAddFurniture}
               onAddLine={handleAddLine}
+              onAddLines={handleAddLines}
               onUpdateStairs={handleUpdateStairs}
               onUpdateDimensions={handleUpdateDimensions}
               onUpdateRoomLabels={handleUpdateRoomLabels}

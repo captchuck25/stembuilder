@@ -19,6 +19,7 @@ export type ToolId =
   | 'line'
   | 'trim'
   | 'extend'
+  | 'fillet'
   | 'section'
   | 'hatch'
   | 'mirror'
@@ -278,6 +279,12 @@ export interface Stair {
   direction: 'up' | 'down';
   shape?: StairShape;  // defaults to 'straight' for back-compat
   treads?: number;     // visible tread count for the plan symbol; defaults to STAIR_DEFAULTS.treads
+  // Cross-floor link: a staircase placed on one floor is mirrored onto the
+  // floor above (treads shown going DOWN). Both copies share a `linkGroup` so
+  // moving/resizing one propagates to the other (they stay vertically aligned),
+  // and `linked` copies are auto-generated + warn before moving.
+  linkGroup?: string;
+  linked?: boolean;    // true on the AUTO-generated mirror (the floor-above copy)
 }
 
 // Furniture is organized as a catalog by room. Each kind has standard-size
@@ -799,7 +806,7 @@ export interface SectionCut {
 // Tools available in the section drafting palette. `select` is the default;
 // it lets the user click primitives to select/drag/delete (Phase F). The
 // other tools draw new primitives or modify existing ones.
-export type SectionTool = 'select' | 'line' | 'offset' | 'trim' | 'dim' | 'text' | 'erase';
+export type SectionTool = 'select' | 'line' | 'offset' | 'trim' | 'dim' | 'text' | 'erase' | 'extend' | 'mirror' | 'fillet';
 
 // ─── Selection ────────────────────────────────────────────────────────────────
 

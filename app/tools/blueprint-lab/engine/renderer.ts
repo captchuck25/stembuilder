@@ -1593,6 +1593,42 @@ export function drawStair(ctx: CanvasRenderingContext2D, s: Stair, vp: Viewport,
     ctx.stroke();
   }
 
+  // Direction arrow: a line up the FIRST run with an arrowhead at the travel
+  // end (UP points toward the top of the flight; DN points back toward the
+  // start). Drawn along the run's long axis, centered across its width.
+  {
+    const run = pieces.find(p => p.kind === 'run') ?? pieces[0];
+    const along = run.treadAxis === 'x' ? 'y' : 'x';   // run's long axis
+    const cx = (run.x + run.w / 2) * ppi;
+    const cy = (run.y + run.h / 2) * ppi;
+    const halfLen = (along === 'y' ? run.h : run.w) * ppi / 2 - 6;
+    // 'up' travels toward decreasing local coordinate (top/left of the symbol);
+    // 'down' travels the opposite way.
+    const sign = s.direction === 'up' ? -1 : 1;
+    const ax0 = along === 'x' ? cx - sign * halfLen : cx;
+    const ay0 = along === 'y' ? cy - sign * halfLen : cy;
+    const ax1 = along === 'x' ? cx + sign * halfLen : cx;
+    const ay1 = along === 'y' ? cy + sign * halfLen : cy;
+    ctx.strokeStyle = selected ? SELECTED_STROKE : '#1f2540';
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(ax0, ay0);
+    ctx.lineTo(ax1, ay1);
+    ctx.stroke();
+    // Arrowhead at (ax1, ay1).
+    const adx = ax1 - ax0, ady = ay1 - ay0;
+    const aL = Math.hypot(adx, ady) || 1;
+    const ux = adx / aL, uy = ady / aL;
+    const hh = 6;
+    ctx.beginPath();
+    ctx.moveTo(ax1, ay1);
+    ctx.lineTo(ax1 - ux * hh - uy * hh * 0.6, ay1 - uy * hh + ux * hh * 0.6);
+    ctx.lineTo(ax1 - ux * hh + uy * hh * 0.6, ay1 - uy * hh - ux * hh * 0.6);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   // UP/DN label centered on the landing if any, else center of the run.
   const labelPiece = pieces.find(p => p.kind === 'landing') ?? pieces[0];
   const lx = (labelPiece.x + labelPiece.w / 2) * ppi;

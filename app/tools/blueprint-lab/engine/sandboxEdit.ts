@@ -21,7 +21,10 @@
 // share one bucket, so editing the upright instance updates the rotated copies.
 
 import { ElevationDirection } from './elevations';
-import { explodePrimitives, makeUserLine, makeUserPrimId, trimLineByClick } from './sectionEdit';
+import {
+  ExtendBoundary, computeLineExtend, explodePrimitives, filletLines, makeUserLine, mirrorReflector,
+  reflectPrimitive, trimLineByClick,
+} from './sectionEdit';
 import { Project, SectionLineStyle, SectionPrimitive, SheetGuide, Vec2 } from './types';
 import { SheetBlock } from './sheet';
 
@@ -206,107 +209,42 @@ export function trimLineAt(project: Project, block: SheetBlock, primId: string, 
   return writeBucket(e.project, e.scope, next);
 }
 
-// Reflect one primitive across the line defined by `R` (a point reflector),
-// returning a fresh copy with a new id. Mirrors every geometry-bearing field.
-function reflectPrim(p: SectionPrimitive, R: (v: Vec2) => Vec2): SectionPrimitive {
-  const id = makeUserPrimId('mirror');
-  switch (p.kind) {
-    case 'line':       return { ...p, id, a: R(p.a), b: R(p.b) };
-    case 'dimLinear':  return { ...p, id, a: R(p.a), b: R(p.b) };
-    case 'polyline':   return { ...p, id, verts: p.verts.map(R) };
-    case 'hatch':      return { ...p, id, verts: p.verts.map(R) };
-    case 'text':       return { ...p, id, at: R(p.at) };
-    case 'pitchSymbol':return { ...p, id, anchor: R(p.anchor) };
-    case 'dimChain': {
-      const a = R({ x: p.xIn, y: p.y1In }), b = R({ x: p.xIn, y: p.y2In });
-      return { ...p, id, xIn: a.x, y1In: a.y, y2In: b.y };
-    }
-    case 'toLine': {
-      const a = R({ x: p.leftXIn, y: p.yIn }), b = R({ x: p.rightXIn, y: p.yIn });
-      return { ...p, id, leftXIn: Math.min(a.x, b.x), rightXIn: Math.max(a.x, b.x), yIn: a.y };
-    }
-    default:           return p;   // exhaustive above; unreachable
-  }
-}
-
-// Point reflector for a mirror over the X axis (horizontal line y=pos → flips
-// top/bottom) or the Y axis (vertical line x=pos → flips left/right).
-export function mirrorReflector(axis: 'x' | 'y', pos: number): (v: Vec2) => Vec2 {
-  return axis === 'x'
-    ? (v: Vec2) => ({ x: v.x, y: 2 * pos - v.y })
-    : (v: Vec2) => ({ x: 2 * pos - v.x, y: v.y });
-}
-
 // Mirror the selected primitives across the chosen axis line (block-local),
 // ADDING reflected copies (originals kept). Returns the updated project and the
-// new copies' ids (so the caller can select them).
+// new copies' ids (so the caller can select them). Reflection math is shared
+// with the other drafting surfaces (sectionEdit.reflectPrimitive).
 export function mirrorSelection(project: Project, block: SheetBlock, ids: Set<string>, axis: 'x' | 'y', pos: number): { project: Project; newIds: string[] } {
   const e = ensureEditable(project, block);
   if (!e) return { project, newIds: [] };
   const R = mirrorReflector(axis, pos);
-  const copies = e.prims.filter(p => ids.has(p.id)).map(p => reflectPrim(p, R));
+  const copies = e.prims.filter(p => ids.has(p.id)).map(p => reflectPrimitive(p, R));
   if (!copies.length) return { project: e.project, newIds: [] };
   return { project: writeBucket(e.project, e.scope, [...e.prims, ...copies]), newIds: copies.map(c => c.id) };
 }
 
 // ── Extend ────────────────────────────────────────────────────────────────────
-// Grow the endpoint of `a→b` nearer `click` ALONG the line's own direction until
-// it reaches the nearest boundary it would cross. Boundaries are segments
-// (`infinite` = treat as an endless line, e.g. a projection guide). Returns the
-// end to move and its new position, or null when nothing lies ahead.
-function extendEndpoint(
-  a: Vec2, b: Vec2,
-  boundaries: Array<{ c: Vec2; d: Vec2; infinite: boolean }>,
-  click: Vec2,
-): { end: 'a' | 'b'; point: Vec2 } | null {
-  const rx = b.x - a.x, ry = b.y - a.y;
-  if (rx * rx + ry * ry === 0) return null;
-  // Extend whichever endpoint the click is nearer to.
-  const extendB = Math.hypot(click.x - b.x, click.y - b.y) <= Math.hypot(click.x - a.x, click.y - a.y);
-  const EPS = 1e-4;
-  let bestT: number | null = null;
-  for (const { c, d, infinite } of boundaries) {
-    const sx = d.x - c.x, sy = d.y - c.y;
-    const denom = rx * sy - ry * sx;
-    if (Math.abs(denom) < 1e-9) continue;                       // parallel
-    const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / denom;    // param along target (0=a, 1=b)
-    const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / denom;    // param along boundary
-    if (!infinite && (u < -EPS || u > 1 + EPS)) continue;       // off the boundary segment
-    if (extendB ? t <= 1 + EPS : t >= -EPS) continue;           // must be PAST the chosen end
-    // Nearest boundary: smallest t beyond b, or largest (closest to 0) before a.
-    if (bestT === null || (extendB ? t < bestT : t > bestT)) bestT = t;
-  }
-  if (bestT === null) return null;
-  return { end: extendB ? 'b' : 'a', point: { x: a.x + bestT * rx, y: a.y + bestT * ry } };
-}
-
-// Boundaries for extending within a block: every other line / polyline edge,
-// plus projection guides (as infinite lines).
-function extendBoundaries(prims: SectionPrimitive[], block: SheetBlock, guides: SheetGuide[], skipId: string): Array<{ c: Vec2; d: Vec2; infinite: boolean }> {
-  const out: Array<{ c: Vec2; d: Vec2; infinite: boolean }> = [];
-  for (const p of prims) {
-    if (p.id === skipId) continue;
-    if (p.kind === 'line') out.push({ c: p.a, d: p.b, infinite: false });
-    else if (p.kind === 'polyline' || p.kind === 'hatch') {
-      const n = p.verts.length;
-      const closed = p.kind === 'hatch' || p.closed;
-      const segCount = closed ? n : n - 1;
-      for (let i = 0; i < segCount; i++) out.push({ c: p.verts[i], d: p.verts[(i + 1) % n], infinite: false });
-    }
-  }
-  for (const [c, d] of guideSegmentsForBlock(block, guides)) out.push({ c, d, infinite: true });
-  return out;
-}
-
 // Compute (without mutating) how a clicked line would extend — for both the
 // commit and the hover preview. Returns the moved end + its new point, or null.
+// Extension math is shared with the other drafting surfaces
+// (sectionEdit.computeLineExtend); the Sandbox-only twist is that projection
+// guides crossing the block count as INFINITE boundaries.
 export function computeExtend(project: Project, block: SheetBlock, primId: string, clickLocal: Vec2): { end: 'a' | 'b'; from: Vec2; point: Vec2 } | null {
   const prims = editablePrims(block, project);
   const target = prims.find(p => p.id === primId);
   if (!target || target.kind !== 'line') return null;
-  const res = extendEndpoint(target.a, target.b, extendBoundaries(prims, block, project.sheet?.guides ?? [], primId), clickLocal);
-  if (!res) return null;
-  return { end: res.end, from: res.end === 'b' ? target.b : target.a, point: res.point };
+  const guideBoundaries: ExtendBoundary[] = guideSegmentsForBlock(block, project.sheet?.guides ?? [])
+    .map(([c, d]) => ({ c, d, infinite: true }));
+  return computeLineExtend(target, prims, clickLocal, guideBoundaries);
+}
+
+// Fillet two lines in a block into a corner at their intersection. Picks are
+// block-local. Both near ends move to where the two lines cross (any angle).
+export function filletLinesAt(project: Project, block: SheetBlock, id1: string, pick1: Vec2, id2: string, pick2: Vec2): Project {
+  const e = ensureEditable(project, block);
+  if (!e) return project;
+  const next = filletLines(e.prims, id1, pick1, id2, pick2);
+  if (!next) return e.project;
+  return writeBucket(e.project, e.scope, next);
 }
 
 // Extend a clicked line to the nearest boundary (the counterpart to trim).

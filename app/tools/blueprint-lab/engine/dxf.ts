@@ -126,7 +126,9 @@ function occludePrimitives(prims: SectionPrimitive[]): SectionPrimitive[] {
 }
 
 // ── Per-block coordinate transform ────────────────────────────────────────────
-function transformPoint(pt: Vec2, block: SheetBlock): Vec2 {
+// Exported so the PDF exporter (pdf.ts) shares the exact same block→sheet-world
+// mapping — keeping the two export formats geometrically identical.
+export function transformPoint(pt: Vec2, block: SheetBlock): Vec2 {
   let x = pt.x + block.offset.x;
   let y = block.space === 'plan' ? -pt.y + block.offset.y : pt.y + block.offset.y;
   const deg = block.rotationDeg || 0;

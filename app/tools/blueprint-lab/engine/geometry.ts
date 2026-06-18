@@ -1732,6 +1732,58 @@ export function snapToWallCorner(p: Vec2, walls: Wall[], toleranceIn: number): V
   return best ?? p;
 }
 
+// Corner + edge-midpoint "grab handles" of a rotated rectangle (an object's
+// own snap points). Returns 4 corners then 4 edge midpoints, all in world
+// coords. Used by the Move tool so the user can pick up a stair/furniture by
+// its corner or the middle of a side.
+export function rectHandlePoints(center: Vec2, hx: number, hy: number, rotation: number): Vec2[] {
+  const locals: Vec2[] = [
+    { x: -hx, y: -hy }, { x: hx, y: -hy }, { x: hx, y: hy }, { x: -hx, y: hy },  // corners
+    { x: 0, y: -hy }, { x: hx, y: 0 }, { x: 0, y: hy }, { x: -hx, y: 0 },        // edge mids
+  ];
+  const c = Math.cos(rotation), s = Math.sin(rotation);
+  return locals.map(l => ({ x: center.x + c * l.x - s * l.y, y: center.y + s * l.x + c * l.y }));
+}
+
+// Nearest of `pts` to `p` within `toleranceIn`, or null. Used to snap a Move
+// grab point onto an object's own handle.
+export function nearestPoint(p: Vec2, pts: Vec2[], toleranceIn: number): Vec2 | null {
+  let best: Vec2 | null = null;
+  let bestD = toleranceIn;
+  for (const q of pts) {
+    const d = dist(p, q);
+    if (d < bestD) { best = q; bestD = d; }
+  }
+  return best;
+}
+
+// Snap to the nearest point ON a wall FACE (the outside edges of the rendered
+// wall rectangle), not just its corners — so an object can be dropped flush
+// along a wall edge. Returns the input unchanged if no edge is within tolerance.
+export function snapToWallEdge(p: Vec2, walls: Wall[], toleranceIn: number): Vec2 {
+  let best: Vec2 | null = null;
+  let bestD = toleranceIn;
+  for (const w of walls) {
+    const poly = wallPolygon(w);
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const q = closestPointOnSegment(p, a, b);
+      const d = dist(p, q);
+      if (d < bestD) { best = q; bestD = d; }
+    }
+  }
+  return best ?? p;
+}
+
+function closestPointOnSegment(p: Vec2, a: Vec2, b: Vec2): Vec2 {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return { ...a };
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
 // Wall length helper, used by the properties panel.
 export function wallLength(w: Wall): number {
   return dist(w.start, w.end);

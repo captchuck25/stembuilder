@@ -17,16 +17,17 @@
 // elevation/section at the same world-Y so grade/plate/ridge datums line up.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Project, SectionLineStyle, SectionPrimitive, ToolId, Vec2, makeId } from '../engine/types';
+import { HatchPattern, PrimHatch, Project, SectionLineStyle, SectionPrimitive, ToolId, Vec2, makeId } from '../engine/types';
 import { Projector, renderSectionPrimitives } from '../engine/sectionPrimitives';
 import { Viewport, drawScene, drawSectionCutSymbol } from '../engine/renderer';
 import { SheetBlock, SheetBounds, SheetLayoutMode, buildSheet } from '../engine/sheet';
 import { buildSheetDxf } from '../engine/dxf';
-import { computeBoxSelection, hitTestLineHandle, hitTestTopmost, makeUserDimLinear, signedPerpendicularOffset } from '../engine/sectionEdit';
+import { buildSheetPdf } from '../engine/pdf';
+import { computeBoxSelection, filletPreview, hitTestLineHandle, hitTestTopmost, makeUserDimLinear, makeUserPrimId, mirrorReflector, signedPerpendicularOffset } from '../engine/sectionEdit';
 import { SnapResult, drawSnapIndicator, findSnap } from '../engine/sectionSnap';
 import {
   addLine, appendPrim, blockLocalToSheet, blockToSheet, computeExtend, deleteIds, editablePrims, enterEditMode,
-  extendLineAt, guideSegmentsForBlock, isSandboxEditable, mirrorReflector, mirrorSelection, pickEditableBlock,
+  extendLineAt, filletLinesAt, guideSegmentsForBlock, isSandboxEditable, mirrorSelection, pickEditableBlock,
   primSheetVertices, setLineEndpoint, sheetToBlockLocal, translateIds, trimLineAt,
 } from '../engine/sandboxEdit';
 import { T } from '../engine/theme';
@@ -67,8 +68,15 @@ function sandboxCursor(panning: boolean, editing: boolean, tool: ToolId): string
 // any of these implies "edit current views" — so the tool just works, exactly
 // like the floor plan, instead of silently doing nothing until a separate
 // toggle is flipped.
-const SANDBOX_DRAW_TOOLS: ToolId[] = ['line', 'dimension', 'trim', 'extend', 'erase', 'offset', 'text', 'select', 'mirror'];
+const SANDBOX_DRAW_TOOLS: ToolId[] = ['line', 'dimension', 'trim', 'extend', 'erase', 'offset', 'text', 'select', 'mirror', 'hatch', 'fillet'];
 function isDrawTool(t: ToolId): boolean { return SANDBOX_DRAW_TOOLS.includes(t); }
+
+// Hatch material patterns — same set the Elevations view offers, so the tool
+// behaves identically on both surfaces.
+const HATCH_PATTERNS: HatchPattern[] = [
+  'lap-siding', 'board-batten', 'brick', 'stone', 'stucco', 'shake',
+  'roof-shingles', 'blank',
+];
 
 // The Line tool's "type" — the regular section dash styles PLUS two PROJECTION
 // kinds. Picking a projection type turns the Line tool into the alignment-line
@@ -254,6 +262,9 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
   const [drag, setDrag] = useState<{ blockId: string; mode: 'body' | 'a' | 'b'; primId?: string; ids: string[]; startLocal: Vec2; base: Project } | null>(null);
   const [marquee, setMarquee] = useState<{ start: Vec2; current: Vec2 } | null>(null);   // sheet-world drag-box selection
   const [extendPreview, setExtendPreview] = useState<{ blockId: string; from: Vec2; to: Vec2 } | null>(null);  // Extend tool hover ghost (block-local)
+  const [hatchDraft, setHatchDraft] = useState<{ blockId: string; verts: Vec2[] } | null>(null);  // in-progress hatch polygon (block-local)
+  const [hatchPattern, setHatchPattern] = useState<HatchPattern>('brick');
+  const [filletFirst, setFilletFirst] = useState<{ blockId: string; id: string; pick: Vec2 } | null>(null);  // first fillet pick (block-local)
 
   // screen (css px in canvas) → sheet-world; and a world-space pick tolerance.
   const screenToSheet = useCallback((cssX: number, cssY: number): Vec2 => {
@@ -338,20 +349,37 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
     if (autoFittedRef.current) doFit();
   }, [layoutMode, doFit]);
 
-  // Export the WHOLE sheet (current layout) as a single DXF for AutoCAD/CAD.
-  const onExportDxf = useCallback(() => {
-    const dxf = buildSheetDxf(sheetRef.current);
-    const blob = new Blob([dxf], { type: 'application/dxf' });
+  // Trigger a browser download of a blob.
+  const downloadBlob = useCallback((blob: Blob, ext: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const safe = (project.name || 'blueprint').replace(/[^\w.-]+/g, '_');
     a.href = url;
-    a.download = `${safe}-sandbox.dxf`;
+    a.download = `${safe}-sandbox.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   }, [project.name]);
+
+  // Export the WHOLE sheet (current layout) as a single DXF for AutoCAD/CAD.
+  const onExportDxf = useCallback(() => {
+    const dxf = buildSheetDxf(sheetRef.current);
+    downloadBlob(new Blob([dxf], { type: 'application/dxf' }), 'dxf');
+  }, [downloadBlob]);
+
+  // Export the sheet as a 1:1 vector PDF (filled, full detail) for CAD/vector
+  // tools. Async because jsPDF is dynamically imported.
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const onExportPdf = useCallback(async () => {
+    setPdfBusy(true);
+    try {
+      const blob = await buildSheetPdf(sheetRef.current);
+      downloadBlob(blob, 'pdf');
+    } finally {
+      setPdfBusy(false);
+    }
+  }, [downloadBlob]);
 
   // Reset all Sandbox view edits → revert the elevations + sections to their
   // auto-generated drawings (clears their drafting snapshots).
@@ -732,6 +760,79 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
       }
     }
 
+    // Hatch preview: the in-progress polygon (block-local verts → sheet) with a
+    // rubber-band edge to the cursor. Matches the Elevations hatch ghost.
+    if (editing && tool === 'hatch' && hatchDraft) {
+      const block = sheet.blocks.find(b => b.id === hatchDraft.blockId);
+      if (block && hatchDraft.verts.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = T.accent;
+        ctx.fillStyle = T.accent;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        hatchDraft.verts.forEach((v, i) => {
+          const s = blockLocalToSheet(block, v);
+          const p = { x: proj.sx(s.x), y: proj.sy(s.y) };
+          if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        if (cursorSheet) {
+          const c = { x: proj.sx(cursorSheet.x), y: proj.sy(cursorSheet.y) };
+          ctx.lineTo(c.x, c.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Vertex dots.
+        for (const v of hatchDraft.verts) {
+          const s = blockLocalToSheet(block, v);
+          ctx.beginPath(); ctx.arc(proj.sx(s.x), proj.sy(s.y), 2.5, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    // Fillet preview: highlight the first picked line (amber); when a valid
+    // second line in the same block is hovered, ghost the resulting corner.
+    if (editing && tool === 'fillet' && filletFirst) {
+      const block = sheet.blocks.find(b => b.id === filletFirst.blockId);
+      if (block) {
+        const prims = editablePrims(block, project);
+        const first = prims.find(p => p.id === filletFirst.id);
+        const toScr = (p: Vec2) => { const s = blockLocalToSheet(block, p); return { x: proj.sx(s.x), y: proj.sy(s.y) }; };
+        if (first && first.kind === 'line') {
+          ctx.save();
+          const fa = toScr(first.a), fb = toScr(first.b);
+          ctx.strokeStyle = '#F59E0B';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.moveTo(fa.x, fa.y); ctx.lineTo(fb.x, fb.y); ctx.stroke();
+          // Hovered second line (same block) → corner ghost.
+          let hoverId: string | null = null;
+          if (cursorSheet) {
+            const hl = sheetToBlockLocal(block, cursorSheet);
+            const h = hitTestTopmost(prims, hl, tolIn());
+            if (h && h.kind === 'line') hoverId = h.id;
+          }
+          if (hoverId && hoverId !== filletFirst.id && cursorSheet) {
+            const r = filletPreview(prims, filletFirst.id, filletFirst.pick, hoverId, sheetToBlockLocal(block, cursorSheet));
+            if (r) {
+              const c = toScr(r.corner), k1 = toScr(r.keep1), k2 = toScr(r.keep2);
+              ctx.strokeStyle = T.accent;
+              ctx.lineWidth = 1.6;
+              ctx.setLineDash([6, 4]);
+              ctx.beginPath();
+              ctx.moveTo(k1.x, k1.y); ctx.lineTo(c.x, c.y);
+              ctx.moveTo(k2.x, k2.y); ctx.lineTo(c.x, c.y);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.beginPath(); ctx.arc(c.x, c.y, 4, 0, Math.PI * 2);
+              ctx.fillStyle = T.accent; ctx.fill();
+            }
+          }
+          ctx.restore();
+        }
+      }
+    }
+
     // Snap indicator (endpoint square / midpoint triangle / intersection X /
     // on-edge circle) at the cursor while editing with a tool.
     if (editing && snap) {
@@ -743,7 +844,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
         });
       }
     }
-  }, [vp, sheet, selection, dimDraft, lineDraft, snap, cursorSheet, tool, lineType, mirrorAxis, project, guides, editing, snapGuide, resolveLinePoint, snapLocal, marquee, boxHits, extendPreview]);
+  }, [vp, sheet, selection, dimDraft, lineDraft, snap, cursorSheet, tool, lineType, mirrorAxis, project, guides, editing, snapGuide, resolveLinePoint, snapLocal, marquee, boxHits, extendPreview, hatchDraft, hatchPattern, filletFirst, tolIn]);
 
   // ── Pointer handlers ──────────────────────────────────────────────────────
   // Priority: projection-guide placement (if a guide mode is armed) → view
@@ -833,12 +934,38 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
         }
       }
 
+      // Continue an in-progress hatch in ITS OWN block — accumulate polygon
+      // vertices; click back near the first vertex (≥3 pts) to close + fill.
+      // Same gesture as the Elevations hatch tool.
+      if (tool === 'hatch' && hatchDraft) {
+        const hb = sheet.blocks.find(b => b.id === hatchDraft.blockId);
+        if (hb) {
+          const snapped = snapLocal(hb, sheetToBlockLocal(hb, sheetPt)).point;
+          if (hatchDraft.verts.length >= 3) {
+            const first = hatchDraft.verts[0];
+            if (Math.hypot(snapped.x - first.x, snapped.y - first.y) <= tol * 1.5) {
+              onChange(appendPrim(project, hb, {
+                id: makeUserPrimId('user-hatch'), kind: 'hatch', verts: hatchDraft.verts, pattern: hatchPattern,
+              } as PrimHatch));
+              setHatchDraft(null);
+              return;
+            }
+          }
+          setHatchDraft({ ...hatchDraft, verts: [...hatchDraft.verts, snapped] });
+          return;
+        }
+      }
+
       const block = pickEditableBlock(sheet.blocks, sheetPt);
       if (block) {
         const local = sheetToBlockLocal(block, sheetPt);
         const snapped = snapLocal(block, local).point;   // endpoint/mid/intersection
         const prims = editablePrims(block, project);
 
+        if (tool === 'hatch') {  // first vertex (continuation handled above)
+          setHatchDraft({ blockId: block.id, verts: [snapped] });
+          return;
+        }
         if (tool === 'line') {  // first point (continuation handled above)
           // Capture the line the anchor lands on so the next point can lock
           // parallel/perpendicular to it (e.g. square off an angled roof slope).
@@ -862,6 +989,19 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
           // Extend the clicked line's nearer end out to the closest boundary.
           const hit = hitTestTopmost(prims, local, tol);
           if (hit && hit.kind === 'line') { onChange(extendLineAt(project, block, hit.id, local)); setExtendPreview(null); }
+          return;
+        }
+        if (tool === 'fillet') {
+          // Two-click corner join WITHIN one view. Pick line 1 (side to keep),
+          // then line 2 — both near ends move to the lines' intersection.
+          const hit = hitTestTopmost(prims, local, tol);
+          if (!hit || hit.kind !== 'line') return;
+          if (!filletFirst || filletFirst.blockId !== block.id || filletFirst.id === hit.id) {
+            setFilletFirst({ blockId: block.id, id: hit.id, pick: local });
+            return;
+          }
+          onChange(filletLinesAt(project, block, filletFirst.id, filletFirst.pick, hit.id, local));
+          setFilletFirst(null);
           return;
         }
         if (tool === 'dimension') {  // first point (continuation handled above)
@@ -898,10 +1038,11 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
         setSelection(null);
         if (dimDraft) { setDimDraft(null); return; }
         if (lineDraft) { setLineDraft(null); return; }
+        if (hatchDraft) { setHatchDraft(null); return; }
       }
     }
     startPan(sx, sy);
-  }, [vp.panX, vp.panY, editing, guides, setGuides, snapGuide, tool, lineType, mirrorAxis, sheet, project, onChange, selection, dimDraft, lineDraft, snapLocal, resolveLinePoint, screenToSheet, tolIn, startPan]);
+  }, [vp.panX, vp.panY, editing, guides, setGuides, snapGuide, tool, lineType, mirrorAxis, sheet, project, onChange, selection, dimDraft, lineDraft, hatchDraft, hatchPattern, filletFirst, snapLocal, resolveLinePoint, screenToSheet, tolIn, startPan]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const r = canvasRef.current?.getBoundingClientRect();
@@ -969,7 +1110,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
-      if (e.key === 'Escape') { setDimDraft(null); setLineDraft(null); setSelection(null); setSnap(null); setMarquee(null); return; }
+      if (e.key === 'Escape') { setDimDraft(null); setLineDraft(null); setHatchDraft(null); setFilletFirst(null); setSelection(null); setSnap(null); setMarquee(null); return; }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selection) {
         const block = sheetRef.current.blocks.find(b => b.id === selection.blockId);
         if (block) { onChange(deleteIds(project, block, new Set(selection.ids))); setSelection(null); e.preventDefault(); }
@@ -1000,7 +1141,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
           onClick={() => {
             const turningOn = !editing;
             setEditing(turningOn);
-            setSelection(null); setDimDraft(null); setLineDraft(null);
+            setSelection(null); setDimDraft(null); setLineDraft(null); setHatchDraft(null); setFilletFirst(null);
             // Explode every editable view into stable, individually-editable
             // lines so the tools act on a consistent id set.
             if (turningOn) onChange(enterEditMode(project, sheetRef.current.blocks));
@@ -1066,6 +1207,13 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
           style={{ ...toolBtn, opacity: empty ? 0.5 : 1, cursor: empty ? 'not-allowed' : 'pointer', fontWeight: 700 }}
           title="Export everything on this sheet as one DXF file (opens in AutoCAD and other CAD tools)"
         >↧ Export DXF</button>
+        <button
+          type="button"
+          onClick={onExportPdf}
+          disabled={empty || pdfBusy}
+          style={{ ...toolBtn, opacity: (empty || pdfBusy) ? 0.5 : 1, cursor: (empty || pdfBusy) ? 'not-allowed' : 'pointer', fontWeight: 700 }}
+          title="Export everything on this sheet as one 1:1-scale vector PDF (filled, full detail) for CAD/vector tools"
+        >{pdfBusy ? '…' : '↧ Export PDF'}</button>
       </div>
 
       <div ref={containerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -1164,6 +1312,42 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
             <div style={{ fontSize: 9, color: T.inkMuted, padding: '4px 4px 2px', maxWidth: 132, lineHeight: 1.4 }}>
               {selection ? 'click to place the mirror line' : 'select lines first (Select tool)'}
             </div>
+          </div>
+        )}
+        {/* Hatch pattern picker — choose a material, click polygon vertices on a
+            view, then click the first vertex (or Esc) to close + fill. Same
+            patterns + gesture as the Elevations hatch tool. */}
+        {editing && tool === 'hatch' && (
+          <div style={{
+            position: 'absolute', left: 12, top: 12,
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '5px 8px', background: T.panel,
+            border: `1px solid ${T.line}`, borderRadius: 8, boxShadow: T.shadow,
+          }}>
+            <span style={{ fontSize: 11, color: T.inkSoft }}>Hatch:</span>
+            <select
+              value={hatchPattern}
+              onChange={e => setHatchPattern(e.target.value as HatchPattern)}
+              style={{
+                fontSize: 12, padding: '3px 6px', borderRadius: 4,
+                border: `1px solid ${T.line}`, background: T.panel, color: T.ink,
+              }}
+            >
+              {HATCH_PATTERNS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <span style={{ fontSize: 10, color: T.inkMuted }}>
+              {hatchDraft ? `${hatchDraft.verts.length} pts — click start to close` : 'click vertices on a view'}
+            </span>
+          </div>
+        )}
+        {editing && tool === 'fillet' && (
+          <div style={{
+            position: 'absolute', left: 12, top: 12,
+            padding: '5px 10px', background: T.panel,
+            border: `1px solid ${T.line}`, borderRadius: 8, boxShadow: T.shadow,
+            fontSize: 11, color: T.inkSoft,
+          }}>
+            {filletFirst ? 'Click the second line — they join where they intersect' : 'Fillet: click the first line (the side to keep)'}
           </div>
         )}
         {empty && (

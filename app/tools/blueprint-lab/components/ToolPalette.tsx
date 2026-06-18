@@ -153,6 +153,15 @@ const ExtendIcon = () => (
   </svg>
 );
 
+// Fillet: two lines meeting at a rounded corner — the "join two lines into a
+// corner" tool. An L-shape with a small arc at the inside corner.
+const FilletIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+    <path d="M6 4 L6 13 A5 5 0 0 0 11 18 L20 18"
+      stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 // Section: classic A——A' cut symbol — dashed cut line with arrow caps and
 // a circle on each end (the section marker).
 const SectionIcon = () => (
@@ -207,12 +216,14 @@ const APPLIES_PLAN: ViewId[] = ['2d'];
 // AND Elevations. These are the geometric drawing primitives (select / offset
 // / text / dim / line / trim) — same toolset across every drafting view.
 const APPLIES_DRAFT: ViewId[] = ['2d', 'specs', 'roof-plan', 'elevations'];
-// Draft tools that ALSO work on the Sandbox composite (editing the elevations &
-// sections in "simple line" format): select / line / offset / text / dimension
-// / trim / erase. (Plan-only tools and Hatch stay out of the Sandbox.)
+// Draft tools that work on EVERY drafting surface — 2D Plan, Section, Roof Plan,
+// Elevations, AND the Sandbox composite. The unified geometric toolset:
+// select / offset / line / trim / extend / mirror / dimension / text / erase.
+// All share one implementation (engine/sectionEdit) on the primitive surfaces,
+// and behave identically on the 2D plan against its native wall/line entities.
 const APPLIES_DRAFT_SB: ViewId[] = ['2d', 'specs', 'roof-plan', 'elevations', 'sandbox'];
-// Hatch is elevation-only — fills a polygon region with a material pattern.
-const APPLIES_HATCH: ViewId[] = ['elevations'];
+// Hatch fills a polygon region with a material pattern — Elevations + Sandbox.
+const APPLIES_HATCH: ViewId[] = ['elevations', 'sandbox'];
 
 const TOOLS: ToolDef[] = [
   { id: 'select',      label: 'Select',    hint: 'Click to select / V',              glyph: <SelectIcon/>,    enabled: true, applies: APPLIES_DRAFT_SB },
@@ -228,10 +239,11 @@ const TOOLS: ToolDef[] = [
   { id: 'furniture',   label: 'Furniture', hint: 'Place furniture',                  glyph: <FurnitureIcon/>, enabled: true, applies: APPLIES_PLAN },
   { id: 'line',        label: 'Line',      hint: 'Draw a line / L',                  glyph: <LineIcon/>,      enabled: true, applies: APPLIES_DRAFT_SB },
   { id: 'trim',        label: 'Trim',      hint: 'Split a wall/line at a crossing / T', glyph: <TrimIcon/>,   enabled: true, applies: APPLIES_DRAFT_SB },
-  { id: 'extend',      label: 'Extend',    hint: 'Extend a line to the nearest boundary', glyph: <ExtendIcon/>, enabled: true, applies: ['sandbox'] },
+  { id: 'extend',      label: 'Extend',    hint: 'Extend a line to the nearest boundary', glyph: <ExtendIcon/>, enabled: true, applies: APPLIES_DRAFT_SB },
+  { id: 'fillet',      label: 'Fillet',    hint: 'Join two walls/lines at their intersection', glyph: <FilletIcon/>, enabled: true, applies: APPLIES_DRAFT_SB },
   { id: 'section',     label: 'Section',   hint: 'Place a section cut / S',          glyph: <SectionIcon/>,   enabled: true, applies: APPLIES_PLAN },
   { id: 'hatch',       label: 'Hatch',     hint: 'Fill a polygon region with a material / H', glyph: <HatchIcon/>, enabled: true, applies: APPLIES_HATCH },
-  { id: 'mirror',      label: 'Mirror',    hint: 'Mirror the selection across an X or Y axis', glyph: <MirrorIcon/>, enabled: true, applies: ['sandbox'] },
+  { id: 'mirror',      label: 'Mirror',    hint: 'Mirror the selection across an X or Y axis', glyph: <MirrorIcon/>, enabled: true, applies: APPLIES_DRAFT_SB },
   { id: 'erase',       label: 'Erase',     hint: 'Click any shape to delete / E',    glyph: <EraseIcon/>,     enabled: true, applies: APPLIES_DRAFT_SB },
 ];
 

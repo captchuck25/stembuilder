@@ -23,12 +23,12 @@ import {
 } from '../engine/sectionPrimitives';
 import { SnapResult, drawSnapIndicator, findSnap } from '../engine/sectionSnap';
 import {
-  addPrimitive, computeBoxSelection, drawDimGhost, drawLineGhost, drawLineHandles,
+  addPrimitive, computeBoxSelection, computeLineExtend, drawDimGhost, drawFilletGhost, drawLineGhost, drawLineHandles,
   drawOffsetGhost, drawOffsetSource, drawSelectionBox, drawSelectionOverlay,
-  explodePrimitives, hitTestLineBody, hitTestLineHandle,
-  hitTestTopmost, makeUserDimLinear, makeUserLine, makeUserText, moveLineEndpoint,
-  offsetLineCopy, removePrimitives, replacePrimitiveWithMany,
-  signedPerpendicularOffset, translatePrimitivesBy, trimLineByClick, trimPolylineByClick,
+  explodePrimitives, filletLines, hitTestLineBody, hitTestLineHandle,
+  hitTestTopmost, makeUserDimLinear, makeUserLine, makeUserText, mirrorReflector, moveLineEndpoint,
+  offsetLineCopy, reflectPrimitives, removePrimitives, replaceLinePrimitive, replacePrimitiveWithMany,
+  setDraftingPrimitives, signedPerpendicularOffset, translatePrimitivesBy, trimLineByClick, trimPolylineByClick,
 } from '../engine/sectionEdit';
 import { T } from '../engine/theme';
 
@@ -41,6 +41,9 @@ function toolIdToSectionTool(t?: ToolId): SectionTool {
     case 'line':       return 'line';
     case 'offset':     return 'offset';
     case 'trim':       return 'trim';
+    case 'extend':     return 'extend';
+    case 'mirror':     return 'mirror';
+    case 'fillet':     return 'fillet';
     case 'dimension':  return 'dim';
     case 'room-label': return 'text';
     case 'text':       return 'text';
@@ -1182,6 +1185,13 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     startWorld: Vec2;
     baseProject: Project;
   } | null>(null);
+  // Mirror tool: y = vertical axis (flip L/R), x = horizontal (flip top/bottom).
+  // Matches the Sandbox/Roof/Elevations mirror convention.
+  const [mirrorAxis, setMirrorAxis] = useState<'x' | 'y'>('y');
+  // Extend tool hover ghost — the line's current end → the boundary it reaches.
+  const [extendPreview, setExtendPreview] = useState<{ from: Vec2; to: Vec2 } | null>(null);
+  // Fillet tool: first picked line + the point clicked on it. Second click joins.
+  const [filletFirst, setFilletFirst] = useState<{ id: string; pick: Vec2 } | null>(null);
 
   // Reset transient tool/selection state when leaving drafting mode or
   // switching tools, so we never get stranded mid-draw.
@@ -1196,6 +1206,8 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     setTextInput('');
     setDimA(null);
     setDimB(null);
+    setExtendPreview(null);
+    setFilletFirst(null);
   }, [activeTool, drafting]);
   // Auto-focus the text input when an anchor is placed.
   useEffect(() => {
@@ -1464,7 +1476,50 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
       setOffsetSources(newLines);
       return;
     }
-    // trim / dim / text: TODO in follow-up — fall through (no-op for now).
+    if (activeTool === 'extend') {
+      if (!onChange) return;
+      // Extend the clicked line's nearer end out to the closest boundary —
+      // the counterpart to Trim. Other primitives' edges are the boundaries.
+      const primitives = getSectionPrimitives(project, cutScope);
+      const tolWorld = 6 / proj.px;
+      const hit = hitTestTopmost(primitives, rawWorld, tolWorld);
+      if (!hit || hit.kind !== 'line') return;
+      const r = computeLineExtend(hit, primitives, rawWorld);
+      if (!r) return;
+      pushUndo?.();
+      onChange(replaceLinePrimitive(project, hit.id, { ...hit, [r.end]: r.point }, cutScope));
+      setExtendPreview(null);
+      return;
+    }
+    if (activeTool === 'mirror') {
+      if (!onChange || selection.size === 0) return;
+      // Reflect the current selection across an X/Y axis placed at the click,
+      // ADDING mirrored copies (originals kept). Needs an existing selection.
+      const primitives = getSectionPrimitives(project, cutScope);
+      const pos = mirrorAxis === 'x' ? rawWorld.y : rawWorld.x;
+      const { copies, newIds } = reflectPrimitives(primitives, selection, mirrorAxis, pos);
+      if (copies.length === 0) return;
+      pushUndo?.();
+      onChange(setDraftingPrimitives(project, [...primitives, ...copies], cutScope));
+      setSelection(new Set(newIds));
+      return;
+    }
+    if (activeTool === 'fillet') {
+      if (!onChange) return;
+      // Two-click corner join: pick line 1 (side to keep), then line 2 — both
+      // near ends move to where the two lines intersect (any angle).
+      const primitives = getSectionPrimitives(project, cutScope);
+      const hit = hitTestTopmost(primitives, rawWorld, 6 / proj.px);
+      if (!hit || hit.kind !== 'line') return;
+      if (!filletFirst || filletFirst.id === hit.id) {
+        setFilletFirst({ id: hit.id, pick: rawWorld });
+        return;
+      }
+      const next = filletLines(primitives, filletFirst.id, filletFirst.pick, hit.id, rawWorld);
+      if (next) { pushUndo?.(); onChange(setDraftingPrimitives(project, next, cutScope)); }
+      setFilletFirst(null);
+      return;
+    }
   };
 
   // ── Drafting key handler: Delete removes selected primitives, Escape
@@ -1486,6 +1541,7 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
           e.preventDefault();
           return;
         }
+        if (filletFirst) { setFilletFirst(null); e.preventDefault(); return; }
         if (boxSelect) { setBoxSelect(null); e.preventDefault(); return; }
         if (selection.size > 0) { setSelection(new Set()); e.preventDefault(); return; }
       }
@@ -1498,7 +1554,7 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [drafting, selection, lineAnchor, textAnchor, dimA, dimB, boxSelect, activeTool, offsetUserTyped, project, onChange, pushUndo]);
+  }, [drafting, selection, lineAnchor, textAnchor, dimA, dimB, boxSelect, filletFirst, activeTool, offsetUserTyped, project, onChange, pushUndo]);
 
   // ── Offset: auto-focus the tooltip input on the first typed digit ──────
   // Matches STEM Sketch's UX — the tooltip shows the live cursor distance
@@ -1548,6 +1604,19 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     const raw: Vec2 = { x: proj.wx(screenX), y: proj.wy(screenY) };
     setCursorWorld(raw);
     setCursorScreen({ x: screenX, y: screenY });
+    // Extend hover ghost — show where the line under the cursor would land.
+    if (activeTool === 'extend') {
+      const primitives = getSectionPrimitives(project, cutScope);
+      const hit = hitTestTopmost(primitives, raw, 6 / proj.px);
+      let pv: { from: Vec2; to: Vec2 } | null = null;
+      if (hit && hit.kind === 'line') {
+        const r = computeLineExtend(hit, primitives, raw);
+        if (r) pv = { from: r.from, to: r.point };
+      }
+      setExtendPreview(pv);
+    } else if (extendPreview) {
+      setExtendPreview(null);
+    }
     if (boxSelect) {
       setBoxSelect({ ...boxSelect, current: raw });
     }
@@ -1612,6 +1681,7 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     setBoxSelect(null);
     setCursorWorld(null);
     setCursorScreen(null);
+    setExtendPreview(null);
   };
 
   // ── Snap result: computed from current cursor + primitives + tolerance ──
@@ -1733,8 +1803,8 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     const cv = canvasRef.current;
     if (!cv || vp.width < 10 || vp.height < 10) return;
     const dpr = window.devicePixelRatio || 1;
-    draw(cv, vp, project, dpr, snap, selection, lineAnchor, lineGhostEndpoint, offsetPreview, boxSelect, dimA, dimB, dimGhost, cursorWorld, cutScope);
-  }, [project, vp, snap, selection, lineAnchor, lineGhostEndpoint, offsetPreview, boxSelect, dimA, dimB, dimGhost, cursorWorld, cutScope]);
+    draw(cv, vp, project, dpr, snap, selection, lineAnchor, lineGhostEndpoint, offsetPreview, boxSelect, dimA, dimB, dimGhost, cursorWorld, cutScope, activeTool ?? 'select', mirrorAxis, extendPreview, filletFirst);
+  }, [project, vp, snap, selection, lineAnchor, lineGhostEndpoint, offsetPreview, boxSelect, dimA, dimB, dimGhost, cursorWorld, cutScope, activeTool, mirrorAxis, extendPreview, filletFirst]);
 
   // ── Commit a typed line from the dynamic input ──────────────────────────
   // Resolves using the same priority as the ghost preview, so pressing Enter
@@ -1805,6 +1875,44 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
         onReset100={onReset100}
         onToggleScale={onToggleScale}
       />
+      {/* Mirror axis toggle — floating control while the Mirror tool is active.
+          Y = vertical axis (flip L/R), X = horizontal (flip top/bottom). Same
+          convention as the Sandbox / Roof / Elevations mirror. */}
+      {drafting && activeTool === 'mirror' && (
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px',
+          background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, boxShadow: T.shadow,
+        }}>
+          <span style={{ fontSize: 11, color: T.inkSoft }}>Mirror axis:</span>
+          <div style={{ display: 'flex', gap: 2 }}>
+            {([['y', 'Vertical'], ['x', 'Horizontal']] as const).map(([ax, label]) => (
+              <button
+                key={ax}
+                onClick={() => setMirrorAxis(ax)}
+                style={{
+                  fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+                  border: mirrorAxis === ax ? `1px solid ${T.accent}` : `1px solid ${T.line}`,
+                  background: mirrorAxis === ax ? T.accentSoft : 'transparent',
+                  color: mirrorAxis === ax ? T.accentInk : T.inkSoft, fontWeight: 600,
+                }}
+              >{label}</button>
+            ))}
+          </div>
+          <span style={{ fontSize: 11, color: T.inkMuted }}>
+            {selection.size > 0 ? 'click to place axis' : 'select shapes first'}
+          </span>
+        </div>
+      )}
+      {drafting && activeTool === 'fillet' && (
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+          padding: '5px 10px', background: T.panel, border: `1px solid ${T.line}`,
+          borderRadius: 8, boxShadow: T.shadow, fontSize: 11, color: T.inkSoft,
+        }}>
+          {filletFirst ? 'Click the second line — they join where they intersect' : 'Click the first line (the side to keep)'}
+        </div>
+      )}
       {lineAnchor && activeTool === 'line' && (
         <LineDynamicInput
           inputRef={lineInputRef}
@@ -2154,6 +2262,10 @@ function draw(
   dimGhost: { a: Vec2; b: Vec2; offset: number } | null,
   cursorWorld: Vec2 | null,
   cutScope: string | null,
+  activeTool: SectionTool,
+  mirrorAxis: 'x' | 'y',
+  extendPreview: { from: Vec2; to: Vec2 } | null,
+  filletFirst: { id: string; pick: Vec2 } | null,
 ) {
   const W = vp.width;
   const H = vp.height;
@@ -2208,6 +2320,56 @@ function draw(
   }
   if (dimGhost) {
     drawDimGhost(ctx, dimGhost.a, dimGhost.b, dimGhost.offset, vp.zoom, toScreen);
+  }
+
+  // ── Extend tool ghost ──────────────────────────────────────────────────
+  // Dashed line from the hovered line's current end to the boundary it
+  // reaches + a marker at the landing point (matches Roof / Elevations).
+  if (extendPreview) {
+    const f = toScreen(extendPreview.from), t = toScreen(extendPreview.to);
+    ctx.save();
+    ctx.strokeStyle = '#16A34A';
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(t.x, t.y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(t.x, t.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#16A34A'; ctx.fill();
+    ctx.restore();
+  }
+
+  // ── Mirror tool preview ────────────────────────────────────────────────
+  // Axis line at the cursor + a ghost of the reflected selection.
+  if (activeTool === 'mirror' && selection.size > 0 && cursorWorld) {
+    const pos = mirrorAxis === 'x' ? cursorWorld.y : cursorWorld.x;
+    const R = mirrorReflector(mirrorAxis, pos);
+    ctx.save();
+    ctx.strokeStyle = '#7C3AED';
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([10, 5]);
+    ctx.beginPath();
+    if (mirrorAxis === 'x') { const y = toScreen({ x: 0, y: pos }).y; ctx.moveTo(0, y); ctx.lineTo(vp.width, y); }
+    else { const x = toScreen({ x: pos, y: 0 }).x; ctx.moveTo(x, 0); ctx.lineTo(x, vp.height); }
+    ctx.stroke();
+    ctx.strokeStyle = T.accent;
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1.5;
+    for (const p of primitives) {
+      if (!selection.has(p.id) || p.kind !== 'line') continue;
+      const a = toScreen(R(p.a)), b = toScreen(R(p.b));
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ── Fillet tool preview ────────────────────────────────────────────────
+  if (activeTool === 'fillet' && filletFirst) {
+    let hoverId: string | null = null;
+    if (cursorWorld) {
+      const h = hitTestTopmost(primitives, cursorWorld, 6 / proj.px);
+      if (h && h.kind === 'line') hoverId = h.id;
+    }
+    drawFilletGhost(ctx, primitives, filletFirst.id, filletFirst.pick, hoverId, cursorWorld, toScreen);
   }
 
   // ── Box selection rectangle (drag in Select tool) ──────────────────────

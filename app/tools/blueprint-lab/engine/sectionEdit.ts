@@ -319,12 +319,17 @@ export function explodePrimitives(primitives: SectionPrimitive[]): SectionPrimit
   const out: SectionPrimitive[] = [];
   for (const p of primitives) {
     if (p.kind !== 'polyline') { out.push(p); continue; }
-    // Preserve FILLED OPENINGS (window glass, door panels — any non-'trim' fill)
-    // as intact filled polygons. Exploding them into edge lines drops the fill, so
-    // windows/doors went blank on the first edit. Structural outlines ('trim' fill
-    // or unfilled — wall shell, corner boards, gable trim, roof) still explode so
-    // their edges stay individually editable (e.g. for roofline tweaks).
-    if (p.fill && p.fill !== 'trim') { out.push(p); continue; }
+    // Preserve ANY filled polygon as an intact filled shape. That covers window
+    // glass / door panels (so they don't go blank) AND the opaque white 'trim'
+    // masks — wall shell, corner boards, fascia/gable trim, roof — which the
+    // drawing relies on to hide the structural edges beneath them. Exploding
+    // those masks into bare outline lines removed the white fill, so in sandbox
+    // edit the siding hatch bled through and every buried edge surfaced as an
+    // "extra line." This matches the elevations view's `explodeUnfilled`, so the
+    // two edit paths now behave identically. Unfilled outlines (sections — wall
+    // framing, plates, roof rafters carry no fill) still explode so their edges
+    // stay individually editable.
+    if (p.fill && p.fill !== 'none') { out.push(p); continue; }
     const edgeStyle: SectionLineStyle = p.style === 'sheathing' ? 'sheathing' : 'normal';
     for (let i = 0; i < p.verts.length - 1; i++) {
       out.push({
@@ -642,27 +647,25 @@ export function trimLineByClick(
   // Project the click onto the target → click position in world units.
   const proj = ((clickPoint.x - target.a.x) * dx + (clickPoint.y - target.a.y) * dy) / (L * L);
   const clickT = Math.max(0, Math.min(L, proj * L));
-  const bounds = [0, ...cuts, L];
-  let removeIdx = -1;
-  for (let i = 0; i < bounds.length - 1; i++) {
-    if (clickT >= bounds[i] - 0.001 && clickT <= bounds[i + 1] + 0.001) {
-      removeIdx = i;
-      break;
-    }
+  // Traditional CAD trim: remove ONLY the span between the two crossings that
+  // bracket the click, and keep the outer portions as WHOLE lines. The kept
+  // pieces span any intermediate crossings instead of being split at every one
+  // — so trimming an end stub leaves the rest as a single continuous line, not
+  // a piece per crossing (which also avoided leaving slivers behind).
+  let prev = 0;     // nearest crossing below the click (or the line start)
+  let next = L;     // nearest crossing above the click (or the line end)
+  for (const c of cuts) {
+    if (c < clickT) prev = c;
+    else if (c > clickT) { next = c; break; }
   }
-  if (removeIdx === -1) return null;
   const ux = dx / L, uy = dy / L;
+  const at = (t: number): Vec2 => ({ x: target.a.x + ux * t, y: target.a.y + uy * t });
   const keep: PrimLine[] = [];
-  for (let i = 0; i < bounds.length - 1; i++) {
-    if (i === removeIdx) continue;
-    const t0 = bounds[i], t1 = bounds[i + 1];
-    if (t1 - t0 < TIP_GUARD) continue;
-    keep.push({
-      ...target,
-      id: makeUserPrimId('user-line'),
-      a: i === 0 ? target.a : { x: target.a.x + ux * t0, y: target.a.y + uy * t0 },
-      b: i === bounds.length - 2 ? target.b : { x: target.a.x + ux * t1, y: target.a.y + uy * t1 },
-    });
+  if (prev > TIP_GUARD) {
+    keep.push({ ...target, id: makeUserPrimId('user-line'), a: target.a, b: at(prev) });
+  }
+  if (next < L - TIP_GUARD) {
+    keep.push({ ...target, id: makeUserPrimId('user-line'), a: at(next), b: target.b });
   }
   return { keep };
 }
@@ -1175,4 +1178,238 @@ export function drawLineGhost(
   ctx.setLineDash([]);
   ctx.fillRect(a.x - 3, a.y - 3, 6, 6);
   ctx.restore();
+}
+
+// ── Mirror (shared) ──────────────────────────────────────────────────────────
+// Canonical mirror math for ALL drafting surfaces. A mirror is defined by an
+// axis ('x' = horizontal line y=pos, flips top/bottom; 'y' = vertical line
+// x=pos, flips left/right) and a position. `mirrorReflector` returns the point
+// reflector; `reflectPrimitive` reflects any primitive kind (fresh id);
+// `reflectPrimitives` builds reflected COPIES of a selection (originals kept).
+// Each view feeds points in its OWN frame, so this stays coordinate-agnostic.
+
+export function mirrorReflector(axis: 'x' | 'y', pos: number): (v: Vec2) => Vec2 {
+  return axis === 'x'
+    ? (v: Vec2) => ({ x: v.x, y: 2 * pos - v.y })
+    : (v: Vec2) => ({ x: 2 * pos - v.x, y: v.y });
+}
+
+// Reflect one primitive across `R`, returning a fresh copy with a new id.
+// Mirrors every geometry-bearing field; non-geometric fields carry over.
+export function reflectPrimitive(p: SectionPrimitive, R: (v: Vec2) => Vec2): SectionPrimitive {
+  const id = makeUserPrimId('mirror');
+  switch (p.kind) {
+    case 'line':        return { ...p, id, a: R(p.a), b: R(p.b) };
+    case 'dimLinear':   return { ...p, id, a: R(p.a), b: R(p.b) };
+    case 'polyline':    return { ...p, id, verts: p.verts.map(R) };
+    case 'hatch':       return { ...p, id, verts: p.verts.map(R) };
+    case 'text':        return { ...p, id, at: R(p.at) };
+    case 'pitchSymbol': return { ...p, id, anchor: R(p.anchor) };
+    case 'dimChain': {
+      const a = R({ x: p.xIn, y: p.y1In }), b = R({ x: p.xIn, y: p.y2In });
+      return { ...p, id, xIn: a.x, y1In: a.y, y2In: b.y };
+    }
+    case 'toLine': {
+      const a = R({ x: p.leftXIn, y: p.yIn }), b = R({ x: p.rightXIn, y: p.yIn });
+      return { ...p, id, leftXIn: Math.min(a.x, b.x), rightXIn: Math.max(a.x, b.x), yIn: a.y };
+    }
+    default:            return p;   // exhaustive above; unreachable
+  }
+}
+
+// Build reflected COPIES of the selected primitives (originals untouched).
+// Returns the copies and their new ids so the caller can re-select them.
+// Generic over the primitive element type — reflection preserves each
+// primitive's kind, so the copies are the same narrowed type as the input
+// (e.g. an elevation's DrawingPrimitive[] stays DrawingPrimitive[]).
+export function reflectPrimitives<T extends SectionPrimitive>(
+  primitives: T[],
+  ids: Set<string>,
+  axis: 'x' | 'y',
+  pos: number,
+): { copies: T[]; newIds: string[] } {
+  const R = mirrorReflector(axis, pos);
+  const copies = primitives.filter(p => ids.has(p.id)).map(p => reflectPrimitive(p, R) as T);
+  return { copies, newIds: copies.map(c => c.id) };
+}
+
+// ── Extend (shared) ──────────────────────────────────────────────────────────
+// Canonical extend math for ALL drafting surfaces — the counterpart to trim.
+// A boundary is a segment; `infinite: true` treats it as an endless line (e.g.
+// a projection guide), so a target can extend to a guide it doesn't physically
+// reach.
+export interface ExtendBoundary { c: Vec2; d: Vec2; infinite: boolean; }
+
+// Grow the endpoint of `a→b` nearer `click` ALONG the line's own direction
+// until it reaches the nearest boundary ahead of it. Returns the end to move
+// and its new position, or null when nothing lies ahead.
+export function extendEndpoint(
+  a: Vec2, b: Vec2,
+  boundaries: ExtendBoundary[],
+  click: Vec2,
+): { end: 'a' | 'b'; point: Vec2 } | null {
+  const rx = b.x - a.x, ry = b.y - a.y;
+  if (rx * rx + ry * ry === 0) return null;
+  // Extend whichever endpoint the click is nearer to.
+  const extendB = Math.hypot(click.x - b.x, click.y - b.y) <= Math.hypot(click.x - a.x, click.y - a.y);
+  const EPS = 1e-4;
+  let bestT: number | null = null;
+  for (const { c, d, infinite } of boundaries) {
+    const sx = d.x - c.x, sy = d.y - c.y;
+    const denom = rx * sy - ry * sx;
+    if (Math.abs(denom) < 1e-9) continue;                       // parallel
+    const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / denom;    // param along target (0=a, 1=b)
+    const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / denom;    // param along boundary
+    if (!infinite && (u < -EPS || u > 1 + EPS)) continue;       // off the boundary segment
+    if (extendB ? t <= 1 + EPS : t >= -EPS) continue;           // must be PAST the chosen end
+    // Nearest boundary: smallest t beyond b, or largest (closest to 0) before a.
+    if (bestT === null || (extendB ? t < bestT : t > bestT)) bestT = t;
+  }
+  if (bestT === null) return null;
+  return { end: extendB ? 'b' : 'a', point: { x: a.x + bestT * rx, y: a.y + bestT * ry } };
+}
+
+// Boundaries from a primitive set: every other line / polyline / hatch edge as
+// a finite segment. (Callers add infinite guides separately.) `skipId` excludes
+// the target line itself.
+export function boundariesFromPrimitives(prims: SectionPrimitive[], skipId: string): ExtendBoundary[] {
+  const out: ExtendBoundary[] = [];
+  for (const p of prims) {
+    if (p.id === skipId) continue;
+    if (p.kind === 'line') {
+      out.push({ c: p.a, d: p.b, infinite: false });
+    } else if (p.kind === 'polyline' || p.kind === 'hatch') {
+      const n = p.verts.length;
+      const closed = p.kind === 'hatch' || p.closed;
+      const segCount = closed ? n : n - 1;
+      for (let i = 0; i < segCount; i++) out.push({ c: p.verts[i], d: p.verts[(i + 1) % n], infinite: false });
+    }
+  }
+  return out;
+}
+
+// Compute (without mutating) how the clicked line would extend against the
+// other primitives. `extraBoundaries` lets a caller add guides/infinite edges.
+// Returns the moved end + its new point, or null.
+export function computeLineExtend(
+  target: PrimLine,
+  prims: SectionPrimitive[],
+  click: Vec2,
+  extraBoundaries: ExtendBoundary[] = [],
+): { end: 'a' | 'b'; from: Vec2; point: Vec2 } | null {
+  const boundaries = [...boundariesFromPrimitives(prims, target.id), ...extraBoundaries];
+  const res = extendEndpoint(target.a, target.b, boundaries, click);
+  if (!res) return null;
+  return { end: res.end, from: res.end === 'b' ? target.b : target.a, point: res.point };
+}
+
+// ── Fillet / corner (shared) ─────────────────────────────────────────────────
+// Canonical "make a corner" math for ALL drafting surfaces. A fillet with
+// radius 0 joins two segments at the intersection of their INFINITE lines: each
+// segment is extended OR trimmed so its near end lands exactly on the corner,
+// and both segments end up sharing that point (a clean join — and, for walls,
+// a shared endpoint that clears disconnected-wall warnings).
+
+// Intersection of the two infinite lines through (a1,b1) and (a2,b2).
+// Returns null when the lines are parallel (or a segment is degenerate).
+export function infiniteLineIntersection(a1: Vec2, b1: Vec2, a2: Vec2, b2: Vec2): Vec2 | null {
+  const r1x = b1.x - a1.x, r1y = b1.y - a1.y;
+  const r2x = b2.x - a2.x, r2y = b2.y - a2.y;
+  const denom = r1x * r2y - r1y * r2x;
+  if (Math.abs(denom) < 1e-9) return null;            // parallel / degenerate
+  const t = ((a2.x - a1.x) * r2y - (a2.y - a1.y) * r2x) / denom;
+  return { x: a1.x + t * r1x, y: a1.y + t * r1y };
+}
+
+// Given a segment a→b, the pick point on it, and the corner point, returns which
+// endpoint should be MOVED to the corner. The picked side is kept: the endpoint
+// on the OPPOSITE side of the corner from the pick is the one that moves. This
+// makes the tool extend a short segment or trim a long one, either way landing
+// its near end on the corner.
+export function filletEndpoint(a: Vec2, b: Vec2, pick: Vec2, corner: Vec2): 'a' | 'b' {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy || 1;
+  const tCorner = ((corner.x - a.x) * dx + (corner.y - a.y) * dy) / len2;
+  const tPick   = ((pick.x - a.x) * dx + (pick.y - a.y) * dy) / len2;
+  // Pick before the corner along a→b → keep 'a', move 'b'; else keep 'b', move 'a'.
+  return tPick < tCorner ? 'b' : 'a';
+}
+
+// Where the corner would land and which end of each line moves there — pure,
+// no mutation. `pick1`/`pick2` are the points clicked on each line (they decide
+// which side is kept). Returns null if either id isn't a line or the lines are
+// parallel. The corner is wherever the two straight lines cross (any angle).
+export function filletPreview(
+  prims: SectionPrimitive[],
+  id1: string, pick1: Vec2,
+  id2: string, pick2: Vec2,
+): { corner: Vec2; keep1: Vec2; keep2: Vec2; move1: 'a' | 'b'; move2: 'a' | 'b' } | null {
+  const l1 = prims.find(p => p.id === id1);
+  const l2 = prims.find(p => p.id === id2);
+  if (!l1 || l1.kind !== 'line' || !l2 || l2.kind !== 'line') return null;
+  const corner = infiniteLineIntersection(l1.a, l1.b, l2.a, l2.b);
+  if (!corner) return null;
+  const move1 = filletEndpoint(l1.a, l1.b, pick1, corner);
+  const move2 = filletEndpoint(l2.a, l2.b, pick2, corner);
+  return { corner, keep1: move1 === 'a' ? l1.b : l1.a, keep2: move2 === 'a' ? l2.b : l2.a, move1, move2 };
+}
+
+// Canvas ghost for the Fillet tool. Highlights the first picked line (amber);
+// when a valid second line is hovered, draws the resulting corner — the two
+// kept ends meeting at the intersection + a dot. Shared by every primitive
+// surface so the tool looks identical everywhere. `firstId`/`firstPick` is the
+// committed first pick; `hoverId`/`hoverPick` is the line currently under the
+// cursor (pass null when none).
+export function drawFilletGhost(
+  ctx: CanvasRenderingContext2D,
+  prims: SectionPrimitive[],
+  firstId: string,
+  firstPick: Vec2,
+  hoverId: string | null,
+  hoverPick: Vec2 | null,
+  toScreen: (p: Vec2) => { x: number; y: number },
+) {
+  const first = prims.find(p => p.id === firstId);
+  if (!first || first.kind !== 'line') return;
+  ctx.save();
+  // Highlight the first pick (amber, like the offset/trim source).
+  const fa = toScreen(first.a), fb = toScreen(first.b);
+  ctx.strokeStyle = '#F59E0B';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(fa.x, fa.y); ctx.lineTo(fb.x, fb.y); ctx.stroke();
+  // Live corner ghost against a hovered second line.
+  if (hoverId && hoverPick && hoverId !== firstId) {
+    const r = filletPreview(prims, firstId, firstPick, hoverId, hoverPick);
+    if (r) {
+      const c = toScreen(r.corner), k1 = toScreen(r.keep1), k2 = toScreen(r.keep2);
+      ctx.strokeStyle = '#3B82F6';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(k1.x, k1.y); ctx.lineTo(c.x, c.y);
+      ctx.moveTo(k2.x, k2.y); ctx.lineTo(c.x, c.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(c.x, c.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = '#3B82F6'; ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// Apply a fillet to two line primitives: both near ends move to the lines'
+// intersection (extend short / trim long), so they meet at a clean corner.
+// Returns the updated primitive array, or null if it can't be applied.
+export function filletLines<T extends SectionPrimitive>(
+  prims: T[],
+  id1: string, pick1: Vec2,
+  id2: string, pick2: Vec2,
+): T[] | null {
+  const r = filletPreview(prims, id1, pick1, id2, pick2);
+  if (!r) return null;
+  return prims.map(p => {
+    if (p.id === id1 && p.kind === 'line') return { ...p, [r.move1]: r.corner } as T;
+    if (p.id === id2 && p.kind === 'line') return { ...p, [r.move2]: r.corner } as T;
+    return p;
+  });
 }

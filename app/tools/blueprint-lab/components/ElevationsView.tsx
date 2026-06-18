@@ -19,8 +19,8 @@ import {
   buildElevationPrimitives, getElevationPrimitives, isElevationDrafting,
 } from '../engine/elevationPrimitives';
 import {
-  hitTestTopmost, makeUserLine, makeUserText, makeUserDimLinear,
-  offsetLineCopy, signedPerpendicularOffset,
+  computeLineExtend, filletLines, filletPreview, hitTestTopmost, makeUserLine, makeUserText, makeUserDimLinear,
+  mirrorReflector, offsetLineCopy, reflectPrimitives, signedPerpendicularOffset,
   primitiveInBoxSelection, trimLineByClick, trimPolylineByClick,
 } from '../engine/sectionEdit';
 import { findSnap, SnapResult } from '../engine/sectionSnap';
@@ -150,6 +150,11 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
   const [hatchPattern, setHatchPattern] = useState<HatchPattern>('brick');
   const [offsetSourceId, setOffsetSourceId] = useState<string | null>(null);
   const [offsetDistance, setOffsetDistance] = useState<number>(12); // inches
+  // Mirror tool: y = vertical axis (flip L/R), x = horizontal (flip top/bottom).
+  // Matches the Sandbox/Roof mirror convention.
+  const [mirrorAxis, setMirrorAxis] = useState<'x' | 'y'>('y');
+  // Fillet tool: first picked line + the point clicked on it. Second click joins.
+  const [filletFirst, setFilletFirst] = useState<{ id: string; pick: Vec2 } | null>(null);
   // Typed numeric input — line LENGTH (length@angle) while drawing a line, or
   // the OFFSET distance once an offset source is picked. Same UX as the 2D plan.
   const [typedLength, setTypedLength] = useState<string>('');
@@ -167,6 +172,7 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
     setHatchVerts([]);
     setOffsetSourceId(null);
     setTypedLength('');
+    setFilletFirst(null);
   }, []);
 
   // Live end of the line being drawn. When the user has typed a length (or
@@ -464,10 +470,49 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
       return;
     }
 
+    if (t === 'extend') {
+      // Extend the clicked line's nearer end out to the closest boundary
+      // (counterpart to Trim). Other primitives' edges are the boundaries.
+      const hit = hitTestTopmost(primitives, world, 6 / PX_PER_INCH_AT_100);
+      if (!hit || hit.kind !== 'line') return;
+      const r = computeLineExtend(hit, primitives, world);
+      if (r) setPrimitives(primitives.map(p => (p.id === hit.id && p.kind === 'line' ? { ...p, [r.end]: r.point } : p)));
+      return;
+    }
+
+    if (t === 'mirror') {
+      // Reflect the current selection across an X/Y axis placed at the click,
+      // ADDING mirrored copies (originals kept). Needs an existing selection.
+      if (selection.size > 0) {
+        const pos = mirrorAxis === 'x' ? world.y : world.x;
+        const { copies, newIds } = reflectPrimitives(primitives, selection, mirrorAxis, pos);
+        if (copies.length) {
+          setPrimitives([...primitives, ...copies]);
+          setSelection(new Set(newIds));
+        }
+      }
+      return;
+    }
+
+    if (t === 'fillet') {
+      // Two-click corner join: pick line 1 (side to keep), then line 2 — both
+      // near ends move to where the two lines intersect (any angle).
+      const hit = hitTestTopmost(primitives, world, 6 / PX_PER_INCH_AT_100);
+      if (!hit || hit.kind !== 'line') return;
+      if (!filletFirst || filletFirst.id === hit.id) {
+        setFilletFirst({ id: hit.id, pick: world });
+        return;
+      }
+      const next = filletLines(primitives, filletFirst.id, filletFirst.pick, hit.id, world);
+      if (next) setPrimitives(next);
+      setFilletFirst(null);
+      return;
+    }
+
     // Select tool (default) — handled by the canvas's own selection logic.
   }, [drafting, onChange, tool, lineAnchor, lineEnd, dimA, dimB, hatchVerts, hatchPattern,
       offsetSourceId, offsetDistance, typedLength, primitives, setPrimitives,
-      project]);
+      selection, mirrorAxis, filletFirst, project]);
 
   // ── Text commit (Enter from the floating input) ───────────────────────
   const commitText = useCallback(() => {
@@ -691,6 +736,30 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
             <span style={{ fontSize: 11, color: T.inkSoft }}>in</span>
           </div>
         )}
+        {drafting && tool === 'mirror' && (
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: T.inkSoft }}>Mirror axis:</span>
+            <div style={{ display: 'flex', gap: 2, padding: 3, background: T.bg, border: `1px solid ${T.line}`, borderRadius: 8 }}>
+              {([['y', 'Vertical'], ['x', 'Horizontal']] as const).map(([ax, label]) => (
+                <button
+                  key={ax}
+                  onClick={() => setMirrorAxis(ax)}
+                  style={{
+                    fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer',
+                    border: mirrorAxis === ax ? `1px solid ${T.accent}` : '1px solid transparent',
+                    background: mirrorAxis === ax ? T.accentSoft : 'transparent',
+                    color: mirrorAxis === ax ? T.accentInk : T.inkSoft, fontWeight: 600,
+                  }}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+        {drafting && tool === 'fillet' && (
+          <span style={{ fontSize: 11, color: T.inkSoft }}>
+            {filletFirst ? 'Click the second line — they join where they intersect' : 'Fillet: click the first line (the side to keep)'}
+          </span>
+        )}
 
         {/* Fit / 100% view buttons — always available regardless of tool. */}
         <button
@@ -754,6 +823,8 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
             xMax={scene.xMax}
             selection={selection}
             tool={tool}
+            mirrorAxis={mirrorAxis}
+            filletFirst={filletFirst}
             drafting={drafting}
             onSelectionChange={setSelection}
             cursor={cursor}
@@ -855,6 +926,8 @@ interface ElevationSvgProps {
   xMax: number;
   selection: Set<string>;
   tool?: ToolId;
+  mirrorAxis: 'x' | 'y';
+  filletFirst: { id: string; pick: Vec2 } | null;
   drafting: boolean;
   onSelectionChange: (s: Set<string>) => void;
   cursor: Vec2 | null;
@@ -887,7 +960,7 @@ const HANDLE_GRAB_IN  = 6;
 function ElevationSvg(props: ElevationSvgProps) {
   const {
     primitives, ridgeY, gradeY, xMin, xMax,
-    selection, tool, drafting, onSelectionChange,
+    selection, tool, mirrorAxis, filletFirst, drafting, onSelectionChange,
     cursor, snap, onCursorChange, onSnapChange, onWorldClick,
     lineAnchor, lineEnd, typedLength, dimA, dimB,
     textAnchor, textInput, onTextInputChange, onCommitText, onCancelText,
@@ -1395,6 +1468,63 @@ function ElevationSvg(props: ElevationSvgProps) {
           vectorEffect="non-scaling-stroke"
         />
       )}
+      {/* Extend ghost — from the hovered line's current end to the boundary it
+          reaches, with a marker at the landing point (matches Roof/Sandbox). */}
+      {drafting && tool === 'extend' && live && (() => {
+        const hit = hitTestTopmost(primitives, live, tolWorld);
+        if (!hit || hit.kind !== 'line') return null;
+        const r = computeLineExtend(hit, primitives, live);
+        if (!r) return null;
+        return (
+          <g>
+            <line x1={r.from.x} y1={flipY(r.from.y)} x2={r.point.x} y2={flipY(r.point.y)}
+              stroke="#16A34A" strokeWidth={1.5} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+            <circle cx={r.point.x} cy={flipY(r.point.y)} r={3 / zoom} fill="#16A34A" vectorEffect="non-scaling-stroke" />
+          </g>
+        );
+      })()}
+      {/* Mirror preview — the axis line at the (snapped) cursor + a ghost of the
+          reflected selection, so the user sees where the copy lands. */}
+      {drafting && tool === 'mirror' && selection.size > 0 && live && (() => {
+        const pos = mirrorAxis === 'x' ? live.y : live.x;
+        const R = mirrorReflector(mirrorAxis, pos);
+        return (
+          <g>
+            {mirrorAxis === 'x'
+              ? <line x1={xMin - PADDING_IN} y1={flipY(pos)} x2={xMax + PADDING_IN} y2={flipY(pos)}
+                  stroke="#7C3AED" strokeWidth={1.25} strokeDasharray="10 5" vectorEffect="non-scaling-stroke" />
+              : <line x1={pos} y1={flipY(ridgeY + PADDING_IN)} x2={pos} y2={flipY(gradeY - PADDING_IN)}
+                  stroke="#7C3AED" strokeWidth={1.25} strokeDasharray="10 5" vectorEffect="non-scaling-stroke" />}
+            {primitives.filter(p => selection.has(p.id) && p.kind === 'line').map((p) => {
+              const a = R((p as { a: Vec2 }).a), b = R((p as { b: Vec2 }).b);
+              return <line key={`mir-${p.id}`} x1={a.x} y1={flipY(a.y)} x2={b.x} y2={flipY(b.y)}
+                stroke={T.accent} strokeWidth={1.5} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />;
+            })}
+          </g>
+        );
+      })()}
+      {/* Fillet preview — highlight the first picked line; when a valid second
+          line is hovered, ghost the resulting corner (any-angle intersection). */}
+      {drafting && tool === 'fillet' && filletFirst && (() => {
+        const first = primitives.find(p => p.id === filletFirst.id);
+        if (!first || first.kind !== 'line') return null;
+        const hoverId = live ? (() => { const h = hitTestTopmost(primitives, live, tolWorld); return h && h.kind === 'line' ? h.id : null; })() : null;
+        const r = hoverId && hoverId !== filletFirst.id && live
+          ? filletPreview(primitives, filletFirst.id, filletFirst.pick, hoverId, live) : null;
+        return (
+          <g>
+            <line x1={first.a.x} y1={flipY(first.a.y)} x2={first.b.x} y2={flipY(first.b.y)}
+              stroke="#F59E0B" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />
+            {r && <>
+              <line x1={r.keep1.x} y1={flipY(r.keep1.y)} x2={r.corner.x} y2={flipY(r.corner.y)}
+                stroke={T.accent} strokeWidth={1.6} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+              <line x1={r.keep2.x} y1={flipY(r.keep2.y)} x2={r.corner.x} y2={flipY(r.corner.y)}
+                stroke={T.accent} strokeWidth={1.6} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+              <circle cx={r.corner.x} cy={flipY(r.corner.y)} r={3 / zoom} fill={T.accent} vectorEffect="non-scaling-stroke" />
+            </>}
+          </g>
+        );
+      })()}
       {/* Anchor dots for in-progress tools. Radius is in WORLD units but
           divided by zoom so the dot stays a fixed ~4px on screen (px-per-inch
           = PX_PER_INCH_AT_100 × zoom), instead of ballooning when zoomed in. */}
