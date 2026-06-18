@@ -40,3 +40,15 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Blueprint Lab — headless-browser screenshot debris + dev backups (not source)
+app/tools/blueprint-lab/engine/.edge-*/
+app/tools/blueprint-lab/engine/.ud_*/
+app/tools/blueprint-lab/engine/_rev*.json
+app/tools/blueprint-lab/engine/*.bak
+app/tools/blueprint-lab/engine/*.html
+app/tools/blueprint-lab/engine/_setback_*.png
+# loose headless-render debris at repo root
+/r_*.html
+/sg_*.html
+/r_west.png
+
