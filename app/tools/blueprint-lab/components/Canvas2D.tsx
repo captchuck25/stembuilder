@@ -29,7 +29,7 @@ import {
 import {
   Viewport, drawBoundaryDraft, drawDimension, drawDoor, drawFurniture, drawHandles, drawLine, drawRoomLabel,
   drawScene, drawSectionCutSymbol, drawStair, drawStairCornerHandles, drawWallPreview, drawWindow,
-  screenToWorld, worldToScreen,
+  screenToWorld, worldToScreen, stairStepEdgePoints,
 } from '../engine/renderer';
 // Shared drafting math — the SAME extend/mirror used by the section, roof,
 // elevation, and sandbox surfaces, so the tools behave identically here.
@@ -751,12 +751,12 @@ export default function Canvas2D({
     if (s !== q) return { point: s, feature: true };
     s = snapToWallMidpoint(q, level.walls, TOL);
     if (s !== q) return { point: s, feature: true };
-    // Staircase perimeter — corners + edge midpoints of every stair on the
-    // level, so the user can draw walls that wrap exactly around a stairwell.
-    const stairPts = level.stairs.flatMap(st => {
-      const { hx, hy } = stairHalfExtents(st);
-      return rectHandlePoints(st.position, hx, hy, st.rotation);
-    });
+    // Staircase OUTSIDE edges — a snap point on each long edge at every step
+    // (tread line) plus the corners, so a wall can be traced down the side of a
+    // stair and stop flush at any individual step (and stay straight via ortho).
+    // Points sit on the edges, never the centerline, so the wall runs ALONG the
+    // edge rather than across the middle of the stair.
+    const stairPts = level.stairs.flatMap(st => stairStepEdgePoints(st));
     const sp = nearestPoint(q, stairPts, TOL);
     if (sp) return { point: sp, feature: true };
     // Then the floor-below ghost (when shown) so walls stack on the floor below.

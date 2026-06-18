@@ -1543,6 +1543,41 @@ export function stairWorldCorners(s: Stair): Vec2[] {
   }));
 }
 
+// Snap points along the stair's OUTSIDE edges, at every step (tread division)
+// plus the corners — so the wall tool can trace a wall down the side of a
+// staircase and stop flush at any individual step. World coords (after
+// rotation + translation). Points sit ON the long run edges (never the
+// centerline), so drawing between them runs ALONG the edge, not across it.
+export function stairStepEdgePoints(s: Stair): Vec2[] {
+  const { pieces } = stairPieces(s);
+  const treadsBase = s.treads ?? STAIR_DEFAULTS.treads;
+  const local: Vec2[] = [];
+  for (const p of pieces) {
+    if (p.kind === 'landing') {
+      // No treads — just the four corners of the landing.
+      local.push({ x: p.x, y: p.y }, { x: p.x + p.w, y: p.y }, { x: p.x + p.w, y: p.y + p.h }, { x: p.x, y: p.y + p.h });
+      continue;
+    }
+    // Tread count for this run (matches drawStair's division), then place a
+    // point on BOTH long edges at every tread line (i = 0..n, so endpoints +
+    // each step). treadAxis 'x' → treads cross X, long edges are the verticals;
+    // treadAxis 'y' → treads cross Y, long edges are the horizontals.
+    const runLen = p.treadAxis === 'x' ? p.h : p.w;
+    const n = Math.max(2, Math.round(treadsBase * (runLen / Math.max(s.length, 24))));
+    for (let i = 0; i <= n; i++) {
+      if (p.treadAxis === 'x') {
+        const y = p.y + (i * p.h) / n;
+        local.push({ x: p.x, y }, { x: p.x + p.w, y });
+      } else {
+        const x = p.x + (i * p.w) / n;
+        local.push({ x, y: p.y }, { x, y: p.y + p.h });
+      }
+    }
+  }
+  const c = Math.cos(s.rotation), si = Math.sin(s.rotation);
+  return local.map(pt => ({ x: s.position.x + c * pt.x - si * pt.y, y: s.position.y + si * pt.x + c * pt.y }));
+}
+
 export function drawStair(ctx: CanvasRenderingContext2D, s: Stair, vp: Viewport, selected: boolean) {
   const c = worldToScreen(s.position, vp);
   const ppi = vp.pxPerInch;
