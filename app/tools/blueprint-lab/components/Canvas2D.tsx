@@ -2093,7 +2093,7 @@ export default function Canvas2D({
       // Stair corner handles next.
       const cornerHit = hitStairCorner(selectedStairs, world, 8 / vp.pxPerInch);
       if (cornerHit) {
-        if (!confirmStairLink(cornerHit.stairId)) return;
+        // No blocking confirm here — see the stair body-drag note above.
         onBeginLiveOp();
         setStairCornerDrag(cornerHit);
         return;
@@ -2195,8 +2195,10 @@ export default function Canvas2D({
       const stairId = hitStair(level.stairs, world, tol);
       if (stairId) {
         click('stair', stairId);
-        // Linked staircase (mirrored across floors): warn once before a move.
-        if (!confirmStairLink(stairId)) return;   // selected, but drag not started
+        // NB: no blocking confirm here — a window.confirm() inside mousedown
+        // eats the mouseup, stranding the drag (stair stuck to the cursor with
+        // no way to drop, Esc included). The cross-floor move warning lives in
+        // the Move tool's click-to-commit flow instead, which is Esc-cancellable.
         setMouseDown({
           worldStart: world, screenStart: getScreen(e),
           hitWallId: null, hitDoorId: null, hitWindowId: null, hitDimId: null,
@@ -2847,6 +2849,14 @@ export default function Canvas2D({
 
       // Global Esc: clear any transient state, then drop back to Select.
       if (e.key === 'Escape') {
+        // Safety: cancel any armed body/corner drag so nothing can get stuck
+        // following the cursor (e.g. if a drag's mouseup was ever lost).
+        if (mouseDown || stairCornerDrag) {
+          if (stairCornerDrag) onCancelLiveOp();
+          setMouseDown(null);
+          setStairCornerDrag(null);
+          return;
+        }
         if (boundaryDraftRoomId) {
           setBoundaryPoints([]);
           onCancelBoundaryDraft();
@@ -3014,7 +3024,7 @@ export default function Canvas2D({
       tool, offsetSource, dimDraft, onChangeTool, moveState, commitOffset,
       onUpdateWalls, onUpdateDimensions, onUpdateRoomLabels, onUpdateTexts, onUpdateStairs, onUpdateFurniture, onUpdateLines,
       onEndLiveOp, onCancelLiveOp, sectionCuts, onUpdateSectionCuts,
-      filletFirst,
+      filletFirst, mouseDown, stairCornerDrag,
       boundaryDraftRoomId, boundaryPoints, onCommitBoundary, onCancelBoundaryDraft]);
 
   // ─── Typed-length tag ─────────────────────────────────────────────────────
