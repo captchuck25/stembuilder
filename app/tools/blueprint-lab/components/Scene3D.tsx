@@ -48,9 +48,11 @@ const WALL_COLOR: Record<'exterior' | 'wall' | 'partition', string> = {
 const FLOOR_COLOR = '#d8c5a3'; // light wood tone
 const ROOF_COLOR  = '#5b5f66'; // asphalt-shingle gray
 
-// Roof withheld from the 3D view at launch: the roof is not rendered and its
-// visibility toggle is hidden. Flip to true to restore the 3D roof + its toggle.
-const ROOF_IN_3D = false;
+// Roof withheld from the 3D view in PRODUCTION only: the live site renders no
+// 3D roof and hides its toggle, while local `next dev` keeps the roof + toggle
+// so it can still be worked on. (NODE_ENV is 'production' in the Vercel build,
+// 'development' under next dev.)
+const ROOF_IN_3D = process.env.NODE_ENV !== 'production';
 const WINDOW_GLASS_COLOR = '#a8c7e3';
 const DOOR_SLAB_COLOR    = '#9a7e58'; // exterior entry doors — stained wood
 const DOOR_SLAB_INTERIOR = '#f4f3ef'; // interior doors are painted white
