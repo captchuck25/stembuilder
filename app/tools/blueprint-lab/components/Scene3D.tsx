@@ -18,9 +18,12 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 
 import {
-  doorOpeningCut, windowOpeningCuts, wallSegmentsWithCuts,
+  doorOpeningCut, windowOpeningCuts, wallSegmentsWithCuts, stairHalfExtents,
 } from '../engine/geometry';
 import { deriveExteriorWallIds } from '../engine/roof';
+import {
+  buildRoofTiers, pointInPolygon, RoofTopology,
+} from '../engine/roofTopology';
 import {
   FurnitureItem,
   Project, Stair, Wall, Window as WinType,
@@ -43,6 +46,11 @@ const WALL_COLOR: Record<'exterior' | 'wall' | 'partition', string> = {
 };
 
 const FLOOR_COLOR = '#d8c5a3'; // light wood tone
+const ROOF_COLOR  = '#5b5f66'; // asphalt-shingle gray
+
+// Roof withheld from the 3D view at launch: the roof is not rendered and its
+// visibility toggle is hidden. Flip to true to restore the 3D roof + its toggle.
+const ROOF_IN_3D = false;
 const WINDOW_GLASS_COLOR = '#a8c7e3';
 const DOOR_SLAB_COLOR    = '#9a7e58'; // exterior entry doors — stained wood
 const DOOR_SLAB_INTERIOR = '#f4f3ef'; // interior doors are painted white
@@ -88,6 +96,24 @@ export default function Scene3D({ project }: { project: Project }) {
   const [webglOk, setWebglOk] = useState<boolean | null>(null);
   useEffect(() => { setWebglOk(detectWebGL()); }, []);
 
+  // Floor visibility — levels stack low→high; the lowest is the "ground" floor
+  // (its slab gets the foundation lip). Hidden levels are skipped entirely so
+  // you can peel the top floor off and inspect the one below.
+  const sortedLevels = useMemo(
+    () => [...project.levels].sort((a, b) => a.elevation - b.elevation),
+    [project.levels],
+  );
+  const groundElev = sortedLevels[0]?.elevation;
+  const [hiddenLevels, setHiddenLevels] = useState<Set<string>>(new Set());
+  const [showRoof, setShowRoof] = useState(true);
+
+  // Roof tiers — derived from the SAME source as the Roof Plan / elevations /
+  // sections: buildRoofTiers reads the drawn ridges (project.roof.drafting) and
+  // each level's footprint, and roofHeightAt(topology, p) is the canonical 3D
+  // roof height those views project from. The 3D roof here samples that exact
+  // function, so a roof only appears once it's been drawn in the Roof Plan.
+  const roofTiers = useMemo(() => buildRoofTiers(project), [project]);
+
   if (webglOk === false) return <WebGLFallback />;
   if (webglOk === null) return <div style={{ flex: 1, background: T.bg }} />;
 
@@ -119,8 +145,50 @@ export default function Scene3D({ project }: { project: Project }) {
         <ambientLight intensity={0.35} />
 
         {project.levels.map(level => (
-          <LevelGroup key={level.id} level={level} project={project} />
+          hiddenLevels.has(level.id) ? null : (
+            <LevelGroup
+              key={level.id}
+              level={level}
+              project={project}
+              isGround={level.elevation === groundElev}
+            />
+          )
         ))}
+
+        {ROOF_IN_3D && showRoof && roofTiers.map(tier => {
+          const lvl = project.levels.find(l => l.id === tier.levelId);
+          if (!lvl || hiddenLevels.has(tier.levelId) || !tier.topology.hasRoof) return null;
+          let top = 0;
+          for (const w of lvl.walls) top = Math.max(top, lvl.elevation + w.height);
+          const higherTiers = roofTiers.filter(t => t.index > tier.index);
+          // Masking a lower tier against the floor(s) above it:
+          //  • coveredWall — the area genuinely UNDER a higher floor (no lower
+          //    roof there). The lower roof runs right up to this wall, so a wing
+          //    dies cleanly INTO the taller wall (no gap at the overhang line).
+          //  • coveredEave — wall + overhang. In the ring between a higher wall
+          //    and its eave, the lower roof is kept ONLY where it's genuinely
+          //    high (a wing rising into the wall); the low flat sliver elsewhere
+          //    (the stray band around the upper block) is dropped.
+          const coveredWall = higherTiers
+            .filter(t => t.footprint.wallOuter)
+            .map(t => t.footprint.wallOuter);
+          const coveredEave = higherTiers
+            .filter(t => t.footprint.eave)
+            .map(t => t.footprint.eave);
+          // A ridge endpoint that lands on a higher tier's WALL (the wing gable
+          // meeting the 2-story) must DIE INTO that wall as a gable, not continue
+          // past it as a hip.
+          const topology = gableizeAgainstHigher(tier.topology, coveredWall);
+          return (
+            <RoofTierMesh
+              key={tier.levelId}
+              topology={topology}
+              baseY={top || lvl.elevation + 96}
+              coveredWall={coveredWall}
+              coveredEave={coveredEave}
+            />
+          );
+        })}
 
         <OrbitControls
           target={center}
@@ -133,6 +201,75 @@ export default function Scene3D({ project }: { project: Project }) {
       </Canvas>
 
       <ViewBadge />
+
+      <FloorToggle
+        levels={sortedLevels}
+        hidden={hiddenLevels}
+        onToggle={id => setHiddenLevels(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id); else next.add(id);
+          return next;
+        })}
+        showRoof={showRoof}
+        onToggleRoof={() => setShowRoof(v => !v)}
+      />
+    </div>
+  );
+}
+
+// Visibility control — a Roof toggle plus one toggle per level, listed top
+// floor first so the stack reads the way it looks in the view. Click to peel a
+// layer off. The Floors section only appears when there's more than one level.
+function FloorToggle({ levels, hidden, onToggle, showRoof, onToggleRoof }: {
+  levels: Pick<Project['levels'][number], 'id' | 'name'>[];
+  hidden: Set<string>;
+  onToggle: (id: string) => void;
+  showRoof: boolean;
+  onToggleRoof: () => void;
+}) {
+  const Row = ({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) => (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 7,
+        border: `1px solid ${on ? T.warm : T.line}`,
+        background: on ? T.warm : 'transparent',
+        color: on ? '#fff' : T.inkSoft,
+        borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
+        fontSize: 12, fontWeight: 600, textAlign: 'left', width: '100%',
+      }}
+    >
+      <span style={{ fontSize: 11, width: 12, display: 'inline-block' }}>
+        {on ? '◉' : '○'}
+      </span>
+      {label}
+    </button>
+  );
+
+  // With the roof toggle withheld, a single-floor project has nothing to show
+  // here, so skip the panel entirely rather than render an empty "Show" box.
+  if (!ROOF_IN_3D && levels.length <= 1) return null;
+
+  return (
+    <div style={{
+      position: 'absolute', top: 12, right: 12, zIndex: 1,
+      background: T.panel, border: `1px solid ${T.line}`,
+      borderRadius: 8, padding: 6, boxShadow: T.shadow,
+      display: 'flex', flexDirection: 'column', gap: 4, minWidth: 110,
+    }}>
+      <div style={{
+        fontSize: 9, fontWeight: 700, letterSpacing: '0.6px',
+        color: T.inkSoft, textTransform: 'uppercase', padding: '2px 4px 0',
+      }}>Show</div>
+      {ROOF_IN_3D && <Row on={showRoof} onClick={onToggleRoof} label="Roof" />}
+      {levels.length > 1 && levels.slice().reverse().map((lvl, i) => (
+        <Row
+          key={lvl.id}
+          on={!hidden.has(lvl.id)}
+          onClick={() => onToggle(lvl.id)}
+          label={lvl.name || `Floor ${levels.length - i}`}
+        />
+      ))}
     </div>
   );
 }
@@ -153,7 +290,7 @@ function ViewBadge() {
 
 // ─── Per-level group ──────────────────────────────────────────────────────────
 
-function LevelGroup({ level, project }: { level: Pick<Project['levels'][number], 'id' | 'elevation' | 'walls' | 'doors' | 'windows' | 'stairs' | 'furniture'>; project: Project }) {
+function LevelGroup({ level, project, isGround }: { level: Pick<Project['levels'][number], 'id' | 'elevation' | 'walls' | 'doors' | 'windows' | 'stairs' | 'furniture'>; project: Project; isGround: boolean }) {
   const elev = level.elevation;
 
   // Pre-index openings by wallId so each wall knows its cuts.
@@ -167,20 +304,51 @@ function LevelGroup({ level, project }: { level: Pick<Project['levels'][number],
   // geometry — exterior is no longer a stored wall type).
   const exteriorIds = useMemo(() => deriveExteriorWallIds(level), [level]);
 
-  // Floor slab — sized to the level's wall bounding box.
+  // Exterior wall thickness — the wall bounding box runs along centerlines, so
+  // the siding face sits half a thickness beyond it. The inter-floor slab edge
+  // is pushed out by this much so its band is flush with the siding (not
+  // recessed, which would read as a shaded horizontal stripe between floors).
+  const exteriorThickness = useMemo(() => {
+    let t = 0;
+    for (const w of level.walls) if (exteriorIds.has(w.id)) t = Math.max(t, w.thickness);
+    return t || 6;
+  }, [level.walls, exteriorIds]);
+
+  // Floor slab — sized to the level's wall bounding box, tiled around any
+  // stairwell openings. A 'down' stair on this level (the auto-generated mirror
+  // of an 'up' flight arriving from below, or a manual descent) means the floor
+  // is cut open there, so we omit slab tiles over its footprint.
   const slab = useMemo(() => computeLevelBounds(level.walls), [level.walls]);
+  const slabTilesList = useMemo(() => {
+    if (!slab) return [];
+    // Ground floor: 12" foundation lip. Upper floors: push the edge out half a
+    // wall thickness so the slab band is flush with the siding (not a recessed
+    // stripe between floors).
+    const halfMargin = isGround ? 12 : exteriorThickness / 2;
+    const outer: Rect = {
+      x0: slab.minX - halfMargin, x1: slab.maxX + halfMargin,
+      z0: slab.minY - halfMargin, z1: slab.maxY + halfMargin,
+    };
+    const holes = level.stairs
+      .filter(s => s.direction === 'down')
+      .map(s => stairHoleRect(s, 1.5));
+    return slabTiles(outer, holes);
+  }, [slab, isGround, exteriorThickness, level.stairs]);
 
   return (
     <group>
-      {slab && (
-        <mesh
-          position={[(slab.minX + slab.maxX) / 2, elev - FLOOR_SLAB_THICKNESS / 2, (slab.minY + slab.maxY) / 2]}
-          receiveShadow
-        >
-          <boxGeometry args={[slab.maxX - slab.minX + 24, FLOOR_SLAB_THICKNESS, slab.maxY - slab.minY + 24]} />
-          <meshStandardMaterial color={FLOOR_COLOR} roughness={0.9} />
-        </mesh>
-      )}
+      {/* Floor slab tiles. Upper floors get a wood TOP face (the visible floor
+          of the open box) with exterior-colored sides so the inter-floor band
+          reads as continuous siding; the ground slab is wood all around. */}
+      {slabTilesList.map((t, i) => (
+        <SlabTile
+          key={i}
+          rect={t}
+          y={elev - FLOOR_SLAB_THICKNESS / 2}
+          thickness={FLOOR_SLAB_THICKNESS}
+          isGround={isGround}
+        />
+      ))}
 
       {level.walls.map(w => (
         <WallMesh
@@ -194,7 +362,11 @@ function LevelGroup({ level, project }: { level: Pick<Project['levels'][number],
         />
       ))}
 
-      {level.stairs.map(s => (
+      {/* Render the stepped flight only for 'up' stairs (the source). The
+          linked 'down' mirror on the arrival floor occupies the same space, so
+          rendering it too would double the geometry — instead it just cuts the
+          stairwell hole in that floor's slab (above). */}
+      {level.stairs.filter(s => s.direction === 'up').map(s => (
         <StairMesh key={s.id} stair={s} elevation={elev} project={project} />
       ))}
 
@@ -869,6 +1041,354 @@ function makeBufferGeometry(positions: Float32Array, indices: number[]): THREE.B
   return g;
 }
 
+// ─── Roof ──────────────────────────────────────────────────────────────────────
+// The 3D roof is sampled from the SAME topology the Roof Plan / elevations /
+// sections use. `roofHeightAt(topology, p)` is the canonical roof height above
+// the wall plate at any plan point (max over the drawn ridges, gable endpoints
+// terminating the slope, hip endpoints continuing it past). We lift a grid over
+// the eave polygon by that function to get the slope surface, and fill a
+// triangular gable wall under each gable-type ridge end.
+
+const ROOF_GRID_STEP = 6; // inches between height samples
+const FASCIA_DEPTH = 8;   // inches the fascia board drops below the roof edge
+
+type Poly = { x: number; y: number }[];
+
+// Distance from a plan point to the nearest edge of a polygon.
+function distToPolygon(p: { x: number; y: number }, poly: Poly): number {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    const cx = a.x + t * dx, cy = a.y + t * dy;
+    best = Math.min(best, Math.hypot(p.x - cx, p.y - cy));
+  }
+  return best;
+}
+
+// Force any ridge endpoint that sits on/at a higher tier's wall to be a GABLE
+// end, so the lower roof terminates there (dies into the taller wall) instead
+// of continuing past as a hip. Returns the topology unchanged when there are no
+// higher tiers (top floor / single story) — protects the known-good cases.
+function gableizeAgainstHigher(topology: RoofTopology, higherWalls: Poly[]): RoofTopology {
+  if (!higherWalls.length) return topology;
+  const TOL = 8; // inches — endpoint within this of a higher wall ⇒ gable
+  const atHigherWall = (pt: { x: number; y: number }) =>
+    higherWalls.some(poly => pointInPolygon(pt, poly) || distToPolygon(pt, poly) < TOL);
+  return {
+    ...topology,
+    ridges: topology.ridges.map(r => ({
+      ...r,
+      endA: atHigherWall(r.a) ? 'gable' as const : r.endA,
+      endB: atHigherWall(r.b) ? 'gable' as const : r.endB,
+    })),
+  };
+}
+
+function RoofTierMesh({ topology, baseY, coveredWall, coveredEave }: {
+  topology: RoofTopology; baseY: number; coveredWall: Poly[]; coveredEave: Poly[];
+}) {
+  const geom = useMemo(
+    () => buildRoofSurface(topology, baseY, coveredWall, coveredEave),
+    [topology, baseY, coveredWall, coveredEave],
+  );
+  if (!geom) return null;
+  return (
+    <group>
+      <mesh geometry={geom.slopes} castShadow receiveShadow>
+        <meshStandardMaterial color={ROOF_COLOR} roughness={0.85} side={THREE.DoubleSide} />
+      </mesh>
+      {geom.gables && (
+        <mesh geometry={geom.gables} castShadow receiveShadow>
+          <meshStandardMaterial color={WALL_COLOR.exterior} roughness={0.85} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {geom.trim && (
+        <mesh geometry={geom.trim} castShadow receiveShadow>
+          <meshStandardMaterial color={TRIM_COLOR} roughness={0.7} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+// Build the roof slope surface (a height-field over the eave polygon), the gable
+// end walls, and the soffit + fascia trim along the eave. Returns null when
+// there's no drawn roof. Plan X→3D x, plan Y→3D z, height→3D y.
+//
+// `coveredWall` / `coveredEave` are the wall-outer / eave polygons of HIGHER
+// tiers. Area inside a higher WALL gets no lower roof (the lower roof dies into
+// that wall). In the ring between a higher wall and its eave, the lower roof is
+// kept only where it's genuinely high (a wing rising into the wall) and dropped
+// where it's a low flat sliver (the stray band around the upper block). The eave
+// height is clamped at the bottom so a point just outside a ridge's reach drips
+// to the eave line instead of plunging.
+function buildRoofSurface(topology: RoofTopology, baseY: number, coveredWall: Poly[], coveredEave: Poly[]):
+  { slopes: THREE.BufferGeometry; gables: THREE.BufferGeometry | null; trim: THREE.BufferGeometry | null } | null {
+  const eave = topology.eave;
+  if (!topology.hasRoof || !eave || eave.length < 3) return null;
+
+  const pitchRR = topology.pitch / 12;
+  // Deepest the roof surface may dip (the eave drip + a margin for hip corners).
+  const eaveFloorY = baseY - topology.overhang * pitchRR * 1.6 - 1;
+  const inEave = (x: number, z: number) => coveredEave.some(poly => pointInPolygon({ x, y: z }, poly));
+  // Under a higher tier's WALL — the lower roof stops here (dies into that wall)
+  // rather than continuing under it. (No tuck-under: a tuck would poke out below
+  // the taller wall at the first-floor eave, since the wall only exists above
+  // the upper floor.)
+  const inWall = (x: number, z: number) => coveredWall.some(poly => pointInPolygon({ x, y: z }, poly));
+  // Skip the trim/gable edges that are buried under a higher tier's eave.
+  const inCovered = inEave;
+
+  // Height sampler that EXTENDS each ridge past its GABLE ends by the overhang,
+  // so the rake-overhang strip (just outside the ridge tip, where the canonical
+  // roofHeightAt returns null) still has a proper sloped height. Without this
+  // the rake edge flattens — the gable wall gets draped over and the rake fascia
+  // can't follow the slope. Hip ends are left as-is (they already continue past
+  // via euclidean distance). Returns height above the plate, or null if no
+  // ridge covers the point.
+  const ext = topology.overhang + 6;
+  const extRidges = topology.ridges.map(r => {
+    const dx = r.b.x - r.a.x, dy = r.b.y - r.a.y, L = Math.hypot(dx, dy) || 1;
+    const ux = dx / L, uy = dy / L;
+    return {
+      ax: r.endA === 'gable' ? r.a.x - ux * ext : r.a.x,
+      ay: r.endA === 'gable' ? r.a.y - uy * ext : r.a.y,
+      bx: r.endB === 'gable' ? r.b.x + ux * ext : r.b.x,
+      by: r.endB === 'gable' ? r.b.y + uy * ext : r.b.y,
+      endA: r.endA, endB: r.endB, h: r.heightAboveWalls,
+    };
+  });
+  const heightAt = (x: number, z: number): number | null => {
+    let best = -Infinity;
+    for (const r of extRidges) {
+      const dx = r.bx - r.ax, dy = r.by - r.ay, L = Math.hypot(dx, dy) || 1;
+      const ux = dx / L, uy = dy / L;
+      const t = (x - r.ax) * ux + (z - r.ay) * uy;
+      let d: number;
+      if (t < 0) d = r.endA === 'gable' ? Infinity : Math.hypot(x - r.ax, z - r.ay);
+      else if (t > L) d = r.endB === 'gable' ? Infinity : Math.hypot(x - r.bx, z - r.by);
+      else d = Math.abs((x - r.ax) * -uy + (z - r.ay) * ux);
+      if (!Number.isFinite(d)) continue;
+      const h = r.h - d * pitchRR;
+      if (h > best) best = h;
+    }
+    return Number.isFinite(best) ? best : null;
+  };
+
+  // Roof Y at a plan point. FINITE height (incl. the negative eave drip) is
+  // clamped so it can't plunge; null (outside every ridge's reach) → plate.
+  const yAtPlan = (x: number, z: number) => {
+    const h = heightAt(x, z);
+    if (h == null) return baseY;
+    return Math.max(eaveFloorY, baseY + h);
+  };
+
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const p of eave) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minZ = Math.min(minZ, p.y); maxZ = Math.max(maxZ, p.y);
+  }
+  const width = maxX - minX, depth = maxZ - minZ;
+  if (width <= 0 || depth <= 0) return null;
+
+  const nx = Math.max(1, Math.round(width / ROOF_GRID_STEP));
+  const nz = Math.max(1, Math.round(depth / ROOF_GRID_STEP));
+  const hx = width / nx, hz = depth / nz;
+
+  // Vertex grid (some verts unused by skipped cells — harmless).
+  const positions = new Float32Array((nx + 1) * (nz + 1) * 3);
+  for (let gz = 0; gz <= nz; gz++) {
+    for (let gx = 0; gx <= nx; gx++) {
+      const i = (gz * (nx + 1) + gx) * 3;
+      const x = minX + gx * hx, z = minZ + gz * hz;
+      positions[i]     = x;
+      positions[i + 1] = yAtPlan(x, z);
+      positions[i + 2] = z;
+    }
+  }
+  // Emit two triangles per cell that is: inside the eave polygon, NOT under a
+  // higher wall, under a roof at all four corners (non-null — past a gable end
+  // there's no roof, and skipping those keeps the roof from draping a cliff over
+  // the gable wall), and — if it sits in a higher tier's eave-overhang ring —
+  // genuinely high (so a wing dies into the taller wall but the low stray band
+  // around the rest of the upper block is dropped).
+  const hasRoofAt = (x: number, z: number) => heightAt(x, z) != null;
+  const roofed = new Set<number>(); // gz*nx+gx for every emitted cell
+  const indices: number[] = [];
+  for (let gz = 0; gz < nz; gz++) {
+    for (let gx = 0; gx < nx; gx++) {
+      const cx = minX + (gx + 0.5) * hx, cz = minZ + (gz + 0.5) * hz;
+      // Render where there's roof: inside the eave outline and NOT under a
+      // higher tier's WALL. (Being under the higher tier's eave OVERHANG is
+      // fine — the lower roof legitimately tucks under it.) The stray band that
+      // used to appear around the far sides of the upper block is excluded for
+      // free by the corner-null test below: it's past the ridge's reach.
+      if (!pointInPolygon({ x: cx, y: cz }, eave) || inWall(cx, cz)) continue;
+      const x0 = minX + gx * hx, x1 = minX + (gx + 1) * hx;
+      const z0 = minZ + gz * hz, z1 = minZ + (gz + 1) * hz;
+      if (!hasRoofAt(x0, z0) || !hasRoofAt(x1, z0) || !hasRoofAt(x0, z1) || !hasRoofAt(x1, z1)) continue;
+      const a = gz * (nx + 1) + gx;
+      const b = a + 1;
+      const c = a + (nx + 1);
+      const d = c + 1;
+      indices.push(a, c, b,  b, c, d);
+      roofed.add(gz * nx + gx);
+    }
+  }
+  const slopes = makeBufferGeometry(positions, indices);
+
+  const wo = topology.wallOuter;
+
+  // Gable / end walls — vertical siding fill from the plate (baseY) up to the
+  // roof underside, SAMPLED along each wall edge. Where the roof rises at the
+  // wall (a gable end) this fills the gable triangle; along an eave or a hip the
+  // roof meets the wall at ~plate height so nothing fills. Sampling the roof
+  // height directly (instead of classifying ridge endpoints) is robust and
+  // symmetric — every gable end gets its wall, both east and west.
+  const wallTopAt = (x: number, z: number) => baseY + Math.max(0, heightAt(x, z) ?? 0);
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+  const gablePos: number[] = [];
+  if (wo && wo.length === eave.length) {
+    const n = wo.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const edgeLen = Math.hypot(wo[j].x - wo[i].x, wo[j].y - wo[i].y);
+      const segs = Math.max(1, Math.round(edgeLen / ROOF_GRID_STEP));
+      for (let s = 0; s < segs; s++) {
+        const t0 = s / segs, t1 = (s + 1) / segs;
+        const p0x = lerp(wo[i].x, wo[j].x, t0), p0z = lerp(wo[i].y, wo[j].y, t0);
+        const p1x = lerp(wo[i].x, wo[j].x, t1), p1z = lerp(wo[i].y, wo[j].y, t1);
+        // Skip a segment only if THIS WALL is under a higher tier's WALL (truly
+        // covered). Being under its eave OVERHANG must NOT skip it — that strip
+        // is still a real gable face (the hole was here).
+        if (inWall((p0x + p1x) / 2, (p0z + p1z) / 2)) continue;
+        const h0 = wallTopAt(p0x, p0z), h1 = wallTopAt(p1x, p1z);
+        if (h0 <= baseY + 0.5 && h1 <= baseY + 0.5) continue; // eave/hip: nothing to fill
+        gablePos.push(
+          p0x, baseY, p0z,  p1x, baseY, p1z,  p1x, h1, p1z,
+          p0x, baseY, p0z,  p1x, h1, p1z,  p0x, h0, p0z,
+        );
+      }
+    }
+  }
+  // Junction end walls — where this tier's roof dies into a HIGHER tier's wall,
+  // its end is open (that wall isn't on this tier's own perimeter), leaving a
+  // hole. Close it by filling along the higher tier's wall up to the lower roof
+  // height. (Coincides with the taller wall — same siding color, so no seam.)
+  for (const hw of coveredWall) {
+    const n = hw.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const edgeLen = Math.hypot(hw[j].x - hw[i].x, hw[j].y - hw[i].y);
+      const segs = Math.max(1, Math.round(edgeLen / ROOF_GRID_STEP));
+      for (let s = 0; s < segs; s++) {
+        const t0 = s / segs, t1 = (s + 1) / segs;
+        const p0x = lerp(hw[i].x, hw[j].x, t0), p0z = lerp(hw[i].y, hw[j].y, t0);
+        const p1x = lerp(hw[i].x, hw[j].x, t1), p1z = lerp(hw[i].y, hw[j].y, t1);
+        const h0 = wallTopAt(p0x, p0z), h1 = wallTopAt(p1x, p1z);
+        if (h0 <= baseY + 0.5 && h1 <= baseY + 0.5) continue; // lower roof not here
+        gablePos.push(
+          p0x, baseY, p0z,  p1x, baseY, p1z,  p1x, h1, p1z,
+          p0x, baseY, p0z,  p1x, h1, p1z,  p0x, h0, p0z,
+        );
+      }
+    }
+  }
+  const gables = gablePos.length ? makeNonIndexedGeometry(gablePos) : null;
+
+  // Soffit + fascia — derived from the RENDERED roof itself, not the footprint
+  // polygon. Every roofed grid cell that borders OPEN AIR (a neighbour that is
+  // neither roofed nor under/near a higher tier) has an eave/rake there, so we
+  // hang a fascia board from the roof edge and run a soffit back to the wall.
+  // A cell bordering the floor above (the roof dies into a taller wall) gets no
+  // fascia. This follows wherever the roof genuinely ends — robust for any
+  // footprint, setback, reflex corner, or L/T/U plan.
+  const vY = (vx: number, vz: number) => positions[(vz * (nx + 1) + vx) * 3 + 1];
+  // Is the cell (gx,gz) open air on the far side of a roof edge? Open unless the
+  // roof there dies into a higher tier's WALL. Being merely under a higher
+  // tier's eave OVERHANG does NOT suppress fascia — the lower eave is a real
+  // roof edge with the upper overhang floating well above it.
+  const isAir = (gx: number, gz: number) => {
+    if (gx < 0 || gx >= nx || gz < 0 || gz >= nz) return true;   // off-grid = open
+    if (roofed.has(gz * nx + gx)) return false;                  // roof continues
+    const cx = minX + (gx + 0.5) * hx, cz = minZ + (gz + 0.5) * hz;
+    return !inWall(cx, cz);                                      // air unless under a higher WALL
+  };
+  const trimPos: number[] = [];
+  // Add fascia + soffit for one cell edge: roof-edge vertices A→B (grid indices)
+  // with `inward` (unit, world) pointing back toward the wall.
+  const addTrim = (vax: number, vaz: number, vbx: number, vbz: number, iwx: number, iwz: number) => {
+    const ax = minX + vax * hx, az = minZ + vaz * hz, ay = vY(vax, vaz);
+    const bx = minX + vbx * hx, bz = minZ + vbz * hz, by = vY(vbx, vbz);
+    const aB = ay - FASCIA_DEPTH, bB = by - FASCIA_DEPTH;
+    trimPos.push(
+      ax, ay, az,  bx, by, bz,  bx, bB, bz,
+      ax, ay, az,  bx, bB, bz,  ax, aB, az,
+    );
+    const sx = iwx * topology.overhang, sz = iwz * topology.overhang;
+    trimPos.push(
+      ax, aB, az,  bx, bB, bz,  bx + sx, bB, bz + sz,
+      ax, aB, az,  bx + sx, bB, bz + sz,  ax + sx, aB, az + sz,
+    );
+  };
+  for (const key of roofed) {
+    const gx = key % nx, gz = (key - gx) / nx;
+    if (isAir(gx - 1, gz)) addTrim(gx, gz, gx, gz + 1, 1, 0);       // west edge
+    if (isAir(gx + 1, gz)) addTrim(gx + 1, gz, gx + 1, gz + 1, -1, 0); // east edge
+    if (isAir(gx, gz - 1)) addTrim(gx, gz, gx + 1, gz, 0, 1);       // north edge
+    if (isAir(gx, gz + 1)) addTrim(gx, gz + 1, gx + 1, gz + 1, 0, -1); // south edge
+  }
+
+  // Gable returns — a short horizontal cornice box at each gable end's bottom
+  // corners, so the rake doesn't die to a sharp point (matches the elevations).
+  // Built from the topology's gable ends, skipped where a gable dies into a
+  // taller floor (it'd be hidden there).
+  const RETURN_LEN = 18;
+  const ohang = topology.overhang;
+  for (const r of topology.ridges) {
+    const dx = r.b.x - r.a.x, dy = r.b.y - r.a.y, L = Math.hypot(dx, dy) || 1;
+    const ux = dx / L, uy = dy / L;     // along ridge a→b
+    const px = -uy, py = ux;            // perpendicular
+    for (const e of [{ pt: r.a, kind: r.endA, sgn: 1 }, { pt: r.b, kind: r.endB, sgn: -1 }]) {
+      if (e.kind !== 'gable') continue;
+      const ix = ux * e.sgn, iz = uy * e.sgn;        // inward, along the ridge
+      for (const side of [r.spanLeft, -r.spanRight]) {
+        if (Math.abs(side) < 1) continue;
+        const ss = Math.sign(side);
+        // Corner at the ROOF end (the eave, one overhang past the wall), not the
+        // wall itself — so the return lines up with the edge of the roof.
+        const sEave = side + ss * ohang;
+        const cx = e.pt.x + px * sEave, cz = e.pt.y + py * sEave;
+        // Every gable end gets a return — including the ones that butt into the
+        // taller floor (they sit under its roof overhang and should still close off).
+        const wx = -px * ss, wz = -py * ss;                       // perpendicular, toward the wall
+        const yT = yAtPlan(cx, cz);                               // eave height at the corner
+        const yB = yT - FASCIA_DEPTH;
+        const ax = cx, az = cz;
+        const bx = cx + ix * RETURN_LEN, bz = cz + iz * RETURN_LEN;
+        const dxw = bx + wx * ohang, dzw = bz + wz * ohang;
+        const exw = ax + wx * ohang, ezw = az + wz * ohang;
+        trimPos.push(ax, yT, az, bx, yT, bz, dxw, yT, dzw,  ax, yT, az, dxw, yT, dzw, exw, yT, ezw); // top
+        trimPos.push(ax, yB, az, bx, yB, bz, dxw, yB, dzw,  ax, yB, az, dxw, yB, dzw, exw, yB, ezw); // soffit
+        trimPos.push(ax, yT, az, exw, yT, ezw, exw, yB, ezw,  ax, yT, az, exw, yB, ezw, ax, yB, az); // fascia (gable-end face)
+      }
+    }
+  }
+  const trim = trimPos.length ? makeNonIndexedGeometry(trimPos) : null;
+
+  return { slopes, gables, trim };
+}
+
+function makeNonIndexedGeometry(positions: number[]): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(positions), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
 // Trim casing around an opening — thin proud-of-wall band on BOTH wall faces.
 // Doors get a 3-sided U (top + two legs); windows get a 4-sided frame (also
 // includes the sill band). Sized from the opening CUT width so entry doors
@@ -972,6 +1492,37 @@ function FurnitureMesh({ item, elevation }: { item: FurnitureItem; elevation: nu
   );
 }
 
+// ─── Floor slab tile ───────────────────────────────────────────────────────────
+
+// One rectangular piece of a floor slab (the slab is split into pieces around
+// stairwell openings). Upper floors get a wood TOP face with exterior-colored
+// sides; the ground slab is wood all around (foundation lip). Box material
+// order is [+X, -X, +Y(top), -Y, +Z, -Z].
+function SlabTile({ rect, y, thickness, isGround }: {
+  rect: Rect; y: number; thickness: number; isGround: boolean;
+}) {
+  const w = rect.x1 - rect.x0;
+  const d = rect.z1 - rect.z0;
+  if (w <= 0.1 || d <= 0.1) return null;
+  return (
+    <mesh position={[(rect.x0 + rect.x1) / 2, y, (rect.z0 + rect.z1) / 2]} receiveShadow>
+      <boxGeometry args={[w, thickness, d]} />
+      {isGround ? (
+        <meshStandardMaterial color={FLOOR_COLOR} roughness={0.9} />
+      ) : (
+        [0, 1, 2, 3, 4, 5].map(i => (
+          <meshStandardMaterial
+            key={i}
+            attach={`material-${i}`}
+            color={i === 2 ? FLOOR_COLOR : WALL_COLOR.exterior}
+            roughness={i === 2 ? 0.9 : 0.85}
+          />
+        ))
+      )}
+    </mesh>
+  );
+}
+
 // ─── Stairs ──────────────────────────────────────────────────────────────────
 // v1: straight stair renders as a stepped staircase climbing to the next floor
 // up. L/U render as a single inclined slab (placeholder — we'll iterate).
@@ -997,7 +1548,10 @@ function StairMesh({ stair, elevation, project }: { stair: Stair; elevation: num
       <group position={[stair.position.x, elevation, stair.position.y]} rotation={[0, -stair.rotation, 0]}>
         {Array.from({ length: treads }, (_, i) => {
           const stepY = (i + 1) * treadH * climbDir;
-          const stepZ = (i + 0.5) * treadDepth - len / 2;
+          // The flight's HIGH end is at local -Z (= plan -Y, where the "UP"
+          // arrow points), so the lowest step starts at +Z and the run climbs
+          // toward -Z — matching the 2D plan orientation.
+          const stepZ = len / 2 - (i + 0.5) * treadDepth;
           return (
             <mesh key={i} position={[0, stepY - treadH / 2, stepZ]} castShadow receiveShadow>
               <boxGeometry args={[w, treadH, treadDepth]} />
@@ -1077,6 +1631,54 @@ function computeWallExtensions(walls: Wall[]): Map<string, { start: number; end:
     out.set(w.id, { start: startExt, end: endExt });
   }
   return out;
+}
+
+// World-plan-space axis-aligned rectangle (X = 3D x, Z = 3D z / plan Y).
+interface Rect { x0: number; x1: number; z0: number; z1: number }
+
+// Axis-aligned world footprint of a (possibly rotated) stair, expanded by
+// `clearance` so the slab opening clears the flight.
+function stairHoleRect(s: Stair, clearance: number): Rect {
+  const { hx, hy } = stairHalfExtents(s);
+  const c = Math.cos(s.rotation), si = Math.sin(s.rotation);
+  const corners: [number, number][] = [[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]];
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const [lx, ly] of corners) {
+    const wx = s.position.x + c * lx - si * ly;
+    const wz = s.position.y + si * lx + c * ly;
+    minX = Math.min(minX, wx); maxX = Math.max(maxX, wx);
+    minZ = Math.min(minZ, wz); maxZ = Math.max(maxZ, wz);
+  }
+  return { x0: minX - clearance, x1: maxX + clearance, z0: minZ - clearance, z1: maxZ + clearance };
+}
+
+// Split `outer` into a grid of sub-rectangles using each hole's edges as cut
+// lines, then drop the cells whose center falls inside any hole. Produces a
+// rectangular slab perforated by rectangular stairwell openings.
+function slabTiles(outer: Rect, holes: Rect[]): Rect[] {
+  if (holes.length === 0) return [outer];
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const xs = new Set<number>([outer.x0, outer.x1]);
+  const zs = new Set<number>([outer.z0, outer.z1]);
+  for (const h of holes) {
+    xs.add(clamp(h.x0, outer.x0, outer.x1));
+    xs.add(clamp(h.x1, outer.x0, outer.x1));
+    zs.add(clamp(h.z0, outer.z0, outer.z1));
+    zs.add(clamp(h.z1, outer.z0, outer.z1));
+  }
+  const xa = [...xs].sort((a, b) => a - b);
+  const za = [...zs].sort((a, b) => a - b);
+  const tiles: Rect[] = [];
+  for (let i = 0; i < xa.length - 1; i++) {
+    for (let j = 0; j < za.length - 1; j++) {
+      const x0 = xa[i], x1 = xa[i + 1], z0 = za[j], z1 = za[j + 1];
+      if (x1 - x0 < 0.1 || z1 - z0 < 0.1) continue;
+      const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+      if (holes.some(h => cx > h.x0 && cx < h.x1 && cz > h.z0 && cz < h.z1)) continue;
+      tiles.push({ x0, x1, z0, z1 });
+    }
+  }
+  return tiles;
 }
 
 function groupBy<T, K>(arr: T[], key: (t: T) => K): Map<K, T[]> {
