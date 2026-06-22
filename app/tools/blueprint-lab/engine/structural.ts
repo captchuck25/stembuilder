@@ -59,12 +59,11 @@ export const SHEETROCK_THICKNESS = 0.5;   // 1/2" gypsum drywall
 export const WALL_SHEATHING_THICKNESS = 0.5; // 1/2" exterior wall sheathing
 
 // ── Floor band thickness ──────────────────────────────────────────────────
-// A "floor band" sits between two floors and stacks: joist + subfloor +
-// finish flooring. We collapse subfloor + finish into a constant 1.5".
-export const SUBFLOOR_SANDWICH = 1.5;
-
+// A "floor band" sits between two floors and stacks: joist + subfloor decking.
+// The deck is a true 3/4" subfloor (no separate finish-flooring allowance), so
+// T/O FLOOR = top of subfloor — the standard framing datum.
 export function getFloorBandThickness(spec: FloorSpecs): number {
-  return LUMBER_ACTUAL_DEPTH[spec.joistDepth] + SUBFLOOR_SANDWICH;
+  return LUMBER_ACTUAL_DEPTH[spec.joistDepth] + SUBFLOOR_THICKNESS;
 }
 
 // ── Per-foundation-type default wall heights ──────────────────────────────

@@ -93,11 +93,16 @@ function visibleRanges(a: Vec2, b: Vec2, masks: Vec2[][]): [number, number][] {
 // line drawing: hatch outlines dropped; every line / polyline-edge clipped to
 // the parts outside any LATER opaque mask. No-op for blocks without masks
 // (sections, the floor plan), so they pass through untouched.
-function occludePrimitives(prims: SectionPrimitive[]): SectionPrimitive[] {
+export function occludePrimitives(prims: SectionPrimitive[]): SectionPrimitive[] {
   const masks: { poly: Vec2[]; i: number }[] = [];
   prims.forEach((p, i) => {
+    // Only OPAQUE WHITE masks hide what's behind them: hatch backings and
+    // `'trim'`-filled shells (wall body, casing, corner boards, gable trim).
+    // Colour fills ('glass' / 'door' / 'panel') are see-through CONTENT, not
+    // masks — treating glass as a mask was clipping the window's own pane edges
+    // and muntins (windows exported missing their inner frame).
     if (p.kind === 'hatch') masks.push({ poly: p.verts, i });
-    else if (p.kind === 'polyline' && p.closed && p.fill && p.fill !== 'none') masks.push({ poly: p.verts, i });
+    else if (p.kind === 'polyline' && p.closed && p.fill === 'trim') masks.push({ poly: p.verts, i });
   });
   if (!masks.length) return prims;
   const out: SectionPrimitive[] = [];

@@ -584,12 +584,15 @@ export function wallSegmentsWithCuts(wall: Wall, cuts: OpeningCut[]): Wall[] {
   if (L === 0) return [wall];
   const ux = dx / L, uy = dy / L;
 
-  const GAP = 0.05; // inches — tiny so the cap renders
-
+  // The opening cut is EXACTLY the door/window width — no slop. A previous
+  // 0.05"-per-side gap left the rough opening ~0.1" wider than the unit, which
+  // showed up in CAD/DXF export as a hairline gap between the symbol and the
+  // jamb. The door/window symbols are drawn at the true width, so the jamb caps
+  // must land at ±width/2 for the export (and the wall fill) to be precise.
   const ranges = cuts
     .map(c => ({
-      start: Math.max(0, c.positionAlong - c.width / 2 - GAP),
-      end:   Math.min(L, c.positionAlong + c.width / 2 + GAP),
+      start: Math.max(0, c.positionAlong - c.width / 2),
+      end:   Math.min(L, c.positionAlong + c.width / 2),
     }))
     .filter(r => r.end > r.start)
     .sort((a, b) => a.start - b.start);

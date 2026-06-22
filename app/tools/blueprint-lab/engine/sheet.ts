@@ -27,12 +27,12 @@
 // by reusing the 2D canvas renderer (drawScene); roof plan + elevations +
 // sections are primitive blocks.
 
-import { Door, Level, Project, SectionCut, SectionPrimitive, SectionLineStyle, Vec2, Wall, Window as WindowObj } from './types';
+import { DEFAULT_SIDE_PANEL_WIDTH, Door, Level, Project, SectionCut, SectionPrimitive, SectionLineStyle, Vec2, Wall, Window as WindowObj } from './types';
 import { getElevationPrimitives } from './elevationPrimitives';
 import { getSectionPrimitives } from './sectionPrimitives';
 import { ElevationDirection } from './elevations';
-import { wallPolygon, windowOpeningCuts } from './geometry';
-import { wallPlanLinework } from './renderer';
+import { resolveDimAnchor, wallPolygon, windowOpeningCuts } from './geometry';
+import { wallPlanLinework, stairPlanLinework } from './renderer';
 import { bboxOf, buildRoofFootprint } from './roof';
 import { buildSectionStack, getStructural } from './structural';
 
@@ -314,8 +314,24 @@ function buildRow(project: Project, raw: RawBlocks): SheetLayout {
   };
 
   // LEFT: every floor plan (Floor 1, Floor 2, …), then sections.
-  for (const fp of raw.floorPlans) {
-    place({ id: `floor-plan-${fp.level.id}`, title: `FLOOR PLAN — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb });
+  // Floor plans REGISTER to a shared building origin: they all use the same
+  // vertical offset (world Y=0 → same sheet Y), so corresponding walls line up
+  // across levels — a horizontal line hits the same feature on every floor.
+  // (Each plan still occupies its own column horizontally.) Centering each plan
+  // on its OWN bbox instead would misregister floors with different footprints.
+  // Identical-footprint / single-story cases are unchanged (shared center == own center).
+  if (raw.floorPlans.length) {
+    let pMinY = Infinity, pMaxY = -Infinity;
+    for (const fp of raw.floorPlans) { pMinY = Math.min(pMinY, fp.lb.minY); pMaxY = Math.max(pMaxY, fp.lb.maxY); }
+    const sharedPlanY = rowCenterY + (pMinY + pMaxY) / 2;
+    for (const fp of raw.floorPlans) {
+      const block = makeBlock(
+        { id: `floor-plan-${fp.level.id}`, title: `FLOOR PLAN — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb },
+        { x: runningX - fp.lb.minX, y: sharedPlanY }, 0,
+      );
+      blocks.push(block);
+      runningX = block.sheetBounds.maxX + BLOCK_GUTTER_IN;
+    }
   }
   for (const sec of raw.sections) {
     place({ id: sec.id, title: sec.title, space: 'elevation', kind: 'primitives', primitives: sec.prims, lb: sec.lb });
@@ -349,13 +365,20 @@ function buildProjected(project: Project, raw: RawBlocks): SheetLayout {
 
   let runningX = 0;
 
-  // LEFT reference: the un-rotated floor plans (one per level), centered on row.
-  for (const fp of raw.floorPlans) {
-    const b = makeBlock(
-      { id: `floor-plan-${fp.level.id}`, title: `FLOOR PLAN — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb },
-      offsetForRow('plan', fp.lb, runningX, 0, rowCenterY), 0,
-    );
-    blocks.push(b); runningX = b.sheetBounds.maxX + BLOCK_GUTTER_IN;
+  // LEFT reference: the un-rotated floor plans (one per level). They REGISTER to
+  // a shared building origin (same vertical offset) so corresponding walls line
+  // up across levels — see buildRow for the rationale.
+  if (raw.floorPlans.length) {
+    let pMinY = Infinity, pMaxY = -Infinity;
+    for (const fp of raw.floorPlans) { pMinY = Math.min(pMinY, fp.lb.minY); pMaxY = Math.max(pMaxY, fp.lb.maxY); }
+    const sharedPlanY = rowCenterY + (pMinY + pMaxY) / 2;
+    for (const fp of raw.floorPlans) {
+      const b = makeBlock(
+        { id: `floor-plan-${fp.level.id}`, title: `FLOOR PLAN — ${fp.level.name}`, space: 'plan', kind: 'plan-scene', level: fp.level, primitives: fp.planPrims, lb: fp.lb },
+        { x: runningX - fp.lb.minX, y: sharedPlanY }, 0,
+      );
+      blocks.push(b); runningX = b.sheetBounds.maxX + BLOCK_GUTTER_IN;
+    }
   }
   // Placed sections (on the datum row).
   for (const sec of raw.sections) {
@@ -479,6 +502,25 @@ function doorSymbol(d: Door, w: Wall, id: () => string): SectionPrimitive[] {
     const arc: Vec2[] = [];
     for (let k = 0; k <= steps; k++) arc.push(addV(H, rotV(d0, sweep * (k / steps)), d.width));
     out.push({ id: id(), kind: 'polyline', verts: arc, closed: false, style: 'normal' });
+    // Entry-door sidelites: the opening cut is widened to include them
+    // (doorOpeningCut), so the export must draw their narrow-window frames or
+    // that part of the opening reads as an empty gap. Matches drawDoor on-screen.
+    if (d.doorType === 'entry' && d.sidePanels && d.sidePanels !== 'none') {
+      const h = w.thickness / 2;
+      const sw = d.sidePanelWidth ?? DEFAULT_SIDE_PANEL_WIDTH;
+      const zones: Array<[number, number]> = [];
+      if (d.sidePanels === 'left'  || d.sidePanels === 'both') zones.push([d.positionAlong - half - sw, d.positionAlong - half]);
+      if (d.sidePanels === 'right' || d.sidePanels === 'both') zones.push([d.positionAlong + half, d.positionAlong + half + sw]);
+      for (const [uMin, uMax] of zones) {
+        const pa = alongWall(w, u, uMin), pb = alongWall(w, u, uMax);
+        // Frame: both wall faces, both end caps (mullion + outer jamb), + centre glazing line.
+        out.push({ id: id(), kind: 'line', a: addV(pa, n,  h), b: addV(pb, n,  h), style: 'solid' });
+        out.push({ id: id(), kind: 'line', a: addV(pa, n, -h), b: addV(pb, n, -h), style: 'solid' });
+        out.push({ id: id(), kind: 'line', a: addV(pa, n, -h), b: addV(pa, n,  h), style: 'solid' });
+        out.push({ id: id(), kind: 'line', a: addV(pb, n, -h), b: addV(pb, n,  h), style: 'solid' });
+        out.push({ id: id(), kind: 'line', a: pa, b: pb, style: 'solid' });
+      }
+    }
   } else {
     // Sliding / pocket / bifold / barn: a panel line across the opening, nudged
     // toward one face so it reads as a leaf rather than an empty gap.
@@ -528,6 +570,23 @@ export function planExportPrimitives(level: Level, sectionCuts: SectionCut[] = [
   }
   for (const r of level.roomLabels) {
     out.push({ id: id(), kind: 'text', at: r.position, content: r.name, size: 11, align: 'center', baseline: 'middle' });
+  }
+  // Staircases — piece outlines (solid) + tread lines & direction arrow (thin).
+  for (const s of level.stairs ?? []) {
+    for (const seg of stairPlanLinework(s)) {
+      out.push({ id: id(), kind: 'line', a: seg.a, b: seg.b, style: seg.thin ? 'thin' : 'solid' });
+    }
+  }
+  // Plan dimensions — resolve each anchor to a world point and emit a linear
+  // dim (witness lines + ticks + measured value). The plan is authored Y-DOWN
+  // but the sheet is Y-UP (plan blocks Y-flip in transformPoint), and that
+  // reflection inverts the perpendicular offset side — so negate `offset` to
+  // keep the dim line on the same side it sits on screen. Stale anchors (their
+  // object was deleted) resolve to null and are skipped.
+  for (const d of level.dimensions ?? []) {
+    const a = resolveDimAnchor(d.start, level);
+    const b = resolveDimAnchor(d.end, level);
+    if (a && b) out.push({ id: id(), kind: 'dimLinear', a, b, offset: -d.offset });
   }
   // Section cut lines + A/A' end labels, so the DXF plan shows which line each
   // section was taken from (mirrors the on-screen section markers).

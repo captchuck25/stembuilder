@@ -27,7 +27,7 @@ import { computeBoxSelection, filletPreview, hitTestLineHandle, hitTestTopmost, 
 import { SnapResult, drawSnapIndicator, findSnap } from '../engine/sectionSnap';
 import {
   addLine, appendPrim, blockLocalToSheet, blockToSheet, computeExtend, deleteIds, editablePrims, enterEditMode,
-  extendLineAt, filletLinesAt, guideSegmentsForBlock, isSandboxEditable, mirrorSelection, pickEditableBlock,
+  extendLineAt, filletLinesAt, guideSegmentsForBlock, isSandboxEditable, mirrorSelection, moveVertex, pickEditableBlock,
   primSheetVertices, setLineEndpoint, sheetToBlockLocal, translateIds, trimLineAt,
 } from '../engine/sandboxEdit';
 import { T } from '../engine/theme';
@@ -163,6 +163,29 @@ const SCALE_LABEL: Record<ScaleMode, string> = {
   half: '1/2" = 1\'-0"', quarter: '1/4" = 1\'-0"', eighth: '1/8" = 1\'-0"',
 };
 const SCALE_ORDER: ScaleMode[] = ['half', 'quarter', 'eighth'];
+
+// PDF-export plot scales. `value` is the paper:real factor (e.g. 1/4" = 1'-0"
+// → 0.25"/12" = 1/48). 'fit' auto-fits the sheet to a valid page. Any factor
+// that would overflow the PDF 200" page limit is clamped down by buildSheetPdf.
+const PDF_SCALES: { label: string; value: number | 'fit' }[] = [
+  { label: 'Fit to page', value: 'fit' },
+  { label: '1:1 (true size)', value: 1 },
+  { label: '1" = 1\'-0" (1:12)', value: 1 / 12 },
+  { label: '3/4" = 1\'-0" (1:16)', value: 0.75 / 12 },
+  { label: '1/2" = 1\'-0" (1:24)', value: 0.5 / 12 },
+  { label: '1/4" = 1\'-0" (1:48)', value: 0.25 / 12 },
+  { label: '3/16" = 1\'-0" (1:64)', value: 0.1875 / 12 },
+  { label: '1/8" = 1\'-0" (1:96)', value: 0.125 / 12 },
+];
+// PDF-export line-color overrides (null = keep each primitive's drawn colour).
+const PDF_LINE_COLORS: { label: string; value: string | null }[] = [
+  { label: 'As drawn', value: null },
+  { label: 'Black', value: '#000000' },
+  { label: 'White', value: '#ffffff' },   // most visible on a dark CAD background
+  { label: 'Blue', value: '#0047ab' },
+  { label: 'Red', value: '#c0143c' },
+  { label: 'Gray', value: '#555555' },
+];
 // Reference px-per-inch at which text renders at its nominal (authored) size.
 // World-locked text scales by (current px-per-inch ÷ this), so at this scale
 // text matches the 2D editor's look (its default is also 2 px/in) and shrinks
@@ -232,10 +255,14 @@ function fitVp(bounds: SheetBounds, width: number, height: number): VP {
   return { scaleMode: 'eighth', zoom, panX: -cx * px, panY: cy * px, width, height };
 }
 
-export default function SandboxView({ project, onChange, tool, orthoOn }: {
+export default function SandboxView({ project, onChange, tool, orthoOn, onBeginLiveOp, onEndLiveOp }: {
   project: Project; onChange: (p: Project) => void;
   tool: ToolId; onChangeTool: (t: ToolId) => void;
   orthoOn: boolean;   // global right-angle lock (StatusBar) — locks the Line tool to H/V
+  // Bracket a multi-tick drag so the WHOLE gesture is ONE undo entry (not one
+  // per mouse-move). Optional so the component still works in embed/test.
+  onBeginLiveOp?: () => void;
+  onEndLiveOp?: () => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -245,6 +272,11 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
   const [panning, setPanning] = useState<{ from: { x: number; y: number }; pan0: { x: number; y: number } } | null>(null);
   const autoFittedRef = useRef(false);
   const shiftRef = useRef(false);   // Shift held → free-draw (disables ortho lock)
+  // Click-vs-drag: a drag commits nothing until the pointer moves past this many
+  // screen px, so a click with a little jitter doesn't record a phantom move /
+  // undo entry. Armed (true) once a real drag begins. Matches the 2D plan.
+  const dragArmedRef = useRef(false);
+  const DRAG_ARM_PX = 4;
   const [layoutMode, setLayoutMode] = useState<SheetLayoutMode>('row');
 
   // ── Edit state ──────────────────────────────────────────────────────────────
@@ -259,7 +291,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
   const [lineDraft, setLineDraft] = useState<{ blockId: string; a: Vec2; refDir?: Vec2 } | null>(null);  // block-local; refDir = the line it started on, for parallel/perp locks
   const [snap, setSnap] = useState<{ blockId: string; result: SnapResult } | null>(null);               // live snap (block-local)
   const [cursorSheet, setCursorSheet] = useState<Vec2 | null>(null);
-  const [drag, setDrag] = useState<{ blockId: string; mode: 'body' | 'a' | 'b'; primId?: string; ids: string[]; startLocal: Vec2; base: Project } | null>(null);
+  const [drag, setDrag] = useState<{ blockId: string; mode: 'body' | 'a' | 'b' | 'vertex'; primId?: string; vertexIndex?: number; ids: string[]; startLocal: Vec2; base: Project } | null>(null);
   const [marquee, setMarquee] = useState<{ start: Vec2; current: Vec2 } | null>(null);   // sheet-world drag-box selection
   const [extendPreview, setExtendPreview] = useState<{ blockId: string; from: Vec2; to: Vec2 } | null>(null);  // Extend tool hover ghost (block-local)
   const [hatchDraft, setHatchDraft] = useState<{ blockId: string; verts: Vec2[] } | null>(null);  // in-progress hatch polygon (block-local)
@@ -368,18 +400,32 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
     downloadBlob(new Blob([dxf], { type: 'application/dxf' }), 'dxf');
   }, [downloadBlob]);
 
-  // Export the sheet as a 1:1 vector PDF (filled, full detail) for CAD/vector
-  // tools. Async because jsPDF is dynamically imported.
+  // Export the sheet as a vector PDF (filled, full detail) for CAD/vector tools.
+  // Async because jsPDF is dynamically imported. Options (scale / hatches / line
+  // colour) live in the popover toggled by the caret next to the button.
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfOptsOpen, setPdfOptsOpen] = useState(false);
+  const [pdfScale, setPdfScale] = useState<number | 'fit'>('fit');
+  const [pdfHideHatch, setPdfHideHatch] = useState(false);
+  const [pdfLineColor, setPdfLineColor] = useState<string | null>(null);
   const onExportPdf = useCallback(async () => {
     setPdfBusy(true);
+    setPdfOptsOpen(false);
     try {
-      const blob = await buildSheetPdf(sheetRef.current);
+      // Only pass a label for explicit architectural scales (not Fit / 1:1,
+      // which get their own note text).
+      const preset = PDF_SCALES.find(s => s.value === pdfScale);
+      const blob = await buildSheetPdf(sheetRef.current, {
+        scale: pdfScale,
+        scaleLabel: (pdfScale !== 'fit' && pdfScale !== 1) ? preset?.label : undefined,
+        hideHatches: pdfHideHatch,
+        lineColor: pdfLineColor,
+      });
       downloadBlob(blob, 'pdf');
     } finally {
       setPdfBusy(false);
     }
-  }, [downloadBlob]);
+  }, [downloadBlob, pdfScale, pdfHideHatch, pdfLineColor]);
 
   // Reset all Sandbox view edits → revert the elevations + sections to their
   // auto-generated drawings (clears their drafting snapshots).
@@ -582,17 +628,25 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
       const block = sheet.blocks.find(b => b.id === selection.blockId);
       if (block) {
         const idset = new Set(selection.ids);
+        const toScr = (v: Vec2) => { const s = blockLocalToSheet(block, v); return { x: proj.sx(s.x), y: proj.sy(s.y) }; };
+        const dot = (s: { x: number; y: number }) => { ctx.beginPath(); ctx.arc(s.x, s.y, 4, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke(); };
         ctx.save();
         ctx.strokeStyle = T.accent;
         ctx.lineWidth = 2;
         for (const p of editablePrims(block, project)) {
-          if (!idset.has(p.id) || p.kind !== 'line') continue;
-          const a = blockLocalToSheet(block, p.a), b = blockLocalToSheet(block, p.b);
-          const sa = { x: proj.sx(a.x), y: proj.sy(a.y) }, sb = { x: proj.sx(b.x), y: proj.sy(b.y) };
-          ctx.beginPath(); ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y); ctx.stroke();
-          for (const ep of [sa, sb]) {
-            ctx.beginPath(); ctx.arc(ep.x, ep.y, 4, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke();
+          if (!idset.has(p.id)) continue;
+          if (p.kind === 'line') {
+            const sa = toScr(p.a), sb = toScr(p.b);
+            ctx.beginPath(); ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y); ctx.stroke();
+            dot(sa); dot(sb);
+          } else if (p.kind === 'polyline' || p.kind === 'hatch') {
+            // Highlight the outline + a draggable handle at every vertex.
+            const closed = p.kind === 'hatch' || p.closed;
+            ctx.beginPath();
+            p.verts.forEach((v, i) => { const s = toScr(v); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+            if (closed) ctx.closePath();
+            ctx.stroke();
+            for (const v of p.verts) dot(toScr(v));
           }
         }
         ctx.restore();
@@ -611,13 +665,22 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
         const block = sheet.blocks.find(b => b.id === hit.blockId);
         if (block) {
           const idset = new Set(hit.ids);
+          const toScr = (v: Vec2) => { const s = blockLocalToSheet(block, v); return { x: proj.sx(s.x), y: proj.sy(s.y) }; };
           ctx.save();
           ctx.strokeStyle = windowMode ? '#2563EB' : '#16A34A';
           ctx.lineWidth = 2;
           for (const p of editablePrims(block, project)) {
-            if (!idset.has(p.id) || p.kind !== 'line') continue;
-            const a = blockLocalToSheet(block, p.a), b = blockLocalToSheet(block, p.b);
-            ctx.beginPath(); ctx.moveTo(proj.sx(a.x), proj.sy(a.y)); ctx.lineTo(proj.sx(b.x), proj.sy(b.y)); ctx.stroke();
+            if (!idset.has(p.id)) continue;
+            if (p.kind === 'line') {
+              const a = toScr(p.a), b = toScr(p.b);
+              ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+            } else if (p.kind === 'polyline' || p.kind === 'hatch') {
+              const closed = p.kind === 'hatch' || p.closed;
+              ctx.beginPath();
+              p.verts.forEach((v, i) => { const s = toScr(v); if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y); });
+              if (closed) ctx.closePath();
+              ctx.stroke();
+            }
           }
           ctx.restore();
         }
@@ -1015,7 +1078,18 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
             const sel = prims.find(p => p.id === selection.ids[0]);
             if (sel && sel.kind === 'line') {
               const h = hitTestLineHandle(sel, local, tol * 1.6);
-              if (h) { setDrag({ blockId: block.id, mode: h, primId: sel.id, ids: [sel.id], startLocal: snapped, base: project }); return; }
+              if (h) { onBeginLiveOp?.(); dragArmedRef.current = false; setDrag({ blockId: block.id, mode: h, primId: sel.id, ids: [sel.id], startLocal: snapped, base: project }); return; }
+            } else if (sel && (sel.kind === 'polyline' || sel.kind === 'hatch')) {
+              // Grab a vertex of a selected filled outline (wall shell / corner
+              // boards / trim) to reshape it — matches the Elevations page.
+              const grab = tol * 1.6;
+              for (let i = 0; i < sel.verts.length; i++) {
+                if (Math.hypot(sel.verts[i].x - local.x, sel.verts[i].y - local.y) <= grab) {
+                  onBeginLiveOp?.(); dragArmedRef.current = false;
+                  setDrag({ blockId: block.id, mode: 'vertex', primId: sel.id, vertexIndex: i, ids: [sel.id], startLocal: snapped, base: project });
+                  return;
+                }
+              }
             }
           }
           const hit = hitTestTopmost(prims, local, tol);
@@ -1025,6 +1099,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
             const inSel = !!selection && selection.blockId === block.id && selection.ids.includes(hit.id);
             const ids = inSel ? selection!.ids : [hit.id];
             if (!inSel) setSelection({ blockId: block.id, ids });
+            onBeginLiveOp?.(); dragArmedRef.current = false;
             setDrag({ blockId: block.id, mode: 'body', ids, startLocal: local, base: project });
             return;
           }
@@ -1042,7 +1117,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
       }
     }
     startPan(sx, sy);
-  }, [vp.panX, vp.panY, editing, guides, setGuides, snapGuide, tool, lineType, mirrorAxis, sheet, project, onChange, selection, dimDraft, lineDraft, hatchDraft, hatchPattern, filletFirst, snapLocal, resolveLinePoint, screenToSheet, tolIn, startPan]);
+  }, [vp.panX, vp.panY, editing, guides, setGuides, snapGuide, tool, lineType, mirrorAxis, sheet, project, onChange, selection, dimDraft, lineDraft, hatchDraft, hatchPattern, filletFirst, snapLocal, resolveLinePoint, screenToSheet, tolIn, startPan, onBeginLiveOp]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const r = canvasRef.current?.getBoundingClientRect();
@@ -1057,8 +1132,16 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
       const block = sheet.blocks.find(b => b.id === drag.blockId);
       if (!block) return;
       const local = sheetToBlockLocal(block, sheetPt);
+      // Don't commit anything until the pointer clears the click-vs-drag
+      // threshold — so a click with a little jitter records no move / undo entry.
+      if (!dragArmedRef.current) {
+        if (Math.hypot(local.x - drag.startLocal.x, local.y - drag.startLocal.y) * pxPerInchOf(vp) < DRAG_ARM_PX) return;
+        dragArmedRef.current = true;
+      }
       if (drag.mode === 'a' || drag.mode === 'b') {
         onChange(setLineEndpoint(drag.base, block, drag.primId!, drag.mode, snapLocal(block, local).point));
+      } else if (drag.mode === 'vertex') {
+        onChange(moveVertex(drag.base, block, drag.primId!, drag.vertexIndex!, snapLocal(block, local).point));
       } else {
         onChange(translateIds(drag.base, block, new Set(drag.ids), local.x - drag.startLocal.x, local.y - drag.startLocal.y));
       }
@@ -1092,7 +1175,7 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
         setSnap(res ? { blockId: block.id, result: res } : null);
       } else setSnap(null);
     } else if (snap) setSnap(null);
-  }, [drag, panning, marquee, editing, tool, lineType, sheet, project, onChange, snap, snapLocal, screenToSheet, tolIn, extendPreview]);
+  }, [drag, panning, marquee, editing, tool, lineType, sheet, project, onChange, snap, snapLocal, screenToSheet, tolIn, extendPreview, vp]);
 
   // Mouse-up / leave: commit a drag-box to the selection (an empty box = a
   // plain click on empty space → clear selection), then end any drag/pan.
@@ -1102,8 +1185,10 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
       setSelection(hit ? { blockId: hit.blockId, ids: hit.ids } : null);
       setMarquee(null);
     }
+    // Close the drag's live-op so the whole gesture collapses to one undo entry.
+    if (drag) onEndLiveOp?.();
     setDrag(null); setPanning(null);
-  }, [marquee, boxHits]);
+  }, [marquee, boxHits, drag, onEndLiveOp]);
 
   // Delete removes the selection; Esc clears any draft / selection / guide mode.
   useEffect(() => {
@@ -1207,13 +1292,110 @@ export default function SandboxView({ project, onChange, tool, orthoOn }: {
           style={{ ...toolBtn, opacity: empty ? 0.5 : 1, cursor: empty ? 'not-allowed' : 'pointer', fontWeight: 700 }}
           title="Export everything on this sheet as one DXF file (opens in AutoCAD and other CAD tools)"
         >↧ Export DXF</button>
-        <button
-          type="button"
-          onClick={onExportPdf}
-          disabled={empty || pdfBusy}
-          style={{ ...toolBtn, opacity: (empty || pdfBusy) ? 0.5 : 1, cursor: (empty || pdfBusy) ? 'not-allowed' : 'pointer', fontWeight: 700 }}
-          title="Export everything on this sheet as one 1:1-scale vector PDF (filled, full detail) for CAD/vector tools"
-        >{pdfBusy ? '…' : '↧ Export PDF'}</button>
+        <div style={{ position: 'relative', display: 'flex' }}>
+          <button
+            type="button"
+            onClick={onExportPdf}
+            disabled={empty || pdfBusy}
+            style={{
+              ...toolBtn, fontWeight: 700,
+              borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none',
+              opacity: (empty || pdfBusy) ? 0.5 : 1, cursor: (empty || pdfBusy) ? 'not-allowed' : 'pointer',
+            }}
+            title="Export everything on this sheet as one vector PDF (filled, full detail) for CAD/vector tools"
+          >{pdfBusy ? '…' : '↧ Export PDF'}</button>
+          <button
+            type="button"
+            onClick={() => setPdfOptsOpen(o => !o)}
+            disabled={empty || pdfBusy}
+            style={{
+              ...toolBtn, fontWeight: 700, padding: '5px 8px',
+              borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
+              background: pdfOptsOpen ? T.accentSoft : T.panel,
+              color: pdfOptsOpen ? T.accentInk : T.ink,
+              opacity: (empty || pdfBusy) ? 0.5 : 1, cursor: (empty || pdfBusy) ? 'not-allowed' : 'pointer',
+            }}
+            title="PDF export options — scale, hatches, line colour"
+          >▾</button>
+
+          {pdfOptsOpen && (
+            <>
+              {/* click-away backdrop */}
+              <div
+                onClick={() => setPdfOptsOpen(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+              />
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 41,
+                width: 230, padding: 12, display: 'flex', flexDirection: 'column', gap: 12,
+                background: T.panel, border: `1px solid ${T.line}`, borderRadius: 8, boxShadow: T.shadow,
+              }}>
+                <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.6px', color: T.inkMuted, textTransform: 'uppercase' }}>
+                  PDF export options
+                </div>
+
+                {/* Scale */}
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: T.inkSoft }}>
+                  <span style={{ fontWeight: 600 }}>Scale</span>
+                  <select
+                    value={String(pdfScale)}
+                    onChange={e => setPdfScale(e.target.value === 'fit' ? 'fit' : Number(e.target.value))}
+                    style={{ fontSize: 11, padding: '4px 6px', border: `1px solid ${T.lineStrong}`, borderRadius: 5, background: '#fff', color: T.ink }}
+                  >
+                    {PDF_SCALES.map(s => (
+                      <option key={s.label} value={String(s.value)}>{s.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                {/* Hatches */}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: T.ink, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={pdfHideHatch} onChange={e => setPdfHideHatch(e.target.checked)} />
+                  Remove material hatches
+                </label>
+
+                {/* Line colour */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: T.inkSoft }}>
+                  <span style={{ fontWeight: 600 }}>Line colour</span>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {PDF_LINE_COLORS.map(c => {
+                      const active = c.value === pdfLineColor;
+                      return (
+                        <button
+                          key={c.label}
+                          type="button"
+                          onClick={() => setPdfLineColor(c.value)}
+                          title={c.label}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5,
+                            padding: '3px 7px', fontSize: 10.5, borderRadius: 5, cursor: 'pointer',
+                            background: active ? T.accentSoft : T.panel,
+                            color: active ? T.accentInk : T.ink,
+                            border: `1px solid ${active ? T.accent : T.lineStrong}`,
+                          }}
+                        >
+                          <span style={{
+                            width: 10, height: 10, borderRadius: 2,
+                            background: c.value ?? 'transparent',
+                            border: c.value ? `1px solid ${T.lineStrong}` : `1px dashed ${T.lineStrong}`,
+                          }} />
+                          {c.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onExportPdf}
+                  disabled={pdfBusy}
+                  style={{ ...toolBtn, fontWeight: 700, background: T.accent, color: '#fff', border: `1px solid ${T.accent}`, opacity: pdfBusy ? 0.5 : 1 }}
+                >{pdfBusy ? 'Exporting…' : '↧ Export PDF'}</button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       <div ref={containerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>

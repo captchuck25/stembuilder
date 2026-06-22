@@ -626,6 +626,11 @@ export default function RoofPlanView({
 
   // ── Mouse handlers ───────────────────────────────────────────────────────
   const panningRef = useRef<{ x: number; y: number } | null>(null);
+  // Click-vs-drag: a handle/body drag commits nothing until the pointer clears
+  // this many screen px, so a click with a little jitter records no undo entry.
+  const dragArmedRef = useRef(false);
+  const dragDownWorldRef = useRef<Vec2 | null>(null);
+  const DRAG_ARM_PX = 4;
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     const canvas = canvasRef.current;
@@ -843,6 +848,7 @@ export default function RoofPlanView({
       const handle = hitTestLineHandle(p, raw, handleTol);
       if (handle) {
         onBeginLiveOp?.();
+        dragDownWorldRef.current = raw; dragArmedRef.current = false;
         setHandleDrag({ id: p.id, end: handle });
         return;
       }
@@ -862,6 +868,7 @@ export default function RoofPlanView({
       setEaveSel(null);
       // Body drag is wired up so a hold-and-move translates the selection.
       onBeginLiveOp?.();
+      dragDownWorldRef.current = raw; dragArmedRef.current = false;
       setBodyDrag({ startWorld: raw, lastWorld: raw });
       return;
     }
@@ -905,6 +912,14 @@ export default function RoofPlanView({
     const { p: world, snap: s } = resolveCursor(raw);
     setCursorWorld(world);
     setSnap(s);
+
+    // Hold a handle/body drag until the pointer clears the click-vs-drag
+    // threshold — a jittery click then records no move / undo entry.
+    if ((handleDrag || bodyDrag) && !dragArmedRef.current) {
+      const d = dragDownWorldRef.current;
+      if (d && Math.hypot(raw.x - d.x, raw.y - d.y) * view.zoom < DRAG_ARM_PX) return;
+      dragArmedRef.current = true;
+    }
 
     if (handleDrag) {
       const line = (roof.drafting ?? []).find(p => p.id === handleDrag.id);

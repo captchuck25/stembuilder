@@ -1477,7 +1477,7 @@ export default function BlueprintLabClient() {
           ) : view === 'elevations' ? (
             <ElevationsView project={project} onChange={setProject} tool={tool} onChangeTool={setTool} />
           ) : view === 'sandbox' ? (
-            <SandboxView project={project} onChange={setProject} tool={tool} onChangeTool={setTool} orthoOn={orthoOn} />
+            <SandboxView project={project} onChange={setProject} tool={tool} onChangeTool={setTool} orthoOn={orthoOn} onBeginLiveOp={beginLiveOp} onEndLiveOp={endLiveOp} />
           ) : view === 'rooms' ? (
             <RoomsView
               project={project}

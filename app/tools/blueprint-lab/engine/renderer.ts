@@ -1599,6 +1599,54 @@ export function stairStepEdgePoints(s: Stair, outset = 0): Vec2[] {
   });
 }
 
+// Stair plan symbol as WORLD-space line segments — piece outlines + tread lines
+// + a direction arrow, mirroring drawStair — so the sheet/DXF/PDF export shows
+// the staircase (it was previously plan-only, missing from exports). `thin`
+// flags the lighter tread/arrow lines. Local piece coords are rotated about the
+// stair's rotation and translated to its world position (same as drawStair).
+export function stairPlanLinework(s: Stair): { a: Vec2; b: Vec2; thin: boolean }[] {
+  const segs: { a: Vec2; b: Vec2; thin: boolean }[] = [];
+  const { pieces } = stairPieces(s);
+  const treads = s.treads ?? STAIR_DEFAULTS.treads;
+  const c = Math.cos(s.rotation), si = Math.sin(s.rotation);
+  const tw = (lx: number, ly: number): Vec2 => ({ x: s.position.x + c * lx - si * ly, y: s.position.y + si * lx + c * ly });
+  const seg = (ax: number, ay: number, bx: number, by: number, thin: boolean) => segs.push({ a: tw(ax, ay), b: tw(bx, by), thin });
+  // Piece outlines (runs + landings).
+  for (const p of pieces) {
+    seg(p.x, p.y, p.x + p.w, p.y, false);
+    seg(p.x + p.w, p.y, p.x + p.w, p.y + p.h, false);
+    seg(p.x + p.w, p.y + p.h, p.x, p.y + p.h, false);
+    seg(p.x, p.y + p.h, p.x, p.y, false);
+  }
+  // Tread lines (runs only) — same division as drawStair.
+  for (const p of pieces) {
+    if (p.kind !== 'run') continue;
+    const runLen = p.treadAxis === 'x' ? p.h : p.w;
+    const n = Math.max(2, Math.round(treads * (runLen / Math.max(s.length, 24))));
+    for (let i = 1; i < n; i++) {
+      if (p.treadAxis === 'x') { const ty = p.y + (i * p.h) / n; seg(p.x, ty, p.x + p.w, ty, true); }
+      else { const tx = p.x + (i * p.w) / n; seg(tx, p.y, tx, p.y + p.h, true); }
+    }
+  }
+  // Direction arrow up the first run (UP travels toward decreasing local coord).
+  const run = pieces.find(p => p.kind === 'run') ?? pieces[0];
+  if (run) {
+    const along: 'x' | 'y' = run.treadAxis === 'x' ? 'y' : 'x';
+    const cx = run.x + run.w / 2, cy = run.y + run.h / 2;
+    const halfLen = (along === 'y' ? run.h : run.w) / 2 - 4;
+    const sign = s.direction === 'up' ? -1 : 1;
+    const x0 = along === 'x' ? cx - sign * halfLen : cx;
+    const y0 = along === 'y' ? cy - sign * halfLen : cy;
+    const x1 = along === 'x' ? cx + sign * halfLen : cx;
+    const y1 = along === 'y' ? cy + sign * halfLen : cy;
+    seg(x0, y0, x1, y1, true);
+    const head = 4;
+    if (along === 'y') { seg(x1, y1, x1 - head, y1 - sign * head, true); seg(x1, y1, x1 + head, y1 - sign * head, true); }
+    else { seg(x1, y1, x1 - sign * head, y1 - head, true); seg(x1, y1, x1 - sign * head, y1 + head, true); }
+  }
+  return segs;
+}
+
 export function drawStair(ctx: CanvasRenderingContext2D, s: Stair, vp: Viewport, selected: boolean) {
   const c = worldToScreen(s.position, vp);
   const ppi = vp.pxPerInch;

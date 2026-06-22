@@ -1059,6 +1059,11 @@ function ElevationSvg(props: ElevationSvgProps) {
     | { kind: 'vertex'; primId: string; index: number }
     | { kind: 'translate'; startWorld: Vec2; snapshot: DrawingPrimitive[] };
   const [dragHandle, setDragHandle] = useState<Drag | null>(null);
+  // Click-vs-drag: a drag commits (and opens its undo live-op) only once the
+  // pointer clears ~4 screen px from the press point, so a jittery click leaves
+  // no move / undo entry. `dragArmedRef` latches once a real drag begins.
+  const dragArmedRef = useRef(false);
+  const dragStartWorldRef = useRef<Vec2 | null>(null);
   // Set on the mouse-up that ends a drag, cleared on the next click. Lets
   // us skip the synthetic click that would otherwise re-select primitives.
   const justDraggedRef = useRef<boolean>(false);
@@ -1109,12 +1114,12 @@ function ElevationSvg(props: ElevationSvgProps) {
         if (!p) continue;
         if (p.kind === 'line') {
           if (Math.hypot(p.a.x - world.x, p.a.y - world.y) <= grab) {
-            onBeginLiveOp();
+            dragStartWorldRef.current = world; dragArmedRef.current = false;
             setDragHandle({ kind: 'endpoint', primId: p.id, endpoint: 'a' });
             return;
           }
           if (Math.hypot(p.b.x - world.x, p.b.y - world.y) <= grab) {
-            onBeginLiveOp();
+            dragStartWorldRef.current = world; dragArmedRef.current = false;
             setDragHandle({ kind: 'endpoint', primId: p.id, endpoint: 'b' });
             return;
           }
@@ -1122,7 +1127,7 @@ function ElevationSvg(props: ElevationSvgProps) {
           for (let i = 0; i < p.verts.length; i++) {
             const v = p.verts[i];
             if (Math.hypot(v.x - world.x, v.y - world.y) <= grab) {
-              onBeginLiveOp();
+              dragStartWorldRef.current = world; dragArmedRef.current = false;
               setDragHandle({ kind: 'vertex', primId: p.id, index: i });
               return;
             }
@@ -1133,7 +1138,7 @@ function ElevationSvg(props: ElevationSvgProps) {
       //    start translating the whole selection.
       const hit = hitTestTopmost(primitives, world, tolWorld);
       if (hit && selection.has(hit.id)) {
-        onBeginLiveOp();
+        dragStartWorldRef.current = world; dragArmedRef.current = false;
         setDragHandle({ kind: 'translate', startWorld: world, snapshot: primitives });
         return;
       }
@@ -1164,6 +1169,15 @@ function ElevationSvg(props: ElevationSvgProps) {
     if (!world) return;
     // ── Drag in progress (endpoint / vertex / translate) ──────────
     if (dragHandle) {
+      // Hold until the pointer clears the click-vs-drag threshold; only THEN
+      // open the undo live-op (which snapshots the pre-drag state). A jittery
+      // click never arms, so it leaves no move and no undo entry.
+      if (!dragArmedRef.current) {
+        const d = dragStartWorldRef.current;
+        if (d && Math.hypot(world.x - d.x, world.y - d.y) * zoom < 4) return;
+        dragArmedRef.current = true;
+        onBeginLiveOp();
+      }
       if (dragHandle.kind === 'translate') {
         // Translate all selected primitives by the delta from drag start.
         const dx = world.x - dragHandle.startWorld.x;
@@ -1235,8 +1249,8 @@ function ElevationSvg(props: ElevationSvgProps) {
       onCursorChange(world);
     }
   }, [panState, boxState, dragHandle, selection, fitted,
-      drafting, tool, primitives, tolWorld, screenToWorld, resolveDraw,
-      onCursorChange, onSnapChange, onSetPrimitives]);
+      drafting, tool, primitives, tolWorld, zoom, screenToWorld, resolveDraw,
+      onCursorChange, onSnapChange, onSetPrimitives, onBeginLiveOp]);
 
   const onMouseUp = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (panState && e.button === 1) {

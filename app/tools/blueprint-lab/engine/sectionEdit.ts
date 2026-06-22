@@ -25,10 +25,16 @@ export function makeUserPrimId(prefix: string): string {
 // Returns true if the world-coord `point` is within `tolWorld` of the
 // primitive's drawable geometry. Used by the Select tool.
 
+// `includeFill` (default true) controls whether a click INSIDE a filled hatch
+// counts as a hit. The selection hit-test runs an edge-only pass first
+// (`includeFill = false`) so a line/edge drawn over a hatch wins — otherwise the
+// siding fill would swallow every click and the structural lines under it
+// couldn't be selected.
 export function hitTestPrimitive(
   p: SectionPrimitive,
   point: Vec2,
   tolWorld: number,
+  includeFill = true,
 ): boolean {
   switch (p.kind) {
     case 'line':
@@ -82,9 +88,10 @@ export function hitTestPrimitive(
       return Math.hypot(p.anchor.x - point.x, p.anchor.y - point.y) <= tolWorld;
     case 'hatch':
       // A hatch is a filled region — selecting anywhere INSIDE the polygon
-      // counts as a hit. Also accept edge proximity (matches closed-polyline
+      // counts as a hit (unless includeFill is off, e.g. the edge-first
+      // selection pass). Also accept edge proximity (matches closed-polyline
       // behaviour) so very thin hatches stay clickable.
-      if (pointInPolygon(point, p.verts)) return true;
+      if (includeFill && pointInPolygon(point, p.verts)) return true;
       for (let i = 0; i < p.verts.length - 1; i++) {
         if (distanceToSegment(point, p.verts[i], p.verts[i + 1]) <= tolWorld) return true;
       }
@@ -124,13 +131,21 @@ function distanceToSegment(p: Vec2, a: Vec2, b: Vec2): number {
 
 // Picks the topmost primitive at `point` (within `tolWorld`), or null. The
 // snapshot order is "drawn later = on top," so we iterate from the end.
+//
+// Two passes so lines/edges beat fills: a thin line drawn OVER the siding hatch
+// stays selectable instead of the hatch swallowing the click. Pass 1 ignores
+// hatch interiors (edge/stroke hits only); pass 2 falls back to fill interiors
+// so you can still select a hatch by clicking bare siding with nothing on top.
 export function hitTestTopmost(
   primitives: SectionPrimitive[],
   point: Vec2,
   tolWorld: number,
 ): SectionPrimitive | null {
   for (let i = primitives.length - 1; i >= 0; i--) {
-    if (hitTestPrimitive(primitives[i], point, tolWorld)) return primitives[i];
+    if (hitTestPrimitive(primitives[i], point, tolWorld, false)) return primitives[i];
+  }
+  for (let i = primitives.length - 1; i >= 0; i--) {
+    if (hitTestPrimitive(primitives[i], point, tolWorld, true)) return primitives[i];
   }
   return null;
 }

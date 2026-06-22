@@ -1175,6 +1175,10 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
   // an undo entry on the FIRST mousemove of a drag, not on mousedown, so a
   // click-without-move doesn't pollute the undo stack with no-op entries.
   const dragPushedUndoRef = useRef(false);
+  // Drag-start world point + click-vs-drag threshold: a handle/body drag commits
+  // (and pushes an undo entry) only once the pointer clears ~4 screen px, so a
+  // jittery click records nothing. `dragPushedUndoRef` latches once armed.
+  const dragStartWorldRef = useRef<Vec2 | null>(null);
   // Whole-primitive translate drag. Set when the user mouse-downs on the
   // BODY of a selected line (not an endpoint handle). We snapshot the
   // project once on drag-start and re-derive each move-frame from it so the
@@ -1336,6 +1340,7 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
         if (which) {
           setDragHandle({ primId: p.id, endpoint: which });
           dragPushedUndoRef.current = false;
+          dragStartWorldRef.current = rawWorld;
           return;
         }
       }
@@ -1350,6 +1355,7 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
         if (hitTestLineBody(p, rawWorld, bodyTolWorld, handleTolWorld)) {
           setDragTranslate({ ids: new Set(selection), startWorld: rawWorld, baseProject: project });
           dragPushedUndoRef.current = false;
+          dragStartWorldRef.current = rawWorld;
           return;
         }
       }
@@ -1620,10 +1626,17 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     if (boxSelect) {
       setBoxSelect({ ...boxSelect, current: raw });
     }
+    // Click-vs-drag: only commit (and push undo) once the pointer clears ~4
+    // screen px from where the drag began. `dragPushedUndoRef` latches true on
+    // the first real commit so dragging back toward the start still tracks.
+    const armed = dragPushedUndoRef.current || (
+      dragStartWorldRef.current != null &&
+      Math.hypot(raw.x - dragStartWorldRef.current.x, raw.y - dragStartWorldRef.current.y) * pxPerInchOf(vp) >= 4
+    );
     // Live update during a handle drag — use the snapped point if a snap
     // target is under the cursor, otherwise the raw cursor position. Push
-    // ONE undo entry per drag on the first mousemove.
-    if (dragHandle && onChange) {
+    // ONE undo entry per drag on the first real move.
+    if (dragHandle && onChange && armed) {
       if (!dragPushedUndoRef.current) {
         pushUndo?.();
         dragPushedUndoRef.current = true;
@@ -1634,7 +1647,7 @@ function CrossSectionCanvas({ project, onChange, pushUndo, activeTool, drafting,
     // Live update during a whole-primitive translate drag. Delta is computed
     // against the snapshot taken at drag-start (`baseProject`) so the gesture
     // is stable as the on-screen geometry updates underneath the cursor.
-    if (dragTranslate && onChange) {
+    if (dragTranslate && onChange && armed) {
       const dx = raw.x - dragTranslate.startWorld.x;
       const dy = raw.y - dragTranslate.startWorld.y;
       if (dx !== 0 || dy !== 0) {

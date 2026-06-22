@@ -273,6 +273,22 @@ export function setLineEndpoint(project: Project, block: SheetBlock, primId: str
   return writeBucket(e.project, e.scope, next);
 }
 
+// Move one vertex of a polyline/hatch (block-local). Lets the user reshape the
+// filled outlines (wall shell, corner boards, trim) by dragging their corners —
+// the same vertex editing the Elevations page offers, so both edit identically.
+export function moveVertex(project: Project, block: SheetBlock, primId: string, index: number, to: Vec2): Project {
+  const e = ensureEditable(project, block);
+  if (!e) return project;
+  const next = e.prims.map(p => {
+    if (p.id !== primId) return p;
+    if (p.kind === 'polyline' || p.kind === 'hatch') {
+      return { ...p, verts: p.verts.map((v, i) => (i === index ? to : v)) };
+    }
+    return p;
+  });
+  return writeBucket(e.project, e.scope, next);
+}
+
 export function translateIds(project: Project, block: SheetBlock, ids: Set<string>, dx: number, dy: number): Project {
   if (ids.size === 0 || (dx === 0 && dy === 0)) return project;
   const e = ensureEditable(project, block);

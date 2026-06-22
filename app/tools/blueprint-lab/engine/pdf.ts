@@ -20,7 +20,7 @@
 import type { jsPDF } from 'jspdf';
 import { SectionPrimitive, Vec2, SectionLineStyle, SectionPolyStyle, DrawingFillStyle, formatImperial } from './types';
 import { SheetBlock, SheetLayout, planExportPrimitives } from './sheet';
-import { transformPoint } from './dxf';
+import { transformPoint, occludePrimitives } from './dxf';
 import { T } from './theme';
 
 // Inches of PDF text height per unit of a primitive's `size` — matches dxf.ts's
@@ -32,6 +32,26 @@ const TEXT_IN_PER_SIZE = 0.5;
 const LW_IN_PER_PX = 0.01;
 const PAGE_MARGIN_IN = 1;          // white border around the sheet bounds
 const HATCH_LINE_IN = 0.4 * LW_IN_PER_PX * 2;  // faint hatch lineweight (~0.008")
+
+// Per-export options (see buildSheetPdf). Set as module state at the start of
+// each export; the UI single-flights exports (pdfBusy) so no re-entrancy.
+export interface PdfExportOptions {
+  // Output scale. 'fit' (default) = largest factor ≤ 1 that fits the page; a
+  // number = an explicit plot factor (e.g. 1/48 for 1/4"=1'-0", 1 for true 1:1).
+  // Any factor that would overflow the 200" page is clamped down to fit.
+  scale?: number | 'fit';
+  scaleLabel?: string;        // human label for the scale note (e.g. `1/4" = 1'-0" (1:48)`)
+  hideHatches?: boolean;      // skip material hatch patterns (keep the white backing mask)
+  lineColor?: string | null;  // hex override for ALL geometry strokes; null = as drawn
+}
+
+// Uniform output scale (≤ 1). 1 = true 1:1; < 1 when scaled down (chosen plot
+// scale, or auto-fit under the PDF 200" page limit) — the WHOLE drawing
+// (positions AND plotted sizes) shrinks proportionally, so rescaling by 1/SCALE
+// in CAD recovers exact 1:1.
+let SCALE = 1;
+let HIDE_HATCH = false;
+let LINE_OVERRIDE: string | null = null;
 
 // ── Style → stroke attributes (mirrors ElevationsView.strokeFor) ──────────────
 function strokeFor(style: SectionLineStyle | SectionPolyStyle): { color: string; widthPx: number; dash?: number[] } {
@@ -156,9 +176,9 @@ function hatchSegments(verts: Vec2[], pattern: string, angle = 0): [Vec2, Vec2][
 type ToPdf = (p: Vec2) => Vec2;
 
 function applyStroke(doc: jsPDF, s: { color: string; widthPx: number; dash?: number[] }) {
-  doc.setDrawColor(...hexToRgb(s.color));
-  doc.setLineWidth(s.widthPx * LW_IN_PER_PX);
-  doc.setLineDashPattern(s.dash ?? [], 0);
+  doc.setDrawColor(...hexToRgb(LINE_OVERRIDE ?? s.color));
+  doc.setLineWidth(s.widthPx * LW_IN_PER_PX * SCALE);
+  doc.setLineDashPattern((s.dash ?? []).map(d => d * SCALE), 0);
 }
 
 function strokePolyline(doc: jsPDF, pts: Vec2[], closed: boolean) {
@@ -192,7 +212,9 @@ function drawPrim(doc: jsPDF, p: SectionPrimitive, block: SheetBlock, toPdf: ToP
     }
     case 'polyline': {
       const pts = p.verts.map(tp);
-      const fill = fillFor(p.fill);
+      // Clean-linework mode (hatches off) draws NO fills at all — just outlines —
+      // so windows/doors come through as complete frames with no solid regions.
+      const fill = HIDE_HATCH ? null : fillFor(p.fill);
       if (p.closed) {
         fillStrokePolygon(doc, pts, fill, p.noStroke ? null : strokeFor(p.style));
       } else {
@@ -206,10 +228,10 @@ function drawPrim(doc: jsPDF, p: SectionPrimitive, block: SheetBlock, toPdf: ToP
       // clipped pattern lines on top.
       const wpts = p.verts.map(v => transformPoint(v, block));
       fillStrokePolygon(doc, wpts.map(toPdf), '#ffffff', null);
-      const segs = hatchSegments(wpts, p.pattern, p.angle ?? 0);
+      const segs = HIDE_HATCH ? [] : hatchSegments(wpts, p.pattern, p.angle ?? 0);
       if (segs.length) {
         applyStroke(doc, { color: '#565c75', widthPx: 0.4, dash: [] });
-        doc.setLineWidth(HATCH_LINE_IN);
+        doc.setLineWidth(HATCH_LINE_IN * SCALE);
         for (const [a, b] of segs) { const pa = toPdf(a), pb = toPdf(b); doc.line(pa.x, pa.y, pb.x, pb.y); }
       }
       return;
@@ -228,12 +250,9 @@ function drawPrim(doc: jsPDF, p: SectionPrimitive, block: SheetBlock, toPdf: ToP
       drawText(doc, a, p.label, 9 * TEXT_IN_PER_SIZE, textAngleFor(block, 0), T.ink, 'left', 'bottom');
       return;
     }
-    case 'dimChain': {
-      applyStroke(doc, strokeFor('thin'));
-      const a = tp({ x: p.xIn, y: p.y1In }), b = tp({ x: p.xIn, y: p.y2In });
-      doc.line(a.x, a.y, b.x, b.y);
+    case 'dimChain':
+      drawDimChain(doc, p.xIn, p.y1In, p.y2In, p.text, block, toPdf);
       return;
-    }
     // pitchSymbol — skipped (matches dxf.ts v1).
   }
 }
@@ -251,8 +270,11 @@ function drawText(
 ) {
   const text = cleanText(content);
   if (!text) return;
-  doc.setTextColor(...hexToRgb(color));
-  doc.setFontSize(heightIn * 72);   // jsPDF font size is points (1/72")
+  // The line-colour override applies to text too — so a single chosen colour
+  // makes the WHOLE drawing (lines + labels) visible on a dark CAD background,
+  // instead of labels staying dark-navy and disappearing.
+  doc.setTextColor(...hexToRgb(LINE_OVERRIDE ?? color));
+  doc.setFontSize(heightIn * SCALE * 72);   // jsPDF font size is points (1/72")
   doc.text(text, at.x, at.y, {
     align: align ?? 'left',
     baseline: baseline === 'top' ? 'top' : baseline === 'middle' ? 'middle' : baseline === 'bottom' ? 'bottom' : 'alphabetic',
@@ -265,6 +287,17 @@ function drawText(
 // space, which shares handedness with that node's flipped working space.
 const DIM_TICK_HALF = 4;   // inches
 const DIM_FONT_IN = 11 * TEXT_IN_PER_SIZE;
+const DIM_EXT_GAP_IN = 2;  // world inches: extension-line gap off the measured point
+
+// Move `pt` a small gap toward `toward` (both PDF coords) — the extension-line
+// gap that keeps witness lines from sharing an endpoint with wall geometry.
+function gapFrom(pt: Vec2, toward: Vec2): Vec2 {
+  const dx = toward.x - pt.x, dy = toward.y - pt.y;
+  const L = Math.hypot(dx, dy);
+  if (L === 0) return pt;
+  const g = Math.min(DIM_EXT_GAP_IN * SCALE, L * 0.4);
+  return { x: pt.x + (dx / L) * g, y: pt.y + (dy / L) * g };
+}
 function drawDimLinear(doc: jsPDF, aW: Vec2, bW: Vec2, offset: number, toPdf: ToPdf) {
   const len = Math.hypot(bW.x - aW.x, bW.y - aW.y);
   if (len === 0) return;
@@ -275,14 +308,20 @@ function drawDimLinear(doc: jsPDF, aW: Vec2, bW: Vec2, offset: number, toPdf: To
   const a = toPdf(aW), b = toPdf(bW), da = toPdf(daW), db = toPdf(dbW);
 
   applyStroke(doc, { color: T.ink, widthPx: 0.8, dash: [] });
-  doc.line(a.x, a.y, da.x, da.y);                 // extension lines
-  doc.line(b.x, b.y, db.x, db.y);
-  doc.setLineWidth(1.1 * LW_IN_PER_PX);
+  // Extension lines start a small GAP off the measured point — standard drafting
+  // convention, and it stops the witness line from sharing an exact endpoint
+  // with the wall corner, so AutoCAD's PDFIMPORT "join segments" won't fuse the
+  // dimension to the wall (the user couldn't erase one without the other).
+  const ea = gapFrom(a, da), eb = gapFrom(b, db);
+  doc.line(ea.x, ea.y, da.x, da.y);               // extension lines (gapped)
+  doc.line(eb.x, eb.y, db.x, db.y);
+  doc.setLineWidth(1.1 * LW_IN_PER_PX * SCALE);
   doc.line(da.x, da.y, db.x, db.y);               // dim line
   const ang = Math.atan2(db.y - da.y, db.x - da.x);
-  const tdx = Math.cos(ang + Math.PI / 4) * DIM_TICK_HALF;
-  const tdy = Math.sin(ang + Math.PI / 4) * DIM_TICK_HALF;
-  doc.setLineWidth(1.4 * LW_IN_PER_PX);
+  const tick = DIM_TICK_HALF * SCALE;
+  const tdx = Math.cos(ang + Math.PI / 4) * tick;
+  const tdy = Math.sin(ang + Math.PI / 4) * tick;
+  doc.setLineWidth(1.4 * LW_IN_PER_PX * SCALE);
   doc.line(da.x - tdx, da.y - tdy, da.x + tdx, da.y + tdy);   // 45° ticks
   doc.line(db.x - tdx, db.y - tdy, db.x + tdx, db.y + tdy);
 
@@ -290,10 +329,34 @@ function drawDimLinear(doc: jsPDF, aW: Vec2, bW: Vec2, offset: number, toPdf: To
   if (deg > 90 || deg < -90) deg += 180;          // keep label upright
   const mid = { x: (da.x + db.x) / 2, y: (da.y + db.y) / 2 };
   // Nudge the label off the dim line (perp), like the node's dy=-3.
-  const off = 3, ox = Math.sin((deg * Math.PI) / 180) * off, oy = -Math.cos((deg * Math.PI) / 180) * off;
+  const off = 3 * SCALE, ox = Math.sin((deg * Math.PI) / 180) * off, oy = -Math.cos((deg * Math.PI) / 180) * off;
   doc.setFont('helvetica', 'bold');
   drawText(doc, { x: mid.x + ox, y: mid.y + oy }, formatImperial(len), DIM_FONT_IN, (360 - deg) % 360, T.ink, 'center', 'bottom');
   doc.setFont('helvetica', 'normal');
+}
+
+// Vertical dimension chain (section/elevation height dims) — a line between two
+// world Y values at a world X, tick marks at both ends, and the value text
+// rotated to read along the line. Mirrors sectionPrimitives.drawPrimDimChain.
+function drawDimChain(doc: jsPDF, xIn: number, y1In: number, y2In: number, text: string, block: SheetBlock, toPdf: ToPdf) {
+  const a = toPdf(transformPoint({ x: xIn, y: y1In }, block));
+  const b = toPdf(transformPoint({ x: xIn, y: y2In }, block));
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (len === 0) return;
+  applyStroke(doc, { color: T.inkSoft, widthPx: 0.8, dash: [] });
+  doc.line(a.x, a.y, b.x, b.y);
+  const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len;
+  const nx = -uy, ny = ux;                     // perpendicular → tick direction
+  const tick = DIM_TICK_HALF * SCALE;
+  doc.line(a.x - nx * tick, a.y - ny * tick, a.x + nx * tick, a.y + ny * tick);
+  doc.line(b.x - nx * tick, b.y - ny * tick, b.x + nx * tick, b.y + ny * tick);
+  const value = cleanText(text);
+  if (!value || len < 0.12) return;            // too short to label legibly
+  let deg = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+  if (deg > 90 || deg < -90) deg += 180;       // keep upright
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const off = 4 * SCALE;                        // sit the label just off the line
+  drawText(doc, { x: mid.x - nx * off, y: mid.y - ny * off }, value, 10 * TEXT_IN_PER_SIZE, (360 - deg) % 360, T.ink, 'center', 'middle');
 }
 
 // PDF pages cannot exceed 14400 pt = 200 inches in either dimension (the format
@@ -306,15 +369,22 @@ function drawDimLinear(doc: jsPDF, aW: Vec2, bW: Vec2, offset: number, toPdf: To
 const PDF_MAX_IN = 199;   // 1" under the hard 200" limit for safety
 
 // ── Assemble the full PDF ─────────────────────────────────────────────────────
-export async function buildSheetPdf(sheet: SheetLayout): Promise<Blob> {
+export async function buildSheetPdf(sheet: SheetLayout, opts: PdfExportOptions = {}): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
+  HIDE_HATCH = !!opts.hideHatches;
+  LINE_OVERRIDE = opts.lineColor ?? null;
   const b = sheet.bounds;
   const M = PAGE_MARGIN_IN;
   const spanX = b ? b.maxX - b.minX : 9;
   const spanY = b ? b.maxY - b.minY : 6.5;
-  // Largest scale ≤ 1 that fits the bounds (+margins) on a valid page.
+  // Largest scale ≤ 1 that still fits the bounds (+margins) on a valid page.
   const avail = PDF_MAX_IN - 2 * M;
-  const k = Math.min(1, avail / Math.max(spanX, 1e-6), avail / Math.max(spanY, 1e-6));
+  const fitK = Math.min(1, avail / Math.max(spanX, 1e-6), avail / Math.max(spanY, 1e-6));
+  // Requested scale: 'fit'/undefined → fitK; a number → that plot factor.
+  const requested = (opts.scale === undefined || opts.scale === 'fit') ? fitK : opts.scale;
+  const k = Math.min(requested, fitK);   // never exceed the page
+  const clamped = k < requested - 1e-9;  // requested scale didn't fit → forced smaller
+  SCALE = k;
 
   const W = spanX * k + 2 * M;
   const H = spanY * k + 2 * M;
@@ -332,17 +402,31 @@ export async function buildSheetPdf(sheet: SheetLayout): Promise<Blob> {
     const rawPrims = block.kind === 'plan-scene'
       ? (block.primitives ?? (block.level ? planExportPrimitives(block.level) : []))
       : (block.primitives ?? []);
-    for (const p of rawPrims) drawPrim(doc, p, block, toPdf);
+    // "Remove material hatches" → emit clean linework: drop hatches AND the
+    // white masking fills (wall shells / hatch backings), clipping the lines
+    // they hid. Same pass the DXF export uses, so the PDF reads identically to
+    // the DXF in CAD — no solid grey shapes on a dark background. With hatches
+    // kept on, draw the full filled presentation (good for white-page viewing).
+    const prims = HIDE_HATCH ? occludePrimitives(rawPrims) : rawPrims;
+    for (const p of prims) drawPrim(doc, p, block, toPdf);
   }
 
-  // Scale note (bottom-left of the page, in the margin). At k=1 it reads "1:1";
-  // otherwise it states the exact factor to rescale by in CAD.
-  const note = k >= 0.99999
-    ? 'SCALE 1:1  (true size, 1 drawing inch = 1 PDF inch)'
-    : `SCALE 1:${(1 / k).toFixed(4)}  (page exceeds PDF 200" limit at 1:1 — rescale by ${(1 / k).toFixed(4)}x on CAD import for true size)`;
+  // Scale note (bottom-left of the page, in the margin). Prefer the chosen plot
+  // label when it actually fit; otherwise state the exact factor to rescale by.
+  // Also report the options applied so the output is self-documenting (and so a
+  // stale build is obvious — a build without this code prints no options tail).
+  const scaleStr = (!clamped && opts.scaleLabel)
+    ? `SCALE ${opts.scaleLabel}`
+    : k >= 0.99999
+      ? 'SCALE 1:1  (true size, 1 drawing inch = 1 PDF inch)'
+      : clamped
+        ? `SCALE 1:${(1 / k).toFixed(2)}  (requested scale exceeded the PDF 200" page limit — rescale by ${(1 / k).toFixed(4)}x on CAD import for true size)`
+        : `SCALE 1:${(1 / k).toFixed(2)}  (rescale by ${(1 / k).toFixed(4)}x on CAD import for true size)`;
+  const note = `${scaleStr}   ·   hatches: ${HIDE_HATCH ? 'OFF' : 'on'}   ·   lines: ${LINE_OVERRIDE ?? 'as drawn'}`;
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...hexToRgb(T.inkSoft));
-  doc.setFontSize(9);
+  const noteIn = Math.max(0.15, Math.min(M * 0.5, 0.004 * Math.max(W, H)));
+  doc.setFontSize(noteIn * 72);
   doc.text(note, M, H - M * 0.35, { align: 'left', baseline: 'bottom' });
 
   return doc.output('blob');
