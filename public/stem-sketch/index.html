@@ -1148,7 +1148,6 @@
             <button data-prim="octagon"><span class="ico">⯃</span> Octagon</button>
             <button data-prim="star"><span class="ico">★</span> Star</button>
             <button data-prim="heart"><span class="ico">♥</span> Heart</button>
-            <button data-prim="teardrop"><span class="ico">💧</span> Teardrop</button>
           </div>
         </div>
         <button class="tool" data-action="add-fastener" title="Add a threaded fastener (hex bolt, Phillips screw, socket cap, flat head)"><svg class="ico"><use href="#i-fastener"/></svg><span class="tool-label">Fastener</span></button>
@@ -5804,6 +5803,7 @@ class Viewer3D {
             const meta = this.extrudeArrows.userData;
             extrudeState.active = true;
             extrudeState.direction = 1; // updated on drag based on sign of delta
+            extrudeState.jobs = meta.jobs || [{ region: meta.region, sketch: meta.sketch }];
             extrudeState.region = meta.region;
             extrudeState.sketch = meta.sketch;
             extrudeState.origin = meta.center.clone();
@@ -6371,35 +6371,46 @@ class Viewer3D {
     }
   }
 
-  // Drag-to-extrude gizmo: when exactly one region is picked, place the push/
-  // pull arrows at its centroid pointing along the sketch plane normal.
+  // Drag-to-extrude gizmo: when one or more coplanar regions are picked, place
+  // the push/pull arrows at the combined centroid pointing along the shared
+  // sketch plane normal. Every picked region extrudes together as one move.
   updateExtrudeGizmo() {
     const sel = doc.selectedRegions || [];
-    if (sel.length !== 1) {
+    if (sel.length < 1) {
       this.extrudeArrows.visible = false;
       this.clearExtrudePreview();
       hideExtrudeTooltip();
       return;
     }
-    const id = sel[0];
-    let region = null, sketch = null;
-    for (const s of doc.sketches) {
-      const r = computeSketchRegions(s).find(r => r.id === id);
-      if (r) { region = r; sketch = s; break; }
+    // Resolve each picked region id back to its source sketch.
+    const allJobs = [];
+    for (const id of sel) {
+      for (const s of doc.sketches) {
+        const r = computeSketchRegions(s).find(r => r.id === id);
+        if (r) { allJobs.push({ region: r, sketch: s }); break; }
+      }
     }
-    if (!region) { this.extrudeArrows.visible = false; return; }
-    let cu = 0, cv = 0;
+    if (!allJobs.length) { this.extrudeArrows.visible = false; return; }
+    // A single push/pull axis only makes sense when every region shares one
+    // plane normal. If the selection spans non-coplanar faces, drive the gizmo
+    // off the first region alone (the rest stay selected for the modal extrude).
+    const n = new THREE.Vector3(...allJobs[0].sketch.plane.n).normalize();
+    const jobs = allJobs.filter(j =>
+      Math.abs(new THREE.Vector3(...j.sketch.plane.n).normalize().dot(n)) > 0.999);
+    const center = new THREE.Vector3();
     let rMinX = +Infinity, rMaxX = -Infinity, rMinY = +Infinity, rMaxY = -Infinity;
-    for (const p of region.points) {
-      cu += p.x; cv += p.y;
-      if (p.x < rMinX) rMinX = p.x; if (p.x > rMaxX) rMaxX = p.x;
-      if (p.y < rMinY) rMinY = p.y; if (p.y > rMaxY) rMaxY = p.y;
+    for (const j of jobs) {
+      let cu = 0, cv = 0;
+      for (const p of j.region.points) {
+        cu += p.x; cv += p.y;
+        if (p.x < rMinX) rMinX = p.x; if (p.x > rMaxX) rMaxX = p.x;
+        if (p.y < rMinY) rMinY = p.y; if (p.y > rMaxY) rMaxY = p.y;
+      }
+      cu /= j.region.points.length; cv /= j.region.points.length;
+      center.add(new THREE.Vector3(cu, cv, 0).applyMatrix4(makePlaneMatrix(j.sketch.plane)));
     }
-    cu /= region.points.length; cv /= region.points.length;
-    const planeM = makePlaneMatrix(sketch.plane);
-    const center = new THREE.Vector3(cu, cv, 0).applyMatrix4(planeM);
-    const n = new THREE.Vector3(...sketch.plane.n).normalize();
-    // Scale the extrude cone with the region's largest in-plane span so a
+    center.multiplyScalar(1 / jobs.length);
+    // Scale the extrude cone with the selection's largest in-plane span so a
     // 6 mm hole doesn't get a 7 mm cone hovering over it, and a 200 mm
     // pocket doesn't get a barely-visible one. ~5% of span, clamped.
     const regionSpan = Math.max(rMaxX - rMinX, rMaxY - rMinY);
@@ -6413,14 +6424,16 @@ class Viewer3D {
     this.extrudeArrows.children[0].position.copy(posOffset);
     this.extrudeArrows.children[0].quaternion.copy(posQ);
     this.extrudeArrows.visible = true;
-    this.extrudeArrows.userData = { region, sketch, center, normal: n };
+    // region/sketch kept for back-compat; jobs[] drives multi-region extrude.
+    this.extrudeArrows.userData = { jobs, region: jobs[0].region, sketch: jobs[0].sketch, center, normal: n };
   }
 
   clearExtrudePreview() {
     if (!this.extrudePreview) return;
     this.scene.remove(this.extrudePreview);
-    this.extrudePreview.geometry?.dispose();
-    this.extrudePreview.material?.dispose();
+    // Preview may be a single Mesh or a Group of per-region meshes — traverse
+    // covers both (a Mesh visits itself). Shared material disposes harmlessly.
+    this.extrudePreview.traverse?.(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
     this.extrudePreview = null;
   }
 
@@ -6431,15 +6444,7 @@ class Viewer3D {
     if (Math.abs(length) < 0.001) return;
     const meta = this.extrudeArrows.userData;
     if (!meta) return;
-    const shape = regionToShape(meta.region);
-    if (!shape) return;
-    const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: Math.abs(length),
-      bevelEnabled: false,
-      curveSegments: 32,
-    });
-    if (direction < 0) geo.translate(0, 0, -Math.abs(length));
-    geo.applyMatrix4(makePlaneMatrix(meta.sketch.plane));
+    const jobs = meta.jobs || [{ region: meta.region, sketch: meta.sketch }];
     // Cut/Add color follows the explicit toggle the user picked on the tooltip.
     const isCut = (typeof getExtrudeTooltipOp === 'function')
       ? getExtrudeTooltipOp() === 'subtract'
@@ -6451,9 +6456,23 @@ class Viewer3D {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    this.extrudePreview = new THREE.Mesh(geo, mat);
-    this.extrudePreview.renderOrder = 9;
-    this.scene.add(this.extrudePreview);
+    const group = new THREE.Group();
+    for (const job of jobs) {
+      const shape = regionToShape(job.region);
+      if (!shape) continue;
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: Math.abs(length),
+        bevelEnabled: false,
+        curveSegments: 32,
+      });
+      if (direction < 0) geo.translate(0, 0, -Math.abs(length));
+      geo.applyMatrix4(makePlaneMatrix(job.sketch.plane));
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 9;
+      group.add(mesh);
+    }
+    this.extrudePreview = group;
+    this.scene.add(group);
   }
 
   // Rebuild the translucent pickable region overlays for every sketch.
@@ -6929,8 +6948,8 @@ class Viewer3D {
     // outer surface (not through the equator), natural depth occlusion works
     // — the sketch is visible from its own side and hidden by the body when
     // the camera orbits behind. That matches what students intuitively expect.
-    const matActive       = new THREE.LineBasicMaterial({ color: 0x4f7cff, transparent: true, opacity: 0.95 });
-    const matInactive     = new THREE.LineBasicMaterial({ color: 0x4f7cff, transparent: true, opacity: 0.35 });
+    const matActive       = new THREE.LineBasicMaterial({ color: 0x16181f, transparent: true, opacity: 0.95 });
+    const matInactive     = new THREE.LineBasicMaterial({ color: 0x16181f, transparent: true, opacity: 0.55 });
     const matConstruction = new THREE.LineDashedMaterial({ color: 0xff9a3e, dashSize: 1.5, gapSize: 0.8, transparent: true, opacity: 0.7 });
 
     // Build a Three.js Shape from a closed entity, in sketch (u,v) coords
@@ -8788,34 +8807,43 @@ function entityFullyBoundsRegion(ent, region) {
   return true;
 }
 
-function commitExtrudeFromGizmo(region, sketch, lengthMm, direction, opOverride) {
-  if (!region || !sketch || lengthMm <= 0) return;
+// jobs: array of { region, sketch }. Extrudes every picked region together by
+// the same length/direction/op, then auto-groups them with the parent body.
+function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
+  jobs = (jobs || []).filter(j => j && j.region && j.sketch);
+  if (!jobs.length || lengthMm <= 0) return;
   pushUndo();
-  const synth = regionToSyntheticSketch(region, sketch);
-  // Operation is whatever the user picked on the tooltip toggle. The drag
-  // direction still affects which way the extrude grows: a Cut should grow
-  // INTO the body (use the direction that points toward it).
-  const userOp = opOverride || getExtrudeTooltipOp();
-  const op = userOp || ((direction < 0 && sketch.boundary) ? 'subtract' : 'add');
-  const body = {
-    id: doc.nextBodyId++, type: 'extrude',
-    sketch: synth,
-    plane: JSON.parse(JSON.stringify(sketch.plane)),
-    height: lengthMm,
-    x: 0, y: 0, z: 0,
-    op,
-    // Live re-extrude metadata — used by rebuildExtrudesForSketch to find
-    // the same region after the user edits the source sketch and switches
-    // back to 3D. Centroid match within ~5mm finds the updated region.
-    sourceSketchId: sketch.id,
-    regionCentroid: regionCentroidOf(region),
-  };
-  doc.bodies.push(body);
-  doc.selection = { kind: 'body', id: body.id };
+
+  const newBodyIds = [];
+  let op = 'add';
+  for (const { region, sketch } of jobs) {
+    const synth = regionToSyntheticSketch(region, sketch);
+    // Operation is whatever the user picked on the tooltip toggle. The drag
+    // direction still affects which way the extrude grows: a Cut should grow
+    // INTO the body (use the direction that points toward it).
+    const userOp = opOverride || getExtrudeTooltipOp();
+    op = userOp || ((direction < 0 && sketch.boundary) ? 'subtract' : 'add');
+    const body = {
+      id: doc.nextBodyId++, type: 'extrude',
+      sketch: synth,
+      plane: JSON.parse(JSON.stringify(sketch.plane)),
+      height: lengthMm,
+      x: 0, y: 0, z: 0,
+      op,
+      // Live re-extrude metadata — used by rebuildExtrudesForSketch to find
+      // the same region after the user edits the source sketch and switches
+      // back to 3D. Centroid match within ~5mm finds the updated region.
+      sourceSketchId: sketch.id,
+      regionCentroid: regionCentroidOf(region),
+    };
+    doc.bodies.push(body);
+    newBodyIds.push(body.id);
+    // Note: source sketch entities are NOT consumed any more — keeping them
+    // visible lets the user re-enter the sketch and edit the shape, with the
+    // extrusion auto-rebuilding when they switch back to 3D.
+  }
+  doc.selection = { kind: 'body', id: newBodyIds[newBodyIds.length - 1] };
   doc.selectedRegions = [];
-  // Note: source sketch entities are NOT consumed any more — keeping them
-  // visible lets the user re-enter the sketch and edit the shape, with the
-  // extrusion auto-rebuilding when they switch back to 3D.
   if (viewer) {
     viewer.clearExtrudePreview();
     viewer.rebuildBodies(); // also refreshes regions + extrude gizmo
@@ -8823,28 +8851,30 @@ function commitExtrudeFromGizmo(region, sketch, lengthMm, direction, opOverride)
   }
   hideExtrudeTooltip();
 
-  // Auto-group with the parent body the sketch was started on (when known).
-  // This skips the manual shift-click + Group step that's a pain in dense scenes.
-  const parent = sketch.sourceBodyId
-    ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
+  // Auto-group every new extrude with the parent body the sketch was started on
+  // (when known). Skips the manual shift-click + Group step in dense scenes.
+  const sketch0 = jobs[0].sketch;
+  const parent = sketch0.sourceBodyId
+    ? doc.bodies.find(b => b.id === sketch0.sourceBodyId)
     : null;
+  const n = newBodyIds.length;
   if (parent && typeof CSG !== 'undefined') {
-    doc.multiSelectedBodies = [parent.id, body.id];
+    doc.multiSelectedBodies = [parent.id, ...newBodyIds];
     groupSelected(true); // already snapshotted at the top of this function
     // Re-point the sketch at the new group so the next extrude on this
     // sketch can auto-group with the (now combined) body too.
     if (doc.selection?.kind === 'body') {
-      const sk = doc.sketches.find(s => s.id === sketch.id);
+      const sk = doc.sketches.find(s => s.id === sketch0.id);
       if (sk) sk.sourceBodyId = doc.selection.id;
     }
     setStatus(op === 'subtract'
-      ? `Cut a region from the body (${fmtUL(lengthMm)} deep)`
-      : `Added a region to the body (${fmtUL(lengthMm)} tall)`);
+      ? `Cut ${n} region${n === 1 ? '' : 's'} from the body (${fmtUL(lengthMm)} deep)`
+      : `Added ${n} region${n === 1 ? '' : 's'} to the body (${fmtUL(lengthMm)} tall)`);
   } else {
     renderTree(); renderProps();
     setStatus(op === 'subtract'
-      ? `Negative extrude (${fmtUL(lengthMm)}) — click Group to cut`
-      : `Extruded region to ${fmtUL(lengthMm)}`);
+      ? `${n} negative extrude${n === 1 ? '' : 's'} (${fmtUL(lengthMm)}) — click Group to cut`
+      : `Extruded ${n} region${n === 1 ? '' : 's'} to ${fmtUL(lengthMm)}`);
   }
 }
 
@@ -8862,7 +8892,7 @@ function commitExtrudeFromGizmo(region, sketch, lengthMm, direction, opOverride)
         const st = viewer?.extrudeState;
         if (!st || !st.region) return;
         const dir = st.direction || 1;
-        commitExtrudeFromGizmo(st.region, st.sketch, lenMm, dir);
+        commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], lenMm, dir);
       } else if (ev.key === 'Escape') {
         hideExtrudeTooltip();
         if (viewer) viewer.clearExtrudePreview();
@@ -8906,13 +8936,13 @@ function commitExtrudeFromGizmo(region, sketch, lengthMm, direction, opOverride)
           const fallback = st && st.length > 0 ? st.length : 0;
           if (fallback <= 0) return;
           const dir = st.direction || 1;
-          commitExtrudeFromGizmo(st.region, st.sketch, fallback, dir);
+          commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], fallback, dir);
           return;
         }
         const lenMm = fromUnit(v);
         const st = viewer?.extrudeState;
         if (!st || !st.region) return;
-        commitExtrudeFromGizmo(st.region, st.sketch, lenMm, st.direction || 1);
+        commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], lenMm, st.direction || 1);
       });
     }
     // Through — set length to "all the way through the target body" and commit
@@ -8930,7 +8960,7 @@ function commitExtrudeFromGizmo(region, sketch, lengthMm, direction, opOverride)
         }
         // Force op to subtract so commitExtrudeFromGizmo doesn't fall back.
         setExtrudeTooltipOp('subtract');
-        commitExtrudeFromGizmo(st.region, st.sketch, depth, -1, 'subtract');
+        commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], depth, -1, 'subtract');
       });
     }
     // Cancel — close tooltip without creating a body
