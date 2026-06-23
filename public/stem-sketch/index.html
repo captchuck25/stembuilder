@@ -6287,20 +6287,14 @@ class Viewer3D {
         // non-raycastable so clicks/picks pass straight through to the body
         // beneath. Disposed with the rest of bodyGroup on the next rebuild.
         if (Array.isArray(body._mergedShells) && body._mergedShells.length) {
-          // Parent overlays to the body's OWN mesh so they inherit the group's
-          // position/rotation — the transform the baked shell used to get for
-          // free by living inside body.geometry. The spec is in world coords,
-          // so convert it into the mesh's local frame (inverse(meshWorld) ×
-          // worldShell); adding to bodyGroup at world coords ignored the
-          // group's transform and floated the threads off-centre in the bore.
-          mesh.updateMatrixWorld(true);
-          const invParent = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+          // Specs are stored in the body's LOCAL frame, so parenting the shell
+          // straight to the body mesh lets it inherit the body's position +
+          // rotation — threads now follow when the body is moved. (Previously
+          // the spec was re-pinned to world via inverse(meshWorld) on every
+          // rebuild, which stranded threads at the original spot on a drag.)
           for (const spec of body._mergedShells) {
             const shellMesh = _buildShellMeshFromSpec(spec);
             if (shellMesh) {
-              shellMesh.updateMatrix();                 // local = world shaftBottom transform
-              shellMesh.matrix.premultiply(invParent);  // → mesh-local frame
-              shellMesh.matrixAutoUpdate = false;
               shellMesh.userData.bodyId = body.id;
               shellMesh.userData.isThreadOverlay = true;
               shellMesh.raycast = () => {};
@@ -10594,12 +10588,35 @@ function processThreadMarks(sketch, marks, opts) {
       ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
       : null;
     if (parentAfterCut && parentAfterCut.geometry) {
+      // Store the shell spec in the PARENT's LOCAL frame (the same frame as its
+      // baked geometry), not world coords. The overlay + STL export then place
+      // the thread via the parent's CURRENT world matrix, so threads follow the
+      // body when it's moved or rotated. When the parent sits at the origin (the
+      // usual case — groups are created at 0,0,0 with no rotation) local == world,
+      // so existing saves are unaffected.
+      const parentMat = new THREE.Matrix4().compose(
+        new THREE.Vector3(parentAfterCut.x || 0, parentAfterCut.y || 0, parentAfterCut.z || 0),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(
+          THREE.MathUtils.degToRad(parentAfterCut.rotation?.x || 0),
+          THREE.MathUtils.degToRad(parentAfterCut.rotation?.y || 0),
+          THREE.MathUtils.degToRad(parentAfterCut.rotation?.z || 0), 'XYZ')),
+        new THREE.Vector3(1, 1, 1));
+      const shellWorld = new THREE.Matrix4().compose(
+        shaftBottom.clone(), q.clone(), new THREE.Vector3(1, 1, 1));
+      const shellLocal = parentMat.invert().multiply(shellWorld);
+      const lpos = new THREE.Vector3(), lquat = new THREE.Quaternion(), lscl = new THREE.Vector3();
+      shellLocal.decompose(lpos, lquat, lscl);
+      const le = new THREE.Euler().setFromQuaternion(lquat, 'XYZ');
       const shellSpec = {
         size: opts.size,
         length: opts.depth,
         fit: opts.fit,
-        x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
-        rotation: { ...rotDeg },
+        x: lpos.x, y: lpos.y, z: lpos.z,
+        rotation: {
+          x: THREE.MathUtils.radToDeg(le.x),
+          y: THREE.MathUtils.radToDeg(le.y),
+          z: THREE.MathUtils.radToDeg(le.z),
+        },
       };
       // Phase 2 — record the thread as lightweight metadata only; do NOT bake
       // it into the parent's geometry. The viewport overlay (rebuildBodies) and
@@ -13075,7 +13092,8 @@ function _bodiesToSTL(bodies, solidName = 'mini_cad') {
         if (!sm) continue;
         sm.updateMatrixWorld(true);
         const sg = sm.geometry.clone();
-        sg.applyMatrix4(sm.matrixWorld);
+        sg.applyMatrix4(sm.matrixWorld);    // spec → body-local frame
+        sg.applyMatrix4(mesh.matrixWorld);  // body-local → world (tracks moves)
         parts.push(sg);
         sm.geometry.dispose();
       }
