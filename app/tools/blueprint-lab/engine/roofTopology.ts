@@ -373,9 +373,18 @@ function pointSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-// Cast perpendicular rays from the ridge midpoint in BOTH perpendicular
-// directions and return the distance to the nearest boundary segment hit
-// on each side.
+// Cast perpendicular rays in BOTH directions and return the distance to the
+// nearest boundary hit on each side, at the ridge's GABLE — the narrowest place
+// it actually roofs.
+//
+// A single midpoint sample fails whenever a ridge's span varies along its
+// length: the cross ridge of a bump-out / reverse gable runs up to the main
+// ridge, so its MIDPOINT sits in the wide main body and the rays fly out to the
+// far walls — the little gable then computes a huge (wrong) height and can even
+// outrank the main ridge. Sampling along the ridge and taking the narrowest
+// span where BOTH sides actually hit a wall measures the true gable, and is a
+// no-op for a uniform rectangular gable (every sample is identical). This is
+// geometry-general: bump-outs, stepped footprints, and L/T plans all benefit.
 function perpSpan(a: Vec2, b: Vec2, boundaries: Seg[]): { left: number; right: number } {
   const dx = b.x - a.x, dy = b.y - a.y;
   const L = Math.hypot(dx, dy);
@@ -385,11 +394,25 @@ function perpSpan(a: Vec2, b: Vec2, boundaries: Seg[]): { left: number; right: n
   // the consumer just uses min(L, R) to pick the limiting side.
   const nLeft:  Vec2 = { x: -uy, y:  ux };
   const nRight: Vec2 = { x:  uy, y: -ux };
-  const mid:    Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  return {
-    left:  castRay(mid, nLeft,  boundaries),
-    right: castRay(mid, nRight, boundaries),
-  };
+  const n = Math.max(8, Math.min(160, Math.round(L / 12))); // ~every foot
+  let bestMin = Infinity, bestL = Infinity, bestR = Infinity;
+  for (let i = 0; i <= n; i++) {
+    // Inset a hair off the very ends so a rake tip sitting past the wall — where
+    // the perpendicular rays would miss the gable walls — doesn't get sampled.
+    const t = 0.02 + 0.96 * (i / n);
+    const o: Vec2 = { x: a.x + dx * t, y: a.y + dy * t };
+    const l = castRay(o, nLeft, boundaries);
+    const r = castRay(o, nRight, boundaries);
+    if (!Number.isFinite(l) || !Number.isFinite(r)) continue; // open side — not a gable here
+    const m = Math.min(l, r);
+    if (m < bestMin) { bestMin = m; bestL = l; bestR = r; }
+  }
+  if (!Number.isFinite(bestMin)) {
+    // No sample saw walls on both sides — fall back to the midpoint cast.
+    const mid: Vec2 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    return { left: castRay(mid, nLeft, boundaries), right: castRay(mid, nRight, boundaries) };
+  }
+  return { left: bestL, right: bestR };
 }
 
 // Distance along `dir` from `origin` to the first hit on any segment in

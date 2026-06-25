@@ -34,6 +34,9 @@ import {
 // Shared drafting math — the SAME extend/mirror used by the section, roof,
 // elevation, and sandbox surfaces, so the tools behave identically here.
 import { ExtendBoundary, extendEndpoint, filletEndpoint, infiniteLineIntersection, mirrorReflector } from '../engine/sectionEdit';
+// Reuse the section view's snap indicator so the dimension tool shows the SAME
+// endpoint/midpoint/intersection markers in the 2D plan.
+import { drawSnapIndicator, SnapResult } from '../engine/sectionSnap';
 import { T } from '../engine/theme';
 
 interface CanvasState {
@@ -79,8 +82,9 @@ interface DragBox {
 
 export interface Canvas2DProps {
   level: Level;
-  // The floor directly below the active one (next-lower elevation), or null if
-  // none. Rendered as a ghost underlay when "Show floor below" is on.
+  // The reference floor ghosted under the active one: the floor directly below,
+  // or — when the active level is the lowest (e.g. a basement) — the floor
+  // directly above. Null if there's only one level. Rendered as a ghost underlay.
   floorBelow: Level | null;
   tool: ToolId;
   selections: Selection[];
@@ -414,6 +418,21 @@ export default function Canvas2D({
   // Dimension drafting: 3-click placement (start, end, offset). Anchors hold
   // a reference to the snap target so the dim follows when that target moves.
   const [dimDraft, setDimDraft] = useState<{ start: DimAnchor | null; end: DimAnchor | null }>({ start: null, end: null });
+  // Live snap target for the Dimension tool — drives the on-cursor marker
+  // (filled square = corner/endpoint, triangle = midpoint, X = wall crossing)
+  // so the user sees exactly what a click will grab, like the section view.
+  const dimSnap = useMemo<SnapResult | null>(() => {
+    if (tool !== 'dimension' || !hoverWorld) return null;
+    const prefer = dimDraft.start ? extractWallFace(dimDraft.start, level) : null;
+    const anchor = snapToDimAnchor(hoverWorld, level, 18 / vp.pxPerInch, prefer);
+    if (anchor.kind === 'free') return null;
+    const pt = resolveDimAnchor(anchor, level);
+    if (!pt) return null;
+    const kind: SnapResult['kind'] =
+      anchor.kind === 'wall-edge-mid' || anchor.kind === 'opening-mid' ? 'midpoint'
+      : 'endpoint';   // corners (incl. junctions, T/X crossings, jambs) read as a corner square
+    return { point: pt, kind };
+  }, [tool, hoverWorld, dimDraft.start, level, vp.pxPerInch]);
   // Stair-corner drag: the user grabs a corner of a selected stair and the
   // entire stair translates so the corner follows the cursor.
   const [stairCornerDrag, setStairCornerDrag] = useState<StairCornerHit | null>(null);
@@ -1378,9 +1397,11 @@ export default function Canvas2D({
       const aStart = dimDraft.start ? resolveDimAnchor(dimDraft.start, level) : null;
       const aEnd   = dimDraft.end   ? resolveDimAnchor(dimDraft.end,   level) : null;
       if (aStart && !aEnd) {
-        // Stage 2: ghost line from start to cursor.
+        // Stage 2: ghost line from start to the SNAPPED cursor (so the preview
+        // lands exactly where the click will).
+        const endPt = dimSnap ? dimSnap.point : hoverWorld;
         const sa = worldToScreen(aStart, viewport);
-        const sb = worldToScreen(hoverWorld, viewport);
+        const sb = worldToScreen(endPt, viewport);
         ctx.save();
         ctx.strokeStyle = T.accent;
         ctx.lineWidth = 1;
@@ -1413,6 +1434,11 @@ export default function Canvas2D({
           }, level, viewport, false);
           ctx.restore();
         }
+      }
+      // Snap marker while picking the start (stage 1) or end (stage 2) point —
+      // not during the offset placement (stage 3).
+      if (dimSnap && !(aStart && aEnd)) {
+        drawSnapIndicator(ctx, dimSnap, p => worldToScreen(p, viewport));
       }
     }
 
@@ -1556,7 +1582,7 @@ export default function Canvas2D({
   }, [vp, level, floorBelow, showFloorBelow, gridInches, gridVisible, displaySelections, drawing, effectiveEnd,
       defaultWallThickness, dragBox, tool, selectedWallIds, hoveredHandle,
       offsetSource, offsetPreview, doorGhost, windowGhost, wallSnapMarker, moveSnapMarker, visibleWarnings,
-      dimDraft, hoverWorld, stairDefaults, activeFurnitureKind, furnitureSettings,
+      dimDraft, dimSnap, hoverWorld, stairDefaults, activeFurnitureKind, furnitureSettings,
       defaultLineStyle, defaultLineWeight, defaultLineColor, lineSnapHit, trimHover,
       extendHover, mirrorAxis, selections, filletFirst, filletEnds,
       roomLabelDefaultName, selectedStairs, hoveredStairCorner,
@@ -3134,7 +3160,7 @@ export default function Canvas2D({
             onChange={e => setShowFloorBelow(e.target.checked)}
             style={{ cursor: 'pointer' }}
           />
-          Show floor below ({floorBelow.name})
+          Show floor {floorBelow.elevation < level.elevation ? 'below' : 'above'} ({floorBelow.name})
         </label>
       )}
 

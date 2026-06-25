@@ -1399,7 +1399,8 @@ export function snapToDimAnchor(
   // nothing. This guarantees straight dims along a wall while keeping the
   // tool useful when dimensioning between two unrelated walls.
   let best: DimAnchor | null = null;
-  let bestScore = toleranceIn;
+  let bestScore = Infinity;        // nearest in-range distance so far
+  let tol = toleranceIn;           // in-range tolerance for the current pass
   let restrictToMatching = false;
   const consider = (a: DimAnchor) => {
     if (restrictToMatching) {
@@ -1408,6 +1409,7 @@ export function snapToDimAnchor(
     const pt = resolveDimAnchor(a, level);
     if (!pt) return;
     const d = dist(p, pt);
+    if (d > tol) return;
     if (d < bestScore) { bestScore = d; best = a; }
   };
   // For each wall endpoint that's SHARED with another wall, the visible
@@ -1425,45 +1427,39 @@ export function snapToDimAnchor(
     }
     return false;
   };
-  const enumerateAll = () => {
-    for (const w of level.walls) {
-      const startShared = isShared(w.start, w.id);
-      const endShared   = isShared(w.end,   w.id);
-      // Corner indices: 0/3 sit on the START endpoint; 1/2 on the END endpoint.
-      if (!startShared) {
-        consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 0 });
-        consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 3 });
-      }
-      if (!endShared) {
-        consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 1 });
-        consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 2 });
-      }
-      // Midpoint of each long face (the visible centerline of the wall edge).
-      consider({ kind: 'wall-edge-mid', wallId: w.id, side: 1 });
-      consider({ kind: 'wall-edge-mid', wallId: w.id, side: -1 });
+  // A wall's rectangle corner that sits inside another wall's body is an overlap
+  // artefact — but ONLY suppress it when it duplicates a real architectural
+  // corner nearby (so the clean junction/cross wins). A buried-but-orphan end
+  // (e.g. an offset wall stub by a window with no junction there) is KEPT so it
+  // stays dimensionable. `archPts` is filled by the junction/cross pass below.
+  const NEAR_CORNER = 8; // inches ≈ one wall thickness
+  const cornerIsBuried = (pt: Vec2, selfId: string): boolean => {
+    for (const o of level.walls) {
+      if (o.id !== selfId && pointInPolygon(pt, wallPolygon(o))) return true;
     }
-    // Wall junction (mitered) corners — the inside/outside corners of a room
-    // where two walls meet. Filtered to architecturally-real (room) corners.
+    return false;
+  };
+  const enumerateAll = () => {
+    // 1) Architectural corners FIRST — mitered junctions (shared-endpoint L's)
+    //    and wall crossings (T/X joints). Collect their points so a buried raw
+    //    endpoint that merely duplicates one can be dropped in step 2.
+    const archPts: Vec2[] = [];
     for (let i = 0; i < level.walls.length; i++) {
       for (let j = i + 1; j < level.walls.length; j++) {
         const A = level.walls[i], B = level.walls[j];
         for (const sA of [1, -1] as const) for (const sB of [1, -1] as const) {
           if (!isArchitecturalJunction(A, B, sA, sB, level.walls)) continue;
-          consider({ kind: 'wall-junction', wallAId: A.id, wallBId: B.id, sideA: sA, sideB: sB });
+          const an: DimAnchor = { kind: 'wall-junction', wallAId: A.id, wallBId: B.id, sideA: sA, sideB: sB };
+          consider(an);
+          const pt = resolveDimAnchor(an, level); if (pt) archPts.push(pt);
         }
       }
     }
-    // Wall CROSSINGS — where two walls' centerlines intersect strictly
-    // inside both segments (not at endpoints). At each such crossing, the 4
-    // face-line corners (small rectangle around the centerline-cross) are
-    // visible architectural points — the corners of a T or X joint.
     for (let i = 0; i < level.walls.length; i++) {
       for (let j = i + 1; j < level.walls.length; j++) {
         const A = level.walls[i], B = level.walls[j];
         const cx = segmentIntersection(A.start, A.end, B.start, B.end);
         if (!cx) continue;
-        // Require the intersection to be inside BOTH walls' centerline
-        // extents (not at the very endpoints — that's a wall-junction case).
         const dxA = A.end.x - A.start.x, dyA = A.end.y - A.start.y;
         const LA = Math.hypot(dxA, dyA);
         const dxB = B.end.x - B.start.x, dyB = B.end.y - B.start.y;
@@ -1474,13 +1470,67 @@ export function snapToDimAnchor(
         const INSIDE_EPS = 0.001;
         const insideA = tA > INSIDE_EPS && tA < 1 - INSIDE_EPS;
         const insideB = tB > INSIDE_EPS && tB < 1 - INSIDE_EPS;
-        // At least one wall must be CROSSED strictly inside; otherwise this
-        // is just an endpoint touch already handled by wall-junction.
         if (!insideA && !insideB) continue;
         for (const sA of [1, -1] as const) for (const sB of [1, -1] as const) {
-          consider({ kind: 'wall-cross', wallAId: A.id, wallBId: B.id, sideA: sA, sideB: sB });
+          const an: DimAnchor = { kind: 'wall-cross', wallAId: A.id, wallBId: B.id, sideA: sA, sideB: sB };
+          consider(an);
+          const pt = resolveDimAnchor(an, level); if (pt) archPts.push(pt);
         }
       }
+    }
+    // Wall TEES — a wall A's ENDPOINT lands inside another wall B's body but the
+    // centerlines DON'T cross (an offset wall dropped on B's face, ending short
+    // of B's centerline). The visible inside corners are A's two face lines
+    // meeting B's NEAR face (the side A's body came from). Generate those as
+    // wall-cross anchors so the dim has a real corner to grab — otherwise the
+    // only nearby anchor is A's buried endpoint. (Mirrors the Line tool's snap.)
+    const polyByWall = new Map(level.walls.map(b => [b.id, wallPolygon(b)]));
+    for (const A of level.walls) {
+      const tee = (endPt: Vec2, otherEnd: Vec2) => {
+        for (const B of level.walls) {
+          if (B.id === A.id) continue;
+          if (!pointInPolygon(endPt, polyByWall.get(B.id)!)) continue;
+          if (Math.hypot(endPt.x - B.start.x, endPt.y - B.start.y) < JOIN_EPS) continue;
+          if (Math.hypot(endPt.x - B.end.x,   endPt.y - B.end.y)   < JOIN_EPS) continue;
+          const dxB = B.end.x - B.start.x, dyB = B.end.y - B.start.y;
+          const LB = Math.hypot(dxB, dyB);
+          if (LB === 0) continue;
+          const nxB = -dyB / LB, nyB = dxB / LB;
+          // B's near face = the side A's body (its other end) sits on.
+          const sideDot = (otherEnd.x - B.start.x) * nxB + (otherEnd.y - B.start.y) * nyB;
+          const sideB: 1 | -1 = sideDot >= 0 ? 1 : -1;
+          for (const sA of [1, -1] as const) {
+            const an: DimAnchor = { kind: 'wall-cross', wallAId: A.id, wallBId: B.id, sideA: sA, sideB };
+            consider(an);
+            const pt = resolveDimAnchor(an, level); if (pt) archPts.push(pt);
+          }
+        }
+      };
+      tee(A.start, A.end);
+      tee(A.end, A.start);
+    }
+    // 2) Per-wall rectangle corners + face midpoints. Drop a non-shared corner
+    //    only when it's buried in another wall AND coincides (within ~a wall
+    //    thickness) with an architectural corner above — that's the offset/
+    //    overshoot artefact. Orphan buried ends are kept so they stay snappable.
+    const dropCorner = (pt: Vec2, selfId: string): boolean =>
+      cornerIsBuried(pt, selfId) && archPts.some(q => Math.hypot(q.x - pt.x, q.y - pt.y) <= NEAR_CORNER);
+    for (const w of level.walls) {
+      const startShared = isShared(w.start, w.id);
+      const endShared   = isShared(w.end,   w.id);
+      const poly = wallPolygon(w);
+      // Corner indices: 0/3 sit on the START endpoint; 1/2 on the END endpoint.
+      if (!startShared) {
+        if (!dropCorner(poly[0], w.id)) consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 0 });
+        if (!dropCorner(poly[3], w.id)) consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 3 });
+      }
+      if (!endShared) {
+        if (!dropCorner(poly[1], w.id)) consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 1 });
+        if (!dropCorner(poly[2], w.id)) consider({ kind: 'wall-corner', wallId: w.id, cornerIndex: 2 });
+      }
+      // Midpoint of each long face (the visible centerline of the wall edge).
+      consider({ kind: 'wall-edge-mid', wallId: w.id, side: 1 });
+      consider({ kind: 'wall-edge-mid', wallId: w.id, side: -1 });
     }
     for (const door of level.doors) {
       for (const side of ['start', 'end'] as const)
@@ -1509,13 +1559,15 @@ export function snapToDimAnchor(
   // anchor's wall+face, take it and we're done.
   if (prefer) {
     restrictToMatching = true;
-    bestScore = toleranceIn * 3;
+    tol = toleranceIn * 3;
+    bestScore = Infinity;
     enumerateAll();
     if (best) return best;
   }
   // Pass 2 — anything within normal tolerance.
   restrictToMatching = false;
-  bestScore = toleranceIn;
+  tol = toleranceIn;
+  bestScore = Infinity;
   enumerateAll();
   return best ?? { kind: 'free', point: p };
 }

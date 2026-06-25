@@ -453,10 +453,17 @@ export default function BlueprintLabClient() {
 
   // The floor directly below the active one (greatest elevation still below it),
   // for the 2D "show floor below" ghost underlay. Null on the lowest floor.
+  // The reference floor drawn faintly under the active one (the optional
+  // "ghost" the user traces against). Prefer the floor directly BELOW; but when
+  // the active level is the lowest (e.g. a BASEMENT has nothing below it), fall
+  // back to the floor directly ABOVE — so the basement can ghost the first
+  // floor, exactly like the 2nd floor ghosts the first.
   const floorBelow: Level | null = useMemo(() => {
     const below = project.levels.filter(l => l.elevation < activeLevel.elevation);
-    if (below.length === 0) return null;
-    return below.reduce((a, b) => (b.elevation > a.elevation ? b : a));
+    if (below.length > 0) return below.reduce((a, b) => (b.elevation > a.elevation ? b : a));
+    const above = project.levels.filter(l => l.elevation > activeLevel.elevation);
+    if (above.length > 0) return above.reduce((a, b) => (b.elevation < a.elevation ? b : a));
+    return null;
   }, [project.levels, activeLevel]);
 
   const selectedWalls: Wall[] = useMemo(() => {
