@@ -4,8 +4,7 @@ import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import SiteHeader from "@/app/components/SiteHeader";
-
-const ADMIN_ID = "user_3CPUWnRGbb5UjjJRoKQx2nVQGyu";
+import { isAdmin } from "@/lib/roles";
 
 const CARD: React.CSSProperties = {
   background: "#fff",
@@ -59,9 +58,9 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (status === "loading") return;
-    if (!session?.user || session.user.id !== ADMIN_ID) { router.push("/"); return; }
+    if (!isAdmin(session?.user?.role)) { router.push("/"); return; }
     loadStats().then(() => setLoading(false));
-  }, [status, session?.user?.id]);
+  }, [status, session?.user?.id, session?.user?.role]);
 
   async function openPanel(next: Panel) {
     if (panel === next) { setPanel(null); return; }

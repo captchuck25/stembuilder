@@ -6,10 +6,10 @@ import bcrypt from 'bcryptjs'
 
 declare module 'next-auth' {
   interface Session {
-    user: { id: string; email: string; name: string; role: 'teacher' | 'student'; username?: string; image?: string }
+    user: { id: string; email: string; name: string; role: 'teacher' | 'student' | 'admin'; username?: string; image?: string }
   }
   interface User {
-    role?: 'teacher' | 'student'
+    role?: 'teacher' | 'student' | 'admin'
     username?: string
   }
 }
@@ -87,7 +87,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async session({ session, token }) {
       session.user.id = token.id as string
-      session.user.role = token.role as 'teacher' | 'student'
+      session.user.role = token.role as 'teacher' | 'student' | 'admin'
       session.user.image = token.picture as string | undefined
       session.user.username = token.username as string | undefined
       return session

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
-
-const ADMIN_ID = 'user_3CPUWnRGbb5UjjJRoKQx2nVQGyu'
+import { isAdmin } from '@/lib/roles'
 
 // DELETE /api/admin/users/[id]
 // Cascade-deletes a user. For teachers, also tears down all classes they own
@@ -10,16 +9,19 @@ const ADMIN_ID = 'user_3CPUWnRGbb5UjjJRoKQx2nVQGyu'
 // students, also tears down their enrollments and per-tool work rows.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
-  if (session?.user?.id !== ADMIN_ID) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!isAdmin(session?.user?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
-  if (id === ADMIN_ID) {
-    return NextResponse.json({ error: 'Cannot delete the admin account' }, { status: 400 })
+  if (id === session!.user.id) {
+    return NextResponse.json({ error: 'You cannot delete your own account here' }, { status: 400 })
   }
 
   const db = adminDb()
   const { data: user } = await db.from('profiles').select('id, role').eq('id', id).maybeSingle()
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  if (isAdmin(user.role)) {
+    return NextResponse.json({ error: 'Cannot delete an admin account' }, { status: 400 })
+  }
 
   if (user.role === 'teacher') {
     const { data: classes } = await db.from('classes').select('id').eq('teacher_id', id)

@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
-
-const ADMIN_ID = 'user_3CPUWnRGbb5UjjJRoKQx2nVQGyu'
+import { isAdmin } from '@/lib/roles'
 
 // DELETE /api/admin/classes/[id]
 // Cascade-deletes a class plus its enrollments, assignments, and lesson_locks.
 // Mirrors the teacher-side delete in app/api/teacher/classes/[id]/route.ts.
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
-  if (session?.user?.id !== ADMIN_ID) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!isAdmin(session?.user?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { id } = await params
   const db = adminDb()

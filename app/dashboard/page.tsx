@@ -13,6 +13,7 @@ export default async function DashboardPage() {
   if (!profile) redirect("/onboarding");
 
   // Route by role
+  if (profile.role === "admin") redirect("/admin");
   if (profile.role === "teacher") redirect("/teachers/dashboard");
   redirect("/student/dashboard");
 }

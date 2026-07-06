@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
-
-const ADMIN_ID = 'user_3CPUWnRGbb5UjjJRoKQx2nVQGyu'
+import { isAdmin } from '@/lib/roles'
 
 // GET /api/admin/users?role=teacher|student
 // Returns the full list of users for the given role, plus per-user counts the
 // admin UI uses for context (classes owned for teachers, enrollments for students).
 export async function GET(req: NextRequest) {
   const session = await auth()
-  if (session?.user?.id !== ADMIN_ID) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!isAdmin(session?.user?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const role = new URL(req.url).searchParams.get('role')
   if (role !== 'teacher' && role !== 'student') {

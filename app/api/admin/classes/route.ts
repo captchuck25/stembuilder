@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
-
-const ADMIN_ID = 'user_3CPUWnRGbb5UjjJRoKQx2nVQGyu'
+import { isAdmin } from '@/lib/roles'
 
 // GET /api/admin/classes
 // All classes across the site, with teacher name/email and enrollment count.
 export async function GET() {
   const session = await auth()
-  if (session?.user?.id !== ADMIN_ID) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!isAdmin(session?.user?.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const db = adminDb()
   const { data: classes, error } = await db
