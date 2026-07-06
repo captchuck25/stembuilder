@@ -13,7 +13,7 @@ const WRAP: React.CSSProperties = {
 };
 const CARD: React.CSSProperties = {
   background: "#fff", borderRadius: 24, boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
-  border: "3px solid #1f1f1f", padding: "40px 36px", width: "100%", maxWidth: 440,
+  border: "3px solid #1f1f1f", padding: "36px 36px", width: "100%", maxWidth: 440,
 };
 const INPUT: React.CSSProperties = {
   width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
@@ -26,13 +26,25 @@ const LABEL: React.CSSProperties = {
 function JoinForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [name, setName] = useState("");
   const [code, setCode] = useState(params.get("code") ?? "");
+  const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const codeReady = code.trim().length > 0;
+
+  function handleGoogle() {
+    setError("");
+    if (!codeReady) { setError("Enter your class code first."); return; }
+    if (!agreed) { setError("Please agree to the Privacy Policy first."); return; }
+    setLoading(true);
+    // Carry the class code through the Google round-trip; /join/complete enrolls
+    // the student in that class once they're signed in.
+    signIn("google", { callbackUrl: `/join/complete?code=${encodeURIComponent(code.trim().toUpperCase())}` });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -51,8 +63,6 @@ function JoinForm() {
       setLoading(false);
       return;
     }
-    // Sign in with the new username + password (the credentials provider accepts
-    // either an email or a username in its identifier field).
     const signInRes = await signIn("credentials", { email: data.username, password, redirect: false });
     if (signInRes?.error) {
       setError("Account created, but sign-in failed. Try signing in with your username.");
@@ -64,54 +74,78 @@ function JoinForm() {
 
   return (
     <div style={CARD}>
-      <div style={{ textAlign: "center", marginBottom: 24 }}>
+      <div style={{ textAlign: "center", marginBottom: 22 }}>
         <Link href="/">
           <Image src="/ui/sb-logo.png" alt="STEM Builder" width={140} height={42} unoptimized
             style={{ height: 42, width: "auto", margin: "0 auto 16px" }} />
         </Link>
         <h1 style={{ fontSize: 24, fontWeight: 900, color: "#111", margin: "0 0 4px" }}>Join your class</h1>
         <p style={{ fontSize: 14, color: "#6b7280", margin: 0 }}>
-          Enter the class code from your teacher and pick a username — no email needed.
+          Enter the class code from your teacher, then choose how to sign in.
         </p>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <label style={LABEL}>Class code</label>
+        <input type="text" value={code} onChange={e => setCode(e.target.value.toUpperCase())} required
+          placeholder="e.g. 7GX4QP" autoCapitalize="characters"
+          style={{ ...INPUT, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }} />
+      </div>
+
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
+        <input type="checkbox" id="agree" checked={agreed} onChange={e => setAgreed(e.target.checked)}
+          style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+        <label htmlFor="agree" style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5, cursor: "pointer" }}>
+          I agree to the{" "}
+          <Link href="/privacy" target="_blank" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
+            Privacy Policy
+          </Link>.
+        </label>
+      </div>
+
+      {/* Preferred path: school Google account */}
+      <button onClick={handleGoogle} disabled={loading || !codeReady || !agreed}
+        style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: "2px solid #e5e7eb",
+          background: "#fff", cursor: (codeReady && agreed) ? "pointer" : "not-allowed",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10, fontSize: 15,
+          fontWeight: 700, color: (codeReady && agreed) ? "#111" : "#9ca3af", marginBottom: 8,
+          opacity: (codeReady && agreed) ? 1 : 0.6 }}>
+        <svg width="20" height="20" viewBox="0 0 48 48">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.36-8.16 2.36-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Continue with Google
+      </button>
+      <div style={{ fontSize: 11, color: "#9ca3af", textAlign: "center", marginBottom: 18 }}>
+        Best if your school gave you a Google login.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+        <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+        <span style={{ fontSize: 12, color: "#9ca3af", fontWeight: 600 }}>or create a username</span>
+        <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
       </div>
 
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: 14 }}>
-          <label style={LABEL}>Class code</label>
-          <input type="text" value={code} onChange={e => setCode(e.target.value.toUpperCase())} required
-            placeholder="e.g. 7GX4QP" autoCapitalize="characters"
-            style={{ ...INPUT, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase" }} />
-        </div>
-        <div style={{ marginBottom: 14 }}>
           <label style={LABEL}>Your name</label>
-          <input type="text" value={name} onChange={e => setName(e.target.value)} required
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
             placeholder="First name + last initial" style={INPUT} />
         </div>
         <div style={{ marginBottom: 14 }}>
           <label style={LABEL}>Username</label>
-          <input type="text" value={username}
-            onChange={e => setUsername(e.target.value.toLowerCase())} required
-            placeholder="3–20 letters/numbers" autoCapitalize="none" autoCorrect="off"
-            style={INPUT} />
+          <input type="text" value={username} onChange={e => setUsername(e.target.value.toLowerCase())}
+            placeholder="3–20 letters/numbers" autoCapitalize="none" autoCorrect="off" style={INPUT} />
           <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
-            Lowercase letters, numbers, and . _ - — this is what you&apos;ll log in with.
+            No email needed — this is what you&apos;ll log in with.
           </div>
         </div>
         <div style={{ marginBottom: 16 }}>
           <label style={LABEL}>Password</label>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)}
             placeholder="Min. 8 characters" style={INPUT} />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
-          <input type="checkbox" id="agree" checked={agreed} onChange={e => setAgreed(e.target.checked)}
-            style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
-          <label htmlFor="agree" style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5, cursor: "pointer" }}>
-            I agree to the{" "}
-            <Link href="/privacy" target="_blank" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
-              Privacy Policy
-            </Link>.
-          </label>
         </div>
 
         {error && (
@@ -120,11 +154,11 @@ function JoinForm() {
             {error}
           </div>
         )}
-        <button type="submit" disabled={loading || !agreed}
+        <button type="submit" disabled={loading || !agreed || !codeReady || !name || !username || !password}
           style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: "none",
-            background: agreed ? "#1f1f1f" : "#9ca3af", color: "#fff", fontSize: 15, fontWeight: 700,
-            cursor: loading || !agreed ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
-          {loading ? "Joining…" : "Join class"}
+            background: (agreed && codeReady) ? "#1f1f1f" : "#9ca3af", color: "#fff", fontSize: 15, fontWeight: 700,
+            cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
+          {loading ? "Joining…" : "Create username & join"}
         </button>
       </form>
 
