@@ -54,9 +54,16 @@ const NAME_TD: React.CSSProperties = {
 interface StudentRow {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  username?: string | null;
   completedChallenges: number;
   totalChallenges: number;
+}
+
+// What to show under a student's name: their email, or @username for
+// username-only accounts (students who joined with a class code, no email).
+function studentSubLabel(s: { email?: string | null; username?: string | null }): string {
+  return s.email || (s.username ? `@${s.username}` : "");
 }
 
 interface GradebookLevel {
@@ -69,7 +76,8 @@ interface GradebookLevel {
 interface GradebookStudent {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  username?: string | null;
   levels: Record<number, GradebookLevel>;
 }
 
@@ -161,6 +169,9 @@ export default function ClassDetailPage() {
   const [confirmDeleteClass, setConfirmDeleteClass] = useState(false);
   const [deletingClass, setDeletingClass] = useState(false);
   const [removingStudentId, setRemovingStudentId] = useState<string | null>(null);
+  const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
+  const [resetReveal, setResetReveal] = useState<{ studentId: string; name: string; loginId: string; tempPassword: string } | null>(null);
+  const [copiedReveal, setCopiedReveal] = useState(false);
 
   // Overall bridge leaderboard
   interface LeaderboardRow { rank: number; student_id: string; name: string; email: string; cost: number; assignment_title: string; }
@@ -455,6 +466,21 @@ export default function ClassDetailPage() {
       setGrades(prev => ({ ...prev, [tool]: data }));
     } finally {
       setLoadingGrades(false);
+    }
+  }
+
+  async function handleResetStudentPassword(s: StudentRow) {
+    if (!confirm(`Reset the password for ${s.name}?\n\nThey'll get a new temporary password you can hand to them. Their current password will stop working.`)) return;
+    setResettingStudentId(s.id);
+    setResetReveal(null);
+    try {
+      const res = await fetch(`/api/teacher/students/${s.id}/reset-password`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error ?? "Reset failed."); return; }
+      setResetReveal({ studentId: s.id, name: s.name, loginId: data.loginId ?? "", tempPassword: data.tempPassword });
+      setCopiedReveal(false);
+    } finally {
+      setResettingStudentId(null);
     }
   }
 
@@ -863,7 +889,7 @@ export default function ClassDetailPage() {
       }
       const rows: string[][] = [header];
       for (const s of gbStudents) {
-        const row = [s.name, s.email];
+        const row = [s.name, studentSubLabel(s)];
         for (const li of assignedLevelIds) {
           const lv = s.levels[li];
           row.push(
@@ -936,7 +962,7 @@ export default function ClassDetailPage() {
                 <tr key={s.id} style={{ background: si % 2 === 0 ? "#fff" : "#fafafa" }}>
                   <td style={{ ...NAME_TD, background: si % 2 === 0 ? "#fff" : "#fafafa" }}>
                     <div style={{ fontWeight: 700, color: "#111" }}>{s.name}</div>
-                    <div style={{ fontSize: 11, color: "#888" }}>{s.email}</div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{studentSubLabel(s)}</div>
                   </td>
                   {assignedLevelIds.map(li => {
                     const meta = levelMeta[li];
@@ -1005,7 +1031,7 @@ export default function ClassDetailPage() {
       const header = ["Student", "Email", ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Status`), ...bridgeAssignments.map(a => `${a.title || "Bridge Assignment"} — Cost`)];
       const rows: string[][] = [header];
       for (const s of sorted) {
-        const row = [s.name, s.email];
+        const row = [s.name, studentSubLabel(s)];
         for (const a of bridgeAssignments) {
           const cell = bridgeSubmissionMap[s.id]?.[a.id];
           const draft = !cell ? bridgeDraftMap[s.id]?.[a.id] : undefined;
@@ -1063,7 +1089,7 @@ export default function ClassDetailPage() {
                 <tr key={s.id} style={{ background: si % 2 === 0 ? "#fff" : "#fffdf5" }}>
                   <td style={{ ...NAME_TD, background: si % 2 === 0 ? "#fff" : "#fffdf5" }}>
                     <div style={{ fontWeight: 700, color: "#111" }}>{s.name}</div>
-                    <div style={{ fontSize: 11, color: "#888" }}>{s.email}</div>
+                    <div style={{ fontSize: 11, color: "#888" }}>{studentSubLabel(s)}</div>
                   </td>
                   {bridgeAssignments.map(a => {
                     const cell = bridgeSubmissionMap[s.id]?.[a.id];
@@ -1406,21 +1432,69 @@ export default function ClassDetailPage() {
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 560 }}>
                       {[...students].sort(compareByLastName).map(s => (
-                        <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
-                          padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb", background: "#fafafa" }}>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{s.name}</div>
-                            <div style={{ fontSize: 12, color: "#888" }}>{s.email}</div>
+                        <div key={s.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                            padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb", background: "#fafafa" }}>
+                            <div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{s.name}</div>
+                              <div style={{ fontSize: 12, color: "#888" }}>{studentSubLabel(s)}</div>
+                            </div>
+                            <div style={{ display: "flex", gap: 8 }}>
+                              <button
+                                onClick={() => handleResetStudentPassword(s)}
+                                disabled={resettingStudentId === s.id}
+                                title="Set a new temporary password for this student"
+                                style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #bfdbfe",
+                                  background: "#fff", color: "#2563eb", fontWeight: 700, fontSize: 12,
+                                  cursor: resettingStudentId === s.id ? "not-allowed" : "pointer",
+                                  opacity: resettingStudentId === s.id ? 0.6 : 1 }}>
+                                {resettingStudentId === s.id ? "Resetting…" : "🔑 Reset password"}
+                              </button>
+                              <button
+                                onClick={() => handleRemoveStudent(s.id)}
+                                disabled={removingStudentId === s.id}
+                                style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #fca5a5",
+                                  background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
+                                  cursor: removingStudentId === s.id ? "not-allowed" : "pointer",
+                                  opacity: removingStudentId === s.id ? 0.6 : 1 }}>
+                                {removingStudentId === s.id ? "Removing…" : "✕ Remove"}
+                              </button>
+                            </div>
                           </div>
-                          <button
-                            onClick={() => handleRemoveStudent(s.id)}
-                            disabled={removingStudentId === s.id}
-                            style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #fca5a5",
-                              background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
-                              cursor: removingStudentId === s.id ? "not-allowed" : "pointer",
-                              opacity: removingStudentId === s.id ? 0.6 : 1 }}>
-                            {removingStudentId === s.id ? "Removing…" : "✕ Remove"}
-                          </button>
+
+                          {resetReveal?.studentId === s.id && (
+                            <div style={{ padding: "12px 14px", borderRadius: 10, border: "2px solid #bbf7d0", background: "#f0fdf4" }}>
+                              <div style={{ fontSize: 13, fontWeight: 800, color: "#166534", marginBottom: 8 }}>
+                                New temporary password — copy it now, it won&apos;t be shown again.
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                {resetReveal.loginId && (
+                                  <span style={{ fontSize: 12, color: "#166534" }}>
+                                    Login: <strong>{resetReveal.loginId}</strong>
+                                  </span>
+                                )}
+                                <code style={{ fontSize: 15, fontWeight: 800, background: "#fff", border: "1px solid #86efac",
+                                  borderRadius: 8, padding: "6px 12px", color: "#111", letterSpacing: 0.5 }}>
+                                  {resetReveal.tempPassword}
+                                </code>
+                                <button
+                                  onClick={() => { navigator.clipboard?.writeText(resetReveal.tempPassword); setCopiedReveal(true); }}
+                                  style={{ padding: "6px 12px", borderRadius: 8, border: "2px solid #16a34a",
+                                    background: "#fff", color: "#16a34a", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                                  {copiedReveal ? "Copied ✓" : "Copy"}
+                                </button>
+                                <button
+                                  onClick={() => setResetReveal(null)}
+                                  style={{ padding: "6px 12px", borderRadius: 8, border: "2px solid #e5e7eb",
+                                    background: "#fff", color: "#6b7280", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                                  Done
+                                </button>
+                              </div>
+                              <div style={{ fontSize: 11, color: "#15803d", marginTop: 8 }}>
+                                Have the student sign in with this password, then change it from their account.
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1661,7 +1735,7 @@ export default function ClassDetailPage() {
                 ...challenges.map(c => `${c.title} — Status`)];
               const rows: string[][] = [header];
               for (const s of sortedStudents) {
-                const row = [s.name, s.email];
+                const row = [s.name, studentSubLabel(s)];
                 for (const ch of tutorials) {
                   const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);
                   row.push(sub ? "Completed" : "—");
@@ -1843,7 +1917,7 @@ export default function ClassDetailPage() {
                           <tr key={s.id} style={{ background: si % 2 === 0 ? "#fff" : "#fafafa" }}>
                             <td style={{ ...NAME_TD, background: si % 2 === 0 ? "#fff" : "#fafafa" }}>
                               <div style={{ fontWeight: 700, color: "#111" }}>{s.name}</div>
-                              <div style={{ fontSize: 11, color: "#888" }}>{s.email}</div>
+                              <div style={{ fontSize: 11, color: "#888" }}>{studentSubLabel(s)}</div>
                             </td>
                             {assignedTutorials.map((ch, i) => {
                               const sub = turtleSubs.find(x => x.user_id === s.id && x.challenge_id === ch.id);

@@ -70,17 +70,23 @@ export default function SignInPage() {
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>
-              Email
+              Email or username
             </label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
-              placeholder="you@school.edu"
+            <input type="text" value={email} onChange={e => setEmail(e.target.value)} required
+              autoCapitalize="none" autoCorrect="off"
+              placeholder="you@school.edu or username"
               style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
                 fontSize: 14, outline: "none", boxSizing: "border-box" }} />
           </div>
           <div style={{ marginBottom: 20 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>
-              Password
-            </label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+                Password
+              </label>
+              <Link href="/forgot-password" style={{ fontSize: 12, color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
+                Forgot password?
+              </Link>
+            </div>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
               placeholder="••••••••"
               style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
@@ -104,6 +110,12 @@ export default function SignInPage() {
           Don&apos;t have an account?{" "}
           <Link href="/sign-up" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
             Sign up
+          </Link>
+        </p>
+        <p style={{ textAlign: "center", fontSize: 13, color: "#6b7280", marginTop: 8, marginBottom: 0 }}>
+          Student joining a class?{" "}
+          <Link href="/join" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
+            Create a username
           </Link>
         </p>
       </div>
