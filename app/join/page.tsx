@@ -17,7 +17,7 @@ const CARD: React.CSSProperties = {
 };
 const INPUT: React.CSSProperties = {
   width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
-  fontSize: 14, outline: "none", boxSizing: "border-box",
+  fontSize: 14, color: "#111", outline: "none", boxSizing: "border-box",
 };
 const LABEL: React.CSSProperties = {
   display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6,

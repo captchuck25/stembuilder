@@ -6,14 +6,29 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 
+const INPUT: React.CSSProperties = {
+  width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
+  fontSize: 14, color: "#111", outline: "none", boxSizing: "border-box",
+};
+const LABEL: React.CSSProperties = {
+  display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6,
+};
+
 export default function SignUpPage() {
   const router = useRouter();
+  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [agreed, setAgreed] = useState(false);
+
+  function goJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!code.trim()) return;
+    router.push(`/join?code=${encodeURIComponent(code.trim().toUpperCase())}`);
+  }
 
   async function handleGoogle() {
     if (!agreed) return;
@@ -45,9 +60,9 @@ export default function SignUpPage() {
       backgroundRepeat: "repeat", backgroundSize: "auto",
       display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ background: "#fff", borderRadius: 24, boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
-        border: "3px solid #1f1f1f", padding: "40px 36px", width: "100%", maxWidth: 420 }}>
+        border: "3px solid #1f1f1f", padding: "36px 36px", width: "100%", maxWidth: 420 }}>
 
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
           <Link href="/">
             <Image src="/ui/sb-logo.png" alt="STEM Builder" width={140} height={42} unoptimized
               style={{ height: 42, width: "auto", margin: "0 auto 16px" }} />
@@ -56,15 +71,41 @@ export default function SignUpPage() {
           <p style={{ fontSize: 14, color: "#6b7280", margin: 0 }}>Join STEM Builder for free</p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 20 }}>
+        {/* Class-code option — students joining with a code (no email needed) */}
+        <div style={{ background: "#f0f9ff", border: "2px solid #bae6fd", borderRadius: 14, padding: "16px 16px", marginBottom: 20 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#075985", marginBottom: 8 }}>
+            🎫 Joining a class? Enter your class code
+          </div>
+          <form onSubmit={goJoin} style={{ display: "flex", gap: 8 }}>
+            <input type="text" value={code} onChange={e => setCode(e.target.value.toUpperCase())}
+              placeholder="e.g. 7GX4QP" autoCapitalize="characters"
+              style={{ ...INPUT, letterSpacing: 2, fontWeight: 700, textTransform: "uppercase", flex: 1 }} />
+            <button type="submit" disabled={!code.trim()}
+              style={{ padding: "10px 18px", borderRadius: 10, border: "none",
+                background: code.trim() ? "#0284c7" : "#cbd5e1", color: "#fff", fontWeight: 800, fontSize: 14,
+                cursor: code.trim() ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}>
+              Join →
+            </button>
+          </form>
+          <div style={{ fontSize: 11, color: "#0369a1", marginTop: 8 }}>
+            Students: pick a username on the next step — no email required.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+          <span style={{ fontSize: 13, color: "#9ca3af", fontWeight: 600 }}>or sign up with</span>
+          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
+        </div>
+
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
           <input type="checkbox" id="agree" checked={agreed} onChange={e => setAgreed(e.target.checked)}
             style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
-          <label htmlFor="agree" style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5, cursor: "pointer" }}>
+          <label htmlFor="agree" style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.5, cursor: "pointer" }}>
             I agree to the{" "}
             <Link href="/privacy" target="_blank" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
               Privacy Policy
-            </Link>
-            . I understand that my name, email, and submitted work will be stored to operate this platform.
+            </Link>.
           </label>
         </div>
 
@@ -72,7 +113,7 @@ export default function SignUpPage() {
           style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: "2px solid #e5e7eb",
             background: "#fff", cursor: agreed ? "pointer" : "not-allowed", display: "flex", alignItems: "center",
             justifyContent: "center", gap: 10, fontSize: 15, fontWeight: 700, color: agreed ? "#111" : "#9ca3af",
-            marginBottom: 20, opacity: agreed ? 1 : 0.6 }}>
+            marginBottom: 18, opacity: agreed ? 1 : 0.6 }}>
           <svg width="20" height="20" viewBox="0 0 48 48">
             <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
             <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
@@ -82,39 +123,21 @@ export default function SignUpPage() {
           Continue with Google
         </button>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
-          <span style={{ fontSize: 13, color: "#9ca3af", fontWeight: 600 }}>or</span>
-          <div style={{ flex: 1, height: 1, background: "#e5e7eb" }} />
-        </div>
-
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>
-              Full Name
-            </label>
+            <label style={LABEL}>Full Name</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} required
-              placeholder="Your name"
-              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
-                fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              placeholder="Your name" style={INPUT} />
           </div>
           <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>
-              Email
-            </label>
+            <label style={LABEL}>Email</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
-              placeholder="you@school.edu"
-              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
-                fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              placeholder="you@school.edu" style={INPUT} />
           </div>
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6 }}>
-              Password
-            </label>
+          <div style={{ marginBottom: 18 }}>
+            <label style={LABEL}>Password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
-              placeholder="Min. 8 characters"
-              style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
-                fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              placeholder="Min. 8 characters" style={INPUT} />
           </div>
           {error && (
             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
@@ -130,10 +153,16 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        <p style={{ textAlign: "center", fontSize: 13, color: "#6b7280", marginTop: 20, marginBottom: 0 }}>
+        <p style={{ textAlign: "center", fontSize: 13, color: "#6b7280", marginTop: 18, marginBottom: 0 }}>
           Already have an account?{" "}
           <Link href="/sign-in" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
             Sign in
+          </Link>
+        </p>
+        <p style={{ textAlign: "center", fontSize: 13, color: "#6b7280", marginTop: 8, marginBottom: 0 }}>
+          Are you a teacher?{" "}
+          <Link href="/teachers" style={{ color: "#2563eb", fontWeight: 700, textDecoration: "none" }}>
+            Teacher sign up
           </Link>
         </p>
       </div>

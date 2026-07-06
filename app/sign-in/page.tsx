@@ -76,7 +76,7 @@ export default function SignInPage() {
               autoCapitalize="none" autoCorrect="off"
               placeholder="you@school.edu or username"
               style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
-                fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                fontSize: 14, color: "#111", outline: "none", boxSizing: "border-box" }} />
           </div>
           <div style={{ marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
@@ -90,7 +90,7 @@ export default function SignInPage() {
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
               placeholder="••••••••"
               style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
-                fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                fontSize: 14, color: "#111", outline: "none", boxSizing: "border-box" }} />
           </div>
           {error && (
             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,

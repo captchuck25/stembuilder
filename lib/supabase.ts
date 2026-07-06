@@ -15,6 +15,11 @@ export interface Profile {
   role: 'teacher' | 'student' | 'admin'
   password_hash?: string
   google_id?: string
+  // Teacher lead-gen details collected at onboarding (all optional).
+  district?: string | null
+  state?: string | null
+  grade_levels?: string | null
+  content_area?: string | null
   created_at: string
 }
 
