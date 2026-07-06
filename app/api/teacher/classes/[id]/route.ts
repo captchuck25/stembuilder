@@ -31,7 +31,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (studentIds.length) {
     const { data: profiles } = await db
       .from('profiles')
-      .select('id, name, email')
+      .select('id, name, email, username')
       .in('id', studentIds)
 
     const totalChallenges = (assignData ?? []).reduce((sum: number, a: { level_id: number }) => {
@@ -40,14 +40,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     }, 0)
 
     students = await Promise.all(
-      (profiles ?? []).map(async (p: { id: string; name: string; email: string }) => {
+      (profiles ?? []).map(async (p: { id: string; name: string; email: string | null; username: string | null }) => {
         const { count } = await db
           .from('user_progress')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', p.id)
           .eq('completed', true)
           .not('challenge_idx', 'is', null)
-        return { id: p.id, name: p.name, email: p.email, completedChallenges: count ?? 0, totalChallenges }
+        return { id: p.id, name: p.name, email: p.email, username: p.username, completedChallenges: count ?? 0, totalChallenges }
       })
     )
   }

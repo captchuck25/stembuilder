@@ -34,7 +34,7 @@ export async function GET(
   const progressTool = tool === 'code-lab' ? 'code-lab-python' : tool;
 
   const [{ data: profiles }, { data: assignData }, { data: allProgress }] = await Promise.all([
-    db.from('profiles').select('id, name, email').in('id', studentIds).order('name', { ascending: true }),
+    db.from('profiles').select('id, name, email, username').in('id', studentIds).order('name', { ascending: true }),
     db.from('assignments').select('level_id').eq('class_id', classId).eq('tool', tool).order('level_id'),
     db.from('user_progress')
       .select('user_id, level_idx, challenge_idx, completed, quiz_score')
@@ -89,7 +89,7 @@ export async function GET(
   // This way, a teacher who locks a level after a deadline still sees who completed it.
   const visibleLevelIds = Array.from(new Set([...assignedLevelIds, ...activeLevelSet])).sort((a, b) => a - b);
 
-  const students = (profiles ?? []).map((p: { id: string; name: string; email: string }) => {
+  const students = (profiles ?? []).map((p: { id: string; name: string; email: string | null; username: string | null }) => {
     const levels: Record<number, { challengesDone: number; challengesTotal: number; quizScore: number | null; quizTotal: number }> = {};
     for (const li of visibleLevelIds) {
       const { challengesTotal, quizTotal } = getLevelInfo(li);
@@ -99,7 +99,7 @@ export async function GET(
       const done = prog?.levelMarkedComplete ? challengesTotal : (prog?.done ?? 0);
       levels[li] = { challengesDone: done, challengesTotal, quizScore: prog?.quizScore ?? null, quizTotal };
     }
-    return { id: p.id, name: p.name, email: p.email, levels };
+    return { id: p.id, name: p.name, email: p.email, username: p.username, levels };
   });
 
   // Keep `assignedLevelIds` as the legacy field the client expects so existing UI keeps working.

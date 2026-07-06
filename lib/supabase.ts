@@ -9,8 +9,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 export interface Profile {
   id: string
-  email: string
+  email: string | null       // null for username-only student accounts
   name: string
+  username?: string | null   // set for students who joined with a class code (no email)
   role: 'teacher' | 'student'
   password_hash?: string
   google_id?: string

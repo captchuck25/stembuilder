@@ -6,10 +6,11 @@ import bcrypt from 'bcryptjs'
 
 declare module 'next-auth' {
   interface Session {
-    user: { id: string; email: string; name: string; role: 'teacher' | 'student'; image?: string }
+    user: { id: string; email: string; name: string; role: 'teacher' | 'student'; username?: string; image?: string }
   }
   interface User {
     role?: 'teacher' | 'student'
+    username?: string
   }
 }
 
@@ -33,16 +34,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null
+        // The "email" field is really an identifier: an email for adults, a
+        // username for students who joined with a class code and have no email.
+        const identifier = (credentials.email as string).toLowerCase().trim()
+        const column = identifier.includes('@') ? 'email' : 'username'
         const db = adminDb()
         const { data: profile } = await db
           .from('profiles')
-          .select('id, email, name, role, password_hash')
-          .eq('email', (credentials.email as string).toLowerCase().trim())
+          .select('id, email, name, role, username, password_hash')
+          .eq(column, identifier)
           .maybeSingle()
         if (!profile?.password_hash) return null
         const valid = await bcrypt.compare(credentials.password as string, profile.password_hash)
         if (!valid) return null
-        return { id: profile.id, email: profile.email, name: profile.name, role: profile.role }
+        return { id: profile.id, email: profile.email ?? '', name: profile.name, role: profile.role, username: profile.username ?? undefined }
       },
     }),
   ],
@@ -77,13 +82,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true
     },
     async jwt({ token, user }) {
-      if (user) { token.id = user.id; token.role = user.role ?? 'student'; token.picture = user.image }
+      if (user) { token.id = user.id; token.role = user.role ?? 'student'; token.picture = user.image; token.username = user.username }
       return token
     },
     async session({ session, token }) {
       session.user.id = token.id as string
       session.user.role = token.role as 'teacher' | 'student'
       session.user.image = token.picture as string | undefined
+      session.user.username = token.username as string | undefined
       return session
     },
   },
