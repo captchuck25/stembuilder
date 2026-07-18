@@ -1,9 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/db.server'
 import { createResetToken } from '@/lib/reset.server'
-import { sendMail } from '@/lib/email'
+import { sendEmail } from '@/lib/email'
 
 const TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+// ─── Rate limiting ───────────────────────────────────────────────────────────
+// Two layers, both silent (limited requests still get { ok: true } so the
+// response never becomes an oracle):
+//  1. Per-IP, in-memory: cheap first gate against a single machine hammering
+//     the endpoint. Best-effort on serverless (per warm instance), which is
+//     fine — it only needs to blunt bursts, not be airtight.
+//  2. Per-account, in the database: at most MAX_TOKENS_PER_HOUR reset tokens
+//     per user per hour, counted from password_reset_tokens itself. Durable
+//     across instances; caps the emails any one inbox can be flooded with.
+
+const IP_WINDOW_MS = 15 * 60 * 1000
+const IP_MAX_REQUESTS = 10
+const MAX_TOKENS_PER_HOUR = 3
+
+const ipHits = new Map<string, number[]>()
+
+function ipRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const hits = (ipHits.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS)
+  if (hits.length >= IP_MAX_REQUESTS) {
+    ipHits.set(ip, hits)
+    return true
+  }
+  hits.push(now)
+  ipHits.set(ip, hits)
+  if (ipHits.size > 10_000) ipHits.clear() // unbounded-growth backstop
+  return false
+}
 
 function resetEmailHtml(url: string): string {
   return `
@@ -31,6 +60,9 @@ function resetEmailHtml(url: string): string {
 // password can reset; Google-only and username-only accounts have no password
 // to reset (students who can't reach email are reset by their teacher instead).
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  if (ipRateLimited(ip)) return NextResponse.json({ ok: true })
+
   let email: unknown
   try {
     ({ email } = await req.json())
@@ -49,6 +81,15 @@ export async function POST(req: NextRequest) {
     .maybeSingle()
 
   if (profile?.email && profile.password_hash) {
+    // Per-account cap: silently drop the request if this user already got
+    // MAX_TOKENS_PER_HOUR reset emails in the last hour.
+    const { count } = await db
+      .from('password_reset_tokens')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', profile.id)
+      .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString())
+    if ((count ?? 0) >= MAX_TOKENS_PER_HOUR) return NextResponse.json({ ok: true })
+
     const { raw, hash } = createResetToken()
     const expiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString()
     await db.from('password_reset_tokens').insert({
@@ -58,7 +99,7 @@ export async function POST(req: NextRequest) {
     })
 
     const resetUrl = `${new URL(req.url).origin}/reset-password?token=${raw}`
-    const sent = await sendMail({
+    const sent = await sendEmail({
       to: profile.email,
       subject: 'Reset your StemBuilder password',
       html: resetEmailHtml(resetUrl),

@@ -88,7 +88,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true
     },
     async jwt({ token, user }) {
-      if (user) { token.id = user.id; token.role = user.role ?? 'student'; token.picture = user.image; token.username = user.username }
+      if (user) {
+        token.id = user.id
+        token.role = user.role ?? 'student'
+        token.picture = user.image
+        token.username = user.username
+        token.authTime = Math.floor(Date.now() / 1000)
+        token.revalidatedAt = Date.now()
+        return token
+      }
+
+      // Sessions are stateless JWTs, so a password reset can't delete them.
+      // Instead, every REVALIDATE_MS we re-check the profile and reject the
+      // token if the account was soft-deleted or the password changed after
+      // this session was issued (see migration 0007). Returning null signs
+      // the user out; staleness is bounded by the re-check interval.
+      const REVALIDATE_MS = 5 * 60 * 1000
+      const last = (token.revalidatedAt as number | undefined) ?? 0
+      if (Date.now() - last > REVALIDATE_MS && token.id) {
+        const { data: profile, error } = await adminDb()
+          .from('profiles')
+          .select('deleted_at, password_changed_at')
+          .eq('id', token.id as string)
+          .maybeSingle()
+        // On a transient DB error keep the session; only reject on a
+        // definitive answer (row gone, deleted, or password changed).
+        if (!error) {
+          if (!profile || profile.deleted_at) return null
+          if (profile.password_changed_at) {
+            const changedAt = Math.floor(new Date(profile.password_changed_at).getTime() / 1000)
+            if (changedAt > ((token.authTime as number | undefined) ?? 0)) return null
+          }
+          token.revalidatedAt = Date.now()
+        }
+      }
       return token
     },
     async session({ session, token }) {

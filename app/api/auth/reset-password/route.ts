@@ -31,7 +31,12 @@ export async function POST(req: NextRequest) {
   const hash = await bcrypt.hash(password, 12)
   // deleted_at guard: soft_delete_user removes outstanding tokens, but never
   // let a stale token reset a soft-deleted account's password.
-  const { error } = await db.from('profiles').update({ password_hash: hash }).eq('id', row.user_id).is('deleted_at', null)
+  // password_changed_at makes auth.ts reject JWT sessions issued before now.
+  const { error } = await db
+    .from('profiles')
+    .update({ password_hash: hash, password_changed_at: new Date().toISOString() })
+    .eq('id', row.user_id)
+    .is('deleted_at', null)
   if (error) return NextResponse.json({ error: 'Could not reset password. Please try again.' }, { status: 500 })
 
   // Burn this token and any other outstanding ones for the user.

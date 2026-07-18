@@ -43,7 +43,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const tempPassword = generateTempPassword()
   const hash = await bcrypt.hash(tempPassword, 12)
-  const { error } = await db.from('profiles').update({ password_hash: hash }).eq('id', studentId).is('deleted_at', null)
+  // password_changed_at makes auth.ts reject the student's existing sessions.
+  const { error } = await db
+    .from('profiles')
+    .update({ password_hash: hash, password_changed_at: new Date().toISOString() })
+    .eq('id', studentId)
+    .is('deleted_at', null)
   if (error) return NextResponse.json({ error: 'Could not reset password. Please try again.' }, { status: 500 })
 
   // Invalidate any outstanding self-service reset links for this student.
