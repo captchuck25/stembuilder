@@ -58,6 +58,53 @@ Audit what was purged and when:
 select ran_at, total, purged from retention_purge_log order by ran_at desc;
 ```
 
+## Verified data inventory (audited 2026-07-18)
+
+Live-schema audit of every table, confirming nothing personal sits outside
+the soft-delete set:
+
+- `assignments`, `lesson_locks`, `turtle_assignments`: **class-level config
+  only** (class_id, tool, level/challenge indexes) — no student or teacher
+  identifiers. Locks are per class, not per student.
+- `bridge_assignments` carries a `teacher_id`, but it is always the owner of
+  the class, and the purge deletes a purged teacher's bridge_assignments
+  (via the defensive class sweep) *before* their profile — no teacher
+  identifier outlives the teacher.
+- No other table in the schema has user/student/email-bearing columns.
+
+## Who can request deletion (`POST /api/deletion-request`)
+
+| Target  | Allowed requester                                             |
+|---------|---------------------------------------------------------------|
+| class   | admin, or the teacher who owns it                              |
+| student | admin, or a teacher sharing a class with that student          |
+| account | admin, or the account owner (teacher self-delete)              |
+
+Admin accounts can never be targets; teachers can never delete other
+teachers; students route deletion requests through their teacher/school
+(COPPA). Requests for already-deleted targets 404 (no oracle).
+
+## Session invalidation for deleted accounts
+
+Soft-deleted accounts cannot sign in (password or Google) or reset a
+password. Sessions that were *already open* at deletion time are killed by
+the JWT revalidation in `auth.ts` (checks `deleted_at` +
+`password_changed_at` every ≤5 min) — shipped with the password-reset
+hardening; requires migration `0007_password_changed_at.sql`. Until that is
+deployed, a pre-existing session could keep using the app for up to its
+30-day token life — invisible to everyone else, and everything they touch is
+still swept by the day-30 purge regardless.
+
+## The procurement / NDPA answer
+
+When a district asks "how do you guarantee deletion?":
+deletion triggers a 30-day recoverable soft-delete window enforced in every
+query and by restrictive RLS; an automated nightly purge permanently erases
+expired data; every purge is recorded with per-table counts in
+`retention_purge_log` (auditable with plain SQL); and database backups
+expire separately on a fixed ~7-day rotation. Mechanism documented here,
+audit trail queryable on demand.
+
 ## Backups age out separately
 
 The purge removes data from the **live database only**. Copies also exist in
