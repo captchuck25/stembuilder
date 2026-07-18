@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
     .eq('tool', tool)
     .eq('level_idx', levelIdx)
     .eq('challenge_idx', challengeIdx)
+    .is('deleted_at', null)
     .maybeSingle()
 
   if ((existing?.quiz_score ?? 0) >= score) return NextResponse.json({ ok: true, skipped: true })
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
       quiz_score: score,
       saved_code: null,
       updated_at: new Date().toISOString(),
+      deleted_at: null,
     },
     { onConflict: 'user_id,tool,level_idx,challenge_idx' }
   )

@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
     .select('id')
     .eq('user_id', session.user.id)
     .eq('name', name)
+    .is('deleted_at', null)
     .maybeSingle()
 
   return NextResponse.json({ exists: data != null })

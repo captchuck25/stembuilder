@@ -18,7 +18,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const db = adminDb()
 
   // The student must be enrolled in a class this teacher owns.
-  const { data: teacherClasses } = await db.from('classes').select('id').eq('teacher_id', session.user.id)
+  const { data: teacherClasses } = await db.from('classes').select('id').eq('teacher_id', session.user.id).is('deleted_at', null)
   const classIds = (teacherClasses ?? []).map((c: { id: string }) => c.id)
   if (!classIds.length) return NextResponse.json({ error: 'That student is not in one of your classes.' }, { status: 403 })
 
@@ -27,6 +27,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .select('id')
     .eq('student_id', studentId)
     .in('class_id', classIds)
+    .is('deleted_at', null)
     .limit(1)
     .maybeSingle()
   if (!enrollment) return NextResponse.json({ error: 'That student is not in one of your classes.' }, { status: 403 })
@@ -35,13 +36,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     .from('profiles')
     .select('id, name, role, username, email')
     .eq('id', studentId)
+    .is('deleted_at', null)
     .maybeSingle()
   if (!student) return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
   if (student.role !== 'student') return NextResponse.json({ error: 'You can only reset student passwords.' }, { status: 400 })
 
   const tempPassword = generateTempPassword()
   const hash = await bcrypt.hash(tempPassword, 12)
-  const { error } = await db.from('profiles').update({ password_hash: hash }).eq('id', studentId)
+  const { error } = await db.from('profiles').update({ password_hash: hash }).eq('id', studentId).is('deleted_at', null)
   if (error) return NextResponse.json({ error: 'Could not reset password. Please try again.' }, { status: 500 })
 
   // Invalidate any outstanding self-service reset links for this student.

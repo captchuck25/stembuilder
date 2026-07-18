@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     .from('profiles')
     .select('id, name, email, role, created_at')
     .eq('role', role)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -28,11 +29,11 @@ export async function GET(req: NextRequest) {
     (users ?? []).map(async (u: { id: string; name: string; email: string; role: string; created_at: string }) => {
       if (role === 'teacher') {
         const { count } = await db
-          .from('classes').select('*', { count: 'exact', head: true }).eq('teacher_id', u.id)
+          .from('classes').select('*', { count: 'exact', head: true }).eq('teacher_id', u.id).is('deleted_at', null)
         return { ...u, classCount: count ?? 0 }
       }
       const { count } = await db
-        .from('enrollments').select('*', { count: 'exact', head: true }).eq('student_id', u.id)
+        .from('enrollments').select('*', { count: 'exact', head: true }).eq('student_id', u.id).is('deleted_at', null)
       return { ...u, enrollmentCount: count ?? 0 }
     })
   )

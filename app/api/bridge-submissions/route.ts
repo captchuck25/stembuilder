@@ -25,13 +25,14 @@ export async function POST(req: NextRequest) {
     .select('id')
     .eq('class_id', assignment.class_id)
     .eq('student_id', session.user.id)
+    .is('deleted_at', null)
     .single()
   if (!enrollment) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data, error } = await db
     .from('bridge_submissions')
     .upsert(
-      { assignment_id: assignmentId, student_id: session.user.id, cost, passed, submitted_at: new Date().toISOString() },
+      { assignment_id: assignmentId, student_id: session.user.id, cost, passed, submitted_at: new Date().toISOString(), deleted_at: null },
       { onConflict: 'assignment_id,student_id' }
     )
     .select()

@@ -12,6 +12,7 @@ export async function GET() {
     .from('blueprint_lab_designs')
     .select('id, name, units, thumbnail, updated_at, created_at')
     .eq('user_id', session.user.id)
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
 
   return NextResponse.json(data ?? [])
@@ -37,6 +38,7 @@ export async function POST(req: NextRequest) {
         units: units ?? 'imperial',
         thumbnail: thumbnail ?? null,
         updated_at: new Date().toISOString(),
+        deleted_at: null,
       },
       { onConflict: 'user_id,name' }
     )

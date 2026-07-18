@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
 
   // Verify teacher owns this class
   const { data: classData } = await db
-    .from('classes').select('teacher_id').eq('id', classId).single();
+    .from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single();
   if (!classData || classData.teacher_id !== session.user.id)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
@@ -40,7 +40,7 @@ export async function DELETE(req: NextRequest) {
   const { data: lock } = await db.from('lesson_locks').select('class_id').eq('id', id).single();
   if (lock) {
     const { data: classData } = await db
-      .from('classes').select('teacher_id').eq('id', lock.class_id).single();
+      .from('classes').select('teacher_id').eq('id', lock.class_id).is('deleted_at', null).single();
     if (!classData || classData.teacher_id !== session.user.id)
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

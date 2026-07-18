@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     .from('classes')
     .select('*')
     .eq('join_code', code.trim().toUpperCase())
+    .is('deleted_at', null)
     .single()
 
   if (!cls) return NextResponse.json({ error: 'Class not found. Check the code and try again.' }, { status: 404 })
@@ -23,10 +24,11 @@ export async function POST(req: NextRequest) {
     .select('id')
     .eq('class_id', cls.id)
     .eq('student_id', session.user.id)
+    .is('deleted_at', null)
     .single()
 
   if (existing) return NextResponse.json({ error: 'You are already enrolled in this class.' }, { status: 409 })
 
-  await db.from('enrollments').insert({ class_id: cls.id, student_id: session.user.id })
+  await db.from('enrollments').upsert({ class_id: cls.id, student_id: session.user.id, deleted_at: null }, { onConflict: 'class_id,student_id' })
   return NextResponse.json({ ok: true })
 }

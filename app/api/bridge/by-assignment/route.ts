@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('user_id', userId)
     .eq('name', saveName)
+    .is('deleted_at', null)
     .maybeSingle()
 
   if (byKey) return NextResponse.json(byKey)
@@ -34,6 +35,7 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('user_id', userId)
     .eq('assignment_id', assignmentId)
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -56,6 +58,7 @@ export async function GET(req: NextRequest) {
       .eq('name', legacyName)
       .eq('span_feet', assignment.span_feet)
       .eq('load_lb', assignment.load_lb)
+      .is('deleted_at', null)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()

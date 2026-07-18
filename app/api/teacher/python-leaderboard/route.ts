@@ -55,6 +55,7 @@ export async function GET() {
     .from('classes')
     .select('id')
     .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
   const classIds = (classes ?? []).map((c: { id: string }) => c.id)
   if (classIds.length === 0) return NextResponse.json({ byChallenge: [] })
 
@@ -62,6 +63,7 @@ export async function GET() {
     .from('enrollments')
     .select('student_id')
     .in('class_id', classIds)
+    .is('deleted_at', null)
   const studentIds = [...new Set((enrollments ?? []).map((e: { student_id: string }) => e.student_id))]
   if (studentIds.length === 0) return NextResponse.json({ byChallenge: [] })
 
@@ -73,6 +75,7 @@ export async function GET() {
     .in('challenge_idx', CHALLENGE_INDICES as unknown as number[])
     .eq('completed', true)
     .in('user_id', studentIds)
+    .is('deleted_at', null)
 
   if (!rows?.length) return NextResponse.json({ byChallenge: [] })
 
@@ -80,6 +83,7 @@ export async function GET() {
     .from('profiles')
     .select('id, name, email')
     .in('id', studentIds)
+    .is('deleted_at', null)
   const profileMap: Record<string, { name: string; email: string }> = {}
   for (const p of profiles ?? []) profileMap[p.id] = { name: p.name, email: p.email }
 

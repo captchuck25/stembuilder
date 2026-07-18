@@ -19,6 +19,9 @@ export async function POST(req: NextRequest) {
   }
 
   const db = adminDb()
+  // Deliberately NOT filtered by deleted_at: a soft-deleted account keeps its
+  // email reserved during the 30-day retention window (the unique index would
+  // reject the insert anyway — this just gives a clean error).
   const { data: existing } = await db
     .from('profiles')
     .select('id')

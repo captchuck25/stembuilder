@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('assignment_id', assignmentId)
     .eq('passed', true)
+    .is('deleted_at', null)
     .order('cost', { ascending: true })
 
   const studentIds = (submissions ?? []).map((s: { student_id: string }) => s.student_id)
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
       .from('profiles')
       .select('id, name, email')
       .in('id', studentIds)
+      .is('deleted_at', null)
     for (const p of profiles ?? []) {
       profileMap[p.id] = { name: p.name, email: p.email }
     }

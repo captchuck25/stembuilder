@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     .select('id')
     .eq('id', classId)
     .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
     .single()
   if (!cls) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
     .from('bridge_submissions')
     .select('assignment_id, student_id, cost, passed, submitted_at')
     .in('assignment_id', assignmentIds)
+    .is('deleted_at', null)
 
   type Sub = { assignment_id: string; student_id: string; cost: number; passed: boolean; submitted_at: string }
   const subs = (submissions ?? []) as Sub[]
@@ -48,6 +50,7 @@ export async function GET(req: NextRequest) {
     .from('bridge_designs')
     .select('user_id, name, cost, passed, thumbnail, updated_at')
     .in('name', designNames)
+    .is('deleted_at', null)
   type Design = { user_id: string; name: string; cost: number | null; passed: boolean | null; thumbnail: string | null; updated_at: string }
   const designRows = (designs ?? []) as Design[]
 

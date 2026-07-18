@@ -21,16 +21,16 @@ export async function GET() {
     { data: recentUsers },
     { data: toolBreakdown },
   ] = await Promise.all([
-    db.from('profiles').select('*', { count: 'exact', head: true }),
-    db.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher'),
-    db.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student'),
-    db.from('classes').select('*', { count: 'exact', head: true }),
-    db.from('enrollments').select('*', { count: 'exact', head: true }),
-    db.from('user_progress').select('*', { count: 'exact', head: true }).eq('completed', true),
-    db.from('bridge_designs').select('*', { count: 'exact', head: true }),
-    db.from('turtle_submissions').select('*', { count: 'exact', head: true }).not('submitted_at', 'is', null),
-    db.from('profiles').select('name, email, role, created_at').order('created_at', { ascending: false }).limit(10),
-    db.from('user_progress').select('tool').eq('completed', true),
+    db.from('profiles').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+    db.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'teacher').is('deleted_at', null),
+    db.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student').is('deleted_at', null),
+    db.from('classes').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+    db.from('enrollments').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+    db.from('user_progress').select('*', { count: 'exact', head: true }).eq('completed', true).is('deleted_at', null),
+    db.from('bridge_designs').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+    db.from('turtle_submissions').select('*', { count: 'exact', head: true }).not('submitted_at', 'is', null).is('deleted_at', null),
+    db.from('profiles').select('name, email, role, created_at').is('deleted_at', null).order('created_at', { ascending: false }).limit(10),
+    db.from('user_progress').select('tool').eq('completed', true).is('deleted_at', null),
   ])
 
   // Count completions per tool

@@ -14,6 +14,7 @@ export async function GET() {
     .from('enrollments')
     .select('class_id')
     .eq('student_id', session.user.id)
+    .is('deleted_at', null)
 
   if (!enrollments?.length) return NextResponse.json([])
 
@@ -26,7 +27,8 @@ export async function GET() {
       .order('created_at', { ascending: false }),
     db.from('bridge_submissions')
       .select('assignment_id, passed')
-      .eq('student_id', session.user.id),
+      .eq('student_id', session.user.id)
+      .is('deleted_at', null),
   ])
 
   const subMap = new Map((submissions ?? []).map((s: { assignment_id: string; passed: boolean }) => [s.assignment_id, s.passed]))

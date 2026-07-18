@@ -43,6 +43,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .from('profiles')
           .select('id, email, name, role, username, password_hash')
           .eq(column, identifier)
+          .is('deleted_at', null) // soft-deleted accounts cannot sign in
           .maybeSingle()
         if (!profile?.password_hash) return null
         const valid = await bcrypt.compare(credentials.password as string, profile.password_hash)
@@ -55,11 +56,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user, account }) {
       if (account?.provider === 'google') {
         const db = adminDb()
+        // Look up WITHOUT the deleted_at filter: a soft-deleted account must
+        // be denied outright — filtering it out here would instead create a
+        // fresh duplicate profile for the same Google identity.
         const { data: existing } = await db
           .from('profiles')
-          .select('id, role')
+          .select('id, role, deleted_at')
           .or(`google_id.eq.${account.providerAccountId},email.eq.${user.email}`)
           .maybeSingle()
+
+        if (existing?.deleted_at) return false
 
         if (existing) {
           await db.from('profiles').update({ google_id: account.providerAccountId }).eq('id', existing.id)

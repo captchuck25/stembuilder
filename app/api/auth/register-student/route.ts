@@ -33,11 +33,15 @@ export async function POST(req: NextRequest) {
     .from('classes')
     .select('id')
     .eq('join_code', String(joinCode).trim().toUpperCase())
+    .is('deleted_at', null)
     .maybeSingle()
   if (!cls) {
     return NextResponse.json({ error: 'Class not found. Check the code with your teacher.' }, { status: 404 })
   }
 
+  // Deliberately NOT filtered by deleted_at: a soft-deleted account keeps its
+  // username reserved during the 30-day retention window (the unique index
+  // would reject the insert anyway — this just gives a clean error).
   const { data: taken } = await db.from('profiles').select('id').eq('username', uname).maybeSingle()
   if (taken) {
     return NextResponse.json({ error: 'That username is taken. Try another.' }, { status: 409 })

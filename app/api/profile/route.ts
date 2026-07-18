@@ -7,7 +7,7 @@ export async function GET() {
   if (!session?.user?.id) return NextResponse.json(null)
 
   const db = adminDb()
-  const { data } = await db.from('profiles').select('*').eq('id', session.user.id).single()
+  const { data } = await db.from('profiles').select('*').eq('id', session.user.id).is('deleted_at', null).single()
   return NextResponse.json(data ?? null)
 }
 
@@ -29,6 +29,12 @@ export async function POST(req: NextRequest) {
   }
 
   const db = adminDb()
+  // Guard, don't resurrect: a soft-deleted profile must not be re-activated
+  // by a stale session's profile save.
+  const { data: existing } = await db
+    .from('profiles').select('id').eq('id', session.user.id).is('deleted_at', null).maybeSingle()
+  if (!existing) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const { error } = await db.from('profiles').upsert(update)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

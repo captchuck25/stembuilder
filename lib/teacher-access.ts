@@ -11,6 +11,7 @@ export async function teacherSharesClassWithStudent(
     .from('classes')
     .select('id')
     .eq('teacher_id', teacherId)
+    .is('deleted_at', null)
 
   const classIds = (teacherClasses ?? []).map((c: { id: string }) => c.id)
   if (classIds.length === 0) return false
@@ -20,6 +21,7 @@ export async function teacherSharesClassWithStudent(
     .select('*', { count: 'exact', head: true })
     .eq('student_id', studentId)
     .in('class_id', classIds)
+    .is('deleted_at', null)
 
   return (count ?? 0) > 0
 }

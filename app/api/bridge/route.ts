@@ -11,6 +11,7 @@ export async function GET() {
     .from('bridge_designs')
     .select('*')
     .eq('user_id', session.user.id)
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
 
   return NextResponse.json(data ?? [])
@@ -37,6 +38,7 @@ export async function POST(req: NextRequest) {
     passed,
     cost,
     updated_at: new Date().toISOString(),
+    deleted_at: null,
   }
   if (typeof thumbnail === 'string' && thumbnail.length > 0) row.thumbnail = thumbnail
   const { error } = await db

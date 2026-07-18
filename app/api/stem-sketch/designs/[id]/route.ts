@@ -12,6 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .select('id, name, units, doc_json, updated_at')
     .eq('id', id)
     .eq('user_id', session.user.id)
+    .is('deleted_at', null)
     .single()
 
   if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -23,11 +24,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id } = await params
+  // Soft delete (30-day retention window) — purged permanently by the daily job.
   const { error } = await adminDb()
     .from('stem_sketch_designs')
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', id)
     .eq('user_id', session.user.id)
+    .is('deleted_at', null)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

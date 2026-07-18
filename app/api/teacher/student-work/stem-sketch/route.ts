@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     .from('stem_sketch_designs')
     .select('id, user_id, name, units, doc_json, thumbnail, updated_at')
     .eq('id', designId)
+    .is('deleted_at', null)
     .maybeSingle()
 
   if (!design) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
     .from('profiles')
     .select('id, name, email')
     .eq('id', design.user_id)
+    .is('deleted_at', null)
     .single()
 
   return NextResponse.json({

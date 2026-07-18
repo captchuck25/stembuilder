@@ -27,6 +27,7 @@ export async function POST() {
     .from('classes')
     .select('id')
     .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
 
   const classIds = (classes ?? []).map((c: { id: string }) => c.id)
   if (classIds.length === 0) return NextResponse.json({ migrated: 0, skipped: 0 })

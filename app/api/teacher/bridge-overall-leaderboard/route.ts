@@ -30,6 +30,7 @@ export async function GET() {
     .from('classes')
     .select('id')
     .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
 
   const classIds = (classes ?? []).map((c: { id: string }) => c.id)
   if (classIds.length === 0) return NextResponse.json({ overall: [], byAssignment: [] })
@@ -50,6 +51,7 @@ export async function GET() {
     .select('student_id, assignment_id, cost')
     .in('assignment_id', assignmentIds)
     .eq('passed', true)
+    .is('deleted_at', null)
     .order('cost', { ascending: true })
 
   if (!submissions?.length) return NextResponse.json({ overall: [], byAssignment: [] })
@@ -60,6 +62,7 @@ export async function GET() {
     .from('profiles')
     .select('id, name, email')
     .in('id', allStudentIds)
+    .is('deleted_at', null)
 
   const profileMap: Record<string, { name: string; email: string }> = {}
   for (const p of profiles ?? []) profileMap[p.id] = { name: p.name, email: p.email }

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { softDeleteClass, softDeleteEnrollment } from '@/lib/retention'
 import { LEVELS } from '@/app/tools/code-lab/python/levels'
 
 async function verifyTeacherOwnsClass(db: ReturnType<typeof import('@/lib/db.server').adminDb>, classId: string, teacherId: string) {
-  const { data } = await db.from('classes').select('teacher_id').eq('id', classId).single()
+  const { data } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
   return data?.teacher_id === teacherId
 }
 
@@ -17,9 +18,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const db = adminDb()
 
   const [{ data: classData }, { data: assignData }, { data: enrollData }, { data: lockData }] = await Promise.all([
-    db.from('classes').select('*').eq('id', classId).single(),
+    db.from('classes').select('*').eq('id', classId).is('deleted_at', null).single(),
     db.from('assignments').select('*').eq('class_id', classId).order('level_id'),
-    db.from('enrollments').select('student_id').eq('class_id', classId),
+    db.from('enrollments').select('student_id').eq('class_id', classId).is('deleted_at', null),
     db.from('lesson_locks').select('*').eq('class_id', classId),
   ])
 
@@ -33,6 +34,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       .from('profiles')
       .select('id, name, email, username')
       .in('id', studentIds)
+      .is('deleted_at', null)
 
     const totalChallenges = (assignData ?? []).reduce((sum: number, a: { level_id: number }) => {
       const level = LEVELS[a.level_id]
@@ -47,6 +49,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           .eq('user_id', p.id)
           .eq('completed', true)
           .not('challenge_idx', 'is', null)
+          .is('deleted_at', null)
         return { id: p.id, name: p.name, email: p.email, username: p.username, completedChallenges: count ?? 0, totalChallenges }
       })
     )
@@ -70,7 +73,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
   const { data, error } = await db
-    .from('classes').update({ name: name.trim() }).eq('id', classId).select().single()
+    .from('classes').update({ name: name.trim() }).eq('id', classId).is('deleted_at', null).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }
@@ -89,21 +92,19 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   const studentId = new URL(req.url).searchParams.get('studentId')
 
-  if (studentId) {
-    // Remove one student from the class
-    const { error } = await db.from('enrollments')
-      .delete().eq('class_id', classId).eq('student_id', studentId)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ ok: true })
-  }
+  try {
+    if (studentId) {
+      // Remove one student from the class (soft delete — 30-day retention)
+      await softDeleteEnrollment(classId, studentId)
+      return NextResponse.json({ ok: true })
+    }
 
-  // Delete entire class — cascade related rows first
-  await Promise.all([
-    db.from('enrollments').delete().eq('class_id', classId),
-    db.from('assignments').delete().eq('class_id', classId),
-    db.from('lesson_locks').delete().eq('class_id', classId),
-  ])
-  const { error } = await db.from('classes').delete().eq('id', classId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    // Soft-delete the entire class: deleted_at cascades to enrollments and
+    // this class's submissions; assignments/locks stay (unreachable) and are
+    // hard-deleted with the class by the daily purge job 30 days later.
+    await softDeleteClass(classId)
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+  }
   return NextResponse.json({ ok: true })
 }

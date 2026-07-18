@@ -14,6 +14,7 @@ export async function GET() {
     .select('tool, level_idx, challenge_idx, completed')
     .eq('user_id', session.user.id)
     .eq('completed', true)
+    .is('deleted_at', null)
 
   return NextResponse.json(data ?? [])
 }

@@ -25,8 +25,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   //       where a teacher loads a student's bridge for projection).
   const [{ data: enrollment }, { data: classRow }] = await Promise.all([
     db.from('enrollments').select('id')
-      .eq('class_id', data.class_id).eq('student_id', session.user.id).maybeSingle(),
-    db.from('classes').select('teacher_id').eq('id', data.class_id).maybeSingle(),
+      .eq('class_id', data.class_id).eq('student_id', session.user.id).is('deleted_at', null).maybeSingle(),
+    db.from('classes').select('teacher_id').eq('id', data.class_id).is('deleted_at', null).maybeSingle(),
   ])
 
   const isEnrolledStudent = !!enrollment

@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     .from('turtle_submissions')
     .select('*')
     .in('user_id', studentIds)
+    .is('deleted_at', null)
 
   return NextResponse.json(data ?? [])
 }
@@ -35,6 +36,7 @@ export async function PATCH(req: NextRequest) {
     .from('turtle_submissions')
     .update({ approved, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .is('deleted_at', null)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

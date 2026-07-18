@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
     .from('profiles')
     .select('id, email, password_hash')
     .eq('email', identifier)
+    .is('deleted_at', null) // soft-deleted accounts cannot request a reset
     .maybeSingle()
 
   if (profile?.email && profile.password_hash) {

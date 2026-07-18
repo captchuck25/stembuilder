@@ -19,12 +19,12 @@ export async function GET(
   const db = adminDb();
 
   const { data: classData } = await db
-    .from('classes').select('teacher_id').eq('id', classId).single();
+    .from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single();
   if (!classData || classData.teacher_id !== session.user.id)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: enrollData } = await db
-    .from('enrollments').select('student_id').eq('class_id', classId);
+    .from('enrollments').select('student_id').eq('class_id', classId).is('deleted_at', null);
 
   if (!enrollData?.length) return NextResponse.json({ students: [], assignedLevelIds: [] });
 
@@ -34,12 +34,13 @@ export async function GET(
   const progressTool = tool === 'code-lab' ? 'code-lab-python' : tool;
 
   const [{ data: profiles }, { data: assignData }, { data: allProgress }] = await Promise.all([
-    db.from('profiles').select('id, name, email, username').in('id', studentIds).order('name', { ascending: true }),
+    db.from('profiles').select('id, name, email, username').in('id', studentIds).is('deleted_at', null).order('name', { ascending: true }),
     db.from('assignments').select('level_id').eq('class_id', classId).eq('tool', tool).order('level_id'),
     db.from('user_progress')
       .select('user_id, level_idx, challenge_idx, completed, quiz_score')
       .eq('tool', progressTool)
-      .in('user_id', studentIds),
+      .in('user_id', studentIds)
+      .is('deleted_at', null),
   ]);
 
   const assignedLevelIds: number[] = (assignData ?? []).map((a: { level_id: number }) => a.level_id);

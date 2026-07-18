@@ -12,6 +12,7 @@ export async function GET() {
     .from('turtle_submissions')
     .select('*')
     .eq('user_id', session.user.id)
+    .is('deleted_at', null)
 
   return NextResponse.json(data ?? [])
 }
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
       .from('enrollments')
       .select('class_id')
       .eq('student_id', session.user.id)
+      .is('deleted_at', null)
     const classIds = (enrollments ?? []).map((e: { class_id: string }) => e.class_id)
     if (classIds.length > 0) {
       const { data: lockRows } = await db
@@ -55,6 +57,7 @@ export async function POST(req: NextRequest) {
     code,
     image_data: imageData,
     updated_at: new Date().toISOString(),
+    deleted_at: null,
   }
   if (submit) record.submitted_at = new Date().toISOString()
 

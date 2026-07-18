@@ -13,6 +13,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ cha
     .select('*')
     .eq('user_id', session.user.id)
     .eq('challenge_id', challengeId)
+    .is('deleted_at', null)
     .maybeSingle()
 
   return NextResponse.json(data ?? null)

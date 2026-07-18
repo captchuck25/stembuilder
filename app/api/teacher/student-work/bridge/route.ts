@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('user_id', studentId)
     .eq('name', saveName)
+    .is('deleted_at', null)
     .maybeSingle()
   if (byKey) return NextResponse.json({ design: byKey, student: profile })
 
@@ -40,6 +41,7 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('user_id', studentId)
     .eq('assignment_id', assignmentId)
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -60,6 +62,7 @@ export async function GET(req: NextRequest) {
       .eq('name', legacyName)
       .eq('span_feet', assignment.span_feet)
       .eq('load_lb', assignment.load_lb)
+      .is('deleted_at', null)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle()
@@ -74,6 +77,7 @@ async function fetchStudentProfile(db: ReturnType<typeof adminDb>, studentId: st
     .from('profiles')
     .select('id, name, email')
     .eq('id', studentId)
+    .is('deleted_at', null)
     .single()
   return data ?? { id: studentId, name: '', email: '' }
 }

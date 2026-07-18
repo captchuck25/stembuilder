@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     .from('user_progress')
     .select('tool, level_idx, challenge_idx, completed, quiz_score, saved_code, updated_at')
     .eq('user_id', session.user.id)
+    .is('deleted_at', null)
   const { data } = await (tool.includes('-')
     ? q.eq('tool', tool)
     : q.ilike('tool', `${tool}-%`))
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       .eq('tool', tool)
       .eq('level_idx', level_idx)
       .eq('challenge_idx', challenge_idx)
+      .is('deleted_at', null)
       .maybeSingle()
     const row = {
       user_id: session.user.id,
@@ -64,6 +66,7 @@ export async function POST(req: NextRequest) {
       saved_code: hasSavedCode ? saved_code : (existing?.saved_code ?? null),
       quiz_score: hasQuizScore ? quiz_score : (existing?.quiz_score ?? null),
       updated_at: new Date().toISOString(),
+      deleted_at: null,
     }
     const { error } = await db.from('user_progress').upsert(row, { onConflict: conflictKey })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -80,6 +83,7 @@ export async function POST(req: NextRequest) {
       saved_code,
       quiz_score,
       updated_at: new Date().toISOString(),
+      deleted_at: null,
     },
     { onConflict: conflictKey }
   )

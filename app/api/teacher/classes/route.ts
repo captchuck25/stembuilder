@@ -32,6 +32,7 @@ export async function GET() {
     .from('classes')
     .select('*')
     .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
 
   const result = await Promise.all(
@@ -40,6 +41,7 @@ export async function GET() {
         .from('enrollments')
         .select('*', { count: 'exact', head: true })
         .eq('class_id', cls.id)
+        .is('deleted_at', null)
       return { ...cls, studentCount: count ?? 0 }
     })
   )

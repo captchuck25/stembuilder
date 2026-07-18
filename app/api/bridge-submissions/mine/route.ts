@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     .select('assignment_id, cost, passed, submitted_at')
     .eq('assignment_id', assignmentId)
     .eq('student_id', session.user.id)
+    .is('deleted_at', null)
     .maybeSingle()
 
   return NextResponse.json(data ?? null)

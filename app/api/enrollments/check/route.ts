@@ -11,6 +11,7 @@ export async function GET() {
     .from('enrollments')
     .select('*', { count: 'exact', head: true })
     .eq('student_id', session.user.id)
+    .is('deleted_at', null)
 
   return NextResponse.json({ enrolled: (count ?? 0) > 0 })
 }

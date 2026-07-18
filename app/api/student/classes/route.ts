@@ -11,11 +11,12 @@ export async function GET() {
     .from('enrollments')
     .select('class_id')
     .eq('student_id', session.user.id)
+    .is('deleted_at', null)
 
   if (!enrollments?.length) return NextResponse.json([])
 
   const classIds = enrollments.map((e: { class_id: string }) => e.class_id)
-  const { data: classes } = await db.from('classes').select('*').in('id', classIds)
+  const { data: classes } = await db.from('classes').select('*').in('id', classIds).is('deleted_at', null)
 
   const result = await Promise.all(
     (classes ?? []).map(async (cls: { id: string }) => {

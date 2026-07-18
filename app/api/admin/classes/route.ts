@@ -13,6 +13,7 @@ export async function GET() {
   const { data: classes, error } = await db
     .from('classes')
     .select('id, name, join_code, teacher_id, created_at')
+    .is('deleted_at', null)
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -20,14 +21,14 @@ export async function GET() {
   const teacherMap: Record<string, { name: string; email: string }> = {}
   if (teacherIds.length) {
     const { data: teachers } = await db
-      .from('profiles').select('id, name, email').in('id', teacherIds)
+      .from('profiles').select('id, name, email').in('id', teacherIds).is('deleted_at', null)
     for (const t of teachers ?? []) teacherMap[t.id] = { name: t.name, email: t.email }
   }
 
   const result = await Promise.all(
     (classes ?? []).map(async (c: { id: string; name: string; join_code: string; teacher_id: string; created_at: string }) => {
       const { count } = await db
-        .from('enrollments').select('*', { count: 'exact', head: true }).eq('class_id', c.id)
+        .from('enrollments').select('*', { count: 'exact', head: true }).eq('class_id', c.id).is('deleted_at', null)
       return {
         ...c,
         studentCount: count ?? 0,

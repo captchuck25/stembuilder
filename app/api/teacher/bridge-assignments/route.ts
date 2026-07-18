@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).single()
+  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
   if (!cls || cls.teacher_id !== session.user.id)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact', head: true })
       .eq('assignment_id', a.id)
       .eq('passed', true)
+      .is('deleted_at', null)
     return { ...a, completionCount: count ?? 0 }
   }))
 
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).single()
+  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
   if (!cls || cls.teacher_id !== session.user.id)
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

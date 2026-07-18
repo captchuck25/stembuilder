@@ -17,7 +17,8 @@ export async function GET(req: Request) {
   const { data: enrollments } = await db
     .from('enrollments')
     .select('class_id')
-    .eq('student_id', session.user.id);
+    .eq('student_id', session.user.id)
+    .is('deleted_at', null);
 
   if (!enrollments?.length) return NextResponse.json(null);
 

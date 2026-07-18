@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
     .select('id')
     .eq('id', classId)
     .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
     .single()
   if (!cls) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -26,6 +27,7 @@ export async function GET(req: NextRequest) {
     .from('enrollments')
     .select('student_id, profiles(id, name, email)')
     .eq('class_id', classId)
+    .is('deleted_at', null)
 
   if (!enrollments?.length) return NextResponse.json([])
 
@@ -35,6 +37,7 @@ export async function GET(req: NextRequest) {
     .from('stem_sketch_designs')
     .select('id, user_id, name, units, thumbnail, updated_at')
     .in('user_id', studentIds)
+    .is('deleted_at', null)
     .order('updated_at', { ascending: false })
 
   type EnrollmentRow = { student_id: string; profiles: { name: string; email: string }[] | { name: string; email: string } | null }

@@ -20,6 +20,14 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Data retention & deletion
+
+Deletions are soft (30-day recoverable window), then permanently purged by a
+daily job. Note that Supabase's automated database backups age out separately,
+on Supabase's own rotation, so purged data can persist in backups for up to
+the backup-retention window after the purge. Full details, setup checklist,
+and audit queries: [db/RETENTION.md](db/RETENTION.md).
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
