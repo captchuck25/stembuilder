@@ -6,10 +6,23 @@ import bcrypt from 'bcryptjs'
 
 declare module 'next-auth' {
   interface Session {
-    user: { id: string; email: string; name: string; role: 'teacher' | 'student' | 'admin'; username?: string; image?: string }
+    user: {
+      id: string
+      email: string
+      name: string
+      // null while a first-time Google user has authenticated but not yet
+      // completed onboarding (no profile row exists yet).
+      role: 'teacher' | 'student' | 'admin' | null
+      username?: string
+      image?: string
+      needsOnboarding?: boolean
+      // Google account id, present so /api/onboarding/complete can attach the
+      // Google identity to the profile it creates.
+      googleSub?: string
+    }
   }
   interface User {
-    role?: 'teacher' | 'student' | 'admin'
+    role?: 'teacher' | 'student' | 'admin' | null
     username?: string
   }
 }
@@ -71,30 +84,59 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           await db.from('profiles').update({ google_id: account.providerAccountId }).eq('id', existing.id)
           user.id = existing.id
           user.role = existing.role
-        } else {
-          const { data: created } = await db
-            .from('profiles')
-            .insert({
-              email: user.email!,
-              name: user.name ?? user.email!.split('@')[0],
-              google_id: account.providerAccountId,
-              role: 'student',
-            })
-            .select('id, role')
-            .single()
-          if (created) { user.id = created.id; user.role = created.role }
         }
+        // First Google login: deliberately NO profile creation. The user is
+        // authenticated but must pick a role and onboarding path first —
+        // /api/onboarding/complete creates the profile (with the correct
+        // account_origin / affirmation / age gate), so an abandoned onboarding
+        // leaves no orphaned rows. user.role stays undefined, which the jwt
+        // callback below turns into needsOnboarding.
       }
       return true
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, account, trigger }) {
+      if (account?.provider === 'google') token.googleSub = account.providerAccountId
+
       if (user) {
-        token.id = user.id
-        token.role = user.role ?? 'student'
+        if (user.role) {
+          token.id = user.id
+          token.role = user.role
+          token.needsOnboarding = false
+        } else {
+          token.id = undefined
+          token.role = null
+          token.needsOnboarding = true
+        }
         token.picture = user.image
         token.username = user.username
         token.authTime = Math.floor(Date.now() / 1000)
         token.revalidatedAt = Date.now()
+        return token
+      }
+
+      // Onboarding just completed (client called useSession().update()):
+      // adopt the freshly created profile into this session's token.
+      if (trigger === 'update' && token.needsOnboarding) {
+        const filters = [
+          token.googleSub ? `google_id.eq.${token.googleSub}` : null,
+          token.email ? `email.eq.${token.email}` : null,
+        ].filter(Boolean).join(',')
+        if (filters) {
+          const { data: profile } = await adminDb()
+            .from('profiles')
+            .select('id, role, username')
+            .or(filters)
+            .is('deleted_at', null)
+            .maybeSingle()
+          if (profile) {
+            token.id = profile.id
+            token.role = profile.role
+            token.username = profile.username ?? undefined
+            token.needsOnboarding = false
+            token.authTime = Math.floor(Date.now() / 1000)
+            token.revalidatedAt = Date.now()
+          }
+        }
         return token
       }
 
@@ -125,10 +167,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token
     },
     async session({ session, token }) {
-      session.user.id = token.id as string
-      session.user.role = token.role as 'teacher' | 'student' | 'admin'
+      // id is '' (matches no profile row) until onboarding creates the profile.
+      session.user.id = (token.id as string | undefined) ?? ''
+      session.user.role = (token.role as 'teacher' | 'student' | 'admin' | null) ?? null
       session.user.image = token.picture as string | undefined
       session.user.username = token.username as string | undefined
+      session.user.needsOnboarding = token.needsOnboarding === true
+      session.user.googleSub = token.googleSub as string | undefined
       return session
     },
   },

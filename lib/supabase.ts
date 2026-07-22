@@ -15,6 +15,12 @@ export interface Profile {
   role: 'teacher' | 'student' | 'admin'
   password_hash?: string
   google_id?: string
+  // Consent basis for student accounts (compliance evidence, migration 0009):
+  // rostered/class_code = school consent; independent = 13+ age-gated.
+  account_origin?: 'rostered' | 'class_code' | 'independent' | null
+  age_verified_13_plus?: boolean | null   // independent path only
+  age_verified_at?: string | null         // when the 13+ check passed (never the DOB)
+  email_verified_at?: string | null       // teachers must verify before creating classes
   // Teacher lead-gen details collected at onboarding (all optional).
   district?: string | null
   state?: string | null

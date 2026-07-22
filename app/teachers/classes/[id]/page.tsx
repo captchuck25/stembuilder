@@ -170,6 +170,15 @@ export default function ClassDetailPage() {
   const [deletingClass, setDeletingClass] = useState(false);
   const [removingStudentId, setRemovingStudentId] = useState<string | null>(null);
   const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
+  // Rostering (path A): teacher provisions a username-only account directly
+  // into this class. The one-time temp password is revealed once, like resets.
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [newStudentName, setNewStudentName] = useState("");
+  const [newStudentUsername, setNewStudentUsername] = useState("");
+  const [addingStudent, setAddingStudent] = useState(false);
+  const [addStudentError, setAddStudentError] = useState("");
+  const [addReveal, setAddReveal] = useState<{ name: string; username: string; tempPassword: string } | null>(null);
+  const [copiedAddReveal, setCopiedAddReveal] = useState(false);
   const [resetReveal, setResetReveal] = useState<{ studentId: string; name: string; loginId: string; tempPassword: string } | null>(null);
   const [copiedReveal, setCopiedReveal] = useState(false);
 
@@ -482,6 +491,34 @@ export default function ClassDetailPage() {
     } finally {
       setResettingStudentId(null);
     }
+  }
+
+  async function handleAddStudent(e: React.FormEvent) {
+    e.preventDefault();
+    if (addingStudent || !newStudentName.trim() || !newStudentUsername.trim()) return;
+    setAddingStudent(true);
+    setAddStudentError("");
+    setAddReveal(null);
+    const res = await fetch(`/api/teacher/classes/${classId}/students`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newStudentName.trim(), username: newStudentUsername.trim() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setAddStudentError(data.error ?? "Could not add the student.");
+      setAddingStudent(false);
+      return;
+    }
+    setStudents(prev => [...prev, {
+      id: data.id, name: newStudentName.trim(), email: null, username: data.username,
+      completedChallenges: 0, totalChallenges: 0,
+    }]);
+    setAddReveal({ name: newStudentName.trim(), username: data.username, tempPassword: data.tempPassword });
+    setCopiedAddReveal(false);
+    setNewStudentName("");
+    setNewStudentUsername("");
+    setAddingStudent(false);
   }
 
   async function handleRemoveStudent(studentId: string) {
@@ -1424,9 +1461,78 @@ export default function ClassDetailPage() {
 
                 {/* Student roster */}
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 10 }}>
-                    Students ({students.length})
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                    marginBottom: 10, maxWidth: 560 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#111" }}>
+                      Students ({students.length})
+                    </div>
+                    <button
+                      onClick={() => { setShowAddStudent(v => !v); setAddStudentError(""); }}
+                      style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #bbf7d0",
+                        background: "#fff", color: "#16a34a", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                      {showAddStudent ? "Close" : "+ Add student"}
+                    </button>
                   </div>
+
+                  {showAddStudent && (
+                    <div style={{ maxWidth: 560, marginBottom: 12, padding: "14px 16px", borderRadius: 12,
+                      border: "2px solid #bbf7d0", background: "#f0fdf4" }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "#166534", marginBottom: 4 }}>
+                        Add a student to this class
+                      </div>
+                      <div style={{ fontSize: 12, color: "#15803d", marginBottom: 10 }}>
+                        Creates a username-only account (no email) already enrolled here.
+                        You&apos;ll get a temporary password to hand to the student.
+                      </div>
+                      <form onSubmit={handleAddStudent} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <input value={newStudentName} onChange={e => setNewStudentName(e.target.value)}
+                          placeholder="Name (e.g. Sam K.)"
+                          style={{ flex: 1, minWidth: 150, padding: "8px 12px", borderRadius: 8,
+                            border: "2px solid #d1fae5", fontSize: 13, color: "#111", outline: "none" }} />
+                        <input value={newStudentUsername}
+                          onChange={e => setNewStudentUsername(e.target.value.toLowerCase())}
+                          placeholder="username" autoCapitalize="none" autoCorrect="off"
+                          style={{ flex: 1, minWidth: 130, padding: "8px 12px", borderRadius: 8,
+                            border: "2px solid #d1fae5", fontSize: 13, color: "#111", outline: "none" }} />
+                        <button type="submit"
+                          disabled={addingStudent || !newStudentName.trim() || !newStudentUsername.trim()}
+                          style={{ padding: "8px 18px", borderRadius: 8, border: "none",
+                            background: newStudentName.trim() && newStudentUsername.trim() ? "#16a34a" : "#cbd5e1",
+                            color: "#fff", fontWeight: 800, fontSize: 13,
+                            cursor: addingStudent ? "not-allowed" : "pointer" }}>
+                          {addingStudent ? "Adding…" : "Add"}
+                        </button>
+                      </form>
+                      {addStudentError && (
+                        <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 600, marginTop: 8 }}>{addStudentError}</div>
+                      )}
+                      {addReveal && (
+                        <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10,
+                          border: "1px solid #86efac", background: "#fff" }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: "#166534", marginBottom: 6 }}>
+                            {addReveal.name} is in — copy the password now, it won&apos;t be shown again.
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 12, color: "#166534" }}>
+                              Login: <strong>{addReveal.username}</strong>
+                            </span>
+                            <code style={{ fontSize: 14, fontWeight: 800, background: "#f0fdf4",
+                              border: "1px solid #86efac", borderRadius: 8, padding: "5px 10px",
+                              color: "#111", letterSpacing: 0.5 }}>
+                              {addReveal.tempPassword}
+                            </code>
+                            <button type="button"
+                              onClick={() => { navigator.clipboard?.writeText(addReveal.tempPassword); setCopiedAddReveal(true); }}
+                              style={{ padding: "5px 12px", borderRadius: 8, border: "2px solid #16a34a",
+                                background: "#fff", color: "#16a34a", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                              {copiedAddReveal ? "Copied ✓" : "Copy"}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {students.length === 0 ? (
                     <div style={{ fontSize: 13, color: "#aaa", fontStyle: "italic" }}>No students enrolled yet.</div>
                   ) : (

@@ -6,8 +6,11 @@ import { adminDb } from '@/lib/db.server'
 const USERNAME_RE = /^[a-z0-9._-]{3,20}$/
 
 // POST /api/auth/register-student  { name, username, password, joinCode }
-// Creates a username-only student account (no email) and enrolls it in the
-// class identified by joinCode. The client then signs in with username+password.
+//
+// Path B (class code): school-consent basis, so no age is collected — any age
+// is allowed. The create_student_account RPC validates the class and creates
+// profile + enrollment in ONE transaction (account_origin = 'class_code'), so
+// an invalid code creates nothing and a created account always has its class.
 export async function POST(req: NextRequest) {
   const { name, username, password, joinCode } = await req.json()
 
@@ -28,38 +31,38 @@ export async function POST(req: NextRequest) {
 
   const db = adminDb()
 
-  // Resolve the class first so a bad code never leaves an orphan account behind.
-  const { data: cls } = await db
-    .from('classes')
-    .select('id')
-    .eq('join_code', String(joinCode).trim().toUpperCase())
-    .is('deleted_at', null)
-    .maybeSingle()
-  if (!cls) {
-    return NextResponse.json({ error: 'Class not found. Check the code with your teacher.' }, { status: 404 })
-  }
-
   // Deliberately NOT filtered by deleted_at: a soft-deleted account keeps its
-  // username reserved during the 30-day retention window (the unique index
-  // would reject the insert anyway — this just gives a clean error).
+  // username reserved during the 30-day retention window. The RPC's unique
+  // index enforces this anyway — the pre-check just gives a clean early error.
   const { data: taken } = await db.from('profiles').select('id').eq('username', uname).maybeSingle()
   if (taken) {
     return NextResponse.json({ error: 'That username is taken. Try another.' }, { status: 409 })
   }
 
   const hash = await bcrypt.hash(password, 12)
-  const { data: created, error } = await db
-    .from('profiles')
-    .insert({ name: name.trim(), username: uname, password_hash: hash, role: 'student' })
-    .select('id')
-    .single()
+  const { error } = await db.rpc('create_student_account', {
+    p_name: name.trim(),
+    p_email: null,
+    p_username: uname,
+    p_password_hash: hash,
+    p_google_id: null,
+    p_join_code: String(joinCode),
+    p_class_id: null,
+    p_origin: 'class_code',
+  })
 
-  // A unique-index violation here means the username was claimed in a race.
-  if (error || !created) {
-    return NextResponse.json({ error: 'That username is taken. Try another.' }, { status: 409 })
+  if (error) {
+    if (error.message.includes('class_not_found')) {
+      return NextResponse.json(
+        { error: "That code didn't match a class. Ask your teacher for your class code." },
+        { status: 404 },
+      )
+    }
+    if (error.message.includes('identifier_taken')) {
+      return NextResponse.json({ error: 'That username is taken. Try another.' }, { status: 409 })
+    }
+    return NextResponse.json({ error: 'Could not create the account. Please try again.' }, { status: 500 })
   }
-
-  await db.from('enrollments').insert({ class_id: cls.id, student_id: created.id })
 
   return NextResponse.json({ ok: true, username: uname })
 }

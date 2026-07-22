@@ -5,6 +5,7 @@ import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { TEACHER_AFFIRMATION_TEXT } from "@/lib/compliance";
 
 const INPUT: React.CSSProperties = {
   width: "100%", padding: "10px 14px", borderRadius: 10, border: "2px solid #e5e7eb",
@@ -26,15 +27,22 @@ export default function TeacherSignUpPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [agreed, setAgreed] = useState(false);
+  const [affirmed, setAffirmed] = useState(false);
 
   // A signed-in user doesn't need this page — send them to their dashboard.
+  // (A Google user who hasn't finished onboarding is bounced to /onboarding by
+  // the middleware instead.)
   useEffect(() => {
-    if (status === "authenticated" && session?.user) router.replace("/dashboard");
+    if (status === "authenticated" && session?.user && !session.user.needsOnboarding) {
+      router.replace("/dashboard");
+    }
   }, [status, session?.user, router]);
 
   async function handleGoogle() {
-    if (!agreed) return;
+    if (!agreed || !affirmed) return;
     setLoading(true);
+    // The affirmation checked here is UI-only — the server requires it again
+    // at /api/onboarding/complete, where the account actually gets created.
     await signIn("google", { callbackUrl: "/onboarding?role=teacher" });
   }
 
@@ -42,10 +50,10 @@ export default function TeacherSignUpPage() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const res = await fetch("/api/auth/register", {
+    const res = await fetch("/api/auth/register-teacher", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, affirmed }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -53,6 +61,9 @@ export default function TeacherSignUpPage() {
       setLoading(false);
       return;
     }
+    // Dev/preview without an email provider: surface the verify link so the
+    // flow stays testable end-to-end (mirrors the password-reset behavior).
+    if (data.devVerifyUrl) console.info("[dev] verify email:", data.devVerifyUrl);
     await signIn("credentials", { email, password, redirect: false });
     router.push("/onboarding?role=teacher");
   }
@@ -76,7 +87,7 @@ export default function TeacherSignUpPage() {
           </p>
         </div>
 
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
           <input type="checkbox" id="agree" checked={agreed} onChange={e => setAgreed(e.target.checked)}
             style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
           <label htmlFor="agree" style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.5, cursor: "pointer" }}>
@@ -87,7 +98,18 @@ export default function TeacherSignUpPage() {
           </label>
         </div>
 
-        <button onClick={handleGoogle} disabled={loading || !agreed}
+        {/* Educator affirmation — recorded server-side with a timestamp and
+            terms version; creating a teacher account requires it. */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 20,
+          background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 12px" }}>
+          <input type="checkbox" id="affirm" checked={affirmed} onChange={e => setAffirmed(e.target.checked)}
+            style={{ marginTop: 2, width: 16, height: 16, cursor: "pointer", flexShrink: 0 }} />
+          <label htmlFor="affirm" style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, cursor: "pointer" }}>
+            {TEACHER_AFFIRMATION_TEXT}
+          </label>
+        </div>
+
+        <button onClick={handleGoogle} disabled={loading || !agreed || !affirmed}
           style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: "2px solid #e5e7eb",
             background: "#fff", cursor: agreed ? "pointer" : "not-allowed", display: "flex", alignItems: "center",
             justifyContent: "center", gap: 10, fontSize: 15, fontWeight: 700, color: agreed ? "#111" : "#9ca3af",
@@ -129,10 +151,10 @@ export default function TeacherSignUpPage() {
               {error}
             </div>
           )}
-          <button type="submit" disabled={loading || !agreed}
+          <button type="submit" disabled={loading || !agreed || !affirmed}
             style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: "none",
-              background: agreed ? "#1f1f1f" : "#9ca3af", color: "#fff", fontSize: 15, fontWeight: 700,
-              cursor: loading || !agreed ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
+              background: agreed && affirmed ? "#1f1f1f" : "#9ca3af", color: "#fff", fontSize: 15, fontWeight: 700,
+              cursor: loading || !agreed || !affirmed ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
             {loading ? "Creating account…" : "Create Teacher Account"}
           </button>
         </form>

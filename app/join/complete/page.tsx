@@ -18,7 +18,7 @@ const CARD: React.CSSProperties = {
 function Complete() {
   const router = useRouter();
   const params = useSearchParams();
-  const { status } = useSession();
+  const { status, update } = useSession();
   const code = params.get("code") ?? "";
   const [error, setError] = useState("");
 
@@ -29,16 +29,24 @@ function Complete() {
 
     let cancelled = false;
     (async () => {
-      const res = await fetch("/api/student/classes/join", {
+      // Goes through the onboarding gate: a FIRST-TIME Google user gets their
+      // student profile + enrollment created atomically here (origin
+      // 'class_code'); an existing student is simply enrolled. 409 covers
+      // "already set up"/already enrolled — treat as success.
+      const res = await fetch("/api/onboarding/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ role: "student", path: "class_code", code }),
       });
       if (cancelled) return;
-      // 409 = already enrolled in this class — that's fine, treat as success.
-      if (res.ok || res.status === 409) { router.replace("/student/dashboard"); return; }
+      if (res.ok || res.status === 409) {
+        // Refresh the JWT so it picks up the newly created profile.
+        await update();
+        if (!cancelled) router.replace("/student/dashboard");
+        return;
+      }
       const data = await res.json().catch(() => ({}));
-      setError(data.error ?? "We couldn't add you to that class. Check the code with your teacher.");
+      setError(data.error ?? "We couldn't add you to that class. Ask your teacher for your class code.");
     })();
     return () => { cancelled = true; };
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps

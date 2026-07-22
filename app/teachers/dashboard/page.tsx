@@ -25,6 +25,9 @@ export default function TeacherDashboard() {
   const [showCreate, setShowCreate] = useState(false);
   const [newClassName, setNewClassName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [emailUnverified, setEmailUnverified] = useState(false);
+  const [resendState, setResendState] = useState<"" | "sending" | "sent">("");
 
   useEffect(() => {
     if (status === "loading") return;
@@ -34,6 +37,8 @@ export default function TeacherDashboard() {
     getProfile(session?.user?.id).then(profile => {
       if (!profile) { router.push("/onboarding"); return; }
       if (profile.role !== "teacher") { router.push("/tools/code-lab"); return; }
+      // Unverified teachers can look around but can't create classes yet.
+      setEmailUnverified(!!profile.email && !profile.email_verified_at);
       loadClasses(session?.user?.id);
       // One-time migration: fix turtle locks in classes that were auto-seeded with the
       // wrong (challenge-only) indexing before we corrected it. Only touches classes
@@ -65,6 +70,7 @@ export default function TeacherDashboard() {
   async function createClass() {
     if (!newClassName.trim()) return;
     setCreating(true);
+    setCreateError("");
     const res = await fetch("/api/teacher/classes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,10 +80,21 @@ export default function TeacherDashboard() {
     if (res.ok) {
       setClasses(prev => [data, ...prev]);
       setStudentCounts(prev => ({ ...prev, [data.id]: 0 }));
+      setNewClassName("");
+      setShowCreate(false);
+    } else {
+      if (data.code === "email_unverified") setEmailUnverified(true);
+      setCreateError(data.error ?? "Could not create the class.");
     }
-    setNewClassName("");
-    setShowCreate(false);
     setCreating(false);
+  }
+
+  async function resendVerification() {
+    setResendState("sending");
+    const res = await fetch("/api/auth/resend-verification", { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    if (data.devVerifyUrl) console.info("[dev] verify email:", data.devVerifyUrl);
+    setResendState(res.ok ? "sent" : "");
   }
 
   if (status === "loading" || loading) return (
@@ -122,6 +139,28 @@ export default function TeacherDashboard() {
             </button>
           </div>
 
+          {/* Email verification notice — class creation is gated until verified */}
+          {emailUnverified && (
+            <div style={{ ...CARD, borderColor: "#b45309", background: "#fffbeb", padding: "16px 22px",
+              marginBottom: 28, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 24 }}>📬</span>
+              <div style={{ flex: 1, minWidth: 240 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#92400e" }}>
+                  Verify your email to create classes
+                </div>
+                <div style={{ fontSize: 13, color: "#a16207" }}>
+                  We sent a verification link to your inbox. Click it to unlock class creation.
+                </div>
+              </div>
+              <button onClick={resendVerification} disabled={resendState !== ""}
+                style={{ padding: "9px 18px", borderRadius: 10, border: "2px solid #b45309",
+                  background: resendState === "sent" ? "#fef3c7" : "#fff", color: "#92400e",
+                  fontWeight: 800, fontSize: 13, cursor: resendState === "" ? "pointer" : "default" }}>
+                {resendState === "sent" ? "Sent ✓" : resendState === "sending" ? "Sending…" : "Resend email"}
+              </button>
+            </div>
+          )}
+
           {/* Create class modal */}
           {showCreate && (
             <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
@@ -143,8 +182,14 @@ export default function TeacherDashboard() {
                     fontSize: 14, fontWeight: 600, outline: "none", boxSizing: "border-box",
                     fontFamily: "system-ui,sans-serif", color: "#111", background: "#fff" }}
                 />
+                {createError && (
+                  <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
+                    padding: "10px 14px", fontSize: 13, color: "#dc2626", fontWeight: 600, marginTop: 12 }}>
+                    {createError}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-                  <button onClick={() => { setShowCreate(false); setNewClassName(""); }}
+                  <button onClick={() => { setShowCreate(false); setNewClassName(""); setCreateError(""); }}
                     style={{ flex: 1, padding: "10px", borderRadius: 10, border: "2px solid #e0e0e0",
                       background: "#f5f5f5", fontWeight: 700, fontSize: 14, cursor: "pointer", color: "#555" }}>
                     Cancel

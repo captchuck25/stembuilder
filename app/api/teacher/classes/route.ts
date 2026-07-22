@@ -58,6 +58,21 @@ export async function POST(req: NextRequest) {
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
   const db = adminDb()
+
+  // Teachers must verify their email before they can create classes (and thus
+  // enroll students). Google-created accounts are verified at creation.
+  const { data: me } = await db
+    .from('profiles')
+    .select('email_verified_at')
+    .eq('id', session.user.id)
+    .is('deleted_at', null)
+    .maybeSingle()
+  if (!me?.email_verified_at) {
+    return NextResponse.json(
+      { error: 'Verify your email to create classes — check your inbox for the link.', code: 'email_unverified' },
+      { status: 403 },
+    )
+  }
   const { data, error } = await db
     .from('classes')
     .insert({ teacher_id: session.user.id, name: name.trim(), join_code: generateJoinCode() })
