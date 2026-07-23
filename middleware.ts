@@ -1,10 +1,15 @@
 import { auth } from '@/auth'
 import { NextResponse } from 'next/server'
 
-const protectedRoutes = ['/dashboard', '/mywork', '/onboarding', '/teachers', '/student']
+// /admin/invite is deliberately NOT protected: invite acceptance happens
+// before the recipient has an account. Everything else under /admin requires
+// a session here, and the real role/scope gate is server-side in
+// lib/admin-guard.server.ts on every API call.
+const protectedRoutes = ['/dashboard', '/mywork', '/onboarding', '/teachers', '/student', '/admin']
 
 export default auth((req) => {
-  const isProtected = protectedRoutes.some(r => req.nextUrl.pathname.startsWith(r))
+  const path = req.nextUrl.pathname
+  const isProtected = protectedRoutes.some(r => path.startsWith(r)) && !path.startsWith('/admin/invite')
   if (isProtected && !req.auth) {
     return NextResponse.redirect(new URL('/sign-in', req.url))
   }
@@ -16,5 +21,5 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ['/dashboard(.*)', '/mywork(.*)', '/onboarding(.*)', '/teachers(.*)', '/student(.*)'],
+  matcher: ['/dashboard(.*)', '/mywork(.*)', '/onboarding(.*)', '/teachers(.*)', '/student(.*)', '/admin(.*)'],
 }

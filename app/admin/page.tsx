@@ -3,6 +3,7 @@
 import { useSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import { isAdmin } from "@/lib/roles";
 
@@ -58,9 +59,14 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (status === "loading") return;
+    // District admins get the district console, not the platform dashboard.
+    if (session?.user?.role === "district_admin" && session.user.districtId) {
+      router.replace(`/admin/districts/${session.user.districtId}`);
+      return;
+    }
     if (!isAdmin(session?.user?.role)) { router.push("/"); return; }
     loadStats().then(() => setLoading(false));
-  }, [status, session?.user?.id, session?.user?.role]);
+  }, [status, session?.user?.id, session?.user?.role, session?.user?.districtId, router]);
 
   async function openPanel(next: Panel) {
     if (panel === next) { setPanel(null); return; }
@@ -153,13 +159,21 @@ export default function AdminPage() {
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "48px 40px" }}>
 
           {/* Header */}
-          <div style={{ ...CARD, marginBottom: 32 }}>
-            <h1 style={{ fontSize: 28, fontWeight: 900, color: "#111", margin: "0 0 4px" }}>
-              Admin Dashboard
-            </h1>
-            <p style={{ fontSize: 14, color: "#666", margin: 0 }}>
-              Site-wide statistics for STEM Builder
-            </p>
+          <div style={{ ...CARD, marginBottom: 32, display: "flex", alignItems: "center",
+            justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div>
+              <h1 style={{ fontSize: 28, fontWeight: 900, color: "#111", margin: "0 0 4px" }}>
+                Admin Dashboard
+              </h1>
+              <p style={{ fontSize: 14, color: "#666", margin: 0 }}>
+                Site-wide statistics for STEM Builder
+              </p>
+            </div>
+            <Link href="/admin/districts" style={{ background: "#1f1f1f", color: "#fff",
+              borderRadius: 12, padding: "12px 22px", fontSize: 14, fontWeight: 800,
+              textDecoration: "none" }}>
+              🏛️ Districts →
+            </Link>
           </div>
 
           {/* Stat cards */}
