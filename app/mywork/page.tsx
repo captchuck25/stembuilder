@@ -220,6 +220,8 @@ interface ArcadeRow { level_idx: number; challenge_idx: number; completed: boole
 
 function ArcadeLabSection() {
   const [rows, setRows] = useState<ArcadeRow[] | null>(null);
+  const [sharingSlot, setSharingSlot] = useState<number | null>(null);
+  const [shareMsg, setShareMsg] = useState<Record<number, { ok: boolean; text: string }>>({});
 
   useEffect(() => {
     fetch("/api/progress?tool=arcade-lab")
@@ -258,6 +260,29 @@ function ArcadeLabSection() {
   const shapeLabel = (d: GameDef) =>
     d.cols * TILE > VIEW_W ? "Long (side-scroller)" : d.rows * TILE > VIEW_H ? "Tall (climber)" : "Classic (one screen)";
   const count = (d: GameDef, t: string) => d.objects.filter(o => o.type === t).length;
+
+  async function shareToClass(slot: number, def: GameDef) {
+    if (!confirm(`Share "${def.title || "Untitled level"}" with your class?\n\nYou can have ONE game in the Class Arcade — this replaces any game you've already published (and resets its leaderboard).`)) return;
+    setSharingSlot(slot);
+    try {
+      const res = await fetch("/api/arcade/games", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: def.title, data: def, bot, slot }),
+      });
+      const data = await res.json().catch(() => null);
+      setShareMsg(m => ({
+        ...m,
+        [slot]: res.ok
+          ? { ok: true, text: "✓ It's in the Class Arcade!" }
+          : { ok: false, text: data?.message ?? "Could not share — try again." },
+      }));
+    } catch {
+      setShareMsg(m => ({ ...m, [slot]: { ok: false, text: "Could not share — check your connection." } }));
+    } finally {
+      setSharingSlot(null);
+    }
+  }
 
   return (
     <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
@@ -348,10 +373,31 @@ function ArcadeLabSection() {
                         </span>
                       </div>
                     </Link>
-                    <Link href={href}
-                      style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none", flexShrink: 0 }}>
-                      Open →
-                    </Link>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end", flexShrink: 0 }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                        <button
+                          onClick={() => shareToClass(slot, def)}
+                          disabled={sharingSlot === slot || !beaten}
+                          title={beaten
+                            ? "Publish this level to your Class Arcade"
+                            : "Beat this level yourself in Free Build before sharing — every arcade game must be winnable!"}
+                          style={{ padding: "6px 14px", borderRadius: 8, fontWeight: 800, fontSize: 12,
+                            border: "none", background: beaten ? "#f59e0b" : "#e5e7eb",
+                            color: beaten ? "#fff" : "#9ca3af",
+                            cursor: sharingSlot === slot || !beaten ? "not-allowed" : "pointer" }}>
+                          {sharingSlot === slot ? "Sharing…" : "🚀 Share to class"}
+                        </button>
+                        <Link href={href}
+                          style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none" }}>
+                          Open →
+                        </Link>
+                      </div>
+                      {shareMsg[slot] && (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: shareMsg[slot].ok ? "#16a34a" : "#dc2626" }}>
+                          {shareMsg[slot].text}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
