@@ -7,6 +7,7 @@ import { CompiledRules, GameDef, TILE, VIEW_W, VIEW_H, emptyRules, validDims, wi
 import { initGame, stepGame, emptyInput, GameState, KEY_LOOKUP } from '../../engine/physics';
 import { renderGame, renderMinimap, cameraFor } from '../../engine/render';
 import { compileScripts } from '../../engine/blocks';
+import RuleSummary from '../../components/RuleSummary';
 import { BotConfig, defaultBot, loadBotLocal, fetchCloudBot, sanitizeBot } from '../../engine/bot';
 import { renderBotPortrait } from '../../engine/render';
 import {
@@ -335,8 +336,17 @@ export default function PlayArcadeGamePage() {
               )}
             </div>
 
-            {/* Leaderboard */}
-            <div style={{ ...CARD, padding: '16px 18px', width: 260, flexShrink: 0 }}>
+            {/* Rules + leaderboard column */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: 270, flexShrink: 0 }}>
+            {loaded && (
+              <div style={{ ...CARD, padding: '14px 16px' }}>
+                <div style={{ fontSize: 13, fontWeight: 900, color: '#e2e8f0', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+                  📜 The Rules
+                </div>
+                <RuleSummary rules={rulesRef.current} />
+              </div>
+            )}
+            <div style={{ ...CARD, padding: '16px 18px' }}>
               <div style={{ fontSize: 13, fontWeight: 900, color: '#e2e8f0', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
                 ⏱ Fastest Runs
               </div>
@@ -359,6 +369,7 @@ export default function PlayArcadeGamePage() {
                   ))}
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>

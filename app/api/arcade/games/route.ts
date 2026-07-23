@@ -100,14 +100,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Certified beatable: the author must have beaten their own level
+  // Certified beatable: the author must have beaten this save slot's level
+  const slot = Number.isInteger(body?.slot) && body.slot >= 0 && body.slot < 6 ? body.slot : 0;
   const { data: beaten } = await db
     .from('user_progress')
     .select('completed')
     .eq('user_id', session.user.id)
     .eq('tool', 'arcade-lab')
     .eq('level_idx', 0)
-    .eq('challenge_idx', 0)
+    .eq('challenge_idx', slot)
     .maybeSingle();
   if (!beaten?.completed) {
     return NextResponse.json({ error: 'not_beaten', message: 'Beat your own level in ▶ Play before publishing — every arcade game must be winnable!' }, { status: 412 });

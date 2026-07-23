@@ -229,7 +229,6 @@ function ArcadeLabSection() {
 
   const missionRows = (rows ?? []).filter(r => r.level_idx === 1 && r.challenge_idx >= 0 && r.completed);
   const unitRow = (rows ?? []).find(r => r.level_idx === 1 && r.challenge_idx === -1);
-  const draftRow = (rows ?? []).find(r => r.level_idx === 0 && r.challenge_idx === 0 && r.saved_code);
   const botRow = (rows ?? []).find(r => r.level_idx === 2 && r.challenge_idx === 0 && r.saved_code);
 
   const missionsDone = missionRows.length;
@@ -237,11 +236,18 @@ function ArcadeLabSection() {
   const quizScore = unitRow?.quiz_score ?? null;
   const certified = unitRow?.completed ?? false;
 
-  let draft: GameDef | null = null;
-  try {
-    const parsed = draftRow?.saved_code ? JSON.parse(draftRow.saved_code) : null;
-    if (parsed && Array.isArray(parsed.objects) && validDims(parsed.cols, parsed.rows)) draft = parsed as GameDef;
-  } catch { /* ignore */ }
+  // Every save slot with a design in it (level 0, challenge = slot 0..5)
+  const designs: { slot: number; def: GameDef; beaten: boolean }[] = [];
+  for (const r of rows ?? []) {
+    if (r.level_idx !== 0 || r.challenge_idx < 0 || r.challenge_idx > 5 || !r.saved_code) continue;
+    try {
+      const parsed = JSON.parse(r.saved_code);
+      if (parsed && Array.isArray(parsed.objects) && validDims(parsed.cols, parsed.rows)) {
+        designs.push({ slot: r.challenge_idx, def: parsed as GameDef, beaten: !!r.completed });
+      }
+    } catch { /* ignore */ }
+  }
+  designs.sort((a, b) => a.slot - b.slot);
 
   let bot: BotConfig = defaultBot();
   try {
@@ -249,10 +255,9 @@ function ArcadeLabSection() {
     if (parsed) bot = parsed;
   } catch { /* ignore */ }
 
-  const shapeLabel = draft
-    ? (draft.cols * TILE > VIEW_W ? "Long (side-scroller)" : draft.rows * TILE > VIEW_H ? "Tall (climber)" : "Classic (one screen)")
-    : "";
-  const count = (t: string) => draft?.objects.filter(o => o.type === t).length ?? 0;
+  const shapeLabel = (d: GameDef) =>
+    d.cols * TILE > VIEW_W ? "Long (side-scroller)" : d.rows * TILE > VIEW_H ? "Tall (climber)" : "Classic (one screen)";
+  const count = (d: GameDef, t: string) => d.objects.filter(o => o.type === t).length;
 
   return (
     <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
@@ -299,50 +304,58 @@ function ArcadeLabSection() {
         )}
       </div>
 
-      {/* Free Build level */}
+      {/* Free Build levels (save slots) */}
       <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 14 }}>
-        <div style={{ ...SECTION_LABEL, marginBottom: 10 }}>My level design</div>
+        <div style={{ ...SECTION_LABEL, marginBottom: 10 }}>My level designs</div>
         {rows === null ? (
           <p style={{ fontSize: 13, color: "#aaa", margin: 0, fontWeight: 600 }}>Loading…</p>
-        ) : !draft ? (
+        ) : designs.length === 0 ? (
           <div style={{ textAlign: "center", padding: "14px 0", color: "#aaa" }}>
-            <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 600 }}>No level designed yet.</p>
+            <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 600 }}>No levels designed yet.</p>
             <Link href="/tools/arcade-lab/create" style={{ fontSize: 13, color: "#7c3aed", fontWeight: 700, textDecoration: "none" }}>
               Open Free Build →
             </Link>
           </div>
         ) : (
-          <div style={{ background: "#fafafa", border: "2px solid #e5e7eb", borderRadius: 12,
-            padding: "14px 18px", transition: "border-color 150ms" }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = "#7c3aed")}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = "#e5e7eb")}>
-            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-              <Link href="/tools/arcade-lab/create" style={{ flexShrink: 0 }}>
-                <ArcadeThumb def={draft} />
-              </Link>
-              <Link href="/tools/arcade-lab/create" style={{ textDecoration: "none", flex: 1, minWidth: 180 }}>
-                <div style={{ fontSize: 15, fontWeight: 900, color: "#111", marginBottom: 6 }}>
-                  {draft.title || "Untitled level"}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {designs.map(({ slot, def, beaten }) => {
+              const href = `/tools/arcade-lab/create?slot=${slot}`;
+              return (
+                <div key={slot} style={{ background: "#fafafa", border: "2px solid #e5e7eb", borderRadius: 12,
+                  padding: "14px 18px", transition: "border-color 150ms" }}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = "#7c3aed")}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = "#e5e7eb")}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+                    <Link href={href} style={{ flexShrink: 0 }}>
+                      <ArcadeThumb def={def} />
+                    </Link>
+                    <Link href={href} style={{ textDecoration: "none", flex: 1, minWidth: 180 }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: "#111", marginBottom: 6 }}>
+                        {def.title || "Untitled level"}
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#999", marginLeft: 8 }}>slot {slot + 1}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>{shapeLabel(def)}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>🪙 {count(def, "coin")}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>🔺 {count(def, "spike")}</span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>👾 {count(def, "enemy")}</span>
+                        <span style={{
+                          fontSize: 11, fontWeight: 800, padding: "2px 7px", borderRadius: 6,
+                          background: beaten ? "#f0fdf4" : "#fffbeb",
+                          color: beaten ? "#16a34a" : "#b45309",
+                        }}>
+                          {beaten ? "✓ Beaten by you" : "Not beaten yet"}
+                        </span>
+                      </div>
+                    </Link>
+                    <Link href={href}
+                      style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none", flexShrink: 0 }}>
+                      Open →
+                    </Link>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>{shapeLabel}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>🪙 {count("coin")}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>🔺 {count("spike")}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>👾 {count("enemy")}</span>
-                  <span style={{
-                    fontSize: 11, fontWeight: 800, padding: "2px 7px", borderRadius: 6,
-                    background: draftRow?.completed ? "#f0fdf4" : "#fffbeb",
-                    color: draftRow?.completed ? "#16a34a" : "#b45309",
-                  }}>
-                    {draftRow?.completed ? "✓ Beaten by you" : "Not beaten yet"}
-                  </span>
-                </div>
-              </Link>
-              <Link href="/tools/arcade-lab/create"
-                style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none", flexShrink: 0 }}>
-                Open →
-              </Link>
-            </div>
+              );
+            })}
           </div>
         )}
       </div>

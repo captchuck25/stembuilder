@@ -1,6 +1,7 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import SiteHeader from '@/app/components/SiteHeader';
 import {
@@ -12,6 +13,7 @@ import { renderGame, renderDesign, renderMinimap, cameraFor, DesignHover } from 
 import { compileScripts } from '../engine/blocks';
 import { BotConfig, defaultBot, loadBotLocal, fetchCloudBot } from '../engine/bot';
 import ArcadeWorkspace from '../components/ArcadeWorkspace';
+import RuleSummary from '../components/RuleSummary';
 import { loadUnitProgress, loadCloudUnitProgress, mergeUnitProgress } from '../unit';
 // Shared juice from Block Lab (particles + synth SFX). If the two labs diverge,
 // extract these into a shared lib alongside the unit-shell refactor (M0).
@@ -30,7 +32,21 @@ const CARD: React.CSSProperties = {
 };
 
 const CONFETTI = ['#FFD54A', '#4C8DFF', '#22C55E', '#FF6BD6', '#7DF9FF'];
-const DRAFT_KEY = 'arcade_lab_draft';
+
+// ── Save slots ────────────────────────────────────────────────────────────────
+// Students keep up to 6 level designs. Slot 0 uses the legacy single-draft key
+// so pre-slots work carries over untouched. Cloud storage: user_progress rows
+// (tool arcade-lab, level 0, challenge = slot).
+const SLOT_COUNT = 6;
+const SLOT_PICK_KEY = 'arcade_lab_slot';
+function draftKey(slot: number) {
+  return slot === 0 ? 'arcade_lab_draft' : `arcade_lab_draft_${slot}`;
+}
+function shapeName(d: GameDef): string {
+  if (d.cols * TILE > VIEW_W) return 'Long';
+  if (d.rows * TILE > VIEW_H) return 'Tall';
+  return 'Classic';
+}
 
 type Mode = 'design' | 'code' | 'play';
 type Tool = ObjectType | 'eraser';
@@ -63,9 +79,9 @@ const BACKDROPS: { id: Backdrop; label: string; swatch: string }[] = [
 
 const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap } as const;
 
-function loadLocalDraft(): GameDef | null {
+function loadLocalDraft(slot: number): GameDef | null {
   try {
-    const raw = localStorage.getItem(DRAFT_KEY);
+    const raw = localStorage.getItem(draftKey(slot));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed?.objects) && validDims(parsed?.cols, parsed?.rows)) return withScripts(parsed);
@@ -73,10 +89,11 @@ function loadLocalDraft(): GameDef | null {
   return null;
 }
 
-export default function ArcadeCreatePage() {
+function CreateInner() {
   const { data: session, status: authStatus } = useSession();
   const userId = session?.user?.id ?? null;
   const role = session?.user?.role ?? 'student';
+  const searchParams = useSearchParams();
 
   // ── Unlock gate: Free Build is the reward for finishing the Missions unit,
   //    and teachers can additionally lock it outright (arcade-lab level 1) ──
@@ -111,6 +128,13 @@ export default function ArcadeCreatePage() {
   const [synced, setSynced] = useState(false);
   const [keysUnwired, setKeysUnwired] = useState(false);
   const [publish, setPublish] = useState<{ state: 'idle' | 'busy' | 'done' | 'error'; msg?: string }>({ state: 'idle' });
+  const [slot, setSlot] = useState(0);
+  const [showLevels, setShowLevels] = useState(false);
+  const [slotsMeta, setSlotsMeta] = useState<({ title: string; shape: string } | null)[] | null>(null);
+  const slotRef = useRef(0);
+  // Guards the cloud autosave: a pristine, untouched page must NEVER overwrite
+  // a cloud design (this bug once wiped a saved level with a blank starter)
+  const dirtyRef = useRef(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const miniCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -166,49 +190,127 @@ export default function ArcadeCreatePage() {
   const hasFlag = def.objects.some(o => o.type === 'flag');
   const playable = hasSpawn && hasFlag;
 
-  // ── Draft persistence: local immediately, cloud debounced ──────────────────
-  useEffect(() => {
-    const local = loadLocalDraft();
+  // ── Slot persistence ────────────────────────────────────────────────────────
+  const fetchCloudSlot = useCallback(async (s: number): Promise<GameDef | null> => {
+    try {
+      const res = await fetch('/api/progress?tool=arcade-lab');
+      const rows = res.ok ? await res.json() : [];
+      const row = (rows ?? []).find(
+        (r: { level_idx: number; challenge_idx: number; saved_code?: string }) =>
+          r.level_idx === 0 && r.challenge_idx === s && r.saved_code,
+      );
+      if (row?.saved_code) {
+        const parsed = JSON.parse(row.saved_code);
+        if (Array.isArray(parsed?.objects) && validDims(parsed?.cols, parsed?.rows)) return withScripts(parsed);
+      }
+    } catch { /* ignore */ }
+    return null;
+  }, []);
+
+  const loadSlot = useCallback(async (s: number) => {
+    setSlot(s);
+    slotRef.current = s;
+    try { localStorage.setItem(SLOT_PICK_KEY, String(s)); } catch { /* ignore */ }
+    setPublish({ state: 'idle' });
+    stateRef.current = null;
+    setMode('design');
+    setShowLevels(false);
+    dirtyRef.current = false; // loading is not editing — don't touch the cloud yet
+    const local = loadLocalDraft(s);
     if (local) {
       setDef(local);
       focusSpawn(local);
-      loadedRef.current = true;
+      return;
     }
-  }, [focusSpawn]);
+    const cloud = await fetchCloudSlot(s);
+    if (cloud) {
+      try { localStorage.setItem(draftKey(s), JSON.stringify(cloud)); } catch { /* ignore */ }
+      setDef(cloud);
+      focusSpawn(cloud);
+      return;
+    }
+    const fresh = starterLevel();
+    setDef(fresh);
+    focusSpawn(fresh);
+  }, [fetchCloudSlot, focusSpawn]);
 
+  // Initial slot: ?slot= in the URL wins (My Work links), else last used
   useEffect(() => {
-    if (!userId) return;
-    fetch('/api/progress?tool=arcade-lab')
-      .then(r => (r.ok ? r.json() : []))
-      .then((rows: { level_idx: number; challenge_idx: number; saved_code?: string }[]) => {
-        if (loadedRef.current) return; // local draft wins
-        const row = (rows ?? []).find(r => r.level_idx === 0 && r.challenge_idx === 0 && r.saved_code);
-        if (!row?.saved_code) return;
-        try {
-          const parsed = JSON.parse(row.saved_code);
-          if (Array.isArray(parsed?.objects) && validDims(parsed?.cols, parsed?.rows)) {
-            const loaded = withScripts(parsed);
-            setDef(loaded);
-            focusSpawn(loaded);
-            loadedRef.current = true;
-          }
-        } catch { /* ignore */ }
-      });
-  }, [userId]);
+    let s = Number(searchParams.get('slot'));
+    if (!Number.isInteger(s) || s < 0 || s >= SLOT_COUNT) {
+      try { s = Number(localStorage.getItem(SLOT_PICK_KEY)); } catch { s = 0; }
+      if (!Number.isInteger(s) || s < 0 || s >= SLOT_COUNT) s = 0;
+    }
+    loadSlot(s);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Autosave — only after a real edit this session (dirty guard)
   useEffect(() => {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(def)); } catch { /* ignore */ }
+    if (!dirtyRef.current) return;
+    try { localStorage.setItem(draftKey(slot), JSON.stringify(def)); } catch { /* ignore */ }
     if (!userId) return;
     setSynced(false);
     const timer = setTimeout(() => {
       fetch('/api/progress', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: 0, completed: false, saved_code: JSON.stringify(def) }),
+        body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: slot, completed: false, saved_code: JSON.stringify(def) }),
       }).then(r => { if (r.ok) setSynced(true); });
     }, 1500);
     return () => clearTimeout(timer);
-  }, [def, userId]);
+  }, [def, userId, slot]);
+
+  // ── My Levels manager ───────────────────────────────────────────────────────
+  const openLevels = useCallback(async () => {
+    setShowLevels(true);
+    setSlotsMeta(null);
+    const metas: ({ title: string; shape: string } | null)[] =
+      Array.from({ length: SLOT_COUNT }, (_, i) => {
+        const d = loadLocalDraft(i);
+        return d ? { title: d.title || 'Untitled level', shape: shapeName(d) } : null;
+      });
+    try {
+      const res = await fetch('/api/progress?tool=arcade-lab');
+      const rows = res.ok ? await res.json() : [];
+      for (const r of rows ?? []) {
+        if (r.level_idx === 0 && r.challenge_idx >= 0 && r.challenge_idx < SLOT_COUNT && r.saved_code && !metas[r.challenge_idx]) {
+          try {
+            const parsed = JSON.parse(r.saved_code);
+            if (Array.isArray(parsed?.objects)) metas[r.challenge_idx] = { title: parsed.title || 'Untitled level', shape: shapeName(parsed) };
+          } catch { /* ignore */ }
+        }
+      }
+    } catch { /* ignore */ }
+    setSlotsMeta(metas);
+  }, []);
+
+  const copyCurrentTo = useCallback((i: number) => {
+    const d = { ...defRef.current, scripts: { ...defRef.current.scripts } };
+    try { localStorage.setItem(draftKey(i), JSON.stringify(d)); } catch { /* ignore */ }
+    if (userId) {
+      fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: i, completed: false, saved_code: JSON.stringify(d) }),
+      });
+    }
+    loadSlot(i);
+  }, [userId, loadSlot]);
+
+  const deleteSlot = useCallback((i: number) => {
+    if (!confirm(`Delete the level in slot ${i + 1}? This can't be undone.`)) return;
+    try { localStorage.removeItem(draftKey(i)); } catch { /* ignore */ }
+    if (userId) {
+      fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: i, completed: false, saved_code: '' }),
+      });
+    }
+    if (i === slotRef.current) loadSlot(i);
+    else openLevels();
+  }, [userId, loadSlot, openLevels]);
 
   // ── Design-mode editing ─────────────────────────────────────────────────────
   const placeAt = useCallback((cx: number, cy: number, t: Tool) => {
@@ -217,6 +319,7 @@ export default function ArcadeCreatePage() {
     const key = `${cx},${cy},${t}`;
     if (lastPaintRef.current === key) return;
     lastPaintRef.current = key;
+    dirtyRef.current = true;
     setDef(d => {
       let objects = d.objects.filter(o => !(o.x === cx && o.y === cy));
       if (t !== 'eraser') {
@@ -388,7 +491,7 @@ export default function ArcadeCreatePage() {
                 fetch('/api/progress', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: 0, completed: true, saved_code: JSON.stringify(defRef.current) }),
+                  body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: slotRef.current, completed: true, saved_code: JSON.stringify(defRef.current) }),
                 });
               }
             }
@@ -433,6 +536,7 @@ export default function ArcadeCreatePage() {
 
   const loadDemo = useCallback(() => {
     if (!confirm('Replace your level with the demo level "Crystal Canyon"? Your current design will be overwritten.')) return;
+    dirtyRef.current = true;
     setDef({ ...DEMO_LEVEL, title: 'Crystal Canyon (my copy)', scripts: { ...DEMO_LEVEL.scripts } });
     viewRef.current = { x: 0, y: 0 };
   }, []);
@@ -440,6 +544,7 @@ export default function ArcadeCreatePage() {
   const newLevel = useCallback((shape: LevelShape) => {
     const s = LEVEL_SHAPES[shape];
     if (!confirm(`Start a fresh ${s.label} level? (${s.blurb}.) Your current design will be replaced — your code blocks are kept.`)) return;
+    dirtyRef.current = true;
     const fresh = starterLevel(shape);
     setDef(d => ({ ...fresh, title: d.title, backdrop: d.backdrop, scripts: d.scripts }));
     focusSpawn(fresh);
@@ -460,6 +565,7 @@ export default function ArcadeCreatePage() {
   }, [clampView]);
 
   const setScriptXml = useCallback((o: ScriptOwner, xml: string) => {
+    dirtyRef.current = true;
     setDef(d => ({ ...d, scripts: { ...d.scripts, [o]: xml } }));
   }, []);
 
@@ -470,7 +576,7 @@ export default function ArcadeCreatePage() {
       const res = await fetch('/api/arcade/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: defRef.current.title, data: defRef.current, bot: botRef.current }),
+        body: JSON.stringify({ title: defRef.current.title, data: defRef.current, bot: botRef.current, slot: slotRef.current }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok) setPublish({ state: 'done' });
@@ -571,22 +677,28 @@ export default function ArcadeCreatePage() {
                 <input
                   value={def.title}
                   maxLength={40}
-                  onChange={e => setDef(d => ({ ...d, title: e.target.value }))}
+                  onChange={e => { dirtyRef.current = true; setDef(d => ({ ...d, title: e.target.value })); }}
                   placeholder="Name your level…"
                   style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 10, padding: '8px 14px', fontSize: 14, fontWeight: 700, color: '#e2e8f0', width: 240, outline: 'none' }}
                 />
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Backdrop:</span>
                   {BACKDROPS.map(b => (
-                    <button key={b.id} onClick={() => setDef(d => ({ ...d, backdrop: b.id }))}
+                    <button key={b.id} onClick={() => { dirtyRef.current = true; setDef(d => ({ ...d, backdrop: b.id })); }}
                       title={b.label}
                       style={{ width: 42, height: 28, borderRadius: 8, cursor: 'pointer', background: b.swatch,
                         border: def.backdrop === b.id ? '2.5px solid #FFD54A' : '2px solid rgba(255,255,255,0.2)' }} />
                   ))}
                 </div>
-                <span style={{ fontSize: 11, color: '#64748b', marginLeft: 'auto' }}>
-                  {userId ? (synced ? '☁️ Saved to your account' : '💾 Saving…') : '💾 Saved on this device'}
-                </span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <button onClick={openLevels}
+                    style={{ padding: '7px 14px', borderRadius: 10, fontWeight: 700, fontSize: 12, background: 'rgba(124,58,237,0.15)', color: '#c4b5fd', border: '1px solid rgba(124,58,237,0.4)', cursor: 'pointer' }}>
+                    📁 My Levels · slot {slot + 1}
+                  </button>
+                  <span style={{ fontSize: 11, color: '#64748b' }}>
+                    {userId ? (synced ? '☁️ Saved to your account' : dirtyRef.current ? '💾 Saving…' : '💾 Saved') : '💾 Saved on this device'}
+                  </span>
+                </div>
               </div>
             )}
             {mode === 'code' && (
@@ -596,14 +708,78 @@ export default function ArcadeCreatePage() {
               </div>
             )}
             {mode === 'play' && (
-              <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 8 }}>
-                Testing <strong style={{ color: '#e2e8f0' }}>{def.title || 'Untitled level'}</strong> with YOUR rules — can you beat your own game?
-                {keysUnwired && (
-                  <span style={{ color: '#fbbf24', fontWeight: 700 }}> ⚠ No keys are wired — the player can&apos;t move! Go to 🧩 Code → Player.</span>
-                )}
-              </div>
+              <>
+                <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 8 }}>
+                  Testing <strong style={{ color: '#e2e8f0' }}>{def.title || 'Untitled level'}</strong> with YOUR rules — can you beat your own game?
+                  {keysUnwired && (
+                    <span style={{ color: '#fbbf24', fontWeight: 700 }}> ⚠ No keys are wired — the player can&apos;t move! Go to 🧩 Code → Player.</span>
+                  )}
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <RuleSummary rules={rulesRef.current} />
+                </div>
+              </>
             )}
           </div>
+
+          {/* My Levels modal */}
+          {showLevels && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => setShowLevels(false)}>
+              <div style={{ ...CARD, padding: '22px 26px', width: 460, maxWidth: '92%' }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 900, color: '#e2e8f0', margin: 0 }}>📁 My Levels</h2>
+                  <button onClick={() => setShowLevels(false)}
+                    style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#64748b', fontSize: 18, fontWeight: 900, cursor: 'pointer' }}>✕</button>
+                </div>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 14px' }}>
+                  Six save slots. Each slot is its own level — design, code, and all.
+                </p>
+                {slotsMeta === null ? (
+                  <div style={{ textAlign: 'center', padding: '20px 0', color: '#64748b', fontWeight: 600, fontSize: 13 }}>Loading…</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {slotsMeta.map((meta, i) => {
+                      const current = i === slot;
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12,
+                          background: current ? 'rgba(124,58,237,0.18)' : 'rgba(255,255,255,0.04)',
+                          border: current ? '2px solid #7C3AED' : '1px solid rgba(255,255,255,0.1)' }}>
+                          <span style={{ fontSize: 12, fontWeight: 800, color: '#64748b', width: 18 }}>{i + 1}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: meta ? '#e2e8f0' : '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {meta ? meta.title : 'Empty slot'}
+                            </div>
+                            {meta && <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>{meta.shape}</div>}
+                          </div>
+                          {current ? (
+                            <span style={{ fontSize: 11, fontWeight: 800, color: '#c4b5fd' }}>Editing now</span>
+                          ) : (
+                            <>
+                              <button onClick={() => loadSlot(i)}
+                                style={{ padding: '6px 14px', borderRadius: 8, fontWeight: 800, fontSize: 12, background: '#7C3AED', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                                {meta ? 'Open' : 'Start here'}
+                              </button>
+                              <button onClick={() => copyCurrentTo(i)} title="Copy the level you're editing into this slot"
+                                style={{ padding: '6px 10px', borderRadius: 8, fontWeight: 700, fontSize: 12, background: 'rgba(255,255,255,0.08)', color: '#cbd5e1', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                                ⧉ Copy
+                              </button>
+                            </>
+                          )}
+                          {meta && (
+                            <button onClick={() => deleteSlot(i)} title="Delete this level"
+                              style={{ padding: '6px 10px', borderRadius: 8, fontWeight: 700, fontSize: 12, background: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer' }}>
+                              🗑
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Work area */}
           <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
@@ -762,5 +938,14 @@ export default function ArcadeCreatePage() {
         </div>
       </main>
     </div>
+  );
+}
+
+// useSearchParams requires a Suspense boundary in the app router
+export default function ArcadeCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <CreateInner />
+    </Suspense>
   );
 }

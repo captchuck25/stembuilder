@@ -89,6 +89,68 @@ export function emptyRules(): CompiledRules {
   return { keys: [], touchCoin: [], touchSpike: [], touchFlag: [], touchFlagScored: [], enemyTop: [], enemySide: [], gameStart: [], scoreRules: [] };
 }
 
+// ── Human-readable rules summary ─────────────────────────────────────────────
+// Derived from the COMPILED rules, so what it says is exactly what the game
+// does — shown before playing your own or a classmate's game.
+
+export interface RulesSummary {
+  controls: string[];
+  goals: string[];
+  danger: string[];
+}
+
+const KEY_LABEL: Record<ArcadeKey, string> = {
+  left: '←', right: '→', up: '↑', space: 'Space', a: 'A', d: 'D', w: 'W', s: 'S',
+};
+
+function keyVerb(actions: ArcadeAction[]): string | null {
+  for (const a of actions) {
+    if (a.kind === 'move') return a.dir === 'left' ? 'move left' : 'move right';
+    if (a.kind === 'jump') return 'jump';
+    if (a.kind === 'sound') return 'sound';
+  }
+  return null;
+}
+
+function scriptsContain(scripts: ArcadeAction[][], kind: ArcadeAction['kind']): boolean {
+  return scripts.some(s => s.some(a => a.kind === kind));
+}
+
+export function summarizeRules(rules: CompiledRules): RulesSummary {
+  const controls: string[] = [];
+  for (const kr of rules.keys) {
+    const verb = keyVerb(kr.actions);
+    if (verb) controls.push(`${KEY_LABEL[kr.key]} ${verb}`);
+  }
+  if (controls.length === 0) controls.push('⚠ No keys wired — the player can’t move!');
+
+  const goals: string[] = [];
+  if (scriptsContain(rules.touchFlag, 'win')) goals.push('🚩 Reach the flag');
+  for (const gated of rules.touchFlagScored) {
+    if (gated.actions.some(a => a.kind === 'win')) goals.push(`🚩 Reach the flag with at least ${gated.n} ✦`);
+    else if (gated.actions.length) goals.push(`🚩 Flag does something special at ${gated.n} ✦`);
+  }
+  for (const sr of rules.scoreRules) {
+    if (sr.actions.some(a => a.kind === 'win')) goals.push(`✦ Collect ${sr.n} points to win`);
+    if (sr.actions.some(a => a.kind === 'disappearAll')) {
+      const t = sr.actions.find(a => a.kind === 'disappearAll') as Extract<ArcadeAction, { kind: 'disappearAll' }>;
+      const label = t.target === 'spike' ? 'the spikes' : t.target === 'enemy' ? 'the enemies' : 'the crystals';
+      goals.push(`✦ At ${sr.n} points, ${label} disappear`);
+    }
+  }
+  if (goals.length === 0) goals.push('⚠ No way to win yet!');
+
+  const danger: string[] = [];
+  const lives = rules.gameStart.flat().find(a => a.kind === 'setLives') as Extract<ArcadeAction, { kind: 'setLives' }> | undefined;
+  danger.push(`❤️ ${lives?.n ?? 3} lives`);
+  if (scriptsContain(rules.touchSpike, 'hurtPlayer')) danger.push('🔺 Spikes hurt');
+  if (scriptsContain(rules.enemySide, 'hurtPlayer')) danger.push('👾 Enemies hurt');
+  if (scriptsContain(rules.enemyTop, 'disappear')) danger.push('👾 Stomp enemies to squash them');
+  if (scriptsContain(rules.touchCoin, 'changeScore')) danger.push('🪙 Crystals give points');
+
+  return { controls, goals, danger };
+}
+
 // ── Default scripts ───────────────────────────────────────────────────────────
 // A new level starts fully wired (the classic rules) so free-build feels alive.
 // The M4 guided challenges hand students deliberately broken subsets of these.
