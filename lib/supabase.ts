@@ -12,7 +12,9 @@ export interface Profile {
   email: string | null       // null for username-only student accounts
   name: string
   username?: string | null   // set for students who joined with a class code (no email)
-  role: 'teacher' | 'student' | 'admin'
+  role: 'teacher' | 'student' | 'district_admin' | 'admin'
+  district_id?: string | null   // org linkage; the admin scope for district_admin
+  school_id?: string | null
   password_hash?: string
   google_id?: string
   // Consent basis for student accounts (compliance evidence, migration 0009):
