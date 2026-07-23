@@ -3,12 +3,14 @@ import { useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
 import * as Blockly from 'blockly';
 import { BlockDef } from '../engine/blocks';
 import { ScriptNode } from '../engine/runtime';
-import { registerBlockDefs, buildToolbox, workspaceToScript } from '../engine/blocklyDefs';
+import { registerBlockDefs, buildToolbox, workspaceToScript, getDarkTheme } from '../engine/blocklyDefs';
 
 export interface BlocklyWorkspaceHandle {
   getScript: () => ScriptNode[];
   getXml: () => string;
   clear: () => void;
+  /** Highlight the currently executing block (null clears the highlight) */
+  highlight: (id: string | null) => void;
 }
 
 interface Props {
@@ -29,11 +31,13 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
 
       const workspace = Blockly.inject(containerRef.current, {
         toolbox: buildToolbox(availableBlocks) as Blockly.utils.toolbox.ToolboxInfo,
+        renderer: 'zelos',
+        theme: getDarkTheme(),
         scrollbars: true,
         trashcan: true,
         sounds: false,
-        zoom: { controls: true, wheel: true, startScale: 1.0, maxScale: 3, minScale: 0.3, scaleSpeed: 1.2 },
-        grid: { spacing: 20, length: 3, colour: '#e8e8e8', snap: false },
+        zoom: { controls: true, wheel: true, startScale: 0.85, maxScale: 3, minScale: 0.3, scaleSpeed: 1.2 },
+        grid: { spacing: 22, length: 3, colour: 'rgba(148,163,184,0.18)', snap: false },
       });
 
       workspaceRef.current = workspace;
@@ -63,10 +67,15 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
         return Blockly.Xml.domToText(dom);
       },
       clear: () => workspaceRef.current?.clear(),
+      highlight: (id: string | null) => workspaceRef.current?.highlightBlock(id),
     }));
 
     return (
       <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+        <style>{`
+          .blocklyFlyoutLabelText { fill: #94a3b8 !important; font-weight: 700; }
+          .blocklyText { font-weight: 600; }
+        `}</style>
         <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
         {disabled && (
           <div style={{

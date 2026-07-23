@@ -6,6 +6,8 @@ export interface Collectible { x: number; y: number; }
 export interface BlockChallenge {
   title: string;
   hint: string;
+  /** Block-count target for the 3rd star — solve with this many blocks or fewer */
+  par: number;
   grid: number[][];
   startX: number; startY: number; startDir: Direction;
   exitX: number; exitY: number;
@@ -25,6 +27,8 @@ export interface BlockUnit {
   tagline: string;
   color: string;
   theme: ThemeName;
+  /** Mission briefing — the story hook shown on the unit intro page */
+  story: string;
   introNotes: string;
   newBlocks: { blockId: string; label: string; desc: string }[];
   challenges: BlockChallenge[];
@@ -39,21 +43,26 @@ const U1: BlockUnit = {
   tagline: 'Give STEM Bot step-by-step instructions',
   color: '#D97706',
   theme: 'desert',
+  story: 'STEM Bot the explorer has touched down in the Great Amber Desert on an important mission: recover the rare power crystals its rocket needs for the flight home. Guide the bot through the canyons one instruction at a time — collect the crystals, and raise a flag at every waypoint.',
   introNotes: `# Unit 1 — Sequence
 
 ## What Is a Program?
 A **program** is a list of instructions you give to a computer. The computer follows them **one at a time, top to bottom**, in the exact order you wrote them.
 
-In Block Lab you control STEM Bot through a desert maze. STEM Bot understands three instructions:
+In Block Lab you control STEM Bot through a desert maze. STEM Bot understands four instructions:
 
 | Block | What it does |
 |---|---|
 | **Move Forward** | Move one step in the direction you are facing |
 | **Turn Left** | Rotate 90° counter-clockwise (left) |
 | **Turn Right** | Rotate 90° clockwise (right) |
+| **Collect** | Pick up the item on the square you are standing on |
 
 ## Turning vs. Moving
 Turning changes the direction STEM Bot faces — **but it does not move**. After turning you still need Move Forward to actually step forward.
+
+## Collecting
+Walking over a crystal is not enough — STEM Bot has to stop **on** the crystal's square and use **Collect** to pick it up. Using Collect on an empty square is safe: nothing happens.
 
 ## Order Matters
 If you put the blocks in the wrong order, STEM Bot goes the wrong way. Read your script like a recipe — top to bottom — before you hit Run.
@@ -62,74 +71,85 @@ If you put the blocks in the wrong order, STEM Bot goes the wrong way. Read your
 If STEM Bot tries to walk into a wall, the program stops. Look at what the bot was trying to do and fix the block that caused the problem.
 
 ## Your Goal
-Guide STEM Bot from the start (blue circle) to the goal (gold star). The mazes get longer and twistier as you go — by Challenge 10 you'll notice something interesting about your scripts…`,
+Guide STEM Bot to the waypoint flag at the end of each maze. Collect every crystal along the way (stand on it, then use Collect!) and stay at or under the block **par** to earn all 3 stars. The mazes get longer and twistier as you go — by Challenge 10 you'll notice something interesting about your scripts…`,
 
   newBlocks: [
     { blockId: 'move_forward', label: 'Move Forward', desc: 'Move one step in the direction you are facing.' },
     { blockId: 'turn_left',    label: 'Turn Left',    desc: 'Rotate 90° to the left (counter-clockwise).' },
     { blockId: 'turn_right',   label: 'Turn Right',   desc: 'Rotate 90° to the right (clockwise).' },
+    { blockId: 'collect',      label: 'Collect',      desc: 'Pick up the item on the square STEM Bot is standing on.' },
   ],
 
   challenges: [
     {
       title: 'First Steps',
+      par: 5,
       hint: 'Click Move Forward to take one step at a time. Reach the gold marker!',
       grid: [[1,1,1,1,1,1],[0,0,0,0,0,0],[1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:1, collectibles:[],
     },
     {
       title: 'Right Turn Ahead',
+      par: 8,
       hint: 'Walk to the wall, then Turn Right to change direction.',
       grid: [[1,1,1,1,1],[0,0,0,0,1],[1,1,1,0,1],[1,1,1,0,0],[1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:4, exitY:3, collectibles:[],
     },
     {
       title: 'Two Turns',
+      par: 9,
       hint: 'You will need to turn twice. Think ahead before you start!',
       grid: [[1,1,1,1,1,1],[0,0,0,1,1,1],[1,1,0,1,1,1],[1,1,0,0,0,0],[1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:3, collectibles:[],
     },
     {
       title: 'The Long Way',
+      par: 12,
       hint: 'A longer corridor then a turn — count your steps carefully.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3, collectibles:[],
     },
     {
       title: 'Desert Crystals',
-      hint: 'Collect the crystals along the way — then reach the exit.',
+      par: 13,
+      hint: 'Stop on each crystal and use Collect to pick it up — then head for the flag.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:3,
       collectibles:[{x:2,y:1},{x:5,y:1}],
     },
     {
       title: 'U-Turn',
+      par: 13,
       hint: 'Follow the path all the way around — three turns to get home.',
       grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:0, exitY:4, collectibles:[],
     },
     {
       title: 'Winding Road',
+      par: 15,
       hint: 'Four turns — read your path like a map before placing blocks.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1],[1,1,1,0,0,0,1,1],[1,1,1,1,1,0,1,1],[1,1,1,1,1,0,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5, collectibles:[],
     },
     {
       title: 'Triple Crystal',
-      hint: 'Three crystals hidden along a winding path.',
+      par: 16,
+      hint: 'Three crystals along the path — remember to Collect each one!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:3,
       collectibles:[{x:2,y:1},{x:5,y:1},{x:8,y:1}],
     },
     {
       title: 'The S-Curve',
+      par: 12,
       hint: 'Right, down, right, down — four segments, three turns.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,1,1,1],[1,1,1,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:5, collectibles:[],
     },
     {
       title: 'Desert Boss',
-      hint: 'The biggest sequential maze yet. Map out every turn before you begin.',
+      par: 24,
+      hint: 'The biggest sequential maze yet. Map out every turn — and Collect all three crystals!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,1,1,1,1,1,1,1],[1,1,0,1,1,1,1,1,1,1],[1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,0,0,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:7,
       collectibles:[{x:2,y:3},{x:5,y:5},{x:7,y:7}],
@@ -150,16 +170,22 @@ Guide STEM Bot from the start (blue circle) to the goal (gold star). The mazes g
       explanation: 'Turning changes the direction STEM Bot faces but does NOT move it. You still need Move Forward to actually step.',
     },
     {
-      question: 'STEM Bot faces North. After one Turn Right, STEM Bot faces…',
-      options: ['South', 'North', 'West', 'East'],
-      answer: 3,
-      explanation: 'Turn Right rotates clockwise: North → East → South → West → North.',
+      question: 'STEM Bot is facing the TOP of the screen. After one Turn Right, which way is it facing?',
+      options: ['The right side of the screen', 'The top of the screen', 'The bottom of the screen', 'The left side of the screen'],
+      answer: 0,
+      explanation: 'Turn Right spins STEM Bot 90° clockwise — from facing the top to facing the right side. Watch its arrow: it always points where the bot is facing.',
     },
     {
-      question: 'Your script has 8 blocks but STEM Bot only needs 5 steps to reach the goal. What most likely happened?',
-      options: ['The extra blocks are ignored', 'STEM Bot crashes into a wall before reaching the goal', 'The blocks run in a loop', 'Nothing — extra blocks are fine'],
+      question: 'STEM Bot crashed into a wall and the program stopped. What is the best thing to do next?',
+      options: ['Delete everything and start over', 'Find the block that sent it the wrong way and fix just that part', 'Add extra Move Forward blocks to push through the wall', 'Run the exact same script again'],
       answer: 1,
-      explanation: 'After the goal is reached any remaining blocks still run, which often causes STEM Bot to walk into a wall and crash.',
+      explanation: 'Programmers call this debugging: watch what the robot did, find the block where things went wrong, fix that one part, and run it again.',
+    },
+    {
+      question: 'STEM Bot is facing the RIGHT side of the screen. Which script makes it face the LEFT side?',
+      options: ['Turn Left twice', 'Turn Right once', 'Move Forward twice', 'Turn Left once'],
+      answer: 0,
+      explanation: 'Facing the opposite way is a half spin (180°). Each turn block is only 90°, so it takes two turns — Turn Left twice (or Turn Right twice) both work.',
     },
   ],
 };
@@ -172,6 +198,7 @@ const U2: BlockUnit = {
   tagline: 'Repeat instructions instead of writing them over and over',
   color: '#16A34A',
   theme: 'forest',
+  story: 'The crystal trail leads into the Whispering Woods, where the paths are long and winding — and STEM Bot\'s battery is precious. There\'s a pattern to every trail here: teach the bot to repeat itself so every step counts, and gather acorn fuel cells along the way.',
   introNotes: `# Unit 2 — Loops
 
 ## The Problem With Counting
@@ -200,6 +227,9 @@ If you want twelve steps instead, just change the 10 to a 12.
 ## Patterns
 Loops shine when there is a **repeating pattern** in the maze. Look for paths where the same sequence of moves appears multiple times. That is your cue to use Repeat.
 
+## Collect Inside Loops
+Collect works great inside a loop. If acorns appear every 2 steps, then **Repeat { Move, Move, Collect }** scoops them all up. Remember: Collect on an empty square is safe — nothing happens — so a rhythm like this never breaks your program.
+
 ## Nesting
 You can put Repeat inside another Repeat. This is called **nesting** and unlocks even more compact programs.
 
@@ -213,26 +243,30 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
   challenges: [
     {
       title: 'Long Trail',
+      par: 3,
       hint: 'That is a very long corridor! Use Repeat so you don\'t write Move Forward nine times.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:1, collectibles:[],
     },
     {
       title: 'Double Stretch',
-      hint: 'Two long corridors connected by a turn. Use Repeat for each straight section.',
+      par: 12,
+      hint: 'Use Repeat for each straight section — and Collect both acorns on the way.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1],[1,1,1,1,0,1,1,1,1],[1,1,1,1,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
       collectibles:[{x:2,y:1},{x:6,y:3}],
     },
     {
       title: 'Staircase',
-      hint: 'Each step is: one right, one down. Use Repeat with TWO blocks inside!',
+      par: 15,
+      hint: 'Every stair is the same moves — put them (and a Collect) inside one Repeat!',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,0],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:6,
       collectibles:[{x:1,y:2},{x:2,y:4},{x:3,y:6}],
     },
     {
       title: 'Tall Staircase',
+      par: 16,
       hint: 'Same staircase pattern but with 4 steps instead of 3. Just change the Repeat number!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1],[1,0,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1],[1,1,0,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1],[1,1,1,0,1,1,1,1,1],[1,1,1,0,0,1,1,1,1],[1,1,1,1,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:8,
@@ -240,13 +274,15 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     },
     {
       title: 'Acorn Row',
-      hint: 'A long path with acorns every other cell. Repeat handles it efficiently.',
+      par: 5,
+      hint: 'Acorns every other cell: Repeat { Move, Move, Collect } scoops them all up!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:11, exitY:1,
       collectibles:[{x:2,y:1},{x:4,y:1},{x:6,y:1},{x:8,y:1},{x:10,y:1}],
     },
     {
       title: 'Triple Corridor',
+      par: 18,
       hint: 'Three horizontal corridors stacked — Repeat gets you down each one.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,0,0,0,0,0,0,1],[1,0,1,1,1,1,1,1],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -254,12 +290,14 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     },
     {
       title: 'Square Route',
+      par: 5,
       hint: 'Travel three sides of a square. Repeat 3 with { Move×3, Turn Right } does it!',
       grid: [[1,1,1,1,1],[0,0,0,0,1],[1,1,1,0,1],[1,1,1,0,1],[0,0,0,0,1],[1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:0, exitY:4, collectibles:[],
     },
     {
       title: 'Forest Maze',
+      par: 18,
       hint: 'A winding forest path — combine Repeat and single-use blocks.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1,1],[1,1,1,1,0,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:5,
@@ -267,13 +305,15 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     },
     {
       title: 'Zigzag Valley',
-      hint: 'The same two-step zigzag repeats four times. One Repeat block solves it!',
+      par: 9,
+      hint: 'The same zigzag repeats — one Repeat (with a Collect inside) solves it!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1],[1,0,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1],[1,1,0,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1],[1,1,1,0,1,1,1,1,1],[1,1,1,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:7,
       collectibles:[{x:1,y:2},{x:2,y:4},{x:3,y:6}],
     },
     {
       title: 'Forest Boss',
+      par: 18,
       hint: 'Long corridors and a staircase all in one maze. Use Repeat wisely!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,0,1,1,1,1,1],[1,1,1,1,1,0,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:6,
@@ -306,6 +346,12 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
       answer: 2,
       explanation: 'Each iteration moves forward then turns 90° right. After 3 iterations you have moved along three sides of a square.',
     },
+    {
+      question: 'Repeat 3 { Repeat 2 { Move Forward } } — how many steps does STEM Bot take in total?',
+      options: ['5', '6', '8', '12'],
+      answer: 1,
+      explanation: 'The inner loop takes 2 steps, and the outer loop runs it 3 times: 3 × 2 = 6 steps. Putting a loop inside a loop is called nesting.',
+    },
   ],
 };
 
@@ -317,6 +363,7 @@ const U3: BlockUnit = {
   tagline: 'Let STEM Bot sense its surroundings and decide what to do',
   color: '#7C3AED',
   theme: 'space',
+  story: 'Fully fueled at last, STEM Bot blasts off! But docking at the orbital station is the trickiest part of the trip — its corridors rearrange themselves on every visit, so no map will help. Upgrade the bot\'s sensors and teach it to feel its own way to the warp portal home.',
   introNotes: `# Unit 3 — While & If
 
 ## From Counting to Sensing
@@ -351,7 +398,9 @@ An **if** block runs its body **once** only if the condition is true at that mom
 If the condition is never false, the loop runs forever (or until the safety limit stops it). Always make sure the bot is actually making progress toward the goal.
 
 ## Your Goal
-Use sensors so STEM Bot can navigate mazes without knowing the exact layout in advance. A good sensor program can solve many different mazes with the same code!`,
+Use sensors so STEM Bot can navigate mazes without knowing the exact layout in advance. A good sensor program can solve many different mazes with the same code!
+
+> Tip: put **Collect** inside your while loop and STEM Bot will scoop up items automatically as it explores — Collect does nothing on empty squares, so it is always safe.`,
 
   newBlocks: [
     { blockId: 'while_path_ahead',  label: 'While path ahead',  desc: 'Keep running the body as long as there is an open cell ahead.' },
@@ -364,12 +413,14 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
   challenges: [
     {
       title: 'Autopilot',
+      par: 3,
       hint: 'Use "While not at goal" — STEM Bot drives itself no matter how far the goal is!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:1, collectibles:[],
     },
     {
       title: 'Sensor Run',
+      par: 9,
       hint: 'Walk forward while the path is clear, then turn and use "While not at goal" for the rest.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -377,6 +428,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Path Detector',
+      par: 7,
       hint: 'Put "If path ahead" inside a "While not at goal" — the bot moves when it can.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,0,0,0,1],[1,0,1,0,1,0,1],[1,0,0,0,1,0,0],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
@@ -384,6 +436,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Left Explorer',
+      par: 9,
       hint: 'At each junction check left first. "If path left" + "If path ahead" inside while solves it.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,1,0,0,0,0,1],[1,0,1,0,1,1,0,1],[1,0,1,0,1,1,0,1],[1,0,0,0,1,1,0,1],[1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -391,6 +444,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Right Wall Hugger',
+      par: 9,
       hint: 'Always check right first, then ahead, then left. This is the right-hand rule!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,1,0,0,0,0,1],[1,1,0,1,0,1,1,0,1],[1,1,0,0,0,1,1,0,1],[1,1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:4,
@@ -398,6 +452,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Dead End',
+      par: 10,
       hint: 'Sometimes all paths are blocked! Add "If path right" as a fallback turn.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,1,0,0,0,1,0],[1,1,0,1,0,1,0,1,0],[1,1,0,0,0,1,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:1,
@@ -405,13 +460,15 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Data Nodes',
-      hint: 'Navigate to each glowing data node using sensors.',
+      par: 10,
+      hint: 'Put Collect inside your loop — STEM Bot picks up every node it crosses.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1,0,0],[1,1,1,0,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0,0,1],[1,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:5,
       collectibles:[{x:3,y:1},{x:5,y:1},{x:7,y:1},{x:5,y:3},{x:5,y:5}],
     },
     {
       title: 'Space Station Alpha',
+      par: 10,
       hint: 'A real labyrinth. Combine while not at goal with if sensors to find the path.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1],[1,1,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0],[1,0,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:5,
@@ -419,6 +476,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Warp Grid',
+      par: 10,
       hint: 'Tall and wide — sensors handle it without knowing dimensions.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,1,0,0,1,0,0,1],[1,1,0,1,0,1,1,0,1,1],[1,0,0,0,0,1,0,0,1,1],[1,0,1,1,1,1,0,1,1,1],[1,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:5,
@@ -426,6 +484,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     },
     {
       title: 'Final Mission',
+      par: 10,
       hint: 'The ultimate maze. A complete sensor program can solve any path — can yours?',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1,0,0],[1,1,1,0,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0,0,1],[1,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:5,
@@ -457,6 +516,12 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       options: ['To make the game harder', 'To prevent infinite loops that would freeze the browser', 'Because space mazes have limited fuel', 'Because while loops can only run 400 times in Python'],
       answer: 1,
       explanation: 'An infinite loop — where the condition never becomes false — would run forever and crash the program. The safety limit stops execution after 400 iterations.',
+    },
+    {
+      question: 'Which program can cross a straight corridor of ANY length?',
+      options: ['Move Forward written 10 times', 'Repeat 10 { Move Forward }', 'While path ahead { Move Forward }', 'Turn Left, then Move Forward'],
+      answer: 2,
+      explanation: 'A while loop keeps stepping as long as the path is open, so it adapts to any corridor length. Fixed step counts only work for one specific maze.',
     },
   ],
 };

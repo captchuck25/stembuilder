@@ -1,14 +1,17 @@
 'use client';
 import { useSession } from 'next-auth/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import SiteHeader from '@/app/components/SiteHeader';
 import { UNITS, chalKey, countCompleted, BlockUnit } from './units';
 import { blocksForLevel, BLOCK_MAP } from './engine/blocks';
 import { ScriptNode } from './engine/runtime';
-import { THEMES } from './engine/themes';
-import MazeBoard, { MazeBoardHandle } from './components/MazeBoard';
+import { THEMES, Theme } from './engine/themes';
+import { STEMBotAnimator } from './engine/animation';
+import { renderBot } from './engine/mazeRenderer';
+import { isMuted, setMuted } from './engine/sfx';
+import MazeBoard, { MazeBoardHandle, WinResult } from './components/MazeBoard';
 import BlocklyWorkspace, { BlocklyWorkspaceHandle } from './components/BlocklyWorkspace';
 
 // ─── Progress ─────────────────────────────────────────────────────────────────
@@ -17,9 +20,11 @@ interface Progress {
   completedChallenges: Record<string, boolean>;
   completedUnits: Record<number, boolean>;
   savedXml: Record<string, string>;
+  /** Best star rating (1-3) per challenge key */
+  stars: Record<string, number>;
 }
 function emptyProgress(): Progress {
-  return { completedChallenges: {}, completedUnits: {}, savedXml: {} };
+  return { completedChallenges: {}, completedUnits: {}, savedXml: {}, stars: {} };
 }
 const STORAGE_KEY = 'block_lab_progress';
 function loadProgress(): Progress {
@@ -32,13 +37,18 @@ function loadProgress(): Progress {
 function saveProgress(p: Progress) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
 }
-async function syncToCloud(_userId: string, ui: number, ci: number | null, completed: boolean, savedXml?: string) {
+// The quiz_score column does double duty: on challenge rows (challenge_idx >= 0)
+// it stores the star rating (1-3); on unit rows (challenge_idx = -1) it stores
+// the actual quiz score. Challenge rows never hold real quiz scores, so the two
+// uses can't collide.
+async function syncToCloud(_userId: string, ui: number, ci: number | null, completed: boolean, savedXml?: string, score?: number) {
   await fetch('/api/progress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       tool: 'block-lab', level_idx: ui, challenge_idx: ci ?? -1,
       completed, saved_code: savedXml ?? null,
+      quiz_score: score ?? null,
     }),
   });
 }
@@ -51,6 +61,7 @@ async function loadFromCloud(_userId: string): Promise<Progress> {
       const key = chalKey(row.level_idx, row.challenge_idx);
       if (row.completed) p.completedChallenges[key] = true;
       if (row.saved_code?.startsWith('<xml')) p.savedXml[key] = row.saved_code;
+      if (typeof row.quiz_score === 'number' && row.quiz_score > 0) p.stars[key] = Math.min(3, row.quiz_score);
     } else if (row.completed) {
       p.completedUnits[row.level_idx] = true;
     }
@@ -82,6 +93,28 @@ const CARD: React.CSSProperties = {
   background: '#1a2540', border: '1px solid rgba(99,179,237,0.15)',
   borderRadius: 20, boxShadow: '0 8px 28px rgba(0,0,0,0.5)',
 };
+
+// ─── Live STEM Bot preview (idle animation on the unit intro) ─────────────────
+
+function BotPreview({ theme, size = 120 }: { theme: Theme; size?: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const anim = new STEMBotAnimator();
+    anim.reset(0, 0, 'right');
+    let raf = 0;
+    const loop = (now: number) => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      renderBot(ctx, anim.getRenderState(now), canvas.width, canvas.height, theme);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [theme]);
+  return <canvas ref={canvasRef} width={size} height={size} style={{ display: 'block' }} />;
+}
 
 // ─── Markdown renderer (same as Python) ───────────────────────────────────────
 
@@ -151,6 +184,7 @@ function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
           {UNITS.map((unit, ui) => {
             const done = countCompleted(ui, progress.completedChallenges);
             const total = unit.challenges.length;
+            const starSum = unit.challenges.reduce((s, _, ci) => s + (progress.stars[chalKey(ui, ci)] ?? 0), 0);
             const teacherLocked = lockedLevels.has(ui) || (assignedSet !== null && !assignedSet.has(ui));
             const locked = teacherLocked || (ui > 0 && !progress.completedUnits[ui - 1]);
             const pct = total ? Math.round(done / total * 100) : 0;
@@ -172,7 +206,10 @@ function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
                 <div style={{ background: 'rgba(255,255,255,0.1)', borderRadius: 20, height: 6, overflow: 'hidden' }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: unit.color, borderRadius: 20, transition: 'width 400ms ease' }} />
                 </div>
-                <div style={{ fontSize: 11, color: '#64748b', marginTop: 5 }}>{done} / {total} challenges</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 5 }}>
+                  {done} / {total} challenges
+                  {starSum > 0 && <span style={{ color: '#eab308', fontWeight: 700 }}> · ⭐ {starSum}/{total * 3}</span>}
+                </div>
               </div>
             );
           })}
@@ -186,6 +223,7 @@ function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
 
 function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
   const unit = UNITS[ui];
+  const theme = THEMES[unit.theme];
   return (
     <SiteChrome>
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '40px 32px' }}>
@@ -193,12 +231,24 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
           ← Back to Units
         </button>
         <div style={{ ...CARD, padding: 0, overflow: 'hidden' }}>
-          <div style={{ background: unit.color, padding: '20px 28px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.7px' }}>Unit {unit.id}</div>
-            <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', marginTop: 2 }}>{unit.title}</div>
-            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>{unit.tagline}</div>
+          <div style={{ background: unit.color, padding: '20px 28px', display: 'flex', alignItems: 'center', gap: 20 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '0.7px' }}>Unit {unit.id}</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', marginTop: 2 }}>{unit.title}</div>
+              <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>{unit.tagline}</div>
+            </div>
+            <div style={{ flexShrink: 0, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.3))' }}>
+              <BotPreview theme={theme} size={110} />
+            </div>
           </div>
           <div style={{ padding: '0 28px 28px' }}>
+            <div style={{ marginTop: 20, background: `${unit.color}14`, border: `1px solid ${unit.color}55`, borderRadius: 14, padding: '14px 18px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 28, lineHeight: 1 }}>{theme.emoji}</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 4 }}>Mission Briefing</div>
+                <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.65, fontStyle: 'italic' }}>{unit.story}</div>
+              </div>
+            </div>
             <LessonPanel text={unit.introNotes} />
             {unit.newBlocks.length > 0 && (
               <div style={{ background: 'rgba(99,179,237,0.06)', border: '1px solid rgba(99,179,237,0.2)', borderRadius: 14, padding: '16px 20px', margin: '16px 0' }}>
@@ -228,7 +278,7 @@ function ChallengeView({
   onSolve, onNext, onFinish, onBack, onJump,
 }: {
   ui: number; ci: number; progress: Progress; lockedCis?: Set<number>;
-  onSolve: (xml: string) => void;
+  onSolve: (xml: string, stars: number) => void;
   onNext: (xml: string) => void;
   onFinish: (xml: string) => void;
   onBack: () => void;
@@ -246,6 +296,8 @@ function ChallengeView({
   const [running, setRunning] = useState(false);
   const [solved, setSolved] = useState(progress.completedChallenges[chalKey(ui, ci)] ?? false);
   const [bumpFlash, setBumpFlash] = useState(false);
+  const [speed, setSpeed] = useState(1);
+  const [muted, setMutedState] = useState(() => (typeof window === 'undefined' ? false : isMuted()));
 
   const boardRef = useRef<MazeBoardHandle>(null);
   const editorRef = useRef<BlocklyWorkspaceHandle>(null);
@@ -273,16 +325,37 @@ function ChallengeView({
     editorRef.current?.clear();
   }, [handleReset]);
 
-  const handleWin = useCallback(() => {
+  const handleWin = useCallback((result: WinResult) => {
     setRunning(false);
     setSolved(true);
-    onSolve(editorRef.current?.getXml() ?? '');
+    onSolve(editorRef.current?.getXml() ?? '', result.stars);
   }, [onSolve]);
 
   const handleBump = useCallback(() => {
     setBumpFlash(true);
-    setTimeout(() => setBumpFlash(false), 500);
+    setTimeout(() => setBumpFlash(false), 1200);
   }, []);
+
+  const handleStepHighlight = useCallback((id: string | null) => {
+    editorRef.current?.highlight(id);
+  }, []);
+
+  const handleRunEnd = useCallback(() => {
+    setRunning(false);
+  }, []);
+
+  // Stable identity — an inline literal would re-trigger MazeBoard's reset
+  // effect on every re-render (e.g. the bump flash), killing the run mid-flight
+  const level = useMemo(() => ({ ...ch, theme: unit.theme }), [ch, unit.theme]);
+
+  const toggleMute = useCallback(() => {
+    setMutedState(m => {
+      setMuted(!m);
+      return !m;
+    });
+  }, []);
+
+  const bestStars = progress.stars[chalKey(ui, ci)] ?? 0;
 
   const TAB = (active: boolean): React.CSSProperties => ({
     padding: '8px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer', border: 'none',
@@ -369,8 +442,8 @@ function ChallengeView({
                 />
               </div>
 
-              {/* Run / Stop / Reset / Clear */}
-              <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', flexShrink: 0, display: 'flex', gap: 8 }}>
+              {/* Run / Stop / Speed / Reset / Clear / Mute */}
+              <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', flexShrink: 0, display: 'flex', gap: 8, alignItems: 'center' }}>
                 {!running ? (
                   <button onClick={handleRun}
                     style={{ flex: 1, padding: '9px 20px', borderRadius: 10, fontWeight: 800, fontSize: 14, background: '#22c55e', color: '#fff', border: 'none', cursor: 'pointer' }}>
@@ -382,13 +455,27 @@ function ChallengeView({
                     ■  Stop
                   </button>
                 )}
-                <button onClick={handleReset} disabled={running}
+                <div style={{ display: 'flex', borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.15)' }}>
+                  {([['🐢', 0.5], ['▶', 1], ['🐇', 2]] as const).map(([label, s]) => (
+                    <button key={s} onClick={() => setSpeed(s)} title={`${s}× speed`}
+                      style={{ padding: '9px 10px', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer',
+                        background: speed === s ? 'rgba(99,179,237,0.3)' : 'rgba(255,255,255,0.05)',
+                        color: speed === s ? '#93c5fd' : '#64748b' }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={handleReset} disabled={running} title="Reset maze"
                   style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.08)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
                   ↺
                 </button>
-                <button onClick={handleClear} disabled={running}
+                <button onClick={handleClear} disabled={running} title="Clear all blocks"
                   style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.08)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
                   🗑
+                </button>
+                <button onClick={toggleMute} title={muted ? 'Unmute sounds' : 'Mute sounds'}
+                  style={{ padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 14, background: 'rgba(255,255,255,0.08)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                  {muted ? '🔇' : '🔊'}
                 </button>
               </div>
             </div>
@@ -403,21 +490,33 @@ function ChallengeView({
           <div style={{ flex: 1, minWidth: 300 }}>
             {/* Challenge header */}
             <div style={{ ...CARD, padding: '14px 20px', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Challenge {ci + 1}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Challenge {ci + 1}</div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '2px 10px' }}>
+                  Par: {ch.par} blocks
+                </span>
+                {bestStars > 0 && (
+                  <span style={{ fontSize: 13, letterSpacing: 1 }}>
+                    {'⭐'.repeat(bestStars)}<span style={{ filter: 'grayscale(1) opacity(0.35)' }}>{'⭐'.repeat(3 - bestStars)}</span>
+                  </span>
+                )}
+              </div>
               <div style={{ fontSize: 18, fontWeight: 900, color: '#e2e8f0', margin: '2px 0 4px' }}>{ch.title}</div>
               <div style={{ fontSize: 13, color: bumpFlash ? '#fca5a5' : '#94a3b8', background: bumpFlash ? 'rgba(239,68,68,0.15)' : 'transparent', padding: bumpFlash ? '6px 10px' : 0, borderRadius: 8, transition: 'all 200ms' }}>
-                {bumpFlash ? '💥 STEM Bot hit a wall! Check your script.' : `💡 ${ch.hint}`}
+                {bumpFlash ? '💥 STEM Bot hit a wall — the program stopped! Check your script.' : `💡 ${ch.hint}`}
               </div>
             </div>
 
             {/* Canvas */}
             <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <MazeBoard ref={boardRef} level={{
-                idx: ui * 10 + ci, title: ch.title, hint: ch.hint,
-                grid: ch.grid, startX: ch.startX, startY: ch.startY, startDir: ch.startDir,
-                exitX: ch.exitX, exitY: ch.exitY, collectibles: ch.collectibles,
-                theme: unit.theme, maxBlocks: 30,
-              }} onWin={handleWin} onBump={handleBump} />
+              <MazeBoard ref={boardRef}
+                level={level}
+                speed={speed}
+                onWin={handleWin}
+                onBump={handleBump}
+                onStep={handleStepHighlight}
+                onRunEnd={handleRunEnd}
+              />
             </div>
 
             {/* Win banner */}
@@ -454,6 +553,16 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
   const unit = UNITS[ui];
   const [answers, setAnswers] = useState<(number | null)[]>(unit.quiz.map(() => null));
   const [submitted, setSubmitted] = useState(false);
+  // Shuffle displayed option order once per attempt so the answer key has no
+  // visible pattern (answers still track original indices)
+  const [order] = useState<number[][]>(() => unit.quiz.map(() => {
+    const idx = [0, 1, 2, 3];
+    for (let i = idx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [idx[i], idx[j]] = [idx[j], idx[i]];
+    }
+    return idx;
+  }));
 
   const score = submitted ? unit.quiz.reduce((s, q, i) => s + (answers[i] === q.answer ? 1 : 0), 0) : 0;
 
@@ -473,7 +582,8 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
                 <div key={qi} style={{ marginBottom: 28 }}>
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#e2e8f0', marginBottom: 10 }}>{qi + 1}. {q.question}</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {q.options.map((opt, oi) => {
+                    {order[qi].map(oi => {
+                      const opt = q.options[oi];
                       const picked = chosen === oi;
                       const isCorrect = submitted && oi === q.answer;
                       const isWrong = submitted && picked && oi !== q.answer;
@@ -527,9 +637,10 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
 
 // ─── Unit complete ────────────────────────────────────────────────────────────
 
-function UnitComplete({ ui, score, total, onNext, onBack }: { ui: number; score: number; total: number; onNext: () => void; onBack: () => void }) {
+function UnitComplete({ ui, score, total, onNext, onRetake, onBack }: { ui: number; score: number; total: number; onNext: () => void; onRetake: () => void; onBack: () => void }) {
   const unit = UNITS[ui];
   const pct = Math.round(score / total * 100);
+  const passed = score >= total * 0.6;
   const hasNext = ui < UNITS.length - 1;
   return (
     <SiteChrome>
@@ -542,7 +653,11 @@ function UnitComplete({ ui, score, total, onNext, onBack }: { ui: number; score:
           <div style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>
             {pct >= 80 ? 'Excellent work!' : pct >= 60 ? 'Good job — keep practicing!' : 'Review the lesson notes and try the quiz again when ready.'}
           </div>
-          {hasNext ? (
+          {!passed ? (
+            <button onClick={onRetake} style={{ display: 'block', width: '100%', padding: '14px 0', background: unit.color, color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: 'pointer', marginBottom: 12 }}>
+              Retake Quiz →
+            </button>
+          ) : hasNext ? (
             <button onClick={onNext} style={{ display: 'block', width: '100%', padding: '14px 0', background: unit.color, color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: 'pointer', marginBottom: 12 }}>
               Start Unit {ui + 2} →
             </button>
@@ -581,10 +696,14 @@ export default function BlockLabPage() {
     progressRef.current = local;
     if (userId) {
       loadFromCloud(userId).then(cloud => {
+        const starKeys = new Set([...Object.keys(local.stars), ...Object.keys(cloud.stars)]);
         const merged: Progress = {
           completedChallenges: { ...local.completedChallenges, ...cloud.completedChallenges },
           completedUnits: { ...local.completedUnits, ...cloud.completedUnits },
           savedXml: { ...local.savedXml, ...cloud.savedXml },
+          stars: Object.fromEntries(
+            [...starKeys].map(k => [k, Math.max(local.stars[k] ?? 0, cloud.stars[k] ?? 0)]),
+          ),
         };
         setProgress(merged);
         progressRef.current = merged;
@@ -611,14 +730,16 @@ export default function BlockLabPage() {
     return next;
   }, []);
 
-  const handleSolve = useCallback((ui: number, ci: number, xml: string) => {
+  const handleSolve = useCallback((ui: number, ci: number, xml: string, stars?: number) => {
     const key = chalKey(ui, ci);
+    const best = Math.max(progressRef.current.stars[key] ?? 0, stars ?? 0);
     const next = updateProgress(p => ({
       ...p,
       completedChallenges: { ...p.completedChallenges, [key]: true },
       savedXml: { ...p.savedXml, [key]: xml },
+      stars: best > 0 ? { ...p.stars, [key]: best } : p.stars,
     }));
-    if (userId) syncToCloud(userId, ui, ci, true, xml);
+    if (userId) syncToCloud(userId, ui, ci, true, xml, best > 0 ? best : undefined);
     return next;
   }, [updateProgress, userId]);
 
@@ -639,7 +760,7 @@ export default function BlockLabPage() {
     return (
       <ChallengeView
         ui={ui} ci={ci} progress={progress} lockedCis={lockedCis}
-        onSolve={xml => handleSolve(ui, ci, xml)}
+        onSolve={(xml, stars) => handleSolve(ui, ci, xml, stars)}
         onNext={xml => {
           handleSolve(ui, ci, xml);
           setPhase({ tag: 'challenge', ui, ci: ci + 1 });
@@ -663,8 +784,8 @@ export default function BlockLabPage() {
       <QuizView ui={ui} onDone={(score, total) => {
         const passed = score >= total * 0.6;
         if (passed) {
-          const next = updateProgress(p => ({ ...p, completedUnits: { ...p.completedUnits, [ui]: true } }));
-          if (userId) syncToCloud(userId, ui, null, true);
+          updateProgress(p => ({ ...p, completedUnits: { ...p.completedUnits, [ui]: true } }));
+          if (userId) syncToCloud(userId, ui, null, true, undefined, score);
         }
         setPhase({ tag: 'complete', ui, score, total });
       }} />
@@ -676,6 +797,7 @@ export default function BlockLabPage() {
     return (
       <UnitComplete ui={ui} score={score} total={total}
         onNext={() => setPhase({ tag: 'intro', ui: ui + 1 })}
+        onRetake={() => setPhase({ tag: 'quiz', ui })}
         onBack={() => setPhase({ tag: 'overview' })}
       />
     );

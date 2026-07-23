@@ -30,6 +30,14 @@ const BLOCKLY_JSON_DEFS = [
     tooltip: 'Rotate 90° clockwise',
   },
   {
+    type: 'collect',
+    message0: 'Collect ✦',
+    previousStatement: null,
+    nextStatement: null,
+    colour: '#0D9488',
+    tooltip: 'Pick up the item on the square STEM Bot is standing on (does nothing on an empty square)',
+  },
+  {
     type: 'repeat',
     message0: 'Repeat %1 times',
     args0: [{ type: 'field_number', name: 'TIMES', value: 3, min: 1, max: 20, precision: 1 }],
@@ -99,10 +107,39 @@ export function registerBlockDefs() {
   defsRegistered = true;
 }
 
+// ─── Dark workspace theme (matches the Block Lab card UI) ────────────────────
+
+let darkTheme: Blockly.Theme | null = null;
+export function getDarkTheme(): Blockly.Theme {
+  if (!darkTheme) {
+    darkTheme = Blockly.Theme.defineTheme('stembuilder-dark', {
+      name: 'stembuilder-dark',
+      base: Blockly.Themes.Classic,
+      componentStyles: {
+        workspaceBackgroundColour: '#0f1a30',
+        toolboxBackgroundColour: '#0c1526',
+        toolboxForegroundColour: '#cbd5e1',
+        flyoutBackgroundColour: '#111d36',
+        flyoutForegroundColour: '#cbd5e1',
+        flyoutOpacity: 1,
+        scrollbarColour: '#33415c',
+        scrollbarOpacity: 0.55,
+        insertionMarkerColour: '#93c5fd',
+        insertionMarkerOpacity: 0.4,
+        markerColour: '#93c5fd',
+        cursorColour: '#93c5fd',
+      },
+      fontStyle: { weight: 'bold', size: 11 },
+    });
+  }
+  return darkTheme;
+}
+
 // ─── Toolbox builder ──────────────────────────────────────────────────────────
 
 export function buildToolbox(availableBlocks: BlockDef[]) {
   const motion = availableBlocks.filter(b => b.category === 'motion');
+  const actions = availableBlocks.filter(b => b.category === 'action');
   const loops = availableBlocks.filter(b => b.category === 'control' && (b.id === 'repeat' || b.id.startsWith('while')));
   const conditionals = availableBlocks.filter(b => b.category === 'control' && b.id.startsWith('if'));
 
@@ -111,6 +148,12 @@ export function buildToolbox(availableBlocks: BlockDef[]) {
   if (motion.length > 0) {
     contents.push({ kind: 'label', text: '— Motion —' });
     contents.push(...motion.map(b => ({ kind: 'block', type: b.id })));
+  }
+
+  if (actions.length > 0) {
+    contents.push({ kind: 'sep' });
+    contents.push({ kind: 'label', text: '— Actions —' });
+    contents.push(...actions.map(b => ({ kind: 'block', type: b.id })));
   }
 
   if (loops.length > 0) {

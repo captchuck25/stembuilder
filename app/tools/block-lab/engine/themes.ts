@@ -19,6 +19,7 @@ export interface Theme {
   botPrimary: string;
   botAccent: string;
   particleColor: string;
+  confetti: string[];
   textColor: string;
 }
 
@@ -33,6 +34,7 @@ export const THEMES: Record<ThemeName, Theme> = {
     itemFill: '#C49A3C', itemAccent: '#FFD54A',
     botPrimary: '#4C8DFF', botAccent: '#FFD54A',
     particleColor: '#FFD54A',
+    confetti: ['#FFD54A', '#F3B63F', '#FF8C42', '#4C8DFF', '#FFF3C4'],
     textColor: '#5A4020',
   },
   forest: {
@@ -45,6 +47,7 @@ export const THEMES: Record<ThemeName, Theme> = {
     itemFill: '#996633', itemAccent: '#FF9944',
     botPrimary: '#4C8DFF', botAccent: '#FFD54A',
     particleColor: '#AADD44',
+    confetti: ['#AADD44', '#4EC84E', '#FF9944', '#FFE066', '#7FE8A2'],
     textColor: '#1E4010',
   },
   space: {
@@ -57,6 +60,7 @@ export const THEMES: Record<ThemeName, Theme> = {
     itemFill: '#8E6BFF', itemAccent: '#39D0FF',
     botPrimary: '#71B7FF', botAccent: '#FFE066',
     particleColor: '#39D0FF',
+    confetti: ['#39D0FF', '#8E6BFF', '#FFE066', '#FF6BD6', '#7DF9FF'],
     textColor: '#C8E8FF',
   },
 };
