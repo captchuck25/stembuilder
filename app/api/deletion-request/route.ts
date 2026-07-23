@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
-import { isAdmin } from '@/lib/roles'
+import { isAdmin, roleAtLeast } from '@/lib/roles'
 import { teacherSharesClassWithStudent } from '@/lib/teacher-access'
 import { softDeleteUser, softDeleteClass } from '@/lib/retention'
 
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { id: callerId, role } = session.user
-  if (role !== 'teacher' && !isAdmin(role)) {
+  if (!roleAtLeast(role, 'teacher')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

@@ -1,3 +1,4 @@
+import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
@@ -19,13 +20,15 @@ function buildDefaultLocks(classId: string) {
   for (let i = 0; i < LEVELS.length; i++) rows.push({ class_id: classId, tool: 'code-lab', level_idx: i, challenge_idx: -1 })
   for (let i = 0; i < UNITS.length; i++) rows.push({ class_id: classId, tool: 'block-lab', level_idx: i, challenge_idx: -1 })
   for (let i = 0; i < TURTLE_CHALLENGES.length; i++) rows.push({ class_id: classId, tool: 'turtle', level_idx: i, challenge_idx: -1 })
+  // Arcade Lab areas: 0 = Missions, 1 = Free Build, 2 = Class Arcade
+  for (let i = 0; i < 3; i++) rows.push({ class_id: classId, tool: 'arcade-lab', level_idx: i, challenge_idx: -1 })
   return rows
 }
 
 export async function GET() {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.user.role !== 'teacher') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const db = adminDb()
   const { data: classes } = await db
@@ -52,7 +55,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.user.role !== 'teacher') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { name } = await req.json()
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })

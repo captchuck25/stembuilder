@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState, useCallback, createContext, useCont
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import { getProfile } from "@/lib/profile";
+import { roleAtLeast } from "@/lib/roles";
 import { EditorView, basicSetup } from "codemirror";
 import { pythonLanguage } from "@codemirror/lang-python";
 import { CompletionContext, CompletionResult } from "@codemirror/autocomplete";
@@ -1443,7 +1444,7 @@ export default function PythonMazePage() {
   useEffect(() => {
     if (status === "loading") return;
     if (userId) {
-      getProfile(userId).then(p => { if (p?.role === "teacher") setIsTeacher(true); });
+      getProfile(userId).then(p => { if (roleAtLeast(p?.role, "teacher")) setIsTeacher(true); });
       loadProgressFromCloud(userId).then(cloudP => {
         const localP = loadProgress();
         const merged: Progress = {

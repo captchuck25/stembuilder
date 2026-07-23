@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { type Class, type Assignment } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
+import { roleAtLeast } from "@/lib/roles";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { UNITS } from "@/app/tools/block-lab/units";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
@@ -61,7 +62,7 @@ export default function StudentDashboard() {
     if (!session?.user) { router.push("/"); return; }
     getProfile(session?.user?.id).then(profile => {
       if (!profile) { router.push("/onboarding"); return; }
-      if (profile.role === "teacher") { router.push("/teachers/dashboard"); return; }
+      if (roleAtLeast(profile.role, "teacher")) { router.push("/teachers/dashboard"); return; }
       // Push any localStorage-only turtle tutorial completions up to the server
       // on this dashboard visit — runs at most once per (user, device).
       void runTurtleBackfillOnce(profile.id);

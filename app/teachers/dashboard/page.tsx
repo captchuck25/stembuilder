@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { type Class } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
+import { roleAtLeast } from "@/lib/roles";
 import SiteHeader from "@/app/components/SiteHeader";
 
 
@@ -36,7 +37,7 @@ export default function TeacherDashboard() {
     // Verify teacher role
     getProfile(session?.user?.id).then(profile => {
       if (!profile) { router.push("/onboarding"); return; }
-      if (profile.role !== "teacher") { router.push("/tools/code-lab"); return; }
+      if (!roleAtLeast(profile.role, "teacher")) { router.push("/tools/code-lab"); return; }
       // Unverified teachers can look around but can't create classes yet.
       setEmailUnverified(!!profile.email && !profile.email_verified_at);
       loadClasses(session?.user?.id);

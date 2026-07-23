@@ -2,6 +2,7 @@ import Link from "next/link";
 import SiteHeader from "./components/SiteHeader";
 import { auth } from "@/auth";
 import { adminDb } from "@/lib/db.server";
+import { roleAtLeast } from "@/lib/roles";
 
 import styles from "./page.module.css";
 
@@ -42,7 +43,7 @@ export default async function Home() {
       .select("role")
       .eq("id", session.user.id)
       .single();
-    isTeacher = data?.role === "teacher";
+    isTeacher = roleAtLeast(data?.role, "teacher");
   }
   const showTeachersBtn = !session?.user || isTeacher;
 

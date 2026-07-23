@@ -6,6 +6,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { type Class, type Assignment, type LessonLock } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
+import { roleAtLeast } from "@/lib/roles";
 import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { UNITS } from "@/app/tools/block-lab/units";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
@@ -208,7 +209,7 @@ export default function ClassDetailPage() {
     if (status === "loading") return;
     if (!session?.user) { router.push("/"); return; }
     getProfile(session?.user?.id).then(profile => {
-      if (!profile || profile.role !== "teacher") { router.push("/"); return; }
+      if (!profile || !roleAtLeast(profile.role, "teacher")) { router.push("/"); return; }
       loadClass();
     });
   }, [status, session?.user?.id]);

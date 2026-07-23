@@ -1,3 +1,4 @@
+import { roleAtLeast } from '@/lib/roles'
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
@@ -16,7 +17,7 @@ import { CHALLENGES as TURTLE_CHALLENGES } from '@/app/tools/code-lab/turtle/cha
 export async function POST() {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.user.role !== 'teacher') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const db = adminDb()
   const challengeCount = TURTLE_CHALLENGES.filter(c => c.category === 'challenge').length

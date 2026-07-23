@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { adminDb } from "@/lib/db.server";
+import { roleAtLeast } from "@/lib/roles";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -12,8 +13,9 @@ export default async function DashboardPage() {
   // New user — hasn't picked a role yet
   if (!profile) redirect("/onboarding");
 
-  // Route by role
-  if (profile.role === "admin") redirect("/admin");
-  if (profile.role === "teacher") redirect("/teachers/dashboard");
+  // Route by rank: teacher and above (district_admin, admin) get the teacher
+  // dashboard — "My Classes" must keep working for admins who also teach.
+  // The admin console has its own header menu entry.
+  if (roleAtLeast(profile.role, "teacher")) redirect("/teachers/dashboard");
   redirect("/student/dashboard");
 }
