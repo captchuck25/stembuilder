@@ -290,7 +290,10 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
             const px = ev.x * TILE, py = ev.y * TILE;
             if (ev.type === 'jump') playMove();
             else if (ev.type === 'sound' && ev.sound) playSoundThrottled(ev.sound, now);
-            else if (ev.type === 'poof') {
+            else if (ev.type === 'needScore') {
+              playBump();
+              particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
+            } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {
               playBump();
@@ -608,8 +611,20 @@ export default function ArcadeMissionsPage() {
   const [progress, setProgress] = useState<ArcadeUnitProgress>(emptyUnitProgress);
   const [phase, setPhase] = useState<Phase>({ tag: 'list' });
   const [quizAttempt, setQuizAttempt] = useState(0);
+  const [teacherLocked, setTeacherLocked] = useState(false);
   const progressRef = useRef(progress);
   progressRef.current = progress;
+
+  // Teacher lock: Missions area (arcade-lab level 0). Returns [] for teachers.
+  useEffect(() => {
+    if (authStatus === 'loading') return;
+    fetch('/api/student/locks?tool=arcade-lab')
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: { level_idx: number; challenge_idx: number }[]) => {
+        setTeacherLocked((rows ?? []).some(l => l.level_idx === 0 && l.challenge_idx === -1));
+      })
+      .catch(() => { /* fail open */ });
+  }, [authStatus]);
 
   useEffect(() => {
     if (authStatus === 'loading') return;
@@ -636,6 +651,25 @@ export default function ArcadeMissionsPage() {
     () => ARCADE_MISSIONS.every((_, i) => progress.completed[i]),
     [progress],
   );
+
+  if (teacherLocked) {
+    return (
+      <SiteChrome>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: '40px 28px' }}>
+          <div style={{ ...CARD, padding: '48px 40px', textAlign: 'center', maxWidth: 440 }}>
+            <div style={{ fontSize: 56 }}>🔒</div>
+            <h2 style={{ fontSize: 22, fontWeight: 900, color: '#e2e8f0', margin: '12px 0 8px' }}>Missions are locked</h2>
+            <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.6, margin: '0 0 24px' }}>
+              Your teacher hasn&apos;t opened the Game Coder Missions yet. Check back soon!
+            </p>
+            <Link href="/tools/arcade-lab" style={{ display: 'inline-block', padding: '11px 26px', background: '#7C3AED', color: '#fff', borderRadius: 10, fontWeight: 800, fontSize: 14, textDecoration: 'none' }}>
+              ← Back to Arcade Lab
+            </Link>
+          </div>
+        </div>
+      </SiteChrome>
+    );
+  }
 
   if (phase.tag === 'mission') {
     const { ci } = phase;

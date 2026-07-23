@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { adminDb } from '@/lib/db.server';
-import { canAccessClass, nameMap } from '../../shared';
+import { canAccessClass, closedArcadeClassIds, nameMap } from '../../shared';
 
 async function loadGame(db: ReturnType<typeof adminDb>, id: string) {
   const { data } = await db
@@ -40,6 +40,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const role = session.user.role ?? 'student';
   if (!(await canAccessClass(db, session.user.id, role, game.class_id))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (role === 'student' && (await closedArcadeClassIds(db, [game.class_id])).has(String(game.class_id))) {
+    return NextResponse.json({ error: 'arcade_closed' }, { status: 403 });
   }
 
   const names = await nameMap(db, [game.owner_id]);
@@ -83,6 +86,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const role = session.user.role ?? 'student';
   if (!(await canAccessClass(db, session.user.id, role, game.class_id))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (role === 'student' && (await closedArcadeClassIds(db, [game.class_id])).has(String(game.class_id))) {
+    return NextResponse.json({ error: 'arcade_closed' }, { status: 403 });
   }
 
   if (body?.type === 'play') {

@@ -77,6 +77,8 @@ export interface CompiledRules {
   touchCoin: ArcadeAction[][];
   touchSpike: ArcadeAction[][];
   touchFlag: ArcadeAction[][];
+  /** Score-gated flag touches: only fire when score >= n (else a "need more" cue) */
+  touchFlagScored: { n: number; actions: ArcadeAction[] }[];
   enemyTop: ArcadeAction[][];
   enemySide: ArcadeAction[][];
   gameStart: ArcadeAction[][];
@@ -84,7 +86,7 @@ export interface CompiledRules {
 }
 
 export function emptyRules(): CompiledRules {
-  return { keys: [], touchCoin: [], touchSpike: [], touchFlag: [], enemyTop: [], enemySide: [], gameStart: [], scoreRules: [] };
+  return { keys: [], touchCoin: [], touchSpike: [], touchFlag: [], touchFlagScored: [], enemyTop: [], enemySide: [], gameStart: [], scoreRules: [] };
 }
 
 // ── Default scripts ───────────────────────────────────────────────────────────

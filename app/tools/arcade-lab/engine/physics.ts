@@ -57,10 +57,12 @@ export interface GameState {
 }
 
 export interface GameEvent {
-  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound';
+  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore';
   x: number;
   y: number;
   sound?: ArcadeSound;
+  /** For needScore: how many more points the player needs at this goal */
+  need?: number;
 }
 
 // Player AABB (in tiles)
@@ -285,6 +287,11 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.2, e.py, 0.6, 1);
       if (touchingNow && !e.touching) {
         for (const script of rules.touchFlag) runActions(script, e);
+        for (const gated of rules.touchFlagScored) {
+          if (s.status !== 'playing') break;
+          if (s.score >= gated.n) runActions(gated.actions, e);
+          else events.push({ type: 'needScore', x: e.px + 0.5, y: e.py + 0.5, need: gated.n - s.score });
+        }
       }
     } else if (e.type === 'enemy') {
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.25, 0.76, 0.7);

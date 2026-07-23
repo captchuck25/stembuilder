@@ -78,16 +78,28 @@ export default function ArcadeCreatePage() {
   const userId = session?.user?.id ?? null;
   const role = session?.user?.role ?? 'student';
 
-  // ── Unlock gate: Free Build is the reward for finishing the Missions unit ──
+  // ── Unlock gate: Free Build is the reward for finishing the Missions unit,
+  //    and teachers can additionally lock it outright (arcade-lab level 1) ──
   const [gate, setGate] = useState<'checking' | 'locked' | 'open'>('checking');
+  const [gateReason, setGateReason] = useState<'missions' | 'teacher'>('missions');
   useEffect(() => {
     if (authStatus === 'loading') return;
-    if (role === 'teacher' || role === 'admin') { setGate('open'); return; }
-    const local = loadUnitProgress();
-    if (local.unitComplete) { setGate('open'); return; }
-    loadCloudUnitProgress().then(cloud => {
-      setGate(mergeUnitProgress(local, cloud).unitComplete ? 'open' : 'locked');
-    });
+    if (role !== 'student') { setGate('open'); return; }
+    fetch('/api/student/locks?tool=arcade-lab')
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: { level_idx: number; challenge_idx: number }[]) => {
+        if ((rows ?? []).some(l => l.level_idx === 1 && l.challenge_idx === -1)) {
+          setGateReason('teacher');
+          setGate('locked');
+          return;
+        }
+        const local = loadUnitProgress();
+        if (local.unitComplete) { setGate('open'); return; }
+        loadCloudUnitProgress().then(cloud => {
+          setGate(mergeUnitProgress(local, cloud).unitComplete ? 'open' : 'locked');
+        });
+      })
+      .catch(() => setGate('locked'));
   }, [authStatus, role]);
 
   const [def, setDef] = useState<GameDef>(starterLevel);
@@ -358,6 +370,9 @@ export default function ArcadeCreatePage() {
               playMove();
             } else if (ev.type === 'sound' && ev.sound) {
               playSoundThrottled(ev.sound, now);
+            } else if (ev.type === 'needScore') {
+              playBump();
+              particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {
@@ -494,11 +509,17 @@ export default function ArcadeCreatePage() {
             <div style={{ ...CARD, padding: '48px 44px', textAlign: 'center', maxWidth: 460 }}>
               <div style={{ fontSize: 56 }}>🔒</div>
               <h2 style={{ fontSize: 22, fontWeight: 900, color: '#e2e8f0', margin: '12px 0 8px' }}>Free Build is locked</h2>
-              <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.6, margin: '0 0 24px' }}>
-                Finish the <strong style={{ color: '#cbd5e1' }}>Game Coder Missions</strong> to earn the full game studio — every block you learn there is a tool you get to keep.
-              </p>
-              <Link href="/tools/arcade-lab/missions" style={{ display: 'inline-block', padding: '12px 28px', background: '#7C3AED', color: '#fff', borderRadius: 12, fontWeight: 800, fontSize: 15, textDecoration: 'none' }}>
-                🎓 Go to Missions →
+              {gateReason === 'teacher' ? (
+                <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.6, margin: '0 0 24px' }}>
+                  Your teacher has locked Free Build for now. Check back once it&apos;s been opened.
+                </p>
+              ) : (
+                <p style={{ fontSize: 14, color: '#94a3b8', lineHeight: 1.6, margin: '0 0 24px' }}>
+                  Finish the <strong style={{ color: '#cbd5e1' }}>Game Coder Missions</strong> to earn the full game studio — every block you learn there is a tool you get to keep.
+                </p>
+              )}
+              <Link href={gateReason === 'teacher' ? '/tools/arcade-lab' : '/tools/arcade-lab/missions'} style={{ display: 'inline-block', padding: '12px 28px', background: '#7C3AED', color: '#fff', borderRadius: 12, fontWeight: 800, fontSize: 15, textDecoration: 'none' }}>
+                {gateReason === 'teacher' ? '← Back to Arcade Lab' : '🎓 Go to Missions →'}
               </Link>
             </div>
           )}
@@ -720,8 +741,8 @@ export default function ArcadeCreatePage() {
             )}
             {mode === 'code' && (
               <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
-                🧪 Try experiments: make crystals worth <strong style={{ color: '#cbd5e1' }}>-1</strong>… make spikes give points…
-                add <strong style={{ color: '#cbd5e1' }}>&quot;when the score reaches 5 → win&quot;</strong> so the flag isn&apos;t the only way to win!
+                🧪 Try experiments: lock your goal with <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me with at least 5 ✦&quot;</strong> on the Goal sheet…
+                make crystals worth <strong style={{ color: '#cbd5e1' }}>-1</strong>… add <strong style={{ color: '#cbd5e1' }}>&quot;when the score reaches 5 → win&quot;</strong> for a flag-free victory!
               </span>
             )}
             {mode === 'play' && (

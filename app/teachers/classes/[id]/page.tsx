@@ -11,6 +11,8 @@ import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { UNITS } from "@/app/tools/block-lab/units";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, fetchTurtleAssignments, assignTurtleChallenge, unassignTurtleChallenge, type TurtleSubmission } from "@/lib/achievements";
+import { renderBotPortrait } from "@/app/tools/arcade-lab/engine/render";
+import { defaultBot, sanitizeBot } from "@/app/tools/arcade-lab/engine/bot";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const CARD: React.CSSProperties = {
@@ -113,6 +115,20 @@ function downloadCSV(rows: string[][], filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function ArcadeBotFace({ bot }: { bot: unknown }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    renderBotPortrait(c.getContext("2d")!, c.width, c.height, 0, sanitizeBot(bot) ?? defaultBot());
+  }, [bot]);
+  return <canvas ref={ref} width={56} height={56} style={{ display: "block" }} />;
+}
+
+function fmtMs(ms: number) {
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
 export default function ClassDetailPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -125,7 +141,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "bridge" | "turtle" | "stem-sketch">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch">("code-lab");
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
   const [turtleAssigned, setTurtleAssigned] = useState<Set<string>>(new Set());
   const [turtleAssignSaving, setTurtleAssignSaving] = useState<string | null>(null);
@@ -160,6 +176,15 @@ export default function ClassDetailPage() {
   const [stemSketchDesigns, setStemSketchDesigns] = useState<StemSketchRow[]>([]);
   const [loadingStemSketch, setLoadingStemSketch] = useState(false);
   const stemSketchLoadedRef = useRef(false);
+
+  // Arcade Lab
+  interface ArcadeStudentRow { id: string; name: string; email: string | null; username?: string | null; missionsDone: number; missionsTotal: number; quizScore: number | null; quizTotal: number; certified: boolean; freeBuildBeaten: boolean; gameId: string | null; }
+  interface ArcadeGameRow { id: string; title: string; bot: unknown; plays: number; updatedAt: string; ownerId: string; ownerName: string; runCount: number; record: { ms: number; name: string } | null; }
+  const [arcadeData, setArcadeData] = useState<{ students: ArcadeStudentRow[]; games: ArcadeGameRow[] } | null>(null);
+  const [loadingArcade, setLoadingArcade] = useState(false);
+  const arcadeLoadedRef = useRef(false);
+  const [arcadeToggling, setArcadeToggling] = useState<number | null>(null);
+  const [arcadeRemovingId, setArcadeRemovingId] = useState<string | null>(null);
 
   // Class settings state
   const [showSettings, setShowSettings] = useState(false);
@@ -225,6 +250,56 @@ export default function ClassDetailPage() {
       .then(data => setGrades(prev => ({ ...prev, [selectedTool]: data })))
       .finally(() => setLoadingGrades(false));
   }, [selectedTool, cls]);
+
+  // Arcade Lab tab data
+  useEffect(() => {
+    if (!cls || selectedTool !== "arcade-lab" || arcadeLoadedRef.current) return;
+    arcadeLoadedRef.current = true;
+    setLoadingArcade(true);
+    fetch(`/api/teacher/classes/${classId}/arcade`)
+      .then(r => r.json())
+      .then(data => setArcadeData(data?.students ? data : { students: [], games: [] }))
+      .finally(() => setLoadingArcade(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTool, cls]);
+
+  // Toggle an Arcade Lab area lock (0 = Missions, 1 = Free Build, 2 = Class Arcade)
+  async function toggleArcadeArea(levelIdx: number) {
+    const existing = locks.find(l => l.tool === "arcade-lab" && l.level_idx === levelIdx && l.challenge_idx === -1);
+    setArcadeToggling(levelIdx);
+    try {
+      if (existing) {
+        const res = await fetch(`/api/teacher/locks?id=${existing.id}`, { method: "DELETE" });
+        if (res.ok) setLocks(prev => prev.filter(l => l.id !== existing.id));
+        else setLockError("Could not unlock — try again.");
+      } else {
+        const res = await fetch("/api/teacher/locks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ classId, tool: "arcade-lab", levelIdx, challengeIdx: -1 }),
+        });
+        if (res.ok) {
+          const row = await res.json();
+          setLocks(prev => [...prev, row]);
+        } else setLockError("Could not lock — try again.");
+      }
+    } finally {
+      setArcadeToggling(null);
+    }
+  }
+
+  async function takedownArcadeGame(gameId: string, title: string, ownerName: string) {
+    if (!confirm(`Take down "${title}" by ${ownerName}? Their Free Build draft is not affected — they can fix it and republish.`)) return;
+    setArcadeRemovingId(gameId);
+    const res = await fetch(`/api/arcade/games?id=${gameId}`, { method: "DELETE" });
+    setArcadeRemovingId(null);
+    if (res.ok) {
+      setArcadeData(prev => prev ? {
+        students: prev.students.map(s => s.gameId === gameId ? { ...s, gameId: null } : s),
+        games: prev.games.filter(g => g.id !== gameId),
+      } : prev);
+    }
+  }
 
   useEffect(() => {
     if (!cls || selectedTool !== "bridge" || bridgeGradebookLoadedRef.current) return;
@@ -1650,6 +1725,7 @@ export default function ClassDetailPage() {
             {([
               { id: "code-lab"    as const, label: "Python Code Lab",  icon: "🐍", color: "#2563eb", desc: "Maze challenges" },
               { id: "block-lab"  as const, label: "Block Lab",         icon: "🧩", color: "#7c3aed", desc: "Visual block coding" },
+              { id: "arcade-lab" as const, label: "Arcade Lab",        icon: "🕹️", color: "#e11d48", desc: "Game design & coding" },
               { id: "bridge"     as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
               { id: "turtle"     as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
               { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
@@ -2414,6 +2490,165 @@ export default function ClassDetailPage() {
           )}
 
           {/* ── STEM Sketch panel ──────────────────────────────────────────────────── */}
+          {/* ── Arcade Lab panel ───────────────────────────────────────────────────── */}
+          {selectedTool === "arcade-lab" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+              {/* Access controls */}
+              <div style={{ ...CARD, padding: "20px 24px" }}>
+                <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: "0 0 4px" }}>Student Access</h2>
+                <p style={{ fontSize: 12, color: "#888", margin: "0 0 14px" }}>
+                  Lock or open each area of Arcade Lab for this class. Free Build additionally requires a student to finish the Missions;
+                  locking the Class Arcade hides all published games and blocks publishing.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {([
+                    { idx: 0, icon: "🎓", label: "Game Coder Missions", desc: "10 fix-the-broken-game challenges + quiz" },
+                    { idx: 1, icon: "🛠️", label: "Free Build", desc: "The full game studio (unlocks after Missions)" },
+                    { idx: 2, icon: "🏟️", label: "Class Arcade", desc: "Publish + play classmates' games, time leaderboards" },
+                  ]).map(area => {
+                    const locked = locks.some(l => l.tool === "arcade-lab" && l.level_idx === area.idx && l.challenge_idx === -1);
+                    return (
+                      <div key={area.idx} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px",
+                        borderRadius: 12, border: `2px solid ${locked ? "#fecaca" : "#bbf7d0"}`,
+                        background: locked ? "#fef2f2" : "#f0fdf4" }}>
+                        <span style={{ fontSize: 24 }}>{area.icon}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>{area.label}</div>
+                          <div style={{ fontSize: 12, color: "#777" }}>{area.desc}</div>
+                        </div>
+                        <button onClick={() => toggleArcadeArea(area.idx)} disabled={arcadeToggling === area.idx}
+                          style={{ padding: "8px 18px", borderRadius: 999, fontWeight: 800, fontSize: 13,
+                            border: "none", cursor: arcadeToggling === area.idx ? "wait" : "pointer",
+                            background: locked ? "#dc2626" : "#16a34a", color: "#fff", minWidth: 110 }}>
+                          {arcadeToggling === area.idx ? "…" : locked ? "🔒 Locked" : "✓ Open"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Progress table */}
+              <div style={{ ...CARD, padding: "20px 24px" }}>
+                <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: "0 0 14px" }}>Student Progress</h2>
+                {loadingArcade ? (
+                  <div style={{ textAlign: "center", padding: "28px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
+                ) : !arcadeData?.students.length ? (
+                  <div style={{ textAlign: "center", padding: "28px 0", color: "#aaa", fontSize: 14 }}>No students enrolled yet.</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...TH, position: "sticky", left: 0, zIndex: 2 }}>Student</th>
+                          <th style={TH}>Missions</th>
+                          <th style={TH}>Quiz</th>
+                          <th style={TH}>Certified</th>
+                          <th style={TH}>Free Build</th>
+                          <th style={TH}>Published Game</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...arcadeData.students].sort(compareByLastName).map(s => {
+                          const game = arcadeData.games.find(g => g.id === s.gameId) ?? null;
+                          return (
+                            <tr key={s.id}>
+                              <td style={NAME_TD}>
+                                {s.name}
+                                <div style={{ fontSize: 11, color: "#999", fontWeight: 500 }}>{studentSubLabel(s)}</div>
+                              </td>
+                              <td style={TD}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div style={{ width: 90, height: 8, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
+                                    <div style={{ height: "100%", width: `${(s.missionsDone / s.missionsTotal) * 100}%`, background: "#e11d48", borderRadius: 99 }} />
+                                  </div>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: "#555" }}>{s.missionsDone}/{s.missionsTotal}</span>
+                                </div>
+                              </td>
+                              <td style={TD}>
+                                {s.quizScore != null ? (
+                                  <span style={{ fontSize: 12, fontWeight: 700,
+                                    color: s.quizScore >= s.quizTotal * 0.8 ? "#16a34a" : "#f59e0b",
+                                    background: s.quizScore >= s.quizTotal * 0.8 ? "#f0fdf4" : "#fffbeb",
+                                    padding: "2px 8px", borderRadius: 6 }}>
+                                    {s.quizScore}/{s.quizTotal}
+                                  </span>
+                                ) : <span style={{ color: "#ccc" }}>—</span>}
+                              </td>
+                              <td style={TD}>{s.certified ? "🎓" : <span style={{ color: "#ccc" }}>—</span>}</td>
+                              <td style={TD}>
+                                {s.freeBuildBeaten
+                                  ? <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a" }}>✓ Beat own level</span>
+                                  : <span style={{ color: "#ccc" }}>—</span>}
+                              </td>
+                              <td style={TD}>
+                                {game ? (
+                                  <Link href={`/tools/arcade-lab/play/${game.id}`} target="_blank"
+                                    style={{ fontSize: 12, fontWeight: 800, color: "#e11d48", textDecoration: "none" }}>
+                                    ▶ {game.title} ({game.plays} plays)
+                                  </Link>
+                                ) : <span style={{ color: "#ccc" }}>—</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Games sandbox */}
+              <div style={{ ...CARD, padding: "20px 24px" }}>
+                <h2 style={{ fontSize: 16, fontWeight: 900, color: "#111", margin: "0 0 4px" }}>Class Arcade — Published Games</h2>
+                <p style={{ fontSize: 12, color: "#888", margin: "0 0 16px" }}>
+                  Every game is creator-certified beatable. Open one to play it, or take it down — the student&apos;s draft is never deleted.
+                </p>
+                {loadingArcade ? (
+                  <div style={{ textAlign: "center", padding: "28px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
+                ) : !arcadeData?.games.length ? (
+                  <div style={{ textAlign: "center", padding: "28px 0", color: "#aaa", fontSize: 14 }}>No games published yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+                    {arcadeData.games.map(g => (
+                      <div key={g.id} style={{ borderRadius: 12, border: "2px solid #fecdd3", background: "#fff1f2",
+                        padding: "14px 16px", width: 250 }}>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+                          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #fecdd3" }}>
+                            <ArcadeBotFace bot={g.bot} />
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 900, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.title}</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#e11d48" }}>{g.ownerName}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#777", fontWeight: 600, marginBottom: 10 }}>
+                          🕹 {g.plays} plays · 🏁 {g.runCount} finisher{g.runCount === 1 ? "" : "s"}
+                          {g.record && <> · 🏆 {fmtMs(g.record.ms)} ({g.record.name})</>}
+                          <br />Updated {new Date(g.updatedAt).toLocaleDateString()}
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <Link href={`/tools/arcade-lab/play/${g.id}`} target="_blank"
+                            style={{ flex: 1, textAlign: "center", padding: "7px 0", borderRadius: 8, fontSize: 12, fontWeight: 800,
+                              background: "#e11d48", color: "#fff", textDecoration: "none" }}>
+                            ▶ Play
+                          </Link>
+                          <button onClick={() => takedownArcadeGame(g.id, g.title, g.ownerName)}
+                            disabled={arcadeRemovingId === g.id}
+                            style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                              border: "2px solid #fca5a5", background: "#fff", color: "#dc2626", cursor: "pointer" }}>
+                            {arcadeRemovingId === g.id ? "…" : "🗑 Take down"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {selectedTool === "stem-sketch" && (
             <div style={{ ...CARD, padding: "26px 28px" }}>
               <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0891b2", marginBottom: 6 }}>STEM Sketch Designs</h2>

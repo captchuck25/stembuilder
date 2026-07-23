@@ -30,6 +30,20 @@ export async function canAccessClass(db: Db, userId: string, role: Role, classId
   return ids.includes(String(classId));
 }
 
+/** Of the given class ids, which have their Class Arcade locked by the teacher
+ *  (lesson_locks row: tool 'arcade-lab', level_idx 2, challenge_idx -1). */
+export async function closedArcadeClassIds(db: Db, classIds: string[]): Promise<Set<string>> {
+  if (classIds.length === 0) return new Set();
+  const { data } = await db
+    .from('lesson_locks')
+    .select('class_id')
+    .eq('tool', 'arcade-lab')
+    .eq('level_idx', 2)
+    .eq('challenge_idx', -1)
+    .in('class_id', classIds);
+  return new Set((data ?? []).map((r: { class_id: string }) => String(r.class_id)));
+}
+
 /** Look up display names for a set of profile ids → { id: name } */
 export async function nameMap(db: Db, ids: string[]): Promise<Record<string, string>> {
   if (ids.length === 0) return {};

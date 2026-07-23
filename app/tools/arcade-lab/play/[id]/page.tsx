@@ -176,7 +176,10 @@ export default function PlayArcadeGamePage() {
           const px = ev.x * TILE, py = ev.y * TILE;
           if (ev.type === 'jump') playMove();
           else if (ev.type === 'sound' && ev.sound) playSoundThrottled(ev.sound, now);
-          else if (ev.type === 'poof') {
+          else if (ev.type === 'needScore') {
+            playBump();
+            particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
+          } else if (ev.type === 'poof') {
             particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
           } else if (ev.type === 'hurt' || ev.type === 'lose') {
             playBump();

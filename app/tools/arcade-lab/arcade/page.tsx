@@ -42,6 +42,7 @@ export default function ClassArcadePage() {
   const [role, setRole] = useState<string>('student');
   const [meId, setMeId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [closed, setClosed] = useState(false);
 
   const load = useCallback(() => {
     fetch('/api/arcade/games')
@@ -49,6 +50,7 @@ export default function ClassArcadePage() {
       .then(data => {
         setGames(data.games ?? []);
         setRole(data.role ?? 'student');
+        setClosed(!!data.closed);
       });
     fetch('/api/auth/session')
       .then(r => (r.ok ? r.json() : null))
@@ -90,7 +92,17 @@ export default function ClassArcadePage() {
             </div>
           )}
 
-          {games !== null && games.length === 0 && (
+          {games !== null && games.length === 0 && closed && (
+            <div style={{ ...CARD, padding: '48px 40px', textAlign: 'center' }}>
+              <div style={{ fontSize: 48 }}>🔒</div>
+              <h2 style={{ fontSize: 20, fontWeight: 900, color: '#e2e8f0', margin: '12px 0 8px' }}>The arcade is closed right now</h2>
+              <p style={{ fontSize: 14, color: '#94a3b8', margin: 0 }}>
+                Your teacher has locked the Class Arcade. Check back when it reopens!
+              </p>
+            </div>
+          )}
+
+          {games !== null && games.length === 0 && !closed && (
             <div style={{ ...CARD, padding: '48px 40px', textAlign: 'center' }}>
               <div style={{ fontSize: 48 }}>🕹️</div>
               <h2 style={{ fontSize: 20, fontWeight: 900, color: '#e2e8f0', margin: '12px 0 8px' }}>No games in the arcade yet</h2>

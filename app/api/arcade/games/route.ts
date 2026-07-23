@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { adminDb } from '@/lib/db.server';
-import { classIdsFor, canAccessClass, nameMap } from '../shared';
+import { classIdsFor, canAccessClass, closedArcadeClassIds, nameMap } from '../shared';
 import { validDims } from '@/app/tools/arcade-lab/engine/types';
 import { sanitizeBot } from '@/app/tools/arcade-lab/engine/bot';
 
@@ -13,8 +13,17 @@ export async function GET() {
 
   const db = adminDb();
   const role = session.user.role ?? 'student';
-  const classIds = await classIdsFor(db, session.user.id, role);
+  let classIds = await classIdsFor(db, session.user.id, role);
   if (classIds.length === 0) return NextResponse.json({ games: [], role });
+
+  // Students only see arcades their teacher hasn't locked
+  let closed = false;
+  if (role === 'student') {
+    const closedIds = await closedArcadeClassIds(db, classIds);
+    classIds = classIds.filter(id => !closedIds.has(id));
+    closed = classIds.length === 0;
+  }
+  if (classIds.length === 0) return NextResponse.json({ games: [], role, closed });
 
   const { data: games } = await db
     .from('arcade_games')
@@ -22,7 +31,7 @@ export async function GET() {
     .in('class_id', classIds)
     .order('updated_at', { ascending: false });
 
-  if (!games?.length) return NextResponse.json({ games: [], role });
+  if (!games?.length) return NextResponse.json({ games: [], role, closed: false });
 
   const gameIds = games.map((g: { id: string }) => g.id);
   const { data: runs } = await db
@@ -82,6 +91,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'not_enrolled', message: 'Join a class to publish to its arcade.' }, { status: 412 });
   }
   const classId = classIds.includes(String(body?.classId)) ? String(body.classId) : classIds[0];
+
+  // Teacher lock: students can't publish while the class arcade is closed
+  if (role === 'student') {
+    const closedIds = await closedArcadeClassIds(db, [classId]);
+    if (closedIds.has(classId)) {
+      return NextResponse.json({ error: 'arcade_closed', message: 'Your teacher has closed the Class Arcade right now.' }, { status: 403 });
+    }
+  }
 
   // Certified beatable: the author must have beaten their own level
   const { data: beaten } = await db

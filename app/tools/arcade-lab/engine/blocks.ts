@@ -44,6 +44,14 @@ const ARCADE_DEFS = [
     tooltip: 'Runs once each time the player touches this object',
   },
   {
+    type: 'arcade_when_touch_me_score',
+    message0: 'when the player touches me with at least %1 ✦',
+    args0: [{ type: 'field_number', name: 'N', value: 5, min: 1, max: 99, precision: 1 }],
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs only if the player has collected enough points — otherwise the goal stays locked',
+  },
+  {
     type: 'arcade_when_stomped',
     message0: 'when the player lands on my head',
     nextStatement: null,
@@ -173,7 +181,7 @@ const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
   coin:   ['arcade_when_touch_me', 'arcade_disappear', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   spike:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_change_score', 'arcade_disappear', 'arcade_play_sound'],
   enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_disappear', 'arcade_bounce_player', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
-  flag:   ['arcade_when_touch_me', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
+  flag:   ['arcade_when_touch_me', 'arcade_when_touch_me_score', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
 };
 
@@ -239,6 +247,9 @@ export function compileScripts(scripts: Partial<Record<ScriptOwner, string>>): C
             if (owner === 'coin') rules.touchCoin.push(actions);
             else if (owner === 'spike') rules.touchSpike.push(actions);
             else if (owner === 'flag') rules.touchFlag.push(actions);
+            break;
+          case 'arcade_when_touch_me_score':
+            if (owner === 'flag') rules.touchFlagScored.push({ n: Number(top.getFieldValue('N')) || 1, actions });
             break;
           case 'arcade_when_stomped':
             if (owner === 'enemy') rules.enemyTop.push(actions);
