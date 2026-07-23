@@ -67,12 +67,19 @@ real imports also write an `admin_audit_log` entry (`roster.import`).
 | Schema | `db/migrations/0013_rostering.sql` |
 | Tests | `tests/roster-csv.test.ts` |
 
-## Next adapters
+## Google Classroom adapter (shipped)
 
-- **Google Classroom**: OAuth connect (scopes `classroom.courses.readonly`,
-  `classroom.rosters.readonly`) → map courses/rosters into the same
-  `RosterData` shape → same importer. Needs a Google Cloud project with a
-  verified consent screen (env vars + setup README ship with that milestone).
+Roster tab → **Google Classroom sync**: connect a Google account, pick
+courses, preview (dry run), confirm. Courses/rosters map into the same
+`RosterData` shape (`lib/roster/google.ts`) and run through the same importer;
+Google's course/user ids are the sourcedIds, so re-syncs add new students
+without duplicating. Requires a Google Cloud OAuth app — full setup, scopes,
+and env vars (`GOOGLE_CLASSROOM_CLIENT_ID/SECRET`) in
+`docs/google-classroom-setup.md`. Until configured, the section shows
+"Not configured" and everything else works normally.
+
+## Next
+
 - **Clever**: "Log in with Clever" SSO is an ACCESS feature (separate from
   rostering). Paid Secure Sync rostering is deliberately out of scope for
   Phase 1; the importer's OneRoster shape leaves room for it later.

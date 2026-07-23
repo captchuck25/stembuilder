@@ -88,6 +88,12 @@ export default function DistrictDetailPage() {
   const [rosterDone, setRosterDone] = useState<RosterSummary | null>(null);
   const [rosterBusy, setRosterBusy] = useState<"" | "preview" | "import">("");
   const [rosterError, setRosterError] = useState<string | null>(null);
+  const [previewSource, setPreviewSource] = useState<"csv" | "google">("csv");
+
+  // Google Classroom
+  const [gcCourses, setGcCourses] = useState<{ id: string; title: string }[] | null>(null);
+  const [gcSelected, setGcSelected] = useState<string[]>([]);
+  const [gcState, setGcState] = useState<"" | "loading" | "unconfigured">("");
 
   // Forms
   const [newSchool, setNewSchool] = useState("");
@@ -136,6 +142,8 @@ export default function DistrictDetailPage() {
     setTab(next);
     if (next === "students" && students === null) loadStudents("");
     if (next === "audit" && audit === null) loadAudit();
+    // Picks up an existing Google connection (cookie) if there is one.
+    if (next === "roster" && gcCourses === null && gcState === "") loadGoogleCourses();
   }
 
   async function post(url: string, method: string, body?: unknown): Promise<boolean> {
@@ -212,9 +220,62 @@ export default function DistrictDetailPage() {
     setBusy(null);
   }
 
+  // Returning from the Google OAuth consent screen: ?google=connected|denied|error
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const google = q.get("google");
+    if (!google) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    setTab("roster");
+    if (google === "connected") loadGoogleCourses();
+    else setRosterError(google === "denied"
+      ? "Google access was declined — connect and allow the Classroom permissions to sync."
+      : "Google connection failed — try again.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadGoogleCourses() {
+    setGcState("loading");
+    try {
+      const r = await fetch(`/api/admin/roster/google/courses?districtId=${districtId}`);
+      if (r.status === 503) { setGcState("unconfigured"); return; }
+      if (r.status === 401) { setGcCourses(null); setGcState(""); return; } // shows Connect button
+      if (r.ok) { setGcCourses(await r.json()); setGcState(""); return; }
+      const d = await r.json().catch(() => ({}));
+      setRosterError(d.error ?? "Could not load Google Classroom courses");
+      setGcState("");
+    } catch {
+      setGcState("");
+    }
+  }
+
+  async function googleSync(dryRun: boolean) {
+    if (gcSelected.length === 0) return;
+    setRosterBusy(dryRun ? "preview" : "import"); setRosterError(null);
+    if (dryRun) { setRosterPreview(null); setRosterDone(null); }
+    try {
+      const r = await fetch("/api/admin/roster/google/sync", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ districtId, courseIds: gcSelected, dryRun }),
+      });
+      const d = await r.json();
+      if (r.status === 401) { setGcCourses(null); setRosterError("Google session expired — connect again."); return; }
+      if (!r.ok) { setRosterError(d.error ?? "Google sync failed"); return; }
+      if (dryRun) { setPreviewSource("google"); setRosterPreview(d); }
+      else {
+        setRosterDone(d); setRosterPreview(null);
+        setStudents(null);
+        await load();
+      }
+    } finally {
+      setRosterBusy("");
+    }
+  }
+
   async function onRosterFile(file: File | undefined) {
     if (!file) return;
     setRosterError(null); setRosterPreview(null); setRosterDone(null);
+    setPreviewSource("csv");
     setRosterFileName(file.name);
     const text = await file.text();
     setRosterCsv(text);
@@ -615,7 +676,8 @@ export default function DistrictDetailPage() {
                       )}
 
                       {rosterPreview && (
-                        <button onClick={runRosterImport} disabled={rosterBusy === "import"}
+                        <button onClick={() => previewSource === "csv" ? runRosterImport() : googleSync(false)}
+                          disabled={rosterBusy === "import"}
                           style={{ ...BTN, background: rosterBusy === "import" ? "#6b7280" : "#16a34a", fontSize: 14, padding: "12px 24px" }}>
                           {rosterBusy === "import" ? "Importing…" : `✓ Import ${c.studentsCreated} students / ${c.classesCreated} classes`}
                         </button>
@@ -623,6 +685,54 @@ export default function DistrictDetailPage() {
                     </div>
                   );
                 })()}
+
+                {/* Google Classroom sync */}
+                <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #eee" }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 900, color: "#111", margin: "0 0 8px" }}>
+                    Google Classroom sync
+                  </h3>
+                  {gcState === "unconfigured" ? (
+                    <p style={{ fontSize: 13, color: "#888", margin: 0 }}>
+                      Not configured yet — a Google Cloud OAuth app is required. See <code>docs/google-classroom-setup.md</code>.
+                    </p>
+                  ) : gcCourses === null ? (
+                    <div>
+                      <p style={{ fontSize: 13, color: "#555", margin: "0 0 12px" }}>
+                        Connect a Google account that teaches the classes (or has them shared), pick courses,
+                        and their rosters import just like a CSV — re-syncing later adds new students without duplicating.
+                      </p>
+                      <a href={`/api/admin/roster/google/connect?districtId=${districtId}`}
+                        style={{ ...BTN, display: "inline-block", textDecoration: "none" }}
+                        onClick={() => setGcState("loading")}>
+                        {gcState === "loading" ? "Connecting…" : "🔗 Connect Google Classroom"}
+                      </a>
+                    </div>
+                  ) : gcCourses.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "#888", margin: 0 }}>
+                      No active courses found on the connected Google account.
+                    </p>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                        {gcCourses.map(c => (
+                          <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10,
+                            padding: "8px 12px", borderRadius: 8, background: "#f9f9f9", border: "1px solid #eee",
+                            fontSize: 13, fontWeight: 600, color: "#111", cursor: "pointer" }}>
+                            <input type="checkbox" checked={gcSelected.includes(c.id)}
+                              onChange={e => setGcSelected(prev => e.target.checked
+                                ? [...prev, c.id] : prev.filter(x => x !== c.id))} />
+                            {c.title}
+                          </label>
+                        ))}
+                      </div>
+                      <button onClick={() => googleSync(true)}
+                        disabled={gcSelected.length === 0 || rosterBusy !== ""}
+                        style={{ ...BTN, opacity: gcSelected.length === 0 ? 0.5 : 1 }}>
+                        {rosterBusy === "preview" && previewSource === "google" ? "Checking…" : `Preview sync (${gcSelected.length} course${gcSelected.length === 1 ? "" : "s"})`}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
