@@ -84,6 +84,20 @@ export default async function CodeLabPage() {
               </div>
             </Link>
 
+            {/* Arcade */}
+            <Link href="/tools/arcade-lab" style={{ textDecoration: "none" }}>
+              <div style={{ ...TILE_STYLE, background: "linear-gradient(135deg, #3b0764 0%, #7c3aed 55%, #c084fc 100%)", position: "relative" }}>
+                <span style={{ position: "absolute", top: 12, right: 14, fontSize: 10, fontWeight: 800,
+                  color: "#3b0764", background: "#FFD54A", borderRadius: 999, padding: "3px 10px",
+                  textTransform: "uppercase", letterSpacing: "0.6px" }}>
+                  Preview
+                </span>
+                <span style={{ fontSize: 40, lineHeight: 1 }}>🕹️</span>
+                <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: "0.3px" }}>Arcade</span>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.85)", fontWeight: 700 }}>Build Your Own Game</span>
+              </div>
+            </Link>
+
           </div>
         </div>
       </main>

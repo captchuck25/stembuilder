@@ -9,8 +9,17 @@ export interface ScriptNode {
 
 export interface RuntimeCallbacks {
   onCollect: (x: number, y: number) => void;
-  onWin: () => void;
+  /** collectedAll is true when every collectible in the level was picked up */
+  onWin: (collectedAll: boolean) => void;
   onBump: () => void;
+  /** Fires as each block begins executing — id matches the Blockly block id */
+  onStep?: (id: string | null) => void;
+  /** Fires on every successful forward step (for sound effects) */
+  onMove?: () => void;
+  /** Fires when Collect runs on an empty square (safe no-op, but give soft feedback) */
+  onCollectMiss?: () => void;
+  /** Fires when the run ends for any reason (win, bump, stop, or script exhausted) */
+  onDone?: () => void;
 }
 
 export class MazeRuntime {
@@ -28,6 +37,7 @@ export class MazeRuntime {
   private _running = false;
   private _stopped = false;
   private _bumped = false;
+  private _speed = 1;
   private readonly stepGap = 55;
 
   constructor(
@@ -63,15 +73,22 @@ export class MazeRuntime {
     this._stopped = true;
   }
 
+  setSpeed(speed: number) {
+    this._speed = speed;
+    this.animator.speed = speed;
+  }
+
   async run(script: ScriptNode[]) {
     this._running = true;
     this._stopped = false;
     this._bumped = false;
     await this.execMany(script);
     this._running = false;
+    this.cb.onStep?.(null);
     if (!this._stopped && this.atGoal() && !this._bumped) {
-      this.cb.onWin();
+      this.cb.onWin(this.collectibles.size === 0);
     }
+    this.cb.onDone?.();
   }
 
   private isPath(x: number, y: number) {
@@ -105,7 +122,7 @@ export class MazeRuntime {
   }
 
   private gap(multiplier = 1): Promise<void> {
-    return new Promise(r => setTimeout(r, this.stepGap * multiplier));
+    return new Promise(r => setTimeout(r, (this.stepGap * multiplier) / this._speed));
   }
 
   private async execMany(nodes: ScriptNode[]) {
@@ -117,6 +134,7 @@ export class MazeRuntime {
 
   private async execNode(node: ScriptNode): Promise<void> {
     if (!this._running) return;
+    this.cb.onStep?.(node.id);
 
     switch (node.blockId) {
       case 'move_forward': {
@@ -127,34 +145,48 @@ export class MazeRuntime {
           this.animator.moveTo(nx, ny, this.botDir);
           this.botX = nx;
           this.botY = ny;
-          const key = `${nx},${ny}`;
-          if (this.collectibles.has(key)) {
-            this.collectibles.delete(key);
-            this.animator.collect();
-            this.cb.onCollect(nx, ny);
-          }
+          this.cb.onMove?.();
           await this.animator.waitForMove();
           await this.gap();
         } else {
+          // Hitting a wall ends the program (as the Unit 1 lesson promises)
           this.animator.bump();
           this._bumped = true;
           this.cb.onBump();
-          await this.gap(3);
+          await this.gap(6);
+          this._running = false;
         }
         break;
       }
 
       case 'turn_left': {
         this.botDir = this.left(this.botDir);
-        this.animator.direction = this.botDir;
-        await this.gap(2);
+        this.animator.turnTo(this.botDir);
+        await this.animator.waitForTurn();
+        await this.gap();
         break;
       }
 
       case 'turn_right': {
         this.botDir = this.right(this.botDir);
-        this.animator.direction = this.botDir;
-        await this.gap(2);
+        this.animator.turnTo(this.botDir);
+        await this.animator.waitForTurn();
+        await this.gap();
+        break;
+      }
+
+      case 'collect': {
+        const key = `${this.botX},${this.botY}`;
+        if (this.collectibles.has(key)) {
+          this.collectibles.delete(key);
+          this.animator.collect();
+          this.cb.onCollect(this.botX, this.botY);
+          await this.gap(4);
+        } else {
+          // Empty square — safe no-op so Collect can ride inside loops
+          this.cb.onCollectMiss?.();
+          await this.gap(2);
+        }
         break;
       }
 
@@ -207,6 +239,11 @@ export class MazeRuntime {
 }
 
 // ── Script tree helpers ────────────────────────────────────────────────────
+
+/** Total blocks in a script, counting nested bodies (a Repeat with 2 blocks inside = 3) */
+export function countBlocks(nodes: ScriptNode[]): number {
+  return nodes.reduce((sum, n) => sum + 1 + (n.children ? countBlocks(n.children) : 0), 0);
+}
 
 export function appendNode(
   nodes: ScriptNode[],

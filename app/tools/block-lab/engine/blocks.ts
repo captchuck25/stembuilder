@@ -1,4 +1,4 @@
-export type BlockCategory = 'motion' | 'control';
+export type BlockCategory = 'motion' | 'action' | 'control';
 
 export interface BlockParam {
   key: string;
@@ -23,6 +23,7 @@ export const BLOCK_DEFS: BlockDef[] = [
   { id: 'move_forward', label: 'Move Forward', category: 'motion', color: '#2563EB', unlockLevel: 0 },
   { id: 'turn_left',    label: 'Turn Left',    category: 'motion', color: '#2563EB', unlockLevel: 0 },
   { id: 'turn_right',   label: 'Turn Right',   category: 'motion', color: '#2563EB', unlockLevel: 0 },
+  { id: 'collect',      label: 'Collect',      category: 'action', color: '#0D9488', unlockLevel: 0 },
   {
     id: 'repeat',
     label: 'Repeat',
