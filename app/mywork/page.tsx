@@ -7,6 +7,10 @@ import SiteHeader from "@/app/components/SiteHeader";
 import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, fetchBlueprintLabDesigns, deleteBlueprintLabDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign, BlueprintLabDesign } from "@/lib/achievements";
 import { runTurtleBackfillOnce } from "@/lib/turtle-backfill";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
+import { GameDef, TILE, VIEW_W, VIEW_H, validDims } from "@/app/tools/arcade-lab/engine/types";
+import { BotConfig, defaultBot, sanitizeBot } from "@/app/tools/arcade-lab/engine/bot";
+import { renderBotPortrait } from "@/app/tools/arcade-lab/engine/render";
+import { ARCADE_MISSIONS, ARCADE_QUIZ } from "@/app/tools/arcade-lab/unit";
 
 // ─── Static metadata ──────────────────────────────────────────────────────────
 
@@ -113,11 +117,9 @@ function ScoreBadge({ score }: { score: number | null }) {
 // ─── Block Lab section ────────────────────────────────────────────────────────
 
 const BLOCK_MODULES = [
-  { id: 1, title: "Events & Movement", color: "#2563eb", challenges: 10, quizTotal: 6 },
-  { id: 2, title: "Sprites & Interaction", color: "#16a34a", challenges: 0, quizTotal: 0 },
-  { id: 3, title: "Loops & Animation", color: "#dc2626", challenges: 0, quizTotal: 0 },
-  { id: 4, title: "Conditionals & Logic", color: "#7c3aed", challenges: 0, quizTotal: 0 },
-  { id: 5, title: "Variables & Final Mission", color: "#059669", challenges: 0, quizTotal: 0 },
+  { id: 1, title: "Sequence",   color: "#D97706", challenges: 10, quizTotal: 5 },
+  { id: 2, title: "Loops",      color: "#16A34A", challenges: 10, quizTotal: 5 },
+  { id: 3, title: "While & If", color: "#7C3AED", challenges: 10, quizTotal: 5 },
 ];
 
 function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
@@ -130,6 +132,8 @@ function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
           const moduleRows = rows.filter(r => r.level_idx === mi);
           const challengeRows = moduleRows.filter(r => r.challenge_idx !== null && r.challenge_idx >= 0);
           const done = challengeRows.filter(r => r.completed).length;
+          // On challenge rows, quiz_score stores the star rating (1-3)
+          const stars = challengeRows.reduce((s, r) => s + (r.quiz_score ?? 0), 0);
           const quizRow = moduleRows.find(r => (r.challenge_idx === null || r.challenge_idx === -1) && r.quiz_score != null);
           const pct = mod.challenges > 0 ? done / mod.challenges : 0;
           const started = done > 0 || quizRow != null;
@@ -142,7 +146,7 @@ function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
                   fontSize: 11, fontWeight: 900, color: started ? "#fff" : "#aaa" }}>
                   {mod.id}
                 </div>
-                <span style={{ fontSize: 14, fontWeight: 800, color: started ? "#111" : "#aaa", minWidth: 180 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: started ? "#111" : "#aaa", minWidth: 120 }}>
                   {mod.title}
                 </span>
                 <div style={{ flex: 1, height: 10, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
@@ -151,6 +155,9 @@ function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
                 </div>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "#888", minWidth: 48, textAlign: "right" }}>
                   {done}/{mod.challenges}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: stars > 0 ? "#d97706" : "#ccc", minWidth: 52, textAlign: "right" }}>
+                  ⭐ {stars}/{mod.challenges * 3}
                 </span>
                 <div style={{ minWidth: 90, textAlign: "right" }}>
                   {quizRow ? (
@@ -168,6 +175,176 @@ function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Arcade Lab section ───────────────────────────────────────────────────────
+
+function ArcadeThumb({ def }: { def: GameDef }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const scale = Math.min(220 / (def.cols * TILE), 132 / (def.rows * TILE));
+  const w = Math.max(60, Math.round(def.cols * TILE * scale));
+  const h = Math.max(36, Math.round(def.rows * TILE * scale));
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d")!;
+    const colors: Record<string, string> = {
+      platform: "#53B54B", coin: "#FFD54A", spike: "#EF4444",
+      enemy: "#B06AE8", flag: "#22C55E", spawn: "#4C8DFF",
+    };
+    ctx.fillStyle = "#0e1830";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const s = Math.min(canvas.width / (def.cols * TILE), canvas.height / (def.rows * TILE));
+    for (const o of def.objects) {
+      ctx.fillStyle = colors[o.type] ?? "#fff";
+      ctx.fillRect(o.x * TILE * s, o.y * TILE * s, Math.max(2, TILE * s), Math.max(2, TILE * s));
+    }
+  }, [def]);
+  return <canvas ref={ref} width={w} height={h} style={{ display: "block", borderRadius: 8 }} />;
+}
+
+function ArcadeBotAvatar({ bot }: { bot: BotConfig }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    renderBotPortrait(canvas.getContext("2d")!, canvas.width, canvas.height, 0, bot);
+  }, [bot]);
+  return <canvas ref={ref} width={52} height={52} style={{ display: "block" }} title="Your bot — edit it in the Robot Garage" />;
+}
+
+interface ArcadeRow { level_idx: number; challenge_idx: number; completed: boolean; quiz_score: number | null; saved_code: string | null; updated_at?: string }
+
+function ArcadeLabSection() {
+  const [rows, setRows] = useState<ArcadeRow[] | null>(null);
+
+  useEffect(() => {
+    fetch("/api/progress?tool=arcade-lab")
+      .then(r => (r.ok ? r.json() : []))
+      .then(data => setRows(data ?? []));
+  }, []);
+
+  const missionRows = (rows ?? []).filter(r => r.level_idx === 1 && r.challenge_idx >= 0 && r.completed);
+  const unitRow = (rows ?? []).find(r => r.level_idx === 1 && r.challenge_idx === -1);
+  const draftRow = (rows ?? []).find(r => r.level_idx === 0 && r.challenge_idx === 0 && r.saved_code);
+  const botRow = (rows ?? []).find(r => r.level_idx === 2 && r.challenge_idx === 0 && r.saved_code);
+
+  const missionsDone = missionRows.length;
+  const missionsTotal = ARCADE_MISSIONS.length;
+  const quizScore = unitRow?.quiz_score ?? null;
+  const certified = unitRow?.completed ?? false;
+
+  let draft: GameDef | null = null;
+  try {
+    const parsed = draftRow?.saved_code ? JSON.parse(draftRow.saved_code) : null;
+    if (parsed && Array.isArray(parsed.objects) && validDims(parsed.cols, parsed.rows)) draft = parsed as GameDef;
+  } catch { /* ignore */ }
+
+  let bot: BotConfig = defaultBot();
+  try {
+    const parsed = botRow?.saved_code ? sanitizeBot(JSON.parse(botRow.saved_code)) : null;
+    if (parsed) bot = parsed;
+  } catch { /* ignore */ }
+
+  const shapeLabel = draft
+    ? (draft.cols * TILE > VIEW_W ? "Long (side-scroller)" : draft.rows * TILE > VIEW_H ? "Tall (climber)" : "Classic (one screen)")
+    : "";
+  const count = (t: string) => draft?.objects.filter(o => o.type === t).length ?? 0;
+
+  return (
+    <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+        marginBottom: 16, paddingBottom: 12, borderBottom: "2px solid #f0f0f0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "#111" }}>🕹️ Arcade Lab</h2>
+          <ArcadeBotAvatar bot={bot} />
+        </div>
+        <Link href="/tools/arcade-lab" style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none" }}>
+          Go to Arcade Lab →
+        </Link>
+      </div>
+
+      {/* Missions progress */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: missionsDone > 0 ? "#111" : "#aaa", minWidth: 120 }}>
+          Game Coder Missions
+        </span>
+        <div style={{ flex: 1, height: 10, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${(missionsDone / missionsTotal) * 100}%`,
+            background: "#7c3aed", borderRadius: 99, transition: "width 600ms" }} />
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#888", minWidth: 48, textAlign: "right" }}>
+          {missionsDone}/{missionsTotal}
+        </span>
+        <div style={{ minWidth: 90, textAlign: "right" }}>
+          {quizScore != null ? (
+            <span style={{ fontSize: 12, fontWeight: 700,
+              color: quizScore >= ARCADE_QUIZ.length * 0.8 ? "#16a34a" : "#f59e0b",
+              background: quizScore >= ARCADE_QUIZ.length * 0.8 ? "#f0fdf4" : "#fffbeb",
+              padding: "2px 8px", borderRadius: 6 }}>
+              Quiz {quizScore}/{ARCADE_QUIZ.length}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: "#ccc", fontWeight: 600 }}>Quiz —</span>
+          )}
+        </div>
+        {certified && (
+          <span style={{ fontSize: 12, fontWeight: 800, color: "#16a34a", background: "#f0fdf4",
+            padding: "2px 8px", borderRadius: 6, whiteSpace: "nowrap" }}>
+            🎓 Certified
+          </span>
+        )}
+      </div>
+
+      {/* Free Build level */}
+      <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 14 }}>
+        <div style={{ ...SECTION_LABEL, marginBottom: 10 }}>My level design</div>
+        {rows === null ? (
+          <p style={{ fontSize: 13, color: "#aaa", margin: 0, fontWeight: 600 }}>Loading…</p>
+        ) : !draft ? (
+          <div style={{ textAlign: "center", padding: "14px 0", color: "#aaa" }}>
+            <p style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 600 }}>No level designed yet.</p>
+            <Link href="/tools/arcade-lab/create" style={{ fontSize: 13, color: "#7c3aed", fontWeight: 700, textDecoration: "none" }}>
+              Open Free Build →
+            </Link>
+          </div>
+        ) : (
+          <div style={{ background: "#fafafa", border: "2px solid #e5e7eb", borderRadius: 12,
+            padding: "14px 18px", transition: "border-color 150ms" }}
+            onMouseEnter={e => (e.currentTarget.style.borderColor = "#7c3aed")}
+            onMouseLeave={e => (e.currentTarget.style.borderColor = "#e5e7eb")}>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <Link href="/tools/arcade-lab/create" style={{ flexShrink: 0 }}>
+                <ArcadeThumb def={draft} />
+              </Link>
+              <Link href="/tools/arcade-lab/create" style={{ textDecoration: "none", flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: "#111", marginBottom: 6 }}>
+                  {draft.title || "Untitled level"}
+                </div>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>{shapeLabel}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>🪙 {count("coin")}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>🔺 {count("spike")}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>👾 {count("enemy")}</span>
+                  <span style={{
+                    fontSize: 11, fontWeight: 800, padding: "2px 7px", borderRadius: 6,
+                    background: draftRow?.completed ? "#f0fdf4" : "#fffbeb",
+                    color: draftRow?.completed ? "#16a34a" : "#b45309",
+                  }}>
+                    {draftRow?.completed ? "✓ Beaten by you" : "Not beaten yet"}
+                  </span>
+                </div>
+              </Link>
+              <Link href="/tools/arcade-lab/create"
+                style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none", flexShrink: 0 }}>
+                Open →
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -819,6 +996,7 @@ export default function AchievementsPage() {
             <>
               <CodeLabSection rows={codeLabRows} />
               <BlockLabSection rows={blockLabRows} />
+              <ArcadeLabSection />
               <TurtleSection completedIds={turtleCompleted} submissions={turtleSubmissions} />
               <BridgeSection
                 designs={bridgeDesigns}
