@@ -15,6 +15,7 @@ const CARD: React.CSSProperties = {
 };
 const INPUT: React.CSSProperties = {
   width: "100%", padding: "10px 12px", borderRadius: 10, border: "2px solid #d1d5db", fontSize: 14,
+  color: "#111", background: "#fff",
 };
 
 interface Peek { email: string; districtName: string; accountExists: boolean }

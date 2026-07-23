@@ -17,6 +17,7 @@ const CARD: React.CSSProperties = {
 };
 const INPUT: React.CSSProperties = {
   padding: "10px 12px", borderRadius: 10, border: "2px solid #d1d5db", fontSize: 14,
+  color: "#111", background: "#fff",
 };
 const BTN: React.CSSProperties = {
   background: "#1f1f1f", color: "#fff", border: "none", borderRadius: 10,

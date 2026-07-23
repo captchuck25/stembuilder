@@ -103,12 +103,12 @@ export default function DistrictsPage() {
               <div style={{ flex: 2, minWidth: 220 }}>
                 <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>New district name</label>
                 <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="e.g. Springfield Public Schools"
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "2px solid #d1d5db", fontSize: 14 }} />
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "2px solid #d1d5db", fontSize: 14, color: "#111", background: "#fff" }} />
               </div>
               <div style={{ flex: 1, minWidth: 120 }}>
                 <label style={{ fontSize: 12, fontWeight: 700, color: "#555", display: "block", marginBottom: 6 }}>State</label>
                 <input value={newState} onChange={e => setNewState(e.target.value)} placeholder="e.g. NJ"
-                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "2px solid #d1d5db", fontSize: 14 }} />
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "2px solid #d1d5db", fontSize: 14, color: "#111", background: "#fff" }} />
               </div>
               <button type="submit" disabled={creating || !newName.trim()}
                 style={{ background: "#1f1f1f", color: "#fff", border: "none", borderRadius: 10,
