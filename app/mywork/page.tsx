@@ -393,9 +393,16 @@ function ArcadeLabSection() {
                         </Link>
                       </div>
                       {shareMsg[slot] && (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: shareMsg[slot].ok ? "#16a34a" : "#dc2626" }}>
-                          {shareMsg[slot].text}
-                        </span>
+                        shareMsg[slot].ok ? (
+                          <Link href="/tools/arcade-lab/arcade"
+                            style={{ fontSize: 11, fontWeight: 800, color: "#16a34a", textDecoration: "none" }}>
+                            {shareMsg[slot].text} See it in the arcade →
+                          </Link>
+                        ) : (
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#dc2626" }}>
+                            {shareMsg[slot].text}
+                          </span>
+                        )
                       )}
                     </div>
                   </div>
