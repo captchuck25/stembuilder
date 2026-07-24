@@ -29,6 +29,8 @@ export default function TeacherDashboard() {
   const [createError, setCreateError] = useState("");
   const [emailUnverified, setEmailUnverified] = useState(false);
   const [resendState, setResendState] = useState<"" | "sending" | "sent">("");
+  const [inDistrict, setInDistrict] = useState(false);
+  const [showBulkInfo, setShowBulkInfo] = useState(false);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -40,6 +42,7 @@ export default function TeacherDashboard() {
       if (!roleAtLeast(profile.role, "teacher")) { router.push("/tools/code-lab"); return; }
       // Unverified teachers can look around but can't create classes yet.
       setEmailUnverified(!!profile.email && !profile.email_verified_at);
+      setInDistrict(!!profile.district_id);
       loadClasses(session?.user?.id);
       // One-time migration: fix turtle locks in classes that were auto-seeded with the
       // wrong (challenge-only) indexing before we corrected it. Only touches classes
@@ -131,14 +134,52 @@ export default function TeacherDashboard() {
                 Manage your classes and track student progress.
               </p>
             </div>
-            <button onClick={() => setShowCreate(true)} style={{
-              padding: "12px 24px", borderRadius: 12, background: "#2563eb",
-              color: "#fff", border: "none", fontWeight: 800, fontSize: 15,
-              cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.3)",
-            }}>
-              + New Class
-            </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setShowBulkInfo(v => !v)} style={{
+                padding: "12px 18px", borderRadius: 12, background: "#fff",
+                color: "#7c3aed", border: "2px dashed #a78bfa", fontWeight: 800, fontSize: 14,
+                cursor: "pointer",
+              }}>
+                ⚡ Bulk import
+              </button>
+              <button onClick={() => setShowCreate(true)} style={{
+                padding: "12px 24px", borderRadius: 12, background: "#2563eb",
+                color: "#fff", border: "none", fontWeight: 800, fontSize: 15,
+                cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.3)",
+              }}>
+                + New Class
+              </button>
+            </div>
           </div>
+
+          {/* Bulk-import teaser: rostering is a district-plan feature, but every
+              teacher should SEE it — it's the pitch for the paid tier. */}
+          {showBulkInfo && (
+            <div style={{ ...CARD, borderColor: "#7c3aed", background: "#faf5ff", padding: "18px 24px",
+              marginBottom: 28, display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 26 }}>🏫</span>
+              <div style={{ flex: 1, minWidth: 260 }}>
+                <div style={{ fontSize: 15, fontWeight: 900, color: "#5b21b6", marginBottom: 4 }}>
+                  Import whole classes from Google Classroom or a CSV
+                </div>
+                <div style={{ fontSize: 13, color: "#6d28d9", lineHeight: 1.6 }}>
+                  {inDistrict ? (
+                    <>Your school district is on StemBuilder — your district administrator can sync your
+                    Google Classroom rosters or upload a class list, and your classes and students appear
+                    here automatically, accounts and all. Ask them to roster your classes.</>
+                  ) : (
+                    <>With <strong>StemBuilder for Districts</strong>, your school connects Google Classroom
+                    or uploads a roster and every class — with student accounts already created — appears
+                    here automatically. No join codes, no manual setup. Interested? Have your school reach
+                    out at <a href="mailto:hello@stembuilder.io" style={{ color: "#5b21b6", fontWeight: 800 }}>
+                    hello@stembuilder.io</a> — district trials are free.</>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setShowBulkInfo(false)} style={{ background: "none", border: "none",
+                color: "#7c3aed", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>✕</button>
+            </div>
+          )}
 
           {/* Email verification notice — class creation is gated until verified */}
           {emailUnverified && (
