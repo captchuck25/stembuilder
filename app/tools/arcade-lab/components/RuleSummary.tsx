@@ -1,9 +1,10 @@
 'use client';
-import { CompiledRules, summarizeRules } from '../engine/types';
+import { CompiledRules, GameDef, summarizeRules } from '../engine/types';
 
 // Compact chip strip describing a game's actual (compiled) rules.
-export default function RuleSummary({ rules }: { rules: CompiledRules }) {
-  const s = summarizeRules(rules);
+// Pass def to also surface level-driven traits (spiky enemies, flyers, springs).
+export default function RuleSummary({ rules, def }: { rules: CompiledRules; def?: GameDef }) {
+  const s = summarizeRules(rules, def);
   const GROUPS: { label: string; items: string[]; color: string }[] = [
     { label: 'Controls', items: s.controls, color: '#7DF9FF' },
     { label: 'How to win', items: s.goals, color: '#4ade80' },

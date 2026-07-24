@@ -293,10 +293,12 @@ export function checkRequirements(rules: CompiledRules, reqs: Requirement[]): st
 /** Returns missing capstone design requirements */
 export function checkCapstone(def: GameDef, spec: CapstoneSpec): string[] {
   const count = (t: string) => def.objects.filter(o => o.type === t).length;
+  // Any enemy kind satisfies the enemy requirement (walker, spiky, flyer)
+  const enemies = def.objects.filter(o => o.type === 'enemy' || o.type === 'spiky' || o.type === 'flyer').length;
   const missing: string[] = [];
   if (count('coin') < spec.minCoins) missing.push(`Place at least ${spec.minCoins} crystals (you have ${count('coin')})`);
   if (count('spike') < spec.minSpikes) missing.push(`Place at least ${spec.minSpikes} spike${spec.minSpikes > 1 ? 's' : ''}`);
-  if (count('enemy') < spec.minEnemies) missing.push(`Place at least ${spec.minEnemies} enem${spec.minEnemies > 1 ? 'ies' : 'y'}`);
+  if (enemies < spec.minEnemies) missing.push(`Place at least ${spec.minEnemies} enem${spec.minEnemies > 1 ? 'ies' : 'y'}`);
   return missing;
 }
 

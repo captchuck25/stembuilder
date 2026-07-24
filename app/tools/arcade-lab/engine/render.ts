@@ -301,6 +301,132 @@ function drawEnemy(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1
   ctx.stroke();
 }
 
+function drawSpiky(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1 | -1, t: number) {
+  const px = fx * TILE, py = fy * TILE;
+  const cx = px + TILE / 2;
+  const bob = Math.sin(t / 110) * 1.5;
+  // feet
+  ctx.fillStyle = '#8A2E1E';
+  const step = Math.sin(t / 90) * 3;
+  ctx.beginPath();
+  ctx.ellipse(cx - 8 + step, py + TILE - 4, 6, 4, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx + 8 - step, py + TILE - 4, 6, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // spike crown FIRST (behind the body top)
+  ctx.fillStyle = '#C8CDD8';
+  ctx.strokeStyle = '#6B7280';
+  ctx.lineWidth = 1.2;
+  for (let i = -2; i <= 2; i++) {
+    const sx = cx + i * TILE * 0.13;
+    ctx.beginPath();
+    ctx.moveTo(sx - 3.5, py + TILE * 0.42 + bob);
+    ctx.lineTo(sx, py + TILE * (0.12 + Math.abs(i) * 0.05) + bob);
+    ctx.lineTo(sx + 3.5, py + TILE * 0.42 + bob);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  // body
+  ctx.fillStyle = '#E85D3D';
+  ctx.beginPath();
+  ctx.ellipse(cx, py + TILE * 0.62 + bob, TILE * 0.34, TILE * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(cx - 4, py + TILE * 0.54 + bob, TILE * 0.15, TILE * 0.09, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // grumpy eyes
+  ctx.fillStyle = '#FFF';
+  ctx.beginPath();
+  ctx.arc(cx + dir * 4 - 5, py + TILE * 0.58 + bob, 4, 0, Math.PI * 2);
+  ctx.arc(cx + dir * 4 + 5, py + TILE * 0.58 + bob, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#3D1409';
+  ctx.beginPath();
+  ctx.arc(cx + dir * 5.5 - 5, py + TILE * 0.58 + bob, 2, 0, Math.PI * 2);
+  ctx.arc(cx + dir * 5.5 + 5, py + TILE * 0.58 + bob, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#3D1409';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 9, py + TILE * 0.48 + bob);
+  ctx.lineTo(cx - 2, py + TILE * 0.52 + bob);
+  ctx.moveTo(cx + 9, py + TILE * 0.48 + bob);
+  ctx.lineTo(cx + 2, py + TILE * 0.52 + bob);
+  ctx.stroke();
+}
+
+function drawFlyer(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1 | -1, t: number) {
+  const px = fx * TILE, py = fy * TILE;
+  const cx = px + TILE / 2;
+  const cy = py + TILE * 0.5;
+  const flap = Math.sin(t / 90);
+  // wings
+  ctx.fillStyle = 'rgba(56,189,248,0.55)';
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(cx + side * TILE * 0.2, cy - TILE * 0.05);
+    ctx.rotate(side * (0.5 + flap * 0.45));
+    ctx.beginPath();
+    ctx.ellipse(side * TILE * 0.16, 0, TILE * 0.2, TILE * 0.09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // body
+  ctx.fillStyle = '#0EA5E9';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, TILE * 0.26, TILE * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(cx - 3, cy - 4, TILE * 0.11, TILE * 0.07, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // eyes
+  ctx.fillStyle = '#FFF';
+  ctx.beginPath();
+  ctx.arc(cx + dir * 4 - 4, cy - 1, 3.5, 0, Math.PI * 2);
+  ctx.arc(cx + dir * 4 + 4, cy - 1, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#082F49';
+  ctx.beginPath();
+  ctx.arc(cx + dir * 5.5 - 4, cy - 1, 1.8, 0, Math.PI * 2);
+  ctx.arc(cx + dir * 5.5 + 4, cy - 1, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+  // little tail wiggle
+  ctx.strokeStyle = '#0EA5E9';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - dir * TILE * 0.24, cy + 2);
+  ctx.quadraticCurveTo(cx - dir * TILE * 0.36, cy + 5 + flap * 2, cx - dir * TILE * 0.42, cy + 2 + flap * 3);
+  ctx.stroke();
+}
+
+function drawSpring(ctx: CanvasRenderingContext2D, px: number, py: number, squash: number) {
+  const cx = px + TILE / 2;
+  const base = py + TILE;
+  const height = TILE * (0.5 - squash * 0.28);
+  // base plate
+  ctx.fillStyle = '#6B7280';
+  ctx.fillRect(px + TILE * 0.2, base - 3, TILE * 0.6, 3);
+  // coil
+  ctx.strokeStyle = '#9CA3AF';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  const coils = 4;
+  for (let i = 0; i <= coils; i++) {
+    const yy = base - 3 - (height * i) / coils;
+    const side = i % 2 === 0 ? -1 : 1;
+    if (i === 0) ctx.moveTo(cx + side * TILE * 0.18, yy);
+    else ctx.lineTo(cx + side * TILE * 0.18, yy);
+  }
+  ctx.stroke();
+  // top pad
+  ctx.fillStyle = '#EF4444';
+  ctx.fillRect(px + TILE * 0.14, base - 3 - height - 5, TILE * 0.72, 5);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillRect(px + TILE * 0.14, base - 3 - height - 5, TILE * 0.72, 2);
+}
+
 /** The parametric bot sprite — used in-game and for Garage/gallery portraits */
 export function drawBot(
   ctx: CanvasRenderingContext2D,
@@ -596,7 +722,7 @@ function drawWorld(
   ctx: CanvasRenderingContext2D,
   def: GameDef,
   solids: Set<string>,
-  entities: { type: ObjectType; alive?: boolean; px: number; py: number; dir?: 1 | -1; id?: number }[],
+  entities: { type: ObjectType; alive?: boolean; px: number; py: number; dir?: 1 | -1; id?: number; springSquash?: number }[],
   t: number,
   camX: number,
   camY: number,
@@ -619,6 +745,9 @@ function drawWorld(
     else if (e.type === 'spike') drawSpike(ctx, e.px * TILE, e.py * TILE);
     else if (e.type === 'flag') drawFlag(ctx, e.px * TILE, e.py * TILE, t);
     else if (e.type === 'enemy') drawEnemy(ctx, e.px, e.py, e.dir ?? 1, t);
+    else if (e.type === 'spiky') drawSpiky(ctx, e.px, e.py, e.dir ?? 1, t);
+    else if (e.type === 'flyer') drawFlyer(ctx, e.px, e.py, e.dir ?? 1, t);
+    else if (e.type === 'spring') drawSpring(ctx, e.px * TILE, e.py * TILE, e.springSquash ?? 0);
   }
 }
 
@@ -699,12 +828,12 @@ export function renderDesign(
 
   for (const o of def.objects) {
     if (o.type === 'spawn') drawSpawnMarker(ctx, o.x, o.y, t);
-    else if (o.type === 'enemy') {
+    else if (o.type === 'enemy' || o.type === 'spiky' || o.type === 'flyer') {
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('↔', o.x * TILE + TILE / 2, o.y * TILE + 2);
+      ctx.fillText(o.type === 'flyer' ? '〰' : '↔', o.x * TILE + TILE / 2, o.y * TILE + 2);
     }
   }
 
@@ -745,6 +874,7 @@ export function renderDesign(
 
 const MINI_COLORS: Record<string, string> = {
   coin: '#FFD54A', spike: '#EF4444', enemy: '#B06AE8', flag: '#22C55E', spawn: '#4C8DFF',
+  spiky: '#F87171', flyer: '#38BDF8', spring: '#A3A3A3',
 };
 
 /** Draws the whole level small + the current viewport rectangle. Returns scale. */

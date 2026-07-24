@@ -98,6 +98,11 @@ export function playZap() {
   tone(900, 0.12, { type: 'sawtooth', gain: 0.07, slideTo: 180 });
 }
 
+/** Rising boing — spring bounce (Arcade Lab) */
+export function playBoing() {
+  tone(140, 0.22, { type: 'triangle', gain: 0.12, slideTo: 620 });
+}
+
 /** Short victory fanfare */
 export function playWin() {
   const notes = [523.25, 659.25, 783.99, 1046.5];

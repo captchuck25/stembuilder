@@ -13,7 +13,7 @@ import { renderBotPortrait } from '../../engine/render';
 import {
   Particle, renderParticles, spawnConfetti, spawnParticles, updateParticles,
 } from '../../../block-lab/engine/mazeRenderer';
-import { isMuted, setMuted, playBump, playCollect, playMove, playStomp, playWin, playZap } from '../../../block-lab/engine/sfx';
+import { isMuted, setMuted, playBoing, playBump, playCollect, playMove, playStomp, playWin, playZap } from '../../../block-lab/engine/sfx';
 
 const CARD: React.CSSProperties = {
   background: '#1a2540', border: '1px solid rgba(99,179,237,0.15)',
@@ -180,6 +180,8 @@ export default function PlayArcadeGamePage() {
           else if (ev.type === 'needScore') {
             playBump();
             particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
+          } else if (ev.type === 'spring') {
+            playBoing();
           } else if (ev.type === 'poof') {
             particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
           } else if (ev.type === 'hurt' || ev.type === 'lose') {
@@ -343,7 +345,7 @@ export default function PlayArcadeGamePage() {
                 <div style={{ fontSize: 13, fontWeight: 900, color: '#e2e8f0', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
                   📜 The Rules
                 </div>
-                <RuleSummary rules={rulesRef.current} />
+                <RuleSummary rules={rulesRef.current} def={defRef.current ?? undefined} />
               </div>
             )}
             <div style={{ ...CARD, padding: '16px 18px' }}>

@@ -20,7 +20,7 @@ import {
 import {
   Particle, renderParticles, spawnConfetti, spawnParticles, updateParticles,
 } from '../../block-lab/engine/mazeRenderer';
-import { isMuted, setMuted, playBump, playCollect, playMove, playStomp, playWin, playZap } from '../../block-lab/engine/sfx';
+import { isMuted, setMuted, playBoing, playBump, playCollect, playMove, playStomp, playWin, playZap } from '../../block-lab/engine/sfx';
 
 const CARD: React.CSSProperties = {
   background: '#1a2540', border: '1px solid rgba(99,179,237,0.15)',
@@ -50,6 +50,9 @@ const PALETTE: { tool: Tool; icon: string; label: string }[] = [
   { tool: 'coin',     icon: '🪙', label: 'Crystal' },
   { tool: 'spike',    icon: '🔺', label: 'Spikes' },
   { tool: 'enemy',    icon: '👾', label: 'Enemy' },
+  { tool: 'spiky',    icon: '🦔', label: 'Spiky' },
+  { tool: 'flyer',    icon: '🦇', label: 'Flyer' },
+  { tool: 'spring',   icon: '🌀', label: 'Spring' },
   { tool: 'flag',     icon: '🚩', label: 'Goal' },
   { tool: 'spawn',    icon: '🤖', label: 'Start' },
   { tool: 'eraser',   icon: '🧽', label: 'Eraser' },
@@ -293,6 +296,8 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
             else if (ev.type === 'needScore') {
               playBump();
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
+            } else if (ev.type === 'spring') {
+              playBoing();
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {

@@ -24,7 +24,7 @@ import {
   spawnParticles,
   updateParticles,
 } from '../../block-lab/engine/mazeRenderer';
-import { isMuted, setMuted, playBump, playCollect, playMove, playStomp, playWin, playZap } from '../../block-lab/engine/sfx';
+import { isMuted, setMuted, playBoing, playBump, playCollect, playMove, playStomp, playWin, playZap } from '../../block-lab/engine/sfx';
 
 const CARD: React.CSSProperties = {
   background: '#1a2540', border: '1px solid rgba(99,179,237,0.15)',
@@ -56,6 +56,9 @@ const PALETTE: { tool: Tool; icon: string; label: string; hint: string }[] = [
   { tool: 'coin',     icon: '🪙', label: 'Crystal', hint: 'Players collect these for points' },
   { tool: 'spike',    icon: '🔺', label: 'Spikes',  hint: 'Ouch — costs a life!' },
   { tool: 'enemy',    icon: '👾', label: 'Enemy',   hint: 'Patrols its platform. Stomp it!' },
+  { tool: 'spiky',    icon: '🦔', label: 'Spiky',   hint: 'Patrols like an enemy — but NEVER stomp it!' },
+  { tool: 'flyer',    icon: '🦇', label: 'Flyer',   hint: 'Patrols the air in a wave. Stompable!' },
+  { tool: 'spring',   icon: '🌀', label: 'Spring',  hint: 'Land on it for a SUPER bounce (~6 tiles)' },
   { tool: 'flag',     icon: '🚩', label: 'Goal',    hint: 'Reach it to win (one per level)' },
   { tool: 'spawn',    icon: '🤖', label: 'Start',   hint: 'Where the player begins (one per level)' },
   { tool: 'eraser',   icon: '🧽', label: 'Eraser',  hint: 'Remove anything (or right-click)' },
@@ -65,7 +68,7 @@ const OWNERS: { owner: ScriptOwner; icon: string; label: string; hint: string }[
   { owner: 'player', icon: '🤖', label: 'Player',  hint: 'Wire the keyboard — how does the player move?' },
   { owner: 'coin',   icon: '🪙', label: 'Crystal', hint: 'What happens when the player touches a crystal?' },
   { owner: 'spike',  icon: '🔺', label: 'Spikes',  hint: 'What do spikes do to the player?' },
-  { owner: 'enemy',  icon: '👾', label: 'Enemy',   hint: 'Head-stomps and side-bumps — you make the rules.' },
+  { owner: 'enemy',  icon: '👾', label: 'Enemy',   hint: 'Rules for ALL enemies — walkers, spiky, and flyers. (Spiky treats every touch as a run-in.)' },
   { owner: 'flag',   icon: '🚩', label: 'Goal',    hint: 'What does reaching the flag do?' },
   { owner: 'game',   icon: '🎮', label: 'Game',    hint: 'Starting rules and score goals.' },
 ];
@@ -476,6 +479,8 @@ function CreateInner() {
             } else if (ev.type === 'needScore') {
               playBump();
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
+            } else if (ev.type === 'spring') {
+              playBoing();
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {
@@ -716,7 +721,7 @@ function CreateInner() {
                   )}
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <RuleSummary rules={rulesRef.current} />
+                  <RuleSummary rules={rulesRef.current} def={def} />
                 </div>
               </>
             )}

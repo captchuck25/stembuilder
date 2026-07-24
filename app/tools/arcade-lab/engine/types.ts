@@ -4,7 +4,10 @@
 
 export type Backdrop = 'hills' | 'cave' | 'candy' | 'space';
 
-export type ObjectType = 'platform' | 'coin' | 'spike' | 'enemy' | 'flag' | 'spawn';
+export type ObjectType = 'platform' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'flyer' | 'spring' | 'flag' | 'spawn';
+
+/** All enemy kinds — they share the Enemy script sheet */
+export const ENEMY_TYPES: ObjectType[] = ['enemy', 'spiky', 'flyer'];
 
 /** Which object type a script sheet belongs to ('game' = global rules) */
 export type ScriptOwner = 'player' | 'coin' | 'spike' | 'enemy' | 'flag' | 'game';
@@ -116,7 +119,7 @@ function scriptsContain(scripts: ArcadeAction[][], kind: ArcadeAction['kind']): 
   return scripts.some(s => s.some(a => a.kind === kind));
 }
 
-export function summarizeRules(rules: CompiledRules): RulesSummary {
+export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummary {
   const controls: string[] = [];
   for (const kr of rules.keys) {
     const verb = keyVerb(kr.actions);
@@ -147,6 +150,14 @@ export function summarizeRules(rules: CompiledRules): RulesSummary {
   if (scriptsContain(rules.enemySide, 'hurtPlayer')) danger.push('👾 Enemies hurt');
   if (scriptsContain(rules.enemyTop, 'disappear')) danger.push('👾 Stomp enemies to squash them');
   if (scriptsContain(rules.touchCoin, 'changeScore')) danger.push('🪙 Crystals give points');
+
+  // Level-driven notes (engine traits, not scripts)
+  if (def) {
+    const has = (t: ObjectType) => def.objects.some(o => o.type === t);
+    if (has('spiky')) danger.push('🦔 Spiky enemies — NEVER stomp them!');
+    if (has('flyer')) danger.push('🦇 Flyers patrol the air');
+    if (has('spring')) danger.push('🌀 Springs give a super bounce');
+  }
 
   return { controls, goals, danger };
 }

@@ -2,7 +2,7 @@
 // Physics (gravity, collision, patrol) comes free; everything else — controls,
 // scoring, damage, winning — is executed from student-compiled block rules.
 
-import { ArcadeAction, ArcadeKey, ArcadeSound, CompiledRules, GameDef, PlacedObject, solidSet } from './types';
+import { ArcadeAction, ArcadeKey, ArcadeSound, CompiledRules, ENEMY_TYPES, GameDef, PlacedObject, solidSet } from './types';
 
 /** Held state per wireable key — arrows AND letters are separate, real keys */
 export type InputState = Record<ArcadeKey, boolean>;
@@ -26,6 +26,8 @@ export interface EntityState extends PlacedObject {
   dir: 1 | -1;
   /** Was the player overlapping last frame? (touch events fire on contact start) */
   touching: boolean;
+  /** Springs: 1 right after a bounce, decays to 0 (drives the squash animation) */
+  springSquash?: number;
 }
 
 export interface PlayerState {
@@ -57,7 +59,7 @@ export interface GameState {
 }
 
 export interface GameEvent {
-  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore';
+  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore' | 'spring';
   x: number;
   y: number;
   sound?: ArcadeSound;
@@ -73,8 +75,11 @@ const SPEED = 7;
 const GRAVITY = 34;
 const JUMP_V = 14.8; // clears ~3.2 tiles
 const BOUNCE_V = 8.5;
+const SPRING_V = 20;  // clears ~5.9 tiles — the super bounce
 const MAX_FALL = 26;
 const ENEMY_SPEED = 2.2;
+const FLYER_SPEED = 2.6;
+const FLYER_AMP = 0.45;   // hover wave height in tiles
 const INVULN_MS = 1500;
 
 export function initGame(def: GameDef, rules: CompiledRules): GameState {
@@ -150,7 +155,7 @@ function hurt(s: GameState, events: GameEvent[]) {
   // A fresh life resets the dangers: every enemy (including squashed ones)
   // returns to its home tile. Collected coins stay collected.
   for (const e of s.entities) {
-    if (e.type === 'enemy') {
+    if (ENEMY_TYPES.includes(e.type)) {
       e.alive = true;
       e.px = e.x;
       e.py = e.y;
@@ -210,7 +215,9 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           break;
         case 'disappearAll':
           for (const e of s.entities) {
-            if (e.type === a.target && e.alive) {
+            // "enemies" covers every enemy kind: walkers, spiky, flyers
+            const matches = a.target === 'enemy' ? ENEMY_TYPES.includes(e.type) : e.type === a.target;
+            if (matches && e.alive) {
               e.alive = false;
               events.push({ type: 'poof', x: e.px + 0.5, y: e.py + 0.5 });
             }
@@ -255,16 +262,31 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
   if (p.y > s.rows + 1) hurt(s, events);
   if (s.status !== 'playing') return events;
 
-  // ── Enemies patrol: flip at walls, platform edges, and level bounds ──
+  // ── Enemies patrol ──
   for (const e of s.entities) {
-    if (!e.alive || e.type !== 'enemy') continue;
-    e.px += e.dir * ENEMY_SPEED * dt;
-    const frontX = e.dir > 0 ? e.px + 0.9 : e.px + 0.1;
-    const wallAhead = s.solids.has(`${Math.floor(frontX)},${Math.floor(e.py + 0.5)}`);
-    const groundAhead = s.solids.has(`${Math.floor(frontX)},${Math.floor(e.py + 0.5) + 1}`);
-    if (e.px < 0 || e.px > s.cols - 1 || wallAhead || !groundAhead) {
-      e.dir = (e.dir * -1) as 1 | -1;
-      e.px = Math.max(0, Math.min(e.px, s.cols - 1));
+    if (!e.alive) continue;
+    if (e.type === 'enemy' || e.type === 'spiky') {
+      // ground walkers: flip at walls, platform edges, and level bounds
+      e.px += e.dir * ENEMY_SPEED * dt;
+      const frontX = e.dir > 0 ? e.px + 0.9 : e.px + 0.1;
+      const wallAhead = s.solids.has(`${Math.floor(frontX)},${Math.floor(e.py + 0.5)}`);
+      const groundAhead = s.solids.has(`${Math.floor(frontX)},${Math.floor(e.py + 0.5) + 1}`);
+      if (e.px < 0 || e.px > s.cols - 1 || wallAhead || !groundAhead) {
+        e.dir = (e.dir * -1) as 1 | -1;
+        e.px = Math.max(0, Math.min(e.px, s.cols - 1));
+      }
+    } else if (e.type === 'flyer') {
+      // air patrol: flip only at walls and level bounds, hover in a sine wave
+      e.px += e.dir * FLYER_SPEED * dt;
+      const frontX = e.dir > 0 ? e.px + 0.9 : e.px + 0.1;
+      const wallAhead = s.solids.has(`${Math.floor(frontX)},${Math.floor(e.py + 0.5)}`);
+      if (e.px < 0 || e.px > s.cols - 1 || wallAhead) {
+        e.dir = (e.dir * -1) as 1 | -1;
+        e.px = Math.max(0, Math.min(e.px, s.cols - 1));
+      }
+      e.py = e.y + Math.sin(s.timeMs / 420 + e.id * 1.7) * FLYER_AMP;
+    } else if (e.type === 'spring' && e.springSquash && e.springSquash > 0) {
+      e.springSquash = Math.max(0, e.springSquash - dt * 5);
     }
   }
 
@@ -293,12 +315,28 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           else events.push({ type: 'needScore', x: e.px + 0.5, y: e.py + 0.5, need: gated.n - s.score });
         }
       }
-    } else if (e.type === 'enemy') {
+    } else if (e.type === 'enemy' || e.type === 'flyer') {
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.25, 0.76, 0.7);
       if (touchingNow && !e.touching) {
         const stomping = p.vy > 2 && p.y + PH < e.py + 0.62;
         const scripts = stomping ? rules.enemyTop : rules.enemySide;
         for (const script of scripts) runActions(script, e);
+      }
+    } else if (e.type === 'spiky') {
+      // Spiky can NEVER be stomped — every contact, including from above,
+      // runs the "runs into me" scripts (usually: hurt the player)
+      touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.2, 0.76, 0.75);
+      if (touchingNow && !e.touching) {
+        for (const script of rules.enemySide) runActions(script, e);
+      }
+    } else if (e.type === 'spring') {
+      touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.15, e.py + 0.45, 0.7, 0.55);
+      if (touchingNow && p.vy > 1) {
+        // landing on a spring: super bounce (built-in physics, like gravity)
+        p.vy = -SPRING_V;
+        p.grounded = false;
+        e.springSquash = 1;
+        events.push({ type: 'spring', x: e.px + 0.5, y: e.py + 0.5 });
       }
     }
 
