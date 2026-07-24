@@ -3,6 +3,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { verifyAgePassToken, isGateBlocked, GATE_COOKIE } from '@/lib/age-gate.server'
 import { TEACHER_AFFIRMATION_VERSION } from '@/lib/compliance'
+import { claimTeacherInvites } from '@/lib/teacher-invites.server'
 
 // POST /api/onboarding/complete
 //
@@ -101,6 +102,9 @@ export async function POST(req: NextRequest) {
       await db.from('profiles').delete().eq('id', created.id)
       return NextResponse.json({ error: 'Could not create the account.' }, { status: 500 })
     }
+    // If a district admin pre-added this email, attach the new account to that
+    // district now (non-fatal — see lib/teacher-invites.server.ts).
+    await claimTeacherInvites(db, created.id, email)
     return NextResponse.json({ ok: true })
   }
 

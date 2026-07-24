@@ -98,6 +98,9 @@ export default function DistrictDetailPage() {
   // Forms
   const [newSchool, setNewSchool] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
+  const [teacherEmail, setTeacherEmail] = useState("");
+  const [teacherSchool, setTeacherSchool] = useState("");
+  const [teacherMsg, setTeacherMsg] = useState<string | null>(null);
   const [licType, setLicType] = useState<"trial" | "paid">("trial");
   const [licSeats, setLicSeats] = useState("");
   const [licEnds, setLicEnds] = useState("");
@@ -269,6 +272,30 @@ export default function DistrictDetailPage() {
       }
     } finally {
       setRosterBusy("");
+    }
+  }
+
+  async function addTeacher(e: React.FormEvent) {
+    e.preventDefault();
+    if (!teacherEmail.trim()) return;
+    setBusy("add-teacher"); setTeacherMsg(null);
+    try {
+      const r = await fetch(`/api/admin/districts/${districtId}/teachers`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: teacherEmail.trim(), schoolId: teacherSchool || null }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setTeacherMsg(d.error ?? "Could not add teacher"); return; }
+      if (d.status === "attached") {
+        setTeacherMsg(d.alreadyInDistrict ? "That teacher is already in this district — school updated." : "Teacher added to the district. ✓");
+        setTeacherEmail("");
+        await load();
+      } else {
+        setTeacherMsg(`No account with that email yet — an invitation was ${d.sent ? "emailed" : "created"}. They'll join the district automatically when they sign up as a teacher with it.`);
+        setTeacherEmail("");
+      }
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -539,8 +566,30 @@ export default function DistrictDetailPage() {
               </>
             )}
 
-            {tab === "teachers" && (
-              d.teachers.length === 0 ? <div style={{ fontSize: 13, color: "#aaa" }}>No teachers linked to this district yet.</div>
+            {tab === "teachers" && (<>
+              <form onSubmit={addTeacher} style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                <input value={teacherEmail} onChange={e => setTeacherEmail(e.target.value)}
+                  placeholder="teacher@district.org" style={{ ...INPUT, flex: 2, minWidth: 200 }} />
+                <select value={teacherSchool} onChange={e => setTeacherSchool(e.target.value)} style={INPUT}>
+                  <option value="">No school (yet)</option>
+                  {d.schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <button type="submit" disabled={busy === "add-teacher" || !teacherEmail.trim()} style={BTN}>
+                  {busy === "add-teacher" ? "Adding…" : "+ Add teacher"}
+                </button>
+              </form>
+              <p style={{ fontSize: 12, color: "#888", margin: "0 0 14px" }}>
+                An existing teacher account is attached immediately; a new email gets an invitation and joins
+                the district automatically at signup. Roster imports require the class&apos;s teacher to be listed here.
+              </p>
+              {teacherMsg && (
+                <div style={{ padding: "10px 14px", borderRadius: 10, marginBottom: 14, fontSize: 13, fontWeight: 600,
+                  background: teacherMsg.includes("✓") || teacherMsg.includes("invitation") ? "#dcfce7" : "#fee2e2",
+                  color: teacherMsg.includes("✓") || teacherMsg.includes("invitation") ? "#166534" : "#b91c1c" }}>
+                  {teacherMsg}
+                </div>
+              )}
+              {d.teachers.length === 0 ? <div style={{ fontSize: 13, color: "#aaa" }}>No teachers linked to this district yet.</div>
               : d.teachers.map(t => (
                 <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "10px 12px", borderRadius: 10, background: "#f9f9f9", border: "1px solid #eee", marginBottom: 8, gap: 12 }}>
@@ -557,8 +606,8 @@ export default function DistrictDetailPage() {
                     {busy === t.id ? "…" : "Remove"}
                   </button>
                 </div>
-              ))
-            )}
+              ))}
+            </>)}
 
             {tab === "students" && (
               <>

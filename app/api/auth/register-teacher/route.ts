@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { adminDb } from '@/lib/db.server'
 import { sendVerificationEmail } from '@/lib/verify-email.server'
+import { claimTeacherInvites } from '@/lib/teacher-invites.server'
 import { TEACHER_AFFIRMATION_VERSION } from '@/lib/compliance'
 
 // POST /api/auth/register-teacher  { email, name, password, affirmed: true }
@@ -60,6 +61,10 @@ export async function POST(req: NextRequest) {
     await db.from('profiles').delete().eq('id', created.id)
     return NextResponse.json({ error: 'Registration failed. Please try again.' }, { status: 500 })
   }
+
+  // If a district admin pre-added this email, attach the new account to that
+  // district now (non-fatal — see lib/teacher-invites.server.ts).
+  await claimTeacherInvites(db, created.id, normalizedEmail)
 
   const { devVerifyUrl } = await sendVerificationEmail(
     db, created.id, normalizedEmail, new URL(req.url).origin,
