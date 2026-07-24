@@ -34,6 +34,24 @@ interface PersonRow {
   school_id?: string | null; account_origin?: string | null; created_at: string;
   classCount?: number; enrollmentCount?: number;
 }
+interface RosterResult {
+  kind: "class" | "student" | "enrollment";
+  key: string; label: string;
+  action: "create" | "link" | "update" | "skip" | "error";
+  message?: string; row?: number;
+}
+interface RosterSummary {
+  dryRun: boolean;
+  counts: {
+    classesCreated: number; classesLinked: number;
+    studentsCreated: number; studentsLinked: number;
+    enrollmentsCreated: number; enrollmentsExisting: number;
+    errors: number;
+  };
+  results: RosterResult[];
+  credentials: { name: string; identifier: string; tempPassword: string; classTitle: string }[];
+}
+
 interface AuditRow {
   id: number; actor_id: string; actor_role: string; action: string;
   target_type: string | null; target_id: string | null; created_at: string;
@@ -59,9 +77,23 @@ export default function DistrictDetailPage() {
   const [students, setStudents] = useState<PersonRow[] | null>(null);
   const [studentSchool, setStudentSchool] = useState<string>("");
   const [audit, setAudit] = useState<AuditRow[] | null>(null);
-  const [tab, setTab] = useState<"schools" | "teachers" | "students" | "audit">("schools");
+  const [tab, setTab] = useState<"schools" | "teachers" | "students" | "roster" | "audit">("schools");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+
+  // Roster upload
+  const [rosterCsv, setRosterCsv] = useState<string | null>(null);
+  const [rosterFileName, setRosterFileName] = useState("");
+  const [rosterPreview, setRosterPreview] = useState<RosterSummary | null>(null);
+  const [rosterDone, setRosterDone] = useState<RosterSummary | null>(null);
+  const [rosterBusy, setRosterBusy] = useState<"" | "preview" | "import">("");
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [previewSource, setPreviewSource] = useState<"csv" | "google">("csv");
+
+  // Google Classroom
+  const [gcCourses, setGcCourses] = useState<{ id: string; title: string }[] | null>(null);
+  const [gcSelected, setGcSelected] = useState<string[]>([]);
+  const [gcState, setGcState] = useState<"" | "loading" | "unconfigured">("");
 
   // Forms
   const [newSchool, setNewSchool] = useState("");
@@ -110,6 +142,8 @@ export default function DistrictDetailPage() {
     setTab(next);
     if (next === "students" && students === null) loadStudents("");
     if (next === "audit" && audit === null) loadAudit();
+    // Picks up an existing Google connection (cookie) if there is one.
+    if (next === "roster" && gcCourses === null && gcState === "") loadGoogleCourses();
   }
 
   async function post(url: string, method: string, body?: unknown): Promise<boolean> {
@@ -186,6 +220,108 @@ export default function DistrictDetailPage() {
     setBusy(null);
   }
 
+  // Returning from the Google OAuth consent screen: ?google=connected|denied|error
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const google = q.get("google");
+    if (!google) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    setTab("roster");
+    if (google === "connected") loadGoogleCourses();
+    else setRosterError(google === "denied"
+      ? "Google access was declined — connect and allow the Classroom permissions to sync."
+      : "Google connection failed — try again.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadGoogleCourses() {
+    setGcState("loading");
+    try {
+      const r = await fetch(`/api/admin/roster/google/courses?districtId=${districtId}`);
+      if (r.status === 503) { setGcState("unconfigured"); return; }
+      if (r.status === 401) { setGcCourses(null); setGcState(""); return; } // shows Connect button
+      if (r.ok) { setGcCourses(await r.json()); setGcState(""); return; }
+      const d = await r.json().catch(() => ({}));
+      setRosterError(d.error ?? "Could not load Google Classroom courses");
+      setGcState("");
+    } catch {
+      setGcState("");
+    }
+  }
+
+  async function googleSync(dryRun: boolean) {
+    if (gcSelected.length === 0) return;
+    setRosterBusy(dryRun ? "preview" : "import"); setRosterError(null);
+    if (dryRun) { setRosterPreview(null); setRosterDone(null); }
+    try {
+      const r = await fetch("/api/admin/roster/google/sync", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ districtId, courseIds: gcSelected, dryRun }),
+      });
+      const d = await r.json();
+      if (r.status === 401) { setGcCourses(null); setRosterError("Google session expired — connect again."); return; }
+      if (!r.ok) { setRosterError(d.error ?? "Google sync failed"); return; }
+      if (dryRun) { setPreviewSource("google"); setRosterPreview(d); }
+      else {
+        setRosterDone(d); setRosterPreview(null);
+        setStudents(null);
+        await load();
+      }
+    } finally {
+      setRosterBusy("");
+    }
+  }
+
+  async function onRosterFile(file: File | undefined) {
+    if (!file) return;
+    setRosterError(null); setRosterPreview(null); setRosterDone(null);
+    setPreviewSource("csv");
+    setRosterFileName(file.name);
+    const text = await file.text();
+    setRosterCsv(text);
+    setRosterBusy("preview");
+    try {
+      const r = await fetch(`/api/admin/districts/${districtId}/roster/csv`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: text, dryRun: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setRosterError(d.error ?? "Validation failed"); return; }
+      setRosterPreview(d);
+    } finally {
+      setRosterBusy("");
+    }
+  }
+
+  async function runRosterImport() {
+    if (!rosterCsv) return;
+    setRosterBusy("import"); setRosterError(null);
+    try {
+      const r = await fetch(`/api/admin/districts/${districtId}/roster/csv`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: rosterCsv, dryRun: false }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setRosterError(d.error ?? "Import failed"); return; }
+      setRosterDone(d); setRosterPreview(null); setRosterCsv(null);
+      setStudents(null); // stale — refetched on next open
+      await load();
+    } finally {
+      setRosterBusy("");
+    }
+  }
+
+  function downloadCredentials(summary: RosterSummary) {
+    const esc = (v: string) => /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    const rows = [["name", "sign_in_with", "temporary_password", "class"],
+      ...summary.credentials.map(c => [c.name, c.identifier, c.tempPassword, c.classTitle])];
+    const blob = new Blob([rows.map(r => r.map(esc).join(",")).join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "student-credentials.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function deleteUser(u: PersonRow, kind: "teacher" | "student") {
     const extra = kind === "teacher"
       ? `\n\nAll ${u.classCount ?? 0} of their classes (and every enrollment inside) will also be deleted.`
@@ -229,6 +365,7 @@ export default function DistrictDetailPage() {
     { key: "schools", label: `Schools (${d.counts.schools})` },
     { key: "teachers", label: `Teachers (${d.counts.teachers})` },
     { key: "students", label: `Students (${d.counts.students})` },
+    { key: "roster", label: "Roster upload" },
     { key: "audit", label: "Audit log" },
   ];
 
@@ -459,6 +596,144 @@ export default function DistrictDetailPage() {
                   </div>
                 )}
               </>
+            )}
+
+            {tab === "roster" && (
+              <div>
+                <p style={{ fontSize: 13, color: "#555", margin: "0 0 14px", lineHeight: 1.6 }}>
+                  Upload a class roster CSV to create classes and student accounts in bulk.
+                  Columns: <code>class_name, teacher_email, first_name, last_name</code> and optionally{" "}
+                  <code>email, username, school</code>. Teachers must already have accounts in this district.
+                  Re-uploading the same file is safe — existing students are matched, never duplicated.{" "}
+                  <a href={`/api/admin/districts/${districtId}/roster/csv`} style={{ color: "#2563eb", fontWeight: 700 }}>
+                    Download the template
+                  </a>
+                </p>
+
+                <label style={{ display: "inline-block", ...BTN, marginBottom: 16 }}>
+                  {rosterBusy === "preview" ? "Checking…" : rosterFileName ? `📄 ${rosterFileName} — choose another` : "📄 Choose CSV file"}
+                  <input type="file" accept=".csv,text/csv" style={{ display: "none" }}
+                    onChange={e => onRosterFile(e.target.files?.[0])} />
+                </label>
+
+                {rosterError && (
+                  <div style={{ padding: "10px 14px", borderRadius: 10, background: "#fee2e2", color: "#b91c1c",
+                    fontSize: 13, fontWeight: 700, marginBottom: 14 }}>{rosterError}</div>
+                )}
+
+                {(rosterPreview ?? rosterDone) && (() => {
+                  const s = (rosterDone ?? rosterPreview)!;
+                  const c = s.counts;
+                  return (
+                    <div>
+                      <div style={{ padding: "12px 16px", borderRadius: 10, marginBottom: 14, fontSize: 13, fontWeight: 700,
+                        background: rosterDone ? "#dcfce7" : "#eff6ff", color: rosterDone ? "#166534" : "#1e40af" }}>
+                        {rosterDone ? "Import complete: " : "Preview — nothing imported yet: "}
+                        {c.classesCreated} class{c.classesCreated === 1 ? "" : "es"} new, {c.classesLinked} existing ·{" "}
+                        {c.studentsCreated} student{c.studentsCreated === 1 ? "" : "s"} new, {c.studentsLinked} existing ·{" "}
+                        {c.enrollmentsCreated} enrollment{c.enrollmentsCreated === 1 ? "" : "s"}
+                        {c.errors > 0 && <span style={{ color: "#b91c1c" }}> · {c.errors} error{c.errors === 1 ? "" : "s"}</span>}
+                      </div>
+
+                      {rosterDone && rosterDone.credentials.length > 0 && (
+                        <div style={{ padding: "12px 16px", borderRadius: 10, background: "#fefce8",
+                          border: "1px solid #fde68a", marginBottom: 14 }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#92400e", marginBottom: 6 }}>
+                            {rosterDone.credentials.length} new sign-in{rosterDone.credentials.length === 1 ? "" : "s"} created —
+                            download now, they are shown only once.
+                          </div>
+                          <button onClick={() => downloadCredentials(rosterDone)} style={BTN}>
+                            ⬇ Download credentials CSV
+                          </button>
+                        </div>
+                      )}
+
+                      {s.results.filter(r => r.action === "error").length > 0 && (
+                        <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 14 }}>
+                          {s.results.filter(r => r.action === "error").map((r, i) => (
+                            <div key={i} style={{ padding: "8px 12px", borderRadius: 8, background: "#fef2f2",
+                              border: "1px solid #fecaca", marginBottom: 6, fontSize: 12, color: "#991b1b" }}>
+                              <strong>{r.row ? `Row ${r.row}: ` : ""}{r.label}</strong> — {r.message}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {rosterPreview && (
+                        <div style={{ maxHeight: 260, overflowY: "auto", marginBottom: 14 }}>
+                          {s.results.filter(r => r.action !== "error").map((r, i) => (
+                            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "6px 12px",
+                              borderRadius: 8, background: "#f9f9f9", border: "1px solid #eee", marginBottom: 4, fontSize: 12 }}>
+                              <span style={{ color: "#111", fontWeight: 600 }}>
+                                {r.kind === "class" ? "🏫" : "🎒"} {r.label}
+                              </span>
+                              <span style={{ fontWeight: 800, color: r.action === "create" ? "#16a34a" : "#6b7280" }}>
+                                {r.action === "create" ? "will create" : "already exists"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {rosterPreview && (
+                        <button onClick={() => previewSource === "csv" ? runRosterImport() : googleSync(false)}
+                          disabled={rosterBusy === "import"}
+                          style={{ ...BTN, background: rosterBusy === "import" ? "#6b7280" : "#16a34a", fontSize: 14, padding: "12px 24px" }}>
+                          {rosterBusy === "import" ? "Importing…" : `✓ Import ${c.studentsCreated} students / ${c.classesCreated} classes`}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Google Classroom sync */}
+                <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #eee" }}>
+                  <h3 style={{ fontSize: 15, fontWeight: 900, color: "#111", margin: "0 0 8px" }}>
+                    Google Classroom sync
+                  </h3>
+                  {gcState === "unconfigured" ? (
+                    <p style={{ fontSize: 13, color: "#888", margin: 0 }}>
+                      Not configured yet — a Google Cloud OAuth app is required. See <code>docs/google-classroom-setup.md</code>.
+                    </p>
+                  ) : gcCourses === null ? (
+                    <div>
+                      <p style={{ fontSize: 13, color: "#555", margin: "0 0 12px" }}>
+                        Connect a Google account that teaches the classes (or has them shared), pick courses,
+                        and their rosters import just like a CSV — re-syncing later adds new students without duplicating.
+                      </p>
+                      <a href={`/api/admin/roster/google/connect?districtId=${districtId}`}
+                        style={{ ...BTN, display: "inline-block", textDecoration: "none" }}
+                        onClick={() => setGcState("loading")}>
+                        {gcState === "loading" ? "Connecting…" : "🔗 Connect Google Classroom"}
+                      </a>
+                    </div>
+                  ) : gcCourses.length === 0 ? (
+                    <p style={{ fontSize: 13, color: "#888", margin: 0 }}>
+                      No active courses found on the connected Google account.
+                    </p>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                        {gcCourses.map(c => (
+                          <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 10,
+                            padding: "8px 12px", borderRadius: 8, background: "#f9f9f9", border: "1px solid #eee",
+                            fontSize: 13, fontWeight: 600, color: "#111", cursor: "pointer" }}>
+                            <input type="checkbox" checked={gcSelected.includes(c.id)}
+                              onChange={e => setGcSelected(prev => e.target.checked
+                                ? [...prev, c.id] : prev.filter(x => x !== c.id))} />
+                            {c.title}
+                          </label>
+                        ))}
+                      </div>
+                      <button onClick={() => googleSync(true)}
+                        disabled={gcSelected.length === 0 || rosterBusy !== ""}
+                        style={{ ...BTN, opacity: gcSelected.length === 0 ? 0.5 : 1 }}>
+                        {rosterBusy === "preview" && previewSource === "google" ? "Checking…" : `Preview sync (${gcSelected.length} course${gcSelected.length === 1 ? "" : "s"})`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
 
             {tab === "audit" && (
