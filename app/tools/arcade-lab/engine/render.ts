@@ -263,19 +263,20 @@ function drawFlag(ctx: CanvasRenderingContext2D, px: number, py: number, t: numb
   ctx.fill();
 }
 
-function drawEnemy(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1 | -1, t: number) {
+function drawEnemy(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1 | -1, t: number, dmg = 0) {
   const px = fx * TILE, py = fy * TILE;
   const cx = px + TILE / 2;
   const bob = Math.sin(t / 110) * 1.5;
+  const squish = 1 - dmg * 0.16; // dented by stomps
   ctx.fillStyle = '#5B2E91';
   const step = Math.sin(t / 90) * 3;
   ctx.beginPath();
   ctx.ellipse(cx - 8 + step, py + TILE - 4, 6, 4, 0, 0, Math.PI * 2);
   ctx.ellipse(cx + 8 - step, py + TILE - 4, 6, 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#8E4EC6';
+  ctx.fillStyle = dmg > 0 ? '#A968E0' : '#8E4EC6';
   ctx.beginPath();
-  ctx.ellipse(cx, py + TILE * 0.58 + bob, TILE * 0.34, TILE * 0.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, py + TILE * (0.58 + dmg * 0.05) + bob, TILE * 0.34 * (1 + dmg * 0.06), TILE * 0.3 * squish, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.2)';
   ctx.beginPath();
@@ -356,11 +357,11 @@ function drawSpiky(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1
   ctx.stroke();
 }
 
-function drawFlyer(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1 | -1, t: number) {
+function drawFlyer(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1 | -1, t: number, dmg = 0) {
   const px = fx * TILE, py = fy * TILE;
   const cx = px + TILE / 2;
-  const cy = py + TILE * 0.5;
-  const flap = Math.sin(t / 90);
+  const cy = py + TILE * (0.5 + dmg * 0.04);
+  const flap = Math.sin(t / (90 + dmg * 40)); // tired wings when dented
   // wings
   ctx.fillStyle = 'rgba(56,189,248,0.55)';
   for (const side of [-1, 1]) {
@@ -373,9 +374,9 @@ function drawFlyer(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1
     ctx.restore();
   }
   // body
-  ctx.fillStyle = '#0EA5E9';
+  ctx.fillStyle = dmg > 0 ? '#5BC4F0' : '#0EA5E9';
   ctx.beginPath();
-  ctx.ellipse(cx, cy, TILE * 0.26, TILE * 0.22, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx, cy, TILE * 0.26 * (1 + dmg * 0.06), TILE * 0.22 * (1 - dmg * 0.14), 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.25)';
   ctx.beginPath();
@@ -695,6 +696,16 @@ function drawHUD(ctx: CanvasRenderingContext2D, s: GameState, w: number) {
   let hearts = '';
   for (let i = 0; i < 3; i++) hearts += i < s.lives ? '❤️' : '🖤';
   ctx.fillText(hearts, 12, 20);
+  // defeated-enemies counter (appears once the first enemy falls)
+  if (s.kills > 0) {
+    const kl = `👾 ${s.kills}`;
+    const kw = ctx.measureText(kl).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    roundedRect(ctx, 78, 8, kw + 18, 24, 12);
+    ctx.fill();
+    ctx.fillStyle = '#E2E8F0';
+    ctx.fillText(kl, 87, 20);
+  }
   // run timer (hundredths — the future leaderboard stat)
   const secs = (s.timeMs / 1000).toFixed(2);
   ctx.textAlign = 'center';
@@ -722,7 +733,7 @@ function drawWorld(
   ctx: CanvasRenderingContext2D,
   def: GameDef,
   solids: Set<string>,
-  entities: { type: ObjectType; alive?: boolean; px: number; py: number; dir?: 1 | -1; id?: number; springSquash?: number }[],
+  entities: { type: ObjectType; alive?: boolean; px: number; py: number; dir?: 1 | -1; id?: number; springSquash?: number; hp?: number; maxHp?: number }[],
   t: number,
   camX: number,
   camY: number,
@@ -744,9 +755,9 @@ function drawWorld(
     if (e.type === 'coin') drawCoin(ctx, e.px * TILE, e.py * TILE, t, (e.id ?? e.px + e.py * 7));
     else if (e.type === 'spike') drawSpike(ctx, e.px * TILE, e.py * TILE);
     else if (e.type === 'flag') drawFlag(ctx, e.px * TILE, e.py * TILE, t);
-    else if (e.type === 'enemy') drawEnemy(ctx, e.px, e.py, e.dir ?? 1, t);
+    else if (e.type === 'enemy') drawEnemy(ctx, e.px, e.py, e.dir ?? 1, t, (e.maxHp ?? 1) - (e.hp ?? 1));
     else if (e.type === 'spiky') drawSpiky(ctx, e.px, e.py, e.dir ?? 1, t);
-    else if (e.type === 'flyer') drawFlyer(ctx, e.px, e.py, e.dir ?? 1, t);
+    else if (e.type === 'flyer') drawFlyer(ctx, e.px, e.py, e.dir ?? 1, t, (e.maxHp ?? 1) - (e.hp ?? 1));
     else if (e.type === 'spring') drawSpring(ctx, e.px * TILE, e.py * TILE, e.springSquash ?? 0);
   }
 }

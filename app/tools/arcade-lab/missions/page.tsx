@@ -299,6 +299,9 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
             else if (ev.type === 'needScore') {
               playBump();
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
+            } else if (ev.type === 'hit') {
+              playStomp();
+              particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFFFFF', 5)];
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {

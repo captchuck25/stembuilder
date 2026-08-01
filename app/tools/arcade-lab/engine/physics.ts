@@ -28,6 +28,9 @@ export interface EntityState extends PlacedObject {
   touching: boolean;
   /** Springs: 1 right after a bounce, decays to 0 (drives the squash animation) */
   springSquash?: number;
+  /** Stomps remaining before this enemy squashes (toughness) */
+  hp?: number;
+  maxHp?: number;
 }
 
 export interface PlayerState {
@@ -54,12 +57,15 @@ export interface GameState {
   lives: number;
   status: GameStatus;
   timeMs: number;
+  /** Enemies defeated this run (any enemy kind that a script made disappear) */
+  kills: number;
   /** Indexes of "when score reaches N" rules that already fired */
   firedScoreRules: Set<number>;
+  firedKillRules: Set<number>;
 }
 
 export interface GameEvent {
-  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore';
+  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore' | 'hit';
   x: number;
   y: number;
   sound?: ArcadeSound;
@@ -88,7 +94,10 @@ export function initGame(def: GameDef, rules: CompiledRules): GameState {
   let id = 0;
   const entities: EntityState[] = def.objects
     .filter(o => o.type !== 'platform' && o.type !== 'spawn')
-    .map(o => ({ ...o, id: id++, alive: true, px: o.x, py: o.y, dir: 1 as const, touching: false }));
+    .map(o => {
+      const maxHp = o.type === 'enemy' ? rules.enemyToughness : o.type === 'flyer' ? rules.flyerToughness : undefined;
+      return { ...o, id: id++, alive: true, px: o.x, py: o.y, dir: 1 as const, touching: false, hp: maxHp, maxHp };
+    });
 
   const s: GameState = {
     player: { x: spawn.x, y: spawn.y, vx: 0, vy: 0, grounded: false, facing: 1, invulnUntil: 0 },
@@ -102,7 +111,9 @@ export function initGame(def: GameDef, rules: CompiledRules): GameState {
     lives: 3,
     status: 'playing',
     timeMs: 0,
+    kills: 0,
     firedScoreRules: new Set(),
+    firedKillRules: new Set(),
   };
 
   // "when the game starts" — only setup actions make sense before the first frame
@@ -161,6 +172,7 @@ function hurt(s: GameState, events: GameEvent[]) {
       e.py = e.y;
       e.dir = 1;
       e.touching = false;
+      e.hp = e.maxHp;
     }
   }
 }
@@ -193,13 +205,15 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           p.grounded = false;
           break;
         case 'launch':
-          p.vy = -SPRING_V;
+          // strength n = multiples of jump HEIGHT → velocity scales by √n
+          p.vy = -JUMP_V * Math.sqrt(a.n >= 2 && a.n <= 4 ? a.n : 2);
           p.grounded = false;
           if (entity?.type === 'spring') entity.springSquash = 1;
           break;
         case 'disappear':
           if (entity) {
             entity.alive = false;
+            if (ENEMY_TYPES.includes(entity.type)) s.kills++;
             events.push({ type: 'poof', x: entity.px + 0.5, y: entity.py + 0.5 });
           }
           break;
@@ -224,6 +238,7 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
             const matches = a.target === 'enemy' ? ENEMY_TYPES.includes(e.type) : e.type === a.target;
             if (matches && e.alive) {
               e.alive = false;
+              if (ENEMY_TYPES.includes(e.type)) s.kills++;
               events.push({ type: 'poof', x: e.px + 0.5, y: e.py + 0.5 });
             }
           }
@@ -319,15 +334,28 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           if (s.score >= gated.n) runActions(gated.actions, e);
           else events.push({ type: 'needScore', x: e.px + 0.5, y: e.py + 0.5, need: gated.n - s.score });
         }
+        for (const gated of rules.touchFlagKills) {
+          if (s.status !== 'playing') break;
+          if (s.kills >= gated.n) runActions(gated.actions, e);
+          else events.push({ type: 'needScore', x: e.px + 0.5, y: e.py + 0.5, need: gated.n - s.kills });
+        }
       }
     } else if (e.type === 'enemy' || e.type === 'flyer') {
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.25, 0.76, 0.7);
       if (touchingNow && !e.touching) {
         const stomping = p.vy > 2 && p.y + PH < e.py + 0.62;
-        const scripts = e.type === 'flyer'
-          ? (stomping ? rules.flyerTop : rules.flyerSide)
-          : (stomping ? rules.enemyTop : rules.enemySide);
-        for (const script of scripts) runActions(script, e);
+        if (stomping && (e.hp ?? 1) > 1) {
+          // Tough enemy: this stomp only dents it — flinch, bounce the player off
+          e.hp = (e.hp ?? 1) - 1;
+          p.vy = -BOUNCE_V;
+          p.grounded = false;
+          events.push({ type: 'hit', x: e.px + 0.5, y: e.py + 0.3 });
+        } else {
+          const scripts = e.type === 'flyer'
+            ? (stomping ? rules.flyerTop : rules.flyerSide)
+            : (stomping ? rules.enemyTop : rules.enemySide);
+          for (const script of scripts) runActions(script, e);
+        }
       }
     } else if (e.type === 'spiky') {
       // Spiky can NEVER be stomped — every contact, including from above,
@@ -353,6 +381,15 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
     if (s.status !== 'playing') return;
     if (!s.firedScoreRules.has(idx) && s.score >= rule.n) {
       s.firedScoreRules.add(idx);
+      runActions(rule.actions, null);
+    }
+  });
+
+  // ── "when N enemies are defeated" rules ──
+  rules.killRules.forEach((rule, idx) => {
+    if (s.status !== 'playing') return;
+    if (!s.firedKillRules.has(idx) && s.kills >= rule.n) {
+      s.firedKillRules.add(idx);
       runActions(rule.actions, null);
     }
   });

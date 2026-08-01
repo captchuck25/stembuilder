@@ -73,6 +73,22 @@ const ARCADE_DEFS = [
     tooltip: 'Runs when the player falls onto this object from above',
   },
   {
+    type: 'arcade_when_kills',
+    message0: 'when %1 enemies are defeated',
+    args0: [{ type: 'field_number', name: 'N', value: 3, min: 1, max: 50, precision: 1 }],
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs once when that many enemies have been defeated',
+  },
+  {
+    type: 'arcade_when_touch_me_kills',
+    message0: 'when the player touches me after defeating %1 enemies',
+    args0: [{ type: 'field_number', name: 'N', value: 3, min: 1, max: 50, precision: 1 }],
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'The goal stays locked until enough enemies have been defeated',
+  },
+  {
     type: 'arcade_when_game_starts',
     message0: 'when the game starts',
     nextStatement: null,
@@ -109,9 +125,23 @@ const ARCADE_DEFS = [
   },
   {
     type: 'arcade_launch',
-    message0: 'launch the player 🌀',
+    message0: 'launch the player 🌀 %1 jump power',
+    args0: [{
+      type: 'field_dropdown', name: 'STRENGTH',
+      options: [['2×', '2'], ['3×', '3'], ['4×', '4']],
+    }],
     previousStatement: null, nextStatement: null, colour: MOTION,
-    tooltip: 'A SUPER bounce — about twice as high as a jump',
+    tooltip: 'A SUPER bounce — 2×, 3×, or 4× as high as a normal jump',
+  },
+  {
+    type: 'arcade_toughness',
+    message0: '🛡 I take %1 stomps to squash',
+    args0: [{
+      type: 'field_dropdown', name: 'N',
+      options: [['1', '1'], ['2', '2'], ['3', '3']],
+    }],
+    colour: '#64748B',
+    tooltip: 'A property, not an action — leave it anywhere on this sheet. Extra stomps make the enemy flinch and bounce you off.',
   },
   {
     type: 'arcade_disappear',
@@ -193,12 +223,12 @@ const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
   player: ['arcade_when_key', 'arcade_move', 'arcade_jump', 'arcade_play_sound'],
   coin:   ['arcade_when_touch_me', 'arcade_disappear', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   spike:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_change_score', 'arcade_disappear', 'arcade_play_sound'],
-  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
   spiky:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_disappear', 'arcade_launch', 'arcade_change_score', 'arcade_play_sound'],
-  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
   spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
-  flag:   ['arcade_when_touch_me', 'arcade_when_touch_me_score', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
-  game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
+  flag:   ['arcade_when_touch_me', 'arcade_when_touch_me_score', 'arcade_when_touch_me_kills', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
+  game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_when_kills', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
 };
 
 export function buildArcadeToolbox(owner: ScriptOwner) {
@@ -226,7 +256,11 @@ function chainToActions(block: Blockly.Block | null): ArcadeAction[] {
         break;
       case 'arcade_jump': actions.push({ kind: 'jump' }); break;
       case 'arcade_bounce_player': actions.push({ kind: 'bouncePlayer' }); break;
-      case 'arcade_launch': actions.push({ kind: 'launch' }); break;
+      case 'arcade_launch': {
+        const n = Number(b.getFieldValue('STRENGTH'));
+        actions.push({ kind: 'launch', n: n >= 2 && n <= 4 ? n : 2 });
+        break;
+      }
       case 'arcade_disappear': actions.push({ kind: 'disappear' }); break;
       case 'arcade_disappear_all':
         actions.push({ kind: 'disappearAll', target: (b.getFieldValue('TARGET') ?? 'spike') as 'spike' | 'enemy' | 'coin' });
@@ -280,6 +314,18 @@ export function compileScripts(scripts: Partial<Record<ScriptOwner, string>>): C
           case 'arcade_when_landed':
             if (owner === 'spring') rules.springLand.push(actions);
             break;
+          case 'arcade_when_kills':
+            if (owner === 'game') rules.killRules.push({ n: Number(top.getFieldValue('N')) || 1, actions });
+            break;
+          case 'arcade_when_touch_me_kills':
+            if (owner === 'flag') rules.touchFlagKills.push({ n: Number(top.getFieldValue('N')) || 1, actions });
+            break;
+          case 'arcade_toughness': {
+            const n = Math.max(1, Math.min(3, Number(top.getFieldValue('N')) || 1));
+            if (owner === 'enemy') rules.enemyToughness = n;
+            else if (owner === 'flyer') rules.flyerToughness = n;
+            break;
+          }
           case 'arcade_when_game_starts':
             if (owner === 'game') rules.gameStart.push(actions);
             break;

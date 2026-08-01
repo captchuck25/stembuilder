@@ -72,7 +72,7 @@ export type ArcadeAction =
   | { kind: 'gameOver' }
   | { kind: 'sound'; name: ArcadeSound }
   | { kind: 'disappearAll'; target: 'spike' | 'enemy' | 'coin' }
-  | { kind: 'launch' };
+  | { kind: 'launch'; n: number };
 
 export interface CompiledRules {
   /** Player: run while the key is held */
@@ -93,13 +93,21 @@ export interface CompiledRules {
   springLand: ArcadeAction[][];
   gameStart: ArcadeAction[][];
   scoreRules: { n: number; actions: ArcadeAction[] }[];
+  /** "when N enemies are defeated" (Game sheet) */
+  killRules: { n: number; actions: ArcadeAction[] }[];
+  /** Kill-gated flag touches: only fire when kills >= n */
+  touchFlagKills: { n: number; actions: ArcadeAction[] }[];
+  /** Head-stomps needed to squash (1-3); property blocks on the sheets */
+  enemyToughness: number;
+  flyerToughness: number;
 }
 
 export function emptyRules(): CompiledRules {
   return {
     keys: [], touchCoin: [], touchSpike: [], touchFlag: [], touchFlagScored: [],
     enemyTop: [], enemySide: [], spikyTouch: [], flyerTop: [], flyerSide: [], springLand: [],
-    gameStart: [], scoreRules: [],
+    gameStart: [], scoreRules: [], killRules: [], touchFlagKills: [],
+    enemyToughness: 1, flyerToughness: 1,
   };
 }
 
@@ -144,6 +152,13 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
     if (gated.actions.some(a => a.kind === 'win')) goals.push(`🚩 Reach the flag with at least ${gated.n} ✦`);
     else if (gated.actions.length) goals.push(`🚩 Flag does something special at ${gated.n} ✦`);
   }
+  for (const kr of rules.killRules) {
+    if (kr.actions.some(a => a.kind === 'win')) goals.push(`👾 Defeat ${kr.n} enem${kr.n === 1 ? 'y' : 'ies'} to win`);
+    else if (kr.actions.length) goals.push(`👾 Something happens after ${kr.n} defeat${kr.n === 1 ? '' : 's'}`);
+  }
+  for (const gated of rules.touchFlagKills) {
+    if (gated.actions.some(a => a.kind === 'win')) goals.push(`🚩 Reach the flag after defeating ${gated.n} enem${gated.n === 1 ? 'y' : 'ies'}`);
+  }
   for (const sr of rules.scoreRules) {
     if (sr.actions.some(a => a.kind === 'win')) goals.push(`✦ Collect ${sr.n} points to win`);
     if (sr.actions.some(a => a.kind === 'disappearAll')) {
@@ -165,6 +180,8 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
   if (scriptsContain(rules.flyerTop, 'disappear')) danger.push('🦇 Stomp flyers to squash them');
   if (scriptsContain(rules.springLand, 'launch')) danger.push('🌀 Springs launch you sky-high');
   if (scriptsContain(rules.springLand, 'hurtPlayer')) danger.push('⚠ Some springs are traps!');
+  if (rules.enemyToughness > 1) danger.push(`🛡 Enemies take ${rules.enemyToughness} stomps`);
+  if (rules.flyerToughness > 1) danger.push(`🛡 Flyers take ${rules.flyerToughness} stomps`);
   if (scriptsContain(rules.touchCoin, 'changeScore')) danger.push('🪙 Crystals give points');
   void def; // level layout no longer needed — the per-type rules tell the whole story
 
