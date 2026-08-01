@@ -926,8 +926,8 @@ function CreateInner() {
             )}
             {mode === 'code' && (
               <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
-                🧪 Try experiments: lock your goal with <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me with at least 5 ✦&quot;</strong> on the Goal sheet…
-                make crystals worth <strong style={{ color: '#cbd5e1' }}>-1</strong>… add <strong style={{ color: '#cbd5e1' }}>&quot;when the score reaches 5 → win&quot;</strong> for a flag-free victory!
+                🧪 Try stacking guards: <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me&quot; → &quot;only if score is at least 5 ✦&quot; → &quot;only if 2 enemies defeated&quot; → &quot;win&quot;</strong> on the Goal sheet…
+                or a toll spring: <strong style={{ color: '#cbd5e1' }}>&quot;only if score is at least 1&quot; → &quot;change score by -1&quot; → &quot;launch&quot;</strong>!
               </span>
             )}
             {mode === 'play' && (

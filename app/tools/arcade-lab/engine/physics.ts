@@ -232,6 +232,19 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
         case 'sound':
           events.push({ type: 'sound', x: p.x, y: p.y, sound: a.name });
           break;
+        case 'requireScore':
+          if (s.score < a.n) {
+            // "locked" cue only for object touches (key chains would spam it)
+            if (entity) events.push({ type: 'needScore', x: entity.px + 0.5, y: entity.py + 0.5, need: a.n - s.score });
+            return; // guard failed — skip the rest of this chain
+          }
+          break;
+        case 'requireKills':
+          if (s.kills < a.n) {
+            if (entity) events.push({ type: 'needScore', x: entity.px + 0.5, y: entity.py + 0.5, need: a.n - s.kills });
+            return;
+          }
+          break;
         case 'disappearAll':
           for (const e of s.entities) {
             // "enemies" covers every enemy kind: walkers, spiky, flyers

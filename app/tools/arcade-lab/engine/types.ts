@@ -72,7 +72,10 @@ export type ArcadeAction =
   | { kind: 'gameOver' }
   | { kind: 'sound'; name: ArcadeSound }
   | { kind: 'disappearAll'; target: 'spike' | 'enemy' | 'coin' }
-  | { kind: 'launch'; n: number };
+  | { kind: 'launch'; n: number }
+  // Guards: if the condition isn't met, the REST of this chain doesn't run
+  | { kind: 'requireScore'; n: number }
+  | { kind: 'requireKills'; n: number };
 
 export interface CompiledRules {
   /** Player: run while the key is held */
@@ -147,7 +150,16 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
   if (controls.length === 0) controls.push('⚠ No keys wired — the player can’t move!');
 
   const goals: string[] = [];
-  if (scriptsContain(rules.touchFlag, 'win')) goals.push('🚩 Reach the flag');
+  // Flag scripts: read guards in the same chain as the win
+  for (const script of rules.touchFlag) {
+    if (!script.some(a => a.kind === 'win')) continue;
+    const sc = script.find(a => a.kind === 'requireScore') as Extract<ArcadeAction, { kind: 'requireScore' }> | undefined;
+    const kl = script.find(a => a.kind === 'requireKills') as Extract<ArcadeAction, { kind: 'requireKills' }> | undefined;
+    if (sc && kl) goals.push(`🚩 Flag needs ${sc.n} ✦ AND ${kl.n} defeat${kl.n === 1 ? '' : 's'}`);
+    else if (sc) goals.push(`🚩 Reach the flag with at least ${sc.n} ✦`);
+    else if (kl) goals.push(`🚩 Reach the flag after defeating ${kl.n} enem${kl.n === 1 ? 'y' : 'ies'}`);
+    else goals.push('🚩 Reach the flag');
+  }
   for (const gated of rules.touchFlagScored) {
     if (gated.actions.some(a => a.kind === 'win')) goals.push(`🚩 Reach the flag with at least ${gated.n} ✦`);
     else if (gated.actions.length) goals.push(`🚩 Flag does something special at ${gated.n} ✦`);
@@ -185,7 +197,7 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
   if (scriptsContain(rules.touchCoin, 'changeScore')) danger.push('🪙 Crystals give points');
   void def; // level layout no longer needed — the per-type rules tell the whole story
 
-  return { controls, goals, danger };
+  return { controls, goals: [...new Set(goals)], danger: [...new Set(danger)] };
 }
 
 // ── Default scripts ───────────────────────────────────────────────────────────

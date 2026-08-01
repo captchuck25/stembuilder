@@ -333,7 +333,7 @@ export const ARCADE_MISSIONS_2: ArcadeMission[] = [
   {
     title: 'The Gatekeeper',
     brief: 'Two tough guards patrol this hall — each takes TWO stomps to squash (feel the flinch!). The flag has no rules at all. Write the gate: it should only open after you have defeated both guards. Watch the 👾 counter climb.',
-    hint: 'Goal sheet: "when the player touches me after defeating 2 enemies" → "win the game 🏆". The guards\' 🛡 toughness block lives on their sheet.',
+    hint: 'Goal sheet: "when the player touches me" → "only if at least 2 enemies defeated" → "win the game 🏆". The guards\' 🛡 toughness block lives on their sheet.',
     backdrop: 'candy',
     objects: [
       ...ground(),
@@ -345,7 +345,8 @@ export const ARCADE_MISSIONS_2: ArcadeMission[] = [
     editableOwners: ['flag'],
     designEditable: false,
     requirements: [
-      { bucket: 'touchFlagKills', kind: 'win', label: 'The flag must open only after enemies are defeated' },
+      { bucket: 'touchFlag', kind: 'requireKills', label: 'The flag must require defeated enemies (only if… guard)' },
+      { bucket: 'touchFlag', kind: 'win', label: 'Reaching the guarded flag must win the game' },
     ],
   },
   {

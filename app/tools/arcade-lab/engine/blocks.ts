@@ -145,6 +145,20 @@ const ARCADE_DEFS = [
     tooltip: 'Snap under "when the game starts" — non-final stomps make me flinch and bounce the player off',
   },
   {
+    type: 'arcade_require_score',
+    message0: 'only if score is at least %1 ✦',
+    args0: [{ type: 'field_number', name: 'N', value: 5, min: 1, max: 99, precision: 1 }],
+    previousStatement: null, nextStatement: null, colour: '#A16207',
+    tooltip: 'A guard: if the score is too low, the rest of this chain is skipped',
+  },
+  {
+    type: 'arcade_require_kills',
+    message0: 'only if at least %1 enemies defeated',
+    args0: [{ type: 'field_number', name: 'N', value: 3, min: 1, max: 50, precision: 1 }],
+    previousStatement: null, nextStatement: null, colour: '#A16207',
+    tooltip: 'A guard: if not enough enemies are defeated, the rest of this chain is skipped',
+  },
+  {
     type: 'arcade_disappear',
     message0: 'disappear',
     previousStatement: null, nextStatement: null, colour: OBJECT,
@@ -220,15 +234,18 @@ export function registerArcadeBlocks() {
 
 // ── Toolboxes per script owner ────────────────────────────────────────────────
 
+// Note: the old combo hats (arcade_when_touch_me_score / _kills) stay
+// registered so saved games keep working, but they're out of the palette —
+// students compose "when the player touches me" + "only if…" guards instead.
 const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
-  player: ['arcade_when_key', 'arcade_move', 'arcade_jump', 'arcade_play_sound'],
-  coin:   ['arcade_when_touch_me', 'arcade_disappear', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
-  spike:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_change_score', 'arcade_disappear', 'arcade_play_sound'],
-  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_when_game_starts', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
-  spiky:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_disappear', 'arcade_launch', 'arcade_change_score', 'arcade_play_sound'],
-  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_when_game_starts', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
-  spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
-  flag:   ['arcade_when_touch_me', 'arcade_when_touch_me_score', 'arcade_when_touch_me_kills', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
+  player: ['arcade_when_key', 'arcade_move', 'arcade_jump', 'arcade_require_score', 'arcade_play_sound'],
+  coin:   ['arcade_when_touch_me', 'arcade_disappear', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_disappear_all', 'arcade_play_sound'],
+  spike:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_disappear', 'arcade_play_sound'],
+  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_when_game_starts', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_play_sound'],
+  spiky:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_disappear', 'arcade_launch', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_play_sound'],
+  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_when_game_starts', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_play_sound'],
+  spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
+  flag:   ['arcade_when_touch_me', 'arcade_require_score', 'arcade_require_kills', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_when_kills', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
 };
 
@@ -273,6 +290,8 @@ function chainToActions(block: Blockly.Block | null): ArcadeAction[] {
       case 'arcade_win': actions.push({ kind: 'win' }); break;
       case 'arcade_game_over': actions.push({ kind: 'gameOver' }); break;
       case 'arcade_play_sound': actions.push({ kind: 'sound', name: (b.getFieldValue('SOUND') ?? 'chime') as ArcadeSound }); break;
+      case 'arcade_require_score': actions.push({ kind: 'requireScore', n: Number(b.getFieldValue('N')) || 1 }); break;
+      case 'arcade_require_kills': actions.push({ kind: 'requireKills', n: Number(b.getFieldValue('N')) || 1 }); break;
     }
     b = b.getNextBlock();
   }
