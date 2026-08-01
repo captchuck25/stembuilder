@@ -140,8 +140,9 @@ const ARCADE_DEFS = [
       type: 'field_dropdown', name: 'N',
       options: [['1', '1'], ['2', '2'], ['3', '3']],
     }],
+    previousStatement: null, nextStatement: null,
     colour: '#64748B',
-    tooltip: 'A property, not an action — leave it anywhere on this sheet. Extra stomps make the enemy flinch and bounce you off.',
+    tooltip: 'Snap under "when the game starts" — non-final stomps make me flinch and bounce the player off',
   },
   {
     type: 'arcade_disappear',
@@ -223,9 +224,9 @@ const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
   player: ['arcade_when_key', 'arcade_move', 'arcade_jump', 'arcade_play_sound'],
   coin:   ['arcade_when_touch_me', 'arcade_disappear', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   spike:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_change_score', 'arcade_disappear', 'arcade_play_sound'],
-  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_when_game_starts', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
   spiky:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_disappear', 'arcade_launch', 'arcade_change_score', 'arcade_play_sound'],
-  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_when_game_starts', 'arcade_toughness', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
   spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
   flag:   ['arcade_when_touch_me', 'arcade_when_touch_me_score', 'arcade_when_touch_me_kills', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_when_kills', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
@@ -320,18 +321,27 @@ export function compileScripts(scripts: Partial<Record<ScriptOwner, string>>): C
           case 'arcade_when_touch_me_kills':
             if (owner === 'flag') rules.touchFlagKills.push({ n: Number(top.getFieldValue('N')) || 1, actions });
             break;
-          case 'arcade_toughness': {
-            const n = Math.max(1, Math.min(3, Number(top.getFieldValue('N')) || 1));
-            if (owner === 'enemy') rules.enemyToughness = n;
-            else if (owner === 'flyer') rules.flyerToughness = n;
-            break;
-          }
+          // (arcade_toughness is handled below via a whole-sheet scan, so it
+          // works chained under a hat OR floating free)
           case 'arcade_when_game_starts':
-            if (owner === 'game') rules.gameStart.push(actions);
+            // Allowed on the Game sheet and on enemy/flyer sheets (as the home
+            // for the toughness block); real actions all route to game start
+            if (owner === 'game' || owner === 'enemy' || owner === 'flyer') rules.gameStart.push(actions);
             break;
           case 'arcade_when_score':
             if (owner === 'game') rules.scoreRules.push({ n: Number(top.getFieldValue('N')) || 1, actions });
             break;
+        }
+      }
+      // Toughness is a property: honored wherever the block sits on the sheet
+      // (snapped into a chain or floating free)
+      if (owner === 'enemy' || owner === 'flyer') {
+        for (const b of ws.getAllBlocks(false)) {
+          if (b.type === 'arcade_toughness') {
+            const n = Math.max(1, Math.min(3, Number(b.getFieldValue('N')) || 1));
+            if (owner === 'enemy') rules.enemyToughness = Math.max(rules.enemyToughness, n);
+            else rules.flyerToughness = Math.max(rules.flyerToughness, n);
+          }
         }
       }
     } catch {

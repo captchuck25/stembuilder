@@ -233,6 +233,15 @@ export function withScripts(def: Omit<GameDef, 'scripts'> & { scripts?: Partial<
   return { ...def, scripts: { ...DEFAULT_SCRIPTS, ...(def.scripts ?? {}) } };
 }
 
+// Fresh Free Build levels start with EMPTY sheets — certified students wire
+// every element themselves (keys, coins, dangers, springs, the win). The
+// classic DEFAULT_SCRIPTS remain for missions and for migrating old saves.
+const EMPTY_SHEET = `${X}</xml>`;
+export const STARTER_SCRIPTS: Record<ScriptOwner, string> = {
+  player: EMPTY_SHEET, coin: EMPTY_SHEET, spike: EMPTY_SHEET, enemy: EMPTY_SHEET,
+  spiky: EMPTY_SHEET, flyer: EMPTY_SHEET, spring: EMPTY_SHEET, flag: EMPTY_SHEET, game: EMPTY_SHEET,
+};
+
 // ── Templates ────────────────────────────────────────────────────────────────
 
 export function span(type: ObjectType, x0: number, x1: number, y: number): PlacedObject[] {
@@ -254,7 +263,7 @@ export function starterLevel(shape: LevelShape = 'classic'): GameDef {
       { type: 'spawn', x: 1, y: rows - 2 },
       { type: 'flag', x: cols - 2, y: rows - 2 },
     ],
-    scripts: { ...DEFAULT_SCRIPTS },
+    scripts: { ...STARTER_SCRIPTS },
   };
 }
 

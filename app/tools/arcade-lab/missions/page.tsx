@@ -13,7 +13,7 @@ import { compileScripts } from '../engine/blocks';
 import { BotConfig, defaultBot, loadBotLocal, fetchCloudBot } from '../engine/bot';
 import ArcadeWorkspace from '../components/ArcadeWorkspace';
 import {
-  ARCADE_MISSIONS, ARCADE_QUIZ, ArcadeMission, ArcadeUnitProgress,
+  ARCADE_MISSIONS, ARCADE_MISSIONS_2, ARCADE_QUIZ, ArcadeMission, ArcadeUnitProgress,
   checkCapstone, checkRequirements, emptyUnitProgress,
   loadUnitProgress, loadCloudUnitProgress, mergeUnitProgress, saveUnitProgress, syncUnitToCloud,
 } from '../unit';
@@ -61,7 +61,10 @@ const PALETTE: { tool: Tool; icon: string; label: string }[] = [
   { tool: 'eraser',   icon: '🧽', label: 'Eraser' },
 ];
 
-function missionKey(ci: number) { return `arcade_mission_${ci}`; }
+type Pack = 1 | 2;
+const PACK_MISSIONS: Record<Pack, ArcadeMission[]> = { 1: ARCADE_MISSIONS, 2: ARCADE_MISSIONS_2 };
+
+function missionKey(pack: Pack, ci: number) { return pack === 2 ? `arcade_mission2_${ci}` : `arcade_mission_${ci}`; }
 
 function buildMissionDef(m: ArcadeMission): GameDef {
   return {
@@ -71,9 +74,9 @@ function buildMissionDef(m: ArcadeMission): GameDef {
   };
 }
 
-function loadMissionDef(ci: number, m: ArcadeMission): GameDef {
+function loadMissionDef(pack: Pack, ci: number, m: ArcadeMission): GameDef {
   try {
-    const raw = localStorage.getItem(missionKey(ci));
+    const raw = localStorage.getItem(missionKey(pack, ci));
     if (raw) {
       const parsed = JSON.parse(raw);
       // Title acts as a version stamp: a redesigned mission discards stale saves
@@ -98,7 +101,8 @@ function SiteChrome({ children }: { children: React.ReactNode }) {
 
 type MissionMode = 'code' | 'design' | 'play';
 
-function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
+function MissionView({ pack, ci, onSuccess, onBack, onNext, isComplete, isLast }: {
+  pack: Pack;
   ci: number;
   onSuccess: () => void;
   onBack: () => void;
@@ -106,12 +110,12 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
   isComplete: boolean;
   isLast: boolean;
 }) {
-  const mission = ARCADE_MISSIONS[ci];
+  const mission = PACK_MISSIONS[pack][ci];
   const canCode = mission.editableOwners.length > 0;
   const canDesign = mission.designEditable;
 
   const [def, setDef] = useState<GameDef>(() =>
-    typeof window === 'undefined' ? buildMissionDef(mission) : loadMissionDef(ci, mission));
+    typeof window === 'undefined' ? buildMissionDef(mission) : loadMissionDef(pack, ci, mission));
   const [mode, setMode] = useState<MissionMode>(canCode ? 'code' : 'design');
   const [owner, setOwner] = useState<ScriptOwner>(mission.editableOwners[0] ?? 'player');
   const [tool, setTool] = useState<Tool>('platform');
@@ -150,7 +154,7 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
 
   // Persist mission work + live requirement checklist (debounced)
   useEffect(() => {
-    try { localStorage.setItem(missionKey(ci), JSON.stringify(def)); } catch { /* ignore */ }
+    try { localStorage.setItem(missionKey(pack, ci), JSON.stringify(def)); } catch { /* ignore */ }
     const timer = setTimeout(() => {
       const missing = [
         ...checkRequirements(compileScripts(def.scripts), mission.requirements),
@@ -239,7 +243,7 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
 
   const resetMission = useCallback(() => {
     if (!confirm('Reset this mission to its starting state? Your changes here will be lost.')) return;
-    try { localStorage.removeItem(missionKey(ci)); } catch { /* ignore */ }
+    try { localStorage.removeItem(missionKey(pack, ci)); } catch { /* ignore */ }
     setDef(buildMissionDef(mission));
     stateRef.current = null;
     setOutcome(null);
@@ -371,7 +375,9 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
         <div style={{ ...CARD, padding: '14px 22px', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Missions</button>
-            <span style={{ fontSize: 12, fontWeight: 800, color: '#7C3AED', textTransform: 'uppercase', letterSpacing: '0.6px' }}>Mission {ci + 1}</span>
+            <span style={{ fontSize: 12, fontWeight: 800, color: pack === 2 ? '#F59E0B' : '#7C3AED', textTransform: 'uppercase', letterSpacing: '0.6px' }}>
+              {pack === 2 ? '⚡ Power Mission' : 'Mission'} {ci + 1}
+            </span>
             <span style={{ fontSize: 18, fontWeight: 900, color: '#e2e8f0' }}>{mission.title}</span>
             {isComplete && <span style={{ fontSize: 14 }}>✅</span>}
 
@@ -486,7 +492,7 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
                         <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'center' }}>
                           <button onClick={onNext}
                             style={{ padding: '10px 24px', background: '#7C3AED', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
-                            {isLast ? 'Take the Quiz →' : 'Next Mission →'}
+                            {isLast ? (pack === 2 ? '⚡ Power Pack complete!' : 'Take the Quiz →') : 'Next Mission →'}
                           </button>
                           <button onClick={restart}
                             style={{ padding: '10px 20px', background: 'rgba(0,0,0,0.08)', color: '#374151', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
@@ -518,7 +524,7 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
               </div>
               <div style={{ flex: 1 }}>
                 <ArcadeWorkspace
-                  key={`${ci}_${owner}`}
+                  key={`${pack}_${ci}_${owner}`}
                   owner={owner}
                   xml={def.scripts[owner] ?? ''}
                   onXmlChange={xml => setDef(d => ({ ...d, scripts: { ...d.scripts, [owner]: xml } }))}
@@ -613,7 +619,7 @@ function QuizView({ onDone }: { onDone: (score: number) => void }) {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
-type Phase = { tag: 'list' } | { tag: 'mission'; ci: number } | { tag: 'quiz' } | { tag: 'complete'; score: number };
+type Phase = { tag: 'list' } | { tag: 'mission'; pack: Pack; ci: number } | { tag: 'quiz' } | { tag: 'complete'; score: number };
 
 export default function ArcadeMissionsPage() {
   const { status: authStatus } = useSession();
@@ -646,18 +652,25 @@ export default function ArcadeMissionsPage() {
     });
   }, [authStatus]);
 
-  const markComplete = useCallback((ci: number) => {
-    const next: ArcadeUnitProgress = {
-      ...progressRef.current,
-      completed: { ...progressRef.current.completed, [ci]: true },
-    };
+  const markComplete = useCallback((pack: Pack, ci: number) => {
+    const next: ArcadeUnitProgress = pack === 2
+      ? { ...progressRef.current, completed2: { ...progressRef.current.completed2, [ci]: true } }
+      : { ...progressRef.current, completed: { ...progressRef.current.completed, [ci]: true } };
     setProgress(next);
     saveUnitProgress(next);
-    syncUnitToCloud(ci, true);
+    syncUnitToCloud(ci, true, undefined, pack);
+    // Finishing the last Power Mission marks the pack's unit row too
+    if (pack === 2 && ARCADE_MISSIONS_2.every((_, i) => next.completed2[i])) {
+      syncUnitToCloud(null, true, undefined, 2);
+    }
   }, []);
 
   const allMissionsDone = useMemo(
     () => ARCADE_MISSIONS.every((_, i) => progress.completed[i]),
+    [progress],
+  );
+  const allPowerDone = useMemo(
+    () => ARCADE_MISSIONS_2.every((_, i) => progress.completed2[i]),
     [progress],
   );
 
@@ -681,16 +694,23 @@ export default function ArcadeMissionsPage() {
   }
 
   if (phase.tag === 'mission') {
-    const { ci } = phase;
+    const { pack, ci } = phase;
+    const packList = PACK_MISSIONS[pack];
+    const isLast = ci === packList.length - 1;
     return (
       <MissionView
-        key={ci}
+        key={`${pack}_${ci}`}
+        pack={pack}
         ci={ci}
-        isComplete={!!progress.completed[ci]}
-        isLast={ci === ARCADE_MISSIONS.length - 1}
-        onSuccess={() => markComplete(ci)}
+        isComplete={pack === 2 ? !!progress.completed2[ci] : !!progress.completed[ci]}
+        isLast={isLast}
+        onSuccess={() => markComplete(pack, ci)}
         onBack={() => setPhase({ tag: 'list' })}
-        onNext={() => setPhase(ci === ARCADE_MISSIONS.length - 1 ? { tag: 'quiz' } : { tag: 'mission', ci: ci + 1 })}
+        onNext={() => {
+          if (!isLast) setPhase({ tag: 'mission', pack, ci: ci + 1 });
+          else if (pack === 1) setPhase({ tag: 'quiz' });
+          else setPhase({ tag: 'list' });
+        }}
       />
     );
   }
@@ -754,7 +774,7 @@ export default function ArcadeMissionsPage() {
             const locked = i > 0 && !progress.completed[i - 1];
             return (
               <div key={i}
-                onClick={() => !locked && setPhase({ tag: 'mission', ci: i })}
+                onClick={() => !locked && setPhase({ tag: 'mission', pack: 1, ci: i })}
                 style={{ ...CARD, width: 204, padding: 18, cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1, position: 'relative' }}>
                 {done && <span style={{ position: 'absolute', top: 10, right: 12 }}>✅</span>}
                 {locked && <span style={{ position: 'absolute', top: 10, right: 12 }}>🔒</span>}
@@ -777,6 +797,36 @@ export default function ArcadeMissionsPage() {
               {progress.quizScore !== null ? `Best score: ${progress.quizScore}/5` : '5 questions · pass to unlock Free Build'}
             </div>
           </div>
+        </div>
+
+        {/* ── Power Pack (Missions II) ── */}
+        <div style={{ ...CARD, padding: '18px 24px', margin: '28px 0 20px', border: '1px solid rgba(245,158,11,0.4)' }}>
+          <h2 style={{ fontSize: 20, fontWeight: 900, color: '#e2e8f0', margin: '0 0 4px' }}>
+            ⚡ Power Pack {allPowerDone && '✅'}
+          </h2>
+          <p style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8', margin: 0 }}>
+            {progress.unitComplete
+              ? 'Five advanced missions for certified game coders: springs, spiky, flyers, tough enemies, and kill-gated goals — the full Free Build toolbox.'
+              : '🔒 Finish the missions and quiz above to unlock the advanced pack.'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+          {ARCADE_MISSIONS_2.map((m, i) => {
+            const done = !!progress.completed2[i];
+            const locked = !progress.unitComplete || (i > 0 && !progress.completed2[i - 1]);
+            const concepts2 = ['Springs & launch', 'Spiky', 'Flyers', 'Kill gates & 🛡', 'Capstone II'];
+            return (
+              <div key={i}
+                onClick={() => !locked && setPhase({ tag: 'mission', pack: 2, ci: i })}
+                style={{ ...CARD, width: 204, padding: 18, cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? 0.55 : 1, position: 'relative' }}>
+                {done && <span style={{ position: 'absolute', top: 10, right: 12 }}>✅</span>}
+                {locked && <span style={{ position: 'absolute', top: 10, right: 12 }}>🔒</span>}
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Power {i + 1}</div>
+                <div style={{ fontSize: 15, fontWeight: 900, color: '#e2e8f0', margin: '3px 0 4px' }}>{m.title}</div>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>{concepts2[i]}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </SiteChrome>
