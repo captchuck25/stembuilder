@@ -2,7 +2,7 @@
 // Physics (gravity, collision, patrol) comes free; everything else — controls,
 // scoring, damage, winning — is executed from student-compiled block rules.
 
-import { ArcadeAction, ArcadeKey, ArcadeSound, CompiledRules, ENEMY_TYPES, GameDef, PlacedObject, solidSet } from './types';
+import { ArcadeAction, ArcadeKey, ArcadeSound, CompiledRules, ENEMY_TYPES, GameDef, Genre, PlacedObject, genreOf, solidSet } from './types';
 
 /** Held state per wireable key — arrows AND letters are separate, real keys */
 export type InputState = Record<ArcadeKey, boolean>;
@@ -31,6 +31,14 @@ export interface EntityState extends PlacedObject {
   /** Stomps remaining before this enemy squashes (toughness) */
   hp?: number;
   maxHp?: number;
+  /** Defender: this alien already triggered its reach-the-bottom scripts */
+  bottomFired?: boolean;
+}
+
+/** Defender: a blaster bolt in flight (tile coords, travels straight up) */
+export interface Blaster {
+  x: number;
+  y: number;
 }
 
 export interface PlayerState {
@@ -62,6 +70,17 @@ export interface GameState {
   /** Indexes of "when score reaches N" rules that already fired */
   firedScoreRules: Set<number>;
   firedKillRules: Set<number>;
+  // ── Space Defender ──
+  genre: Genre;
+  blasters: Blaster[];
+  /** timeMs before which the blaster is still reloading */
+  fireCooldownUntil: number;
+  /** Which way the alien formation is marching */
+  alienDir: 1 | -1;
+  /** How far the formation has drifted from its designed tiles */
+  alienOffsetX: number;
+  alienOffsetY: number;
+  aliensClearedFired: boolean;
 }
 
 export interface GameEvent {
@@ -87,6 +106,14 @@ const ENEMY_SPEED = 2.2;
 const FLYER_SPEED = 2.6;
 const FLYER_AMP = 0.45;   // hover wave height in tiles
 const INVULN_MS = 1500;
+const BOLT_SPEED = 16;       // blaster bolts, tiles/s straight up
+const FIRE_COOLDOWN_MS = 260;
+const MARCH_BASE = 1.2;      // formation speed with a full armada...
+const MARCH_PANIC = 2.2;     // ...plus this much extra as it thins out
+const MARCH_STEP_DOWN = 0.4; // tiles the formation drops at each edge
+
+/** Anything a script's "disappear" counts as a defeat */
+const KILLABLE: readonly string[] = [...ENEMY_TYPES, 'alien'];
 
 export function initGame(def: GameDef, rules: CompiledRules): GameState {
   const spawnObj = def.objects.find(o => o.type === 'spawn');
@@ -114,6 +141,13 @@ export function initGame(def: GameDef, rules: CompiledRules): GameState {
     kills: 0,
     firedScoreRules: new Set(),
     firedKillRules: new Set(),
+    genre: genreOf(def),
+    blasters: [],
+    fireCooldownUntil: 0,
+    alienDir: 1,
+    alienOffsetX: 0,
+    alienOffsetY: 0,
+    aliensClearedFired: false,
   };
 
   // "when the game starts" — only setup actions make sense before the first frame
@@ -213,8 +247,15 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
         case 'disappear':
           if (entity) {
             entity.alive = false;
-            if (ENEMY_TYPES.includes(entity.type)) s.kills++;
+            if (KILLABLE.includes(entity.type)) s.kills++;
             events.push({ type: 'poof', x: entity.px + 0.5, y: entity.py + 0.5 });
+          }
+          break;
+        case 'fire':
+          if (s.timeMs >= s.fireCooldownUntil) {
+            s.fireCooldownUntil = s.timeMs + FIRE_COOLDOWN_MS;
+            s.blasters.push({ x: p.x + PW / 2, y: p.y - 0.15 });
+            events.push({ type: 'sound', x: p.x, y: p.y, sound: 'zap' });
           }
           break;
         case 'changeScore': s.score = Math.max(0, s.score + a.n); break;
@@ -251,7 +292,7 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
             const matches = a.target === 'enemy' ? ENEMY_TYPES.includes(e.type) : e.type === a.target;
             if (matches && e.alive) {
               e.alive = false;
-              if (ENEMY_TYPES.includes(e.type)) s.kills++;
+              if (KILLABLE.includes(e.type)) s.kills++;
               events.push({ type: 'poof', x: e.px + 0.5, y: e.py + 0.5 });
             }
           }
@@ -266,6 +307,105 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
     if (input[kr.key]) runActions(kr.actions, null);
   }
   if (s.status !== 'playing') return events;
+
+  // ══ Space Defender: ship + blasters + marching formation, no gravity ══
+  if (s.genre === 'defender') {
+    // The ship slides along its row; jump/launch are no-ops in space
+    p.vy = 0;
+    p.grounded = false;
+    p.x = Math.max(0, Math.min(p.x + p.vx * dt, s.cols - PW));
+    p.y = s.spawn.y;
+
+    // Bolts fly straight up
+    for (const b of s.blasters) b.y -= BOLT_SPEED * dt;
+    s.blasters = s.blasters.filter(b => b.y > -1);
+
+    // Formation march: sweep sideways, drop a step at each edge,
+    // and speed up as the armada thins out
+    const aliens = s.entities.filter(e => e.type === 'alien');
+    const alive = aliens.filter(e => e.alive);
+    if (alive.length) {
+      const speed = MARCH_BASE + MARCH_PANIC * (1 - alive.length / aliens.length);
+      s.alienOffsetX += s.alienDir * speed * dt;
+      let minX = Infinity, maxX = -Infinity;
+      for (const e of alive) {
+        minX = Math.min(minX, e.x + s.alienOffsetX);
+        maxX = Math.max(maxX, e.x + s.alienOffsetX);
+      }
+      if (s.alienDir > 0 && maxX > s.cols - 1.05) {
+        s.alienDir = -1;
+        s.alienOffsetX += s.cols - 1.05 - maxX;
+        s.alienOffsetY += MARCH_STEP_DOWN;
+      } else if (s.alienDir < 0 && minX < 0.05) {
+        s.alienDir = 1;
+        s.alienOffsetX += 0.05 - minX;
+        s.alienOffsetY += MARCH_STEP_DOWN;
+      }
+      for (const e of aliens) {
+        e.px = e.x + s.alienOffsetX;
+        e.py = e.y + s.alienOffsetY;
+        e.dir = s.alienDir;
+      }
+    }
+
+    // Blaster bolt hits an alien → that alien's "when a blaster hits me"
+    for (const b of s.blasters) {
+      for (const e of alive) {
+        if (!e.alive) continue; // an earlier bolt got it this frame
+        if (overlaps(b.x - 0.06, b.y - 0.35, 0.12, 0.35, e.px + 0.12, e.py + 0.15, 0.76, 0.7)) {
+          b.y = -99; // spent
+          events.push({ type: 'hit', x: e.px + 0.5, y: e.py + 0.5 });
+          for (const script of rules.alienHit) runActions(script, e);
+          break;
+        }
+        if (s.status !== 'playing') break;
+      }
+      if (s.status !== 'playing') break;
+    }
+    if (s.status !== 'playing') return events;
+    s.blasters = s.blasters.filter(b => b.y > -1);
+
+    for (const e of alive) {
+      if (!e.alive) continue;
+      // Descended to the ship's row → "when I reach the bottom" (once per alien)
+      if (!e.bottomFired && e.py + 0.85 >= s.spawn.y + PH) {
+        e.bottomFired = true;
+        for (const script of rules.alienBottom) runActions(script, e);
+        if (s.status !== 'playing') return events;
+      }
+      // Contact with the ship → "when I touch the ship" (once per contact)
+      const touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.15, 0.76, 0.7);
+      if (touchingNow && !e.touching) {
+        for (const script of rules.alienShip) runActions(script, e);
+        if (s.status !== 'playing') return events;
+      }
+      e.touching = touchingNow;
+    }
+
+    // Last alien destroyed → "when every alien is destroyed" (once)
+    if (!s.aliensClearedFired && aliens.length > 0 && aliens.every(e => !e.alive)) {
+      s.aliensClearedFired = true;
+      for (const script of rules.aliensCleared) runActions(script, null);
+      if (s.status !== 'playing') return events;
+    }
+
+    rules.scoreRules.forEach((rule, idx) => {
+      if (s.status !== 'playing') return;
+      if (!s.firedScoreRules.has(idx) && s.score >= rule.n) {
+        s.firedScoreRules.add(idx);
+        runActions(rule.actions, null);
+      }
+    });
+    rules.killRules.forEach((rule, idx) => {
+      if (s.status !== 'playing') return;
+      if (!s.firedKillRules.has(idx) && s.kills >= rule.n) {
+        s.firedKillRules.add(idx);
+        runActions(rule.actions, null);
+      }
+    });
+    return events;
+  }
+
   p.vy = Math.min(p.vy + GRAVITY * dt, MAX_FALL);
 
   // ── Move X, resolve ──

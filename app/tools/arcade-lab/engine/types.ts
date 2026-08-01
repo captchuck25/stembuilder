@@ -4,13 +4,17 @@
 
 export type Backdrop = 'hills' | 'cave' | 'candy' | 'space';
 
-export type ObjectType = 'platform' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'flyer' | 'spring' | 'flag' | 'spawn';
+/** Two game genres share the engine: side-view platformer, and Space Defender
+ *  (ship at the bottom, alien formation above, blasters). */
+export type Genre = 'platformer' | 'defender';
 
-/** All enemy kinds — they share the Enemy script sheet */
+export type ObjectType = 'platform' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'flyer' | 'spring' | 'flag' | 'spawn' | 'alien';
+
+/** All enemy kinds — they share the Enemy script sheet (platformer) */
 export const ENEMY_TYPES: ObjectType[] = ['enemy', 'spiky', 'flyer'];
 
 /** Which object type a script sheet belongs to ('game' = global rules) */
-export type ScriptOwner = 'player' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'flyer' | 'spring' | 'flag' | 'game';
+export type ScriptOwner = 'player' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'flyer' | 'spring' | 'flag' | 'game' | 'alien';
 
 export interface PlacedObject {
   type: ObjectType;
@@ -26,6 +30,12 @@ export interface GameDef {
   objects: PlacedObject[];
   /** Blockly XML per script owner — these ARE the game's rules */
   scripts: Record<ScriptOwner, string>;
+  /** Missing = platformer (all pre-Defender saves) */
+  genre?: Genre;
+}
+
+export function genreOf(def: Pick<GameDef, 'genre'>): Genre {
+  return def.genre === 'defender' ? 'defender' : 'platformer';
 }
 
 export const TILE = 40;
@@ -75,7 +85,9 @@ export type ArcadeAction =
   | { kind: 'launch'; n: number }
   // Guards: if the condition isn't met, the REST of this chain doesn't run
   | { kind: 'requireScore'; n: number }
-  | { kind: 'requireKills'; n: number };
+  | { kind: 'requireKills'; n: number }
+  // Defender: fire a blaster bolt from the ship
+  | { kind: 'fire' };
 
 export interface CompiledRules {
   /** Player: run while the key is held */
@@ -98,6 +110,11 @@ export interface CompiledRules {
   scoreRules: { n: number; actions: ArcadeAction[] }[];
   /** "when N enemies are defeated" (Game sheet) */
   killRules: { n: number; actions: ArcadeAction[] }[];
+  /** Defender: alien sheet + game-sheet events */
+  alienHit: ArcadeAction[][];
+  alienBottom: ArcadeAction[][];
+  alienShip: ArcadeAction[][];
+  aliensCleared: ArcadeAction[][];
   /** Kill-gated flag touches: only fire when kills >= n */
   touchFlagKills: { n: number; actions: ArcadeAction[] }[];
   /** Head-stomps needed to squash (1-3); property blocks on the sheets */
@@ -110,6 +127,7 @@ export function emptyRules(): CompiledRules {
     keys: [], touchCoin: [], touchSpike: [], touchFlag: [], touchFlagScored: [],
     enemyTop: [], enemySide: [], spikyTouch: [], flyerTop: [], flyerSide: [], springLand: [],
     gameStart: [], scoreRules: [], killRules: [], touchFlagKills: [],
+    alienHit: [], alienBottom: [], alienShip: [], aliensCleared: [],
     enemyToughness: 1, flyerToughness: 1,
   };
 }
@@ -132,6 +150,7 @@ function keyVerb(actions: ArcadeAction[]): string | null {
   for (const a of actions) {
     if (a.kind === 'move') return a.dir === 'left' ? 'move left' : 'move right';
     if (a.kind === 'jump') return 'jump';
+    if (a.kind === 'fire') return '🔫 fire!';
     if (a.kind === 'sound') return 'sound';
   }
   return null;
@@ -168,6 +187,8 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
     if (kr.actions.some(a => a.kind === 'win')) goals.push(`👾 Defeat ${kr.n} enem${kr.n === 1 ? 'y' : 'ies'} to win`);
     else if (kr.actions.length) goals.push(`👾 Something happens after ${kr.n} defeat${kr.n === 1 ? '' : 's'}`);
   }
+  if (rules.aliensCleared.some(s2 => s2.some(a => a.kind === 'win'))) goals.push('👽 Destroy EVERY alien to win');
+  if (scriptsContain(rules.alienHit, 'changeScore')) goals.push('🔫 Blasting aliens scores points');
   for (const gated of rules.touchFlagKills) {
     if (gated.actions.some(a => a.kind === 'win')) goals.push(`🚩 Reach the flag after defeating ${gated.n} enem${gated.n === 1 ? 'y' : 'ies'}`);
   }
@@ -194,6 +215,8 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
   if (scriptsContain(rules.springLand, 'hurtPlayer')) danger.push('⚠ Some springs are traps!');
   if (rules.enemyToughness > 1) danger.push(`🛡 Enemies take ${rules.enemyToughness} stomps`);
   if (rules.flyerToughness > 1) danger.push(`🛡 Flyers take ${rules.flyerToughness} stomps`);
+  if (scriptsContain(rules.alienBottom, 'gameOver')) danger.push("👽 Don't let the aliens reach the bottom!");
+  if (scriptsContain(rules.alienShip, 'hurtPlayer')) danger.push('👽 Alien contact hurts your ship');
   if (scriptsContain(rules.touchCoin, 'changeScore')) danger.push('🪙 Crystals give points');
   void def; // level layout no longer needed — the per-type rules tell the whole story
 
@@ -238,6 +261,11 @@ export const DEFAULT_SCRIPTS: Record<ScriptOwner, string> = {
   game: `${X}
 <block type="arcade_when_game_starts" x="16" y="16"><next><block type="arcade_set_lives"><field name="N">3</field></block></next></block>
 </xml>`,
+  alien: `${X}
+<block type="arcade_when_blaster_hits" x="16" y="16"><next><block type="arcade_change_score"><field name="N">1</field><next><block type="arcade_disappear"><next><block type="arcade_play_sound"><field name="SOUND">pop</field></block></next></block></next></block></next></block>
+<block type="arcade_when_reach_bottom" x="16" y="230"><next><block type="arcade_game_over"></block></next></block>
+<block type="arcade_when_touch_ship" x="16" y="340"><next><block type="arcade_hurt_player"></block></next></block>
+</xml>`,
 };
 
 /** Ensure a loaded draft (possibly saved before scripts existed) has all script sheets */
@@ -252,6 +280,7 @@ const EMPTY_SHEET = `${X}</xml>`;
 export const STARTER_SCRIPTS: Record<ScriptOwner, string> = {
   player: EMPTY_SHEET, coin: EMPTY_SHEET, spike: EMPTY_SHEET, enemy: EMPTY_SHEET,
   spiky: EMPTY_SHEET, flyer: EMPTY_SHEET, spring: EMPTY_SHEET, flag: EMPTY_SHEET, game: EMPTY_SHEET,
+  alien: EMPTY_SHEET,
 };
 
 // ── Templates ────────────────────────────────────────────────────────────────
@@ -276,6 +305,27 @@ export function starterLevel(shape: LevelShape = 'classic'): GameDef {
       { type: 'flag', x: cols - 2, y: rows - 2 },
     ],
     scripts: { ...STARTER_SCRIPTS },
+  };
+}
+
+/** Fresh Space Defender arena: an alien armada up top, your ship below —
+ *  and every sheet empty. Wire the fire button yourself, commander. */
+export function starterDefenderLevel(): GameDef {
+  const objects: PlacedObject[] = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 8; col++) {
+      objects.push({ type: 'alien', x: 3 + col * 2, y: 2 + row });
+    }
+  }
+  objects.push({ type: 'spawn', x: 10, y: ROWS - 2 });
+  return {
+    title: 'My Space Battle',
+    backdrop: 'space',
+    cols: COLS,
+    rows: ROWS,
+    objects,
+    scripts: { ...STARTER_SCRIPTS },
+    genre: 'defender',
   };
 }
 

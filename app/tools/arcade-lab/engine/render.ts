@@ -402,6 +402,57 @@ function drawFlyer(ctx: CanvasRenderingContext2D, fx: number, fy: number, dir: 1
   ctx.stroke();
 }
 
+function drawAlien(ctx: CanvasRenderingContext2D, fx: number, fy: number, t: number, seed = 0) {
+  const px = fx * TILE, py = fy * TILE;
+  const cx = px + TILE / 2;
+  const wob = Math.sin(t / 300 + seed * 1.3);
+  const cy = py + TILE * 0.42 + wob * 1.5;
+  // dangly tentacles, wiggling out of phase
+  ctx.strokeStyle = '#4E9E33';
+  ctx.lineWidth = 2.5;
+  for (let i = -2; i <= 2; i++) {
+    const lx = cx + i * TILE * 0.12;
+    const sway = Math.sin(t / 220 + seed + i * 1.4) * 3;
+    ctx.beginPath();
+    ctx.moveTo(lx, cy + TILE * 0.12);
+    ctx.quadraticCurveTo(lx + sway * 0.5, cy + TILE * 0.28, lx + sway, cy + TILE * 0.4);
+    ctx.stroke();
+  }
+  // squishy dome body
+  ctx.fillStyle = '#7CDB4F';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, TILE * 0.32 * (1 + wob * 0.04), TILE * 0.24 * (1 - wob * 0.05), 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(cx - 4, cy - 4, TILE * 0.13, TILE * 0.08, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // antennae with glowing tips
+  ctx.strokeStyle = '#4E9E33';
+  ctx.lineWidth = 2;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + side * 5, cy - TILE * 0.18);
+    ctx.lineTo(cx + side * 8, cy - TILE * 0.34);
+    ctx.stroke();
+    ctx.fillStyle = '#D8FF6A';
+    ctx.beginPath();
+    ctx.arc(cx + side * 8, cy - TILE * 0.36, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // big glowy eyes
+  ctx.fillStyle = '#0E2A08';
+  ctx.beginPath();
+  ctx.ellipse(cx - 6, cy - 1, 4.5, 5.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(cx + 6, cy - 1, 4.5, 5.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#D8FF6A';
+  ctx.beginPath();
+  ctx.arc(cx - 6, cy - 2, 1.8, 0, Math.PI * 2);
+  ctx.arc(cx + 6, cy - 2, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawSpring(ctx: CanvasRenderingContext2D, px: number, py: number, squash: number) {
   const cx = px + TILE / 2;
   const base = py + TILE;
@@ -676,6 +727,70 @@ function drawPlayer(ctx: CanvasRenderingContext2D, s: GameState, t: number, cfg:
   ctx.restore();
 }
 
+/** Defender: the student's bot piloting a flying saucer */
+function drawShip(ctx: CanvasRenderingContext2D, s: GameState, t: number, cfg: BotConfig) {
+  const p = s.player;
+  if (s.timeMs < p.invulnUntil && Math.floor(t / 90) % 2 === 0) return;
+  const px = p.x * TILE, py = p.y * TILE;
+  const w = PW * TILE, h = PH * TILE;
+  const cx = px + w / 2;
+  const bob = Math.sin(t / 380) * 1.5;
+  const dishY = py + h - 7 + bob;
+
+  // engine glow
+  const glow = ctx.createRadialGradient(cx, dishY + 8, 0, cx, dishY + 8, w * 0.6);
+  glow.addColorStop(0, 'rgba(57,208,255,0.5)');
+  glow.addColorStop(1, 'rgba(57,208,255,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(cx - w * 0.6, dishY, w * 1.2, w * 0.7);
+
+  // the pilot (feet hidden inside the dish drawn after)
+  const bw = w * 0.72, bh = h * 0.62;
+  drawBot(ctx, cx - bw / 2, dishY - bh + 4, bw, bh, p.facing, t, cfg, { moving: p.vx !== 0 });
+
+  // saucer dish
+  ctx.fillStyle = '#8FA6C8';
+  ctx.beginPath();
+  ctx.ellipse(cx, dishY, w * 0.62, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#5F7398';
+  ctx.beginPath();
+  ctx.ellipse(cx, dishY + 3, w * 0.5, 6, 0, 0, Math.PI);
+  ctx.fill();
+  // running lights chase around the rim
+  for (let i = 0; i < 3; i++) {
+    const on = Math.floor(t / 220 + i) % 3 === 0;
+    ctx.fillStyle = on ? '#FFD54A' : 'rgba(255,213,74,0.3)';
+    ctx.beginPath();
+    ctx.arc(cx + (i - 1) * w * 0.36, dishY + 1, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawBlasters(ctx: CanvasRenderingContext2D, s: GameState) {
+  for (const b of s.blasters) {
+    const bx = b.x * TILE, by = b.y * TILE;
+    const glow = ctx.createRadialGradient(bx, by - 7, 0, bx, by - 7, 12);
+    glow.addColorStop(0, 'rgba(57,208,255,0.6)');
+    glow.addColorStop(1, 'rgba(57,208,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(bx - 12, by - 19, 24, 24);
+    ctx.strokeStyle = '#AEE9FF';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx, by - TILE * 0.35);
+    ctx.stroke();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(bx, by - 2);
+    ctx.lineTo(bx, by - TILE * 0.35 + 2);
+    ctx.stroke();
+  }
+}
+
 /** Big idle bot for the Garage preview and gallery cards */
 export function renderBotPortrait(ctx: CanvasRenderingContext2D, cw: number, ch: number, t: number, cfg: BotConfig) {
   ctx.clearRect(0, 0, cw, ch);
@@ -696,8 +811,17 @@ function drawHUD(ctx: CanvasRenderingContext2D, s: GameState, w: number) {
   let hearts = '';
   for (let i = 0; i < 3; i++) hearts += i < s.lives ? '❤️' : '🖤';
   ctx.fillText(hearts, 12, 20);
-  // defeated-enemies counter (appears once the first enemy falls)
-  if (s.kills > 0) {
+  // defender: aliens-remaining counter; platformer: defeated-enemies counter
+  if (s.genre === 'defender') {
+    const left = s.entities.filter(e => e.type === 'alien' && e.alive).length;
+    const al = `👽 ${left}`;
+    const aw = ctx.measureText(al).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    roundedRect(ctx, 78, 8, aw + 18, 24, 12);
+    ctx.fill();
+    ctx.fillStyle = '#D8FF6A';
+    ctx.fillText(al, 87, 20);
+  } else if (s.kills > 0) {
     const kl = `👾 ${s.kills}`;
     const kw = ctx.measureText(kl).width;
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -715,8 +839,8 @@ function drawHUD(ctx: CanvasRenderingContext2D, s: GameState, w: number) {
   ctx.fill();
   ctx.fillStyle = '#E2E8F0';
   ctx.fillText(`⏱ ${secs}`, w / 2, 20);
-  // score pill
-  const label = `✦ ${s.score} / ${s.coinsTotal}`;
+  // score pill (no coin total when the level has no coins, e.g. defender)
+  const label = s.coinsTotal > 0 ? `✦ ${s.score} / ${s.coinsTotal}` : `✦ ${s.score}`;
   ctx.textAlign = 'right';
   const tw = ctx.measureText(label).width;
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -759,6 +883,7 @@ function drawWorld(
     else if (e.type === 'spiky') drawSpiky(ctx, e.px, e.py, e.dir ?? 1, t);
     else if (e.type === 'flyer') drawFlyer(ctx, e.px, e.py, e.dir ?? 1, t, (e.maxHp ?? 1) - (e.hp ?? 1));
     else if (e.type === 'spring') drawSpring(ctx, e.px * TILE, e.py * TILE, e.springSquash ?? 0);
+    else if (e.type === 'alien') drawAlien(ctx, e.px, e.py, t, e.id ?? e.px + e.py * 7);
   }
 }
 
@@ -778,7 +903,12 @@ export function renderGame(
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
   drawWorld(ctx, def, state.solids, state.entities, t, cam.x, cam.y);
-  drawPlayer(ctx, state, t, bot ?? defaultBot());
+  if (state.genre === 'defender') {
+    drawBlasters(ctx, state);
+    drawShip(ctx, state, t, bot ?? defaultBot());
+  } else {
+    drawPlayer(ctx, state, t, bot ?? defaultBot());
+  }
   ctx.restore();
 
   drawHUD(ctx, state, VIEW_W);
@@ -839,7 +969,7 @@ export function renderDesign(
 
   for (const o of def.objects) {
     if (o.type === 'spawn') drawSpawnMarker(ctx, o.x, o.y, t);
-    else if (o.type === 'enemy' || o.type === 'spiky' || o.type === 'flyer') {
+    else if (o.type === 'enemy' || o.type === 'spiky' || o.type === 'flyer' || o.type === 'alien') {
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
@@ -885,7 +1015,7 @@ export function renderDesign(
 
 const MINI_COLORS: Record<string, string> = {
   coin: '#FFD54A', spike: '#EF4444', enemy: '#B06AE8', flag: '#22C55E', spawn: '#4C8DFF',
-  spiky: '#F87171', flyer: '#38BDF8', spring: '#A3A3A3',
+  spiky: '#F87171', flyer: '#38BDF8', spring: '#A3A3A3', alien: '#7CDB4F',
 };
 
 /** Draws the whole level small + the current viewport rectangle. Returns scale. */

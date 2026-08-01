@@ -88,6 +88,41 @@ const ARCADE_DEFS = [
     colour: EVENT,
     tooltip: 'The goal stays locked until enough enemies have been defeated',
   },
+  // ── Space Defender ──
+  {
+    type: 'arcade_when_blaster_hits',
+    message0: 'when a blaster hits me',
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs when one of the ship\'s blaster bolts hits this alien',
+  },
+  {
+    type: 'arcade_when_reach_bottom',
+    message0: 'when I reach the bottom',
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs when this alien descends to the ship\'s row — the invasion moment',
+  },
+  {
+    type: 'arcade_when_touch_ship',
+    message0: 'when I touch the ship',
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs when this alien collides with the player\'s ship',
+  },
+  {
+    type: 'arcade_when_aliens_cleared',
+    message0: 'when every alien is destroyed',
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs once when the last alien is gone',
+  },
+  {
+    type: 'arcade_fire',
+    message0: 'fire the blaster 🔫',
+    previousStatement: null, nextStatement: null, colour: MOTION,
+    tooltip: 'Shoot a bolt straight up from the ship (short reload between shots)',
+  },
   {
     type: 'arcade_when_game_starts',
     message0: 'when the game starts',
@@ -247,10 +282,18 @@ const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
   spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
   flag:   ['arcade_when_touch_me', 'arcade_require_score', 'arcade_require_kills', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_when_kills', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
+  alien:  ['arcade_when_blaster_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_disappear', 'arcade_change_score', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
 };
 
-export function buildArcadeToolbox(owner: ScriptOwner) {
-  const types = TOOLBOX_BLOCKS[owner];
+// Defender-mode overrides: the ship's sheet gets fire; the Game sheet gets
+// the every-alien-destroyed win hat
+const DEFENDER_TOOLBOX: Partial<Record<ScriptOwner, string[]>> = {
+  player: ['arcade_when_key', 'arcade_move', 'arcade_fire', 'arcade_require_score', 'arcade_play_sound'],
+  game:   ['arcade_when_game_starts', 'arcade_when_aliens_cleared', 'arcade_when_score', 'arcade_when_kills', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
+};
+
+export function buildArcadeToolbox(owner: ScriptOwner, genre: 'platformer' | 'defender' = 'platformer') {
+  const types = (genre === 'defender' && DEFENDER_TOOLBOX[owner]) || TOOLBOX_BLOCKS[owner];
   const contents: object[] = [];
   const events = types.filter(t => t.startsWith('arcade_when'));
   const actions = types.filter(t => !t.startsWith('arcade_when'));
@@ -292,6 +335,7 @@ function chainToActions(block: Blockly.Block | null): ArcadeAction[] {
       case 'arcade_play_sound': actions.push({ kind: 'sound', name: (b.getFieldValue('SOUND') ?? 'chime') as ArcadeSound }); break;
       case 'arcade_require_score': actions.push({ kind: 'requireScore', n: Number(b.getFieldValue('N')) || 1 }); break;
       case 'arcade_require_kills': actions.push({ kind: 'requireKills', n: Number(b.getFieldValue('N')) || 1 }); break;
+      case 'arcade_fire': actions.push({ kind: 'fire' }); break;
     }
     b = b.getNextBlock();
   }
@@ -336,6 +380,18 @@ export function compileScripts(scripts: Partial<Record<ScriptOwner, string>>): C
             break;
           case 'arcade_when_kills':
             if (owner === 'game') rules.killRules.push({ n: Number(top.getFieldValue('N')) || 1, actions });
+            break;
+          case 'arcade_when_blaster_hits':
+            if (owner === 'alien') rules.alienHit.push(actions);
+            break;
+          case 'arcade_when_reach_bottom':
+            if (owner === 'alien') rules.alienBottom.push(actions);
+            break;
+          case 'arcade_when_touch_ship':
+            if (owner === 'alien') rules.alienShip.push(actions);
+            break;
+          case 'arcade_when_aliens_cleared':
+            if (owner === 'game') rules.aliensCleared.push(actions);
             break;
           case 'arcade_when_touch_me_kills':
             if (owner === 'flag') rules.touchFlagKills.push({ n: Number(top.getFieldValue('N')) || 1, actions });
