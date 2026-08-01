@@ -10,7 +10,7 @@ export type ObjectType = 'platform' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'fl
 export const ENEMY_TYPES: ObjectType[] = ['enemy', 'spiky', 'flyer'];
 
 /** Which object type a script sheet belongs to ('game' = global rules) */
-export type ScriptOwner = 'player' | 'coin' | 'spike' | 'enemy' | 'flag' | 'game';
+export type ScriptOwner = 'player' | 'coin' | 'spike' | 'enemy' | 'spiky' | 'flyer' | 'spring' | 'flag' | 'game';
 
 export interface PlacedObject {
   type: ObjectType;
@@ -57,7 +57,7 @@ export function solidSet(def: GameDef): Set<string> {
 // ── Compiled rules (produced by blocks.ts, executed by physics.ts) ────────────
 
 export type ArcadeKey = 'left' | 'right' | 'up' | 'space' | 'a' | 'd' | 'w' | 's';
-export type ArcadeSound = 'chime' | 'pop' | 'thud' | 'zap';
+export type ArcadeSound = 'chime' | 'pop' | 'thud' | 'zap' | 'boing';
 
 export type ArcadeAction =
   | { kind: 'move'; dir: 'left' | 'right' }
@@ -71,7 +71,8 @@ export type ArcadeAction =
   | { kind: 'win' }
   | { kind: 'gameOver' }
   | { kind: 'sound'; name: ArcadeSound }
-  | { kind: 'disappearAll'; target: 'spike' | 'enemy' | 'coin' };
+  | { kind: 'disappearAll'; target: 'spike' | 'enemy' | 'coin' }
+  | { kind: 'launch' };
 
 export interface CompiledRules {
   /** Player: run while the key is held */
@@ -84,12 +85,22 @@ export interface CompiledRules {
   touchFlagScored: { n: number; actions: ArcadeAction[] }[];
   enemyTop: ArcadeAction[][];
   enemySide: ArcadeAction[][];
+  /** Spiky: ANY contact (there is no safe stomp) */
+  spikyTouch: ArcadeAction[][];
+  flyerTop: ArcadeAction[][];
+  flyerSide: ArcadeAction[][];
+  /** Spring: the player lands on it (falling) */
+  springLand: ArcadeAction[][];
   gameStart: ArcadeAction[][];
   scoreRules: { n: number; actions: ArcadeAction[] }[];
 }
 
 export function emptyRules(): CompiledRules {
-  return { keys: [], touchCoin: [], touchSpike: [], touchFlag: [], touchFlagScored: [], enemyTop: [], enemySide: [], gameStart: [], scoreRules: [] };
+  return {
+    keys: [], touchCoin: [], touchSpike: [], touchFlag: [], touchFlagScored: [],
+    enemyTop: [], enemySide: [], spikyTouch: [], flyerTop: [], flyerSide: [], springLand: [],
+    gameStart: [], scoreRules: [],
+  };
 }
 
 // ── Human-readable rules summary ─────────────────────────────────────────────
@@ -149,15 +160,13 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
   if (scriptsContain(rules.touchSpike, 'hurtPlayer')) danger.push('🔺 Spikes hurt');
   if (scriptsContain(rules.enemySide, 'hurtPlayer')) danger.push('👾 Enemies hurt');
   if (scriptsContain(rules.enemyTop, 'disappear')) danger.push('👾 Stomp enemies to squash them');
+  if (scriptsContain(rules.spikyTouch, 'hurtPlayer')) danger.push('🦔 Spiky hurts — NEVER stomp it!');
+  if (scriptsContain(rules.flyerSide, 'hurtPlayer')) danger.push('🦇 Flyers hurt');
+  if (scriptsContain(rules.flyerTop, 'disappear')) danger.push('🦇 Stomp flyers to squash them');
+  if (scriptsContain(rules.springLand, 'launch')) danger.push('🌀 Springs launch you sky-high');
+  if (scriptsContain(rules.springLand, 'hurtPlayer')) danger.push('⚠ Some springs are traps!');
   if (scriptsContain(rules.touchCoin, 'changeScore')) danger.push('🪙 Crystals give points');
-
-  // Level-driven notes (engine traits, not scripts)
-  if (def) {
-    const has = (t: ObjectType) => def.objects.some(o => o.type === t);
-    if (has('spiky')) danger.push('🦔 Spiky enemies — NEVER stomp them!');
-    if (has('flyer')) danger.push('🦇 Flyers patrol the air');
-    if (has('spring')) danger.push('🌀 Springs give a super bounce');
-  }
+  void def; // level layout no longer needed — the per-type rules tell the whole story
 
   return { controls, goals, danger };
 }
@@ -183,6 +192,16 @@ export const DEFAULT_SCRIPTS: Record<ScriptOwner, string> = {
   enemy: `${X}
 <block type="arcade_when_stomped" x="16" y="16"><next><block type="arcade_disappear"><next><block type="arcade_bounce_player"><next><block type="arcade_play_sound"><field name="SOUND">pop</field></block></next></block></next></block></next></block>
 <block type="arcade_when_touch_side" x="16" y="200"><next><block type="arcade_hurt_player"><next><block type="arcade_play_sound"><field name="SOUND">thud</field></block></next></block></next></block>
+</xml>`,
+  spiky: `${X}
+<block type="arcade_when_touch_me" x="16" y="16"><next><block type="arcade_hurt_player"><next><block type="arcade_play_sound"><field name="SOUND">thud</field></block></next></block></next></block>
+</xml>`,
+  flyer: `${X}
+<block type="arcade_when_stomped" x="16" y="16"><next><block type="arcade_disappear"><next><block type="arcade_bounce_player"><next><block type="arcade_play_sound"><field name="SOUND">pop</field></block></next></block></next></block></next></block>
+<block type="arcade_when_touch_side" x="16" y="200"><next><block type="arcade_hurt_player"><next><block type="arcade_play_sound"><field name="SOUND">thud</field></block></next></block></next></block>
+</xml>`,
+  spring: `${X}
+<block type="arcade_when_landed" x="16" y="16"><next><block type="arcade_launch"><next><block type="arcade_play_sound"><field name="SOUND">boing</field></block></next></block></next></block>
 </xml>`,
   flag: `${X}
 <block type="arcade_when_touch_me" x="16" y="16"><next><block type="arcade_win"></block></next></block>

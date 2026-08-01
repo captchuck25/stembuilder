@@ -68,7 +68,10 @@ const OWNERS: { owner: ScriptOwner; icon: string; label: string; hint: string }[
   { owner: 'player', icon: '🤖', label: 'Player',  hint: 'Wire the keyboard — how does the player move?' },
   { owner: 'coin',   icon: '🪙', label: 'Crystal', hint: 'What happens when the player touches a crystal?' },
   { owner: 'spike',  icon: '🔺', label: 'Spikes',  hint: 'What do spikes do to the player?' },
-  { owner: 'enemy',  icon: '👾', label: 'Enemy',   hint: 'Rules for ALL enemies — walkers, spiky, and flyers. (Spiky treats every touch as a run-in.)' },
+  { owner: 'enemy',  icon: '👾', label: 'Enemy',   hint: 'The walker — head-stomps and side-bumps, you make the rules.' },
+  { owner: 'spiky',  icon: '🦔', label: 'Spiky',   hint: 'ANY touch counts (there is no safe stomp) — write what happens.' },
+  { owner: 'flyer',  icon: '🦇', label: 'Flyer',   hint: 'Head-stomps and side-bumps, up in the air.' },
+  { owner: 'spring', icon: '🌀', label: 'Spring',  hint: 'What happens when the player lands on it? (Try: launch!)' },
   { owner: 'flag',   icon: '🚩', label: 'Goal',    hint: 'What does reaching the flag do?' },
   { owner: 'game',   icon: '🎮', label: 'Game',    hint: 'Starting rules and score goals.' },
 ];
@@ -80,7 +83,7 @@ const BACKDROPS: { id: Backdrop; label: string; swatch: string }[] = [
   { id: 'space', label: 'Space', swatch: 'linear-gradient(135deg,#141B33,#5A6888)' },
 ];
 
-const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap } as const;
+const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap, boing: playBoing } as const;
 
 function loadLocalDraft(slot: number): GameDef | null {
   try {
@@ -479,8 +482,6 @@ function CreateInner() {
             } else if (ev.type === 'needScore') {
               playBump();
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
-            } else if (ev.type === 'spring') {
-              playBoing();
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {

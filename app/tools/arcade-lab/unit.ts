@@ -37,7 +37,7 @@ function gameWinAtScore(n: number) {
 // ── Mission + check types ────────────────────────────────────────────────────
 
 export interface Requirement {
-  bucket: 'keys' | 'touchCoin' | 'touchSpike' | 'touchFlag' | 'enemyTop' | 'enemySide' | 'gameStart' | 'scoreRules';
+  bucket: 'keys' | 'touchCoin' | 'touchSpike' | 'touchFlag' | 'enemyTop' | 'enemySide' | 'spikyTouch' | 'flyerTop' | 'flyerSide' | 'springLand' | 'gameStart' | 'scoreRules';
   kind: ArcadeAction['kind'];
   min?: number;
   max?: number;
@@ -252,7 +252,7 @@ export const ARCADE_MISSIONS: ArcadeMission[] = [
     backdrop: 'hills',
     objects: [...ground(), { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 }],
     scripts: scriptsWith({}),
-    editableOwners: ['player', 'coin', 'spike', 'enemy', 'flag', 'game'],
+    editableOwners: ['player', 'coin', 'spike', 'enemy', 'spiky', 'flyer', 'spring', 'flag', 'game'],
     designEditable: true,
     requirements: [],
     capstone: { minCoins: 3, minSpikes: 1, minEnemies: 1 },
@@ -279,6 +279,10 @@ function bucketActions(rules: CompiledRules, bucket: Requirement['bucket']): Arc
     case 'touchFlag': return rules.touchFlag.flat();
     case 'enemyTop': return rules.enemyTop.flat();
     case 'enemySide': return rules.enemySide.flat();
+    case 'spikyTouch': return rules.spikyTouch.flat();
+    case 'flyerTop': return rules.flyerTop.flat();
+    case 'flyerSide': return rules.flyerSide.flat();
+    case 'springLand': return rules.springLand.flat();
     case 'gameStart': return rules.gameStart.flat();
   }
 }

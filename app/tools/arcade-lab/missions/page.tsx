@@ -28,7 +28,7 @@ const CARD: React.CSSProperties = {
 };
 
 const CONFETTI = ['#FFD54A', '#4C8DFF', '#22C55E', '#FF6BD6', '#7DF9FF'];
-const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap } as const;
+const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap, boing: playBoing } as const;
 
 const CONCEPTS = [
   'Events & keys', 'More events', 'Scoring rules', 'Danger rules', 'Two-hat enemies',
@@ -40,6 +40,9 @@ const OWNERS: { owner: ScriptOwner; icon: string; label: string }[] = [
   { owner: 'coin',   icon: '🪙', label: 'Crystal' },
   { owner: 'spike',  icon: '🔺', label: 'Spikes' },
   { owner: 'enemy',  icon: '👾', label: 'Enemy' },
+  { owner: 'spiky',  icon: '🦔', label: 'Spiky' },
+  { owner: 'flyer',  icon: '🦇', label: 'Flyer' },
+  { owner: 'spring', icon: '🌀', label: 'Spring' },
   { owner: 'flag',   icon: '🚩', label: 'Goal' },
   { owner: 'game',   icon: '🎮', label: 'Game' },
 ];
@@ -296,8 +299,6 @@ function MissionView({ ci, onSuccess, onBack, onNext, isComplete, isLast }: {
             else if (ev.type === 'needScore') {
               playBump();
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
-            } else if (ev.type === 'spring') {
-              playBoing();
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {

@@ -66,6 +66,13 @@ const ARCADE_DEFS = [
     tooltip: 'Runs when the player touches this enemy from the side',
   },
   {
+    type: 'arcade_when_landed',
+    message0: 'when the player lands on me',
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs when the player falls onto this object from above',
+  },
+  {
     type: 'arcade_when_game_starts',
     message0: 'when the game starts',
     nextStatement: null,
@@ -99,6 +106,12 @@ const ARCADE_DEFS = [
     message0: 'bounce the player up',
     previousStatement: null, nextStatement: null, colour: MOTION,
     tooltip: 'Give the player a little hop — great after a stomp',
+  },
+  {
+    type: 'arcade_launch',
+    message0: 'launch the player 🌀',
+    previousStatement: null, nextStatement: null, colour: MOTION,
+    tooltip: 'A SUPER bounce — about twice as high as a jump',
   },
   {
     type: 'arcade_disappear',
@@ -160,7 +173,7 @@ const ARCADE_DEFS = [
     message0: 'play sound %1',
     args0: [{
       type: 'field_dropdown', name: 'SOUND',
-      options: [['✨ chime', 'chime'], ['💥 pop', 'pop'], ['🥁 thud', 'thud'], ['⚡ zap', 'zap']],
+      options: [['✨ chime', 'chime'], ['💥 pop', 'pop'], ['🥁 thud', 'thud'], ['⚡ zap', 'zap'], ['🌀 boing', 'boing']],
     }],
     previousStatement: null, nextStatement: null, colour: SOUND,
     tooltip: 'Play a sound effect',
@@ -180,7 +193,10 @@ const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
   player: ['arcade_when_key', 'arcade_move', 'arcade_jump', 'arcade_play_sound'],
   coin:   ['arcade_when_touch_me', 'arcade_disappear', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   spike:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_change_score', 'arcade_disappear', 'arcade_play_sound'],
-  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_disappear', 'arcade_bounce_player', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  enemy:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  spiky:  ['arcade_when_touch_me', 'arcade_hurt_player', 'arcade_disappear', 'arcade_launch', 'arcade_change_score', 'arcade_play_sound'],
+  flyer:  ['arcade_when_stomped', 'arcade_when_touch_side', 'arcade_disappear', 'arcade_bounce_player', 'arcade_launch', 'arcade_hurt_player', 'arcade_change_score', 'arcade_play_sound'],
+  spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
   flag:   ['arcade_when_touch_me', 'arcade_when_touch_me_score', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
 };
@@ -210,6 +226,7 @@ function chainToActions(block: Blockly.Block | null): ArcadeAction[] {
         break;
       case 'arcade_jump': actions.push({ kind: 'jump' }); break;
       case 'arcade_bounce_player': actions.push({ kind: 'bouncePlayer' }); break;
+      case 'arcade_launch': actions.push({ kind: 'launch' }); break;
       case 'arcade_disappear': actions.push({ kind: 'disappear' }); break;
       case 'arcade_disappear_all':
         actions.push({ kind: 'disappearAll', target: (b.getFieldValue('TARGET') ?? 'spike') as 'spike' | 'enemy' | 'coin' });
@@ -247,15 +264,21 @@ export function compileScripts(scripts: Partial<Record<ScriptOwner, string>>): C
             if (owner === 'coin') rules.touchCoin.push(actions);
             else if (owner === 'spike') rules.touchSpike.push(actions);
             else if (owner === 'flag') rules.touchFlag.push(actions);
+            else if (owner === 'spiky') rules.spikyTouch.push(actions);
             break;
           case 'arcade_when_touch_me_score':
             if (owner === 'flag') rules.touchFlagScored.push({ n: Number(top.getFieldValue('N')) || 1, actions });
             break;
           case 'arcade_when_stomped':
             if (owner === 'enemy') rules.enemyTop.push(actions);
+            else if (owner === 'flyer') rules.flyerTop.push(actions);
             break;
           case 'arcade_when_touch_side':
             if (owner === 'enemy') rules.enemySide.push(actions);
+            else if (owner === 'flyer') rules.flyerSide.push(actions);
+            break;
+          case 'arcade_when_landed':
+            if (owner === 'spring') rules.springLand.push(actions);
             break;
           case 'arcade_when_game_starts':
             if (owner === 'game') rules.gameStart.push(actions);

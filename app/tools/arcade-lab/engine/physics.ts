@@ -59,7 +59,7 @@ export interface GameState {
 }
 
 export interface GameEvent {
-  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore' | 'spring';
+  type: 'jump' | 'hurt' | 'win' | 'lose' | 'poof' | 'sound' | 'needScore';
   x: number;
   y: number;
   sound?: ArcadeSound;
@@ -192,6 +192,11 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           p.vy = -BOUNCE_V;
           p.grounded = false;
           break;
+        case 'launch':
+          p.vy = -SPRING_V;
+          p.grounded = false;
+          if (entity?.type === 'spring') entity.springSquash = 1;
+          break;
         case 'disappear':
           if (entity) {
             entity.alive = false;
@@ -319,24 +324,23 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.25, 0.76, 0.7);
       if (touchingNow && !e.touching) {
         const stomping = p.vy > 2 && p.y + PH < e.py + 0.62;
-        const scripts = stomping ? rules.enemyTop : rules.enemySide;
+        const scripts = e.type === 'flyer'
+          ? (stomping ? rules.flyerTop : rules.flyerSide)
+          : (stomping ? rules.enemyTop : rules.enemySide);
         for (const script of scripts) runActions(script, e);
       }
     } else if (e.type === 'spiky') {
       // Spiky can NEVER be stomped — every contact, including from above,
-      // runs the "runs into me" scripts (usually: hurt the player)
+      // runs its "touches me" scripts (usually: hurt the player)
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.2, 0.76, 0.75);
       if (touchingNow && !e.touching) {
-        for (const script of rules.enemySide) runActions(script, e);
+        for (const script of rules.spikyTouch) runActions(script, e);
       }
     } else if (e.type === 'spring') {
-      touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.15, e.py + 0.45, 0.7, 0.55);
-      if (touchingNow && p.vy > 1) {
-        // landing on a spring: super bounce (built-in physics, like gravity)
-        p.vy = -SPRING_V;
-        p.grounded = false;
-        e.springSquash = 1;
-        events.push({ type: 'spring', x: e.px + 0.5, y: e.py + 0.5 });
+      // "lands on me" = falling into the spring's pad zone; scripted from there
+      touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.15, e.py + 0.45, 0.7, 0.55) && p.vy > 1;
+      if (touchingNow && !e.touching) {
+        for (const script of rules.springLand) runActions(script, e);
       }
     }
 
