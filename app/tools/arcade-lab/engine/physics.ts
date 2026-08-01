@@ -324,6 +324,11 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
   }
 
   // ── Player vs entities: touch events fire once per contact ──
+  // Snapshot the player's motion before resolving any contact, so a stomp's
+  // bounce can't reclassify a same-frame second stomp as a deadly side-hit
+  const impactVy = p.vy;
+  const impactFeetY = p.y + PH;
+  let stompedThisFrame = false;
   for (const e of s.entities) {
     if (!e.alive) continue;
     let touchingNow = false;
@@ -356,17 +361,25 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
     } else if (e.type === 'enemy' || e.type === 'flyer') {
       touchingNow = overlaps(p.x, p.y, PW, PH, e.px + 0.12, e.py + 0.25, 0.76, 0.7);
       if (touchingNow && !e.touching) {
-        const stomping = p.vy > 2 && p.y + PH < e.py + 0.62;
+        // Judge the stomp by the player's motion AT IMPACT (snapshotted before
+        // this loop) — the first stomp's bounce must not turn a simultaneous
+        // second stomp into a side-hit (landing on two crossing enemies).
+        const stomping = impactVy > 2 && impactFeetY < e.py + 0.62;
         if (stomping && (e.hp ?? 1) > 1) {
           // Tough enemy: this stomp only dents it — flinch, bounce the player off
           e.hp = (e.hp ?? 1) - 1;
           p.vy = -BOUNCE_V;
           p.grounded = false;
+          stompedThisFrame = true;
           events.push({ type: 'hit', x: e.px + 0.5, y: e.py + 0.3 });
-        } else {
-          const scripts = e.type === 'flyer'
-            ? (stomping ? rules.flyerTop : rules.flyerSide)
-            : (stomping ? rules.enemyTop : rules.enemySide);
+        } else if (stomping) {
+          stompedThisFrame = true;
+          const scripts = e.type === 'flyer' ? rules.flyerTop : rules.enemyTop;
+          for (const script of scripts) runActions(script, e);
+        } else if (!stompedThisFrame) {
+          // side-hit — but a stomp in this same frame grants grace against
+          // other walkers/flyers brushing the player during the bounce
+          const scripts = e.type === 'flyer' ? rules.flyerSide : rules.enemySide;
           for (const script of scripts) runActions(script, e);
         }
       }
