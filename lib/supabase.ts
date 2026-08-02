@@ -36,6 +36,9 @@ export interface Class {
   teacher_id: string
   name: string
   join_code: string
+  // Per-class toggle for student-facing measurement-lab sprint leaderboards
+  // (migration 0015; optional so code tolerates a pre-migration database).
+  leaderboard_enabled?: boolean
   created_at: string
 }
 

@@ -70,11 +70,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!(await verifyTeacherOwnsClass(db, classId, session.user.id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { name } = await req.json()
-  if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
+  const { name, leaderboardEnabled } = await req.json()
+  const patch: { name?: string; leaderboard_enabled?: boolean } = {}
+  if (name !== undefined) {
+    if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
+    patch.name = name.trim()
+  }
+  if (leaderboardEnabled !== undefined) {
+    if (typeof leaderboardEnabled !== 'boolean')
+      return NextResponse.json({ error: 'leaderboardEnabled must be a boolean' }, { status: 400 })
+    patch.leaderboard_enabled = leaderboardEnabled
+  }
+  if (!Object.keys(patch).length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
 
   const { data, error } = await db
-    .from('classes').update({ name: name.trim() }).eq('id', classId).is('deleted_at', null).select().single()
+    .from('classes').update(patch).eq('id', classId).is('deleted_at', null).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
 }

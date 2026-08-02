@@ -1,19 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
-
-// ─── Visual constants ─────────────────────────────────────────────────────────
-
-const CARD: React.CSSProperties = {
-  background: "rgba(255,255,255,0.97)",
-  border: "3px solid #1f1f1f",
-  borderRadius: 20,
-  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-};
+import {
+  CARD, TOOL_META, useMeasurementSession,
+  ModeSelector, ScoreHud, SprintBar, ResultScreen,
+  AssignmentBanner, AssignmentErrorCard,
+} from "../shared";
 
 // ─── Ruler geometry ───────────────────────────────────────────────────────────
 
@@ -302,7 +298,7 @@ const MM_STEPS: { val: MmStep; label: string }[] = [
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export default function RulerGamePage() {
+function RulerGamePage() {
   const { data: session } = useSession();
   const userId = session?.user?.id ?? null;
   const [mode,     setMode]     = useState<Mode>("inches");
@@ -319,7 +315,29 @@ export default function RulerGamePage() {
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const meas = useMeasurementSession({
+    tool: "ruler",
+    getTier: () => TOOL_META["ruler"].tier(mode, mode === "inches" ? String(inchPrec) : String(mmStep)),
+    onAdvance: () => nextQuestion(mode, inchPrec, mmStep),
+  });
+
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  // Deep-linked assignment: lock settings to its config and restart.
+  useEffect(() => {
+    if (!meas.assignment) return;
+    const cfg = meas.assignment.config;
+    if (cfg.mode === "metric") {
+      const step = ([10, 5, 2, 1] as MmStep[]).includes(parseInt(cfg.precision, 10) as MmStep)
+        ? parseInt(cfg.precision, 10) as MmStep : 10;
+      startFresh("metric", inchPrec, step);
+    } else {
+      const prec = ([2, 4, 8, 16] as InchPrec[]).includes(parseInt(cfg.precision, 10) as InchPrec)
+        ? parseInt(cfg.precision, 10) as InchPrec : 2;
+      startFresh("inches", prec, mmStep);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meas.assignment]);
 
   const clearTimer = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
 
@@ -330,7 +348,9 @@ export default function RulerGamePage() {
   function startFresh(m: Mode, p: InchPrec, s: MmStep) {
     clearTimer();
     setMode(m); setInchPrec(p); setMmStep(s);
-    setTarget(freshTarget(m, p, s));
+    const t = freshTarget(m, p, s);
+    setTarget(t);
+    meas.noteQuestionShown(t.label);
     setUserPtr(null); setCorrectPtr(null);
     setScore(0); setStrikes(0);
     setGameOver(false); setAnswered(false);
@@ -338,44 +358,58 @@ export default function RulerGamePage() {
 
   function nextQuestion(m: Mode, p: InchPrec, s: MmStep) {
     setUserPtr(null); setCorrectPtr(null); setAnswered(false);
-    setTarget(freshTarget(m, p, s));
+    const t = freshTarget(m, p, s);
+    setTarget(t);
+    meas.noteQuestionShown(t.label);
   }
 
   function handleRulerClick(svgX: number) {
-    if (answered || gameOver) return;
+    if (answered || gameOver || meas.sessionOver) return;
     const ptr = snapClick(svgX, mode, inchPrec, mmStep);
     if (!ptr) return;
     setUserPtr(ptr);
     setAnswered(true);
 
     const correct = Math.abs(ptr.value - target.value) < 0.0001;
+    const clickedLabel = mode === "inches"
+      ? inchLabel(Math.round(ptr.value * inchPrec), inchPrec)
+      : (ptr.value / 10) % 1 === 0 ? `${ptr.value / 10} cm` : `${(ptr.value / 10).toFixed(1)} cm`;
+    const res = meas.recordAnswer(correct, { target: target.label, answer: clickedLabel });
 
-    if (correct) {
-      const newScore = score + 1;
-      setScore(newScore);
-      if (userId) {
-        const li = mode === "inches" ? 0 : 1;
-        const ci = mode === "inches"
-          ? INCH_PRECS.findIndex(p => p.val === inchPrec)
-          : MM_STEPS.findIndex(s => s.val === mmStep);
-        upsertToolHighScore(userId, "meas-ruler", li, ci, newScore);
-      }
-      // Advance after short delay
-      timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1200);
-    } else {
-      // Show correct answer on ruler
+    if (!correct) {
+      // Show correct answer on ruler (all modes)
       const cx = mode === "inches"
         ? valueToX_in(target.value)
         : valueToX_mm(target.value);
       setCorrectPtr({ x: cx, value: target.value });
+    }
 
-      const newStrikes = strikes + 1;
-      setStrikes(newStrikes);
-      if (newStrikes >= 3) {
-        timerRef.current = setTimeout(() => setGameOver(true), 1800);
+    if (meas.playMode === "practice") {
+      if (correct) {
+        const newScore = score + 1;
+        setScore(newScore);
+        if (userId) {
+          const li = mode === "inches" ? 0 : 1;
+          const ci = mode === "inches"
+            ? INCH_PRECS.findIndex(p => p.val === inchPrec)
+            : MM_STEPS.findIndex(s => s.val === mmStep);
+          upsertToolHighScore(userId, "meas-ruler", li, ci, newScore);
+        }
+        // Advance after short delay
+        timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1200);
       } else {
-        timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1800);
+        const newStrikes = strikes + 1;
+        setStrikes(newStrikes);
+        if (newStrikes >= 3) {
+          timerRef.current = setTimeout(() => setGameOver(true), 1800);
+        } else {
+          timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1800);
+        }
       }
+    } else if (!res.sessionOver) {
+      // sprint keeps feedback brief so the 60s clock isn't eaten by delays
+      const delay = meas.playMode === "sprint" ? (correct ? 700 : 1100) : (correct ? 1200 : 1800);
+      timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), delay);
     }
   }
 
@@ -406,9 +440,18 @@ export default function RulerGamePage() {
             </p>
           </div>
 
+          <AssignmentErrorCard session={meas} />
+          <AssignmentBanner session={meas} />
+
           {/* Settings bar */}
+          {!meas.assignment && (
           <div style={{ ...CARD, padding: "14px 20px", marginBottom: 20,
             display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+
+            <ModeSelector session={meas} color="#2563eb"
+              onSelect={() => startFresh(mode, inchPrec, mmStep)} />
+
+            <div style={{ width: 1, height: 28, background: "#e5e7eb" }} />
 
             {/* Mode */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -454,9 +497,12 @@ export default function RulerGamePage() {
               }
             </div>
           </div>
+          )}
 
           {/* Main game card */}
-          {gameOver ? (
+          {meas.sessionOver ? (
+            <ResultScreen session={meas} color="#2563eb" onPlayAgain={() => meas.restart()} />
+          ) : gameOver ? (
             <div style={{ ...CARD, padding: "64px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 56, marginBottom: 14 }}>💥</div>
               <h2 style={{ fontSize: 28, fontWeight: 900, color: "#111", marginBottom: 8 }}>Game Over!</h2>
@@ -477,6 +523,8 @@ export default function RulerGamePage() {
             </div>
           ) : (
             <div style={{ ...CARD, padding: "28px 24px 20px" }}>
+
+              {meas.playMode === "sprint" && <SprintBar secondsLeft={meas.sprintSecondsLeft} />}
 
               {/* ── Target display ── */}
               <div style={{ textAlign: "center", marginBottom: 20 }}>
@@ -519,6 +567,9 @@ export default function RulerGamePage() {
               </div>
 
               {/* ── Score bar ── */}
+              {meas.playMode !== "practice" ? (
+                <ScoreHud session={meas} />
+              ) : (
               <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 16,
                 display: "flex", gap: 32, alignItems: "center", justifyContent: "center" }}>
                 <div style={{ textAlign: "center" }}>
@@ -543,6 +594,7 @@ export default function RulerGamePage() {
                   </div>
                 </div>
               </div>
+              )}
 
             </div>
           )}
@@ -552,5 +604,14 @@ export default function RulerGamePage() {
       <footer style={{ height: 40, width: "100%", backgroundImage: "url('/ui/footer-metal.png')",
         backgroundSize: "cover", backgroundPosition: "center" }} />
     </div>
+  );
+}
+
+// useMeasurementSession reads useSearchParams, which requires a Suspense boundary.
+export default function RulerGamePageRoot() {
+  return (
+    <Suspense fallback={null}>
+      <RulerGamePage />
+    </Suspense>
   );
 }

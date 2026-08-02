@@ -14,6 +14,8 @@ import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, fetchTurtle
 import { renderBotPortrait } from "@/app/tools/arcade-lab/engine/render";
 import { defaultBot, sanitizeBot } from "@/app/tools/arcade-lab/engine/bot";
 import SiteHeader from "@/app/components/SiteHeader";
+import { TOOL_META, LeaderboardBoards, type LeaderboardData as MeasLeaderboardData, type MeasTool } from "@/app/tools/measurement-lab/shared";
+import { type AssignmentConfig as MeasAssignmentConfig } from "@/app/tools/measurement-lab/constants";
 
 const CARD: React.CSSProperties = {
   background: "rgba(255,255,255,0.97)",
@@ -141,7 +143,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch" | "measurement">("code-lab");
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
   const [turtleAssigned, setTurtleAssigned] = useState<Set<string>>(new Set());
   const [turtleAssignSaving, setTurtleAssignSaving] = useState<string | null>(null);
@@ -170,6 +172,30 @@ export default function ClassDetailPage() {
   const [bridgeDraftMap, setBridgeDraftMap] = useState<Record<string, Record<string, BridgeDraftCell>>>({});
   const [loadingBridgeGradebook, setLoadingBridgeGradebook] = useState(false);
   const bridgeGradebookLoadedRef = useRef(false);
+
+  // Measurement Lab assignments state
+  interface MeasurementAssignmentRow { id: string; title: string; tool: MeasTool; config: MeasAssignmentConfig; attemptStudentCount: number; created_at: string; }
+  interface MeasurementResultRow { student_id: string; name: string; best_correct: number; total: number; attempts: number; last_at: string; }
+  const [measAssignments, setMeasAssignments] = useState<MeasurementAssignmentRow[]>([]);
+  const [loadingMeas, setLoadingMeas] = useState(false);
+  const measLoadedRef = useRef(false);
+  const [showMeasForm, setShowMeasForm] = useState(false);
+  const [measForm, setMeasForm] = useState({
+    title: "", tool: "ruler" as MeasTool, mode: "inches", precision: "2",
+    questionCount: 10, timerSeconds: "", passThreshold: 8,
+  });
+  const [measFormSaving, setMeasFormSaving] = useState(false);
+  const [measFormError, setMeasFormError] = useState("");
+  const [deletingMeasId, setDeletingMeasId] = useState<string | null>(null);
+  const [expandedMeasId, setExpandedMeasId] = useState<string | null>(null);
+  const [measResults, setMeasResults] = useState<Record<string, MeasurementResultRow[]>>({});
+  const [loadingMeasResultsId, setLoadingMeasResultsId] = useState<string | null>(null);
+  // Sprint leaderboard (class scope + combined across the teacher's classes)
+  const [measBoardData, setMeasBoardData] = useState<Partial<Record<"class" | "combined", MeasLeaderboardData>>>({});
+  const [measBoardScope, setMeasBoardScope] = useState<"class" | "combined">("class");
+  const [loadingMeasBoard, setLoadingMeasBoard] = useState(false);
+  const [measLbEnabled, setMeasLbEnabled] = useState(true);
+  const [measLbToggleSaving, setMeasLbToggleSaving] = useState(false);
 
   // STEM Sketch
   interface StemSketchRow { id: string; user_id: string; name: string; units: string; thumbnail: string | null; updated_at: string; student_name: string; student_email: string; }
@@ -337,6 +363,19 @@ export default function ClassDetailPage() {
       .finally(() => setLoadingStemSketch(false));
   }, [selectedTool, cls]);
 
+  // Measurement Lab: lazy-load assignments + class leaderboard on first tab open
+  useEffect(() => {
+    if (!cls || selectedTool !== "measurement" || measLoadedRef.current) return;
+    measLoadedRef.current = true;
+    setMeasLbEnabled((cls as { leaderboard_enabled?: boolean }).leaderboard_enabled !== false);
+    setLoadingMeas(true);
+    fetch(`/api/teacher/measurement-assignments?classId=${classId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setMeasAssignments)
+      .finally(() => setLoadingMeas(false));
+    loadMeasBoard("class");
+  }, [selectedTool, cls]);
+
   async function loadClass() {
     const res = await fetch(`/api/teacher/classes/${classId}`);
     if (!res.ok) { router.push("/teachers/dashboard"); return; }
@@ -424,6 +463,98 @@ export default function ClassDetailPage() {
     const res = await fetch(`/api/teacher/bridge-submissions?assignmentId=${id}`);
     if (res.ok) { const data = await res.json(); setBridgeLeaderboards(prev => ({ ...prev, [id]: data })); }
     setLoadingLeaderboardId(null);
+  }
+
+  // ── Measurement Lab handlers ──
+
+  async function loadMeasBoard(scope: "class" | "combined") {
+    setLoadingMeasBoard(true);
+    const res = await fetch(`/api/measurement-leaderboard?classId=${classId}&scope=${scope}`);
+    if (res.ok) {
+      const data = await res.json();
+      setMeasBoardData(prev => ({ ...prev, [scope]: data }));
+    }
+    setLoadingMeasBoard(false);
+  }
+
+  function switchMeasBoardScope(scope: "class" | "combined") {
+    setMeasBoardScope(scope);
+    if (!measBoardData[scope]) loadMeasBoard(scope);
+  }
+
+  async function handleCreateMeasAssignment() {
+    const qc = Math.min(20, Math.max(5, measForm.questionCount));
+    const pt = Math.min(qc, Math.max(1, measForm.passThreshold));
+    const timer = parseInt(measForm.timerSeconds, 10);
+    setMeasFormSaving(true);
+    setMeasFormError("");
+    const res = await fetch("/api/teacher/measurement-assignments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        classId,
+        title: measForm.title,
+        tool: measForm.tool,
+        config: {
+          mode: measForm.mode,
+          precision: measForm.precision,
+          questionCount: qc,
+          timerSeconds: Number.isFinite(timer) && timer > 0 ? timer : null,
+          passThreshold: pt,
+        },
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setMeasAssignments(prev => [data, ...prev]);
+      setShowMeasForm(false);
+      setMeasForm(f => ({ ...f, title: "" }));
+    } else {
+      const e = await res.json().catch(() => ({}));
+      setMeasFormError(e.error ?? "Failed to create assignment");
+    }
+    setMeasFormSaving(false);
+  }
+
+  async function handleDeleteMeasAssignment(id: string) {
+    setDeletingMeasId(id);
+    const res = await fetch(`/api/teacher/measurement-assignments?id=${id}`, { method: "DELETE" });
+    if (res.ok) {
+      setMeasAssignments(prev => prev.filter(a => a.id !== id));
+      if (expandedMeasId === id) setExpandedMeasId(null);
+    }
+    setDeletingMeasId(null);
+  }
+
+  async function toggleMeasResults(id: string) {
+    if (expandedMeasId === id) { setExpandedMeasId(null); return; }
+    setExpandedMeasId(id);
+    if (measResults[id]) return;
+    setLoadingMeasResultsId(id);
+    const res = await fetch(`/api/teacher/measurement-results?assignmentId=${id}`);
+    if (res.ok) { const data = await res.json(); setMeasResults(prev => ({ ...prev, [id]: data })); }
+    setLoadingMeasResultsId(null);
+  }
+
+  async function handleMeasLbToggle() {
+    const next = !measLbEnabled;
+    setMeasLbEnabled(next);       // optimistic
+    setMeasLbToggleSaving(true);
+    const res = await fetch(`/api/teacher/classes/${classId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ leaderboardEnabled: next }),
+    });
+    if (!res.ok) setMeasLbEnabled(!next);  // revert on failure
+    setMeasLbToggleSaving(false);
+  }
+
+  // Reset dependent selects when the instrument changes in the create form.
+  function setMeasFormTool(tool: MeasTool) {
+    const meta = TOOL_META[tool];
+    const mode = meta.modes[0].value;
+    const precs = meta.precisions(mode);
+    setMeasForm(f => ({ ...f, tool, mode, precision: precs[0]?.value ?? "" }));
   }
 
   // Three-state setter for a single turtle item (tutorial or challenge).
@@ -1729,6 +1860,7 @@ export default function ClassDetailPage() {
               { id: "bridge"     as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
               { id: "turtle"     as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
               { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
+              { id: "measurement" as const, label: "Measurement Lab",  icon: "📏", color: "#0d9488", desc: "Precision measuring games" },
             ] as const).map(tool => {
               const active = selectedTool === tool.id;
               return (
@@ -2485,6 +2617,312 @@ export default function ClassDetailPage() {
                     </div>
                   );
                 })()
+              )}
+            </div>
+          )}
+
+          {/* ── Measurement Lab panel ──────────────────────────────────────────────── */}
+          {selectedTool === "measurement" && (
+            <div style={{ ...CARD, padding: "28px 28px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0d9488", margin: 0 }}>Measurement Assignments</h2>
+                  <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                    Students complete a fixed set of questions on one instrument; you see best scores and attempts.
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setShowMeasForm(v => !v); setMeasFormError(""); }}
+                  style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #0d9488",
+                    background: showMeasForm ? "#ccfbf1" : "#fff", color: "#115e59",
+                    fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+                  {showMeasForm ? "✕ Cancel" : "+ New Assignment"}
+                </button>
+              </div>
+
+              {showMeasForm && (
+                <div style={{ background: "#f0fdfa", border: "2px solid #99f6e4", borderRadius: 14,
+                  padding: "20px 22px", marginBottom: 24 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#115e59", marginBottom: 14 }}>Create Measurement Assignment</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 480 }}>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                      Title (optional)
+                      <input
+                        value={measForm.title}
+                        onChange={e => setMeasForm(f => ({ ...f, title: e.target.value }))}
+                        placeholder={`e.g. ${TOOL_META[measForm.tool].label} Check-up`}
+                        maxLength={80}
+                        style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 12px",
+                          borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14,
+                          fontWeight: 600, color: "#111", outline: "none", boxSizing: "border-box" }}
+                      />
+                    </label>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Instrument
+                        <select
+                          value={measForm.tool}
+                          onChange={e => setMeasFormTool(e.target.value as MeasTool)}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          {(Object.keys(TOOL_META) as MeasTool[]).map(t => (
+                            <option key={t} value={t}>{TOOL_META[t].icon} {TOOL_META[t].label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Mode
+                        <select
+                          value={measForm.mode}
+                          onChange={e => {
+                            const mode = e.target.value;
+                            const precs = TOOL_META[measForm.tool].precisions(mode);
+                            setMeasForm(f => ({ ...f, mode, precision: precs[0]?.value ?? "" }));
+                          }}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          {TOOL_META[measForm.tool].modes.map(m => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      {TOOL_META[measForm.tool].precisionLabel && (
+                        <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                          {TOOL_META[measForm.tool].precisionLabel}
+                          <select
+                            value={measForm.precision}
+                            onChange={e => setMeasForm(f => ({ ...f, precision: e.target.value }))}
+                            style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                              borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                            {TOOL_META[measForm.tool].precisions(measForm.mode).map(p => (
+                              <option key={p.value} value={p.value}>{p.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Questions
+                        <select
+                          value={measForm.questionCount}
+                          onChange={e => {
+                            const qc = Number(e.target.value);
+                            setMeasForm(f => ({ ...f, questionCount: qc, passThreshold: Math.min(f.passThreshold, qc) }));
+                          }}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          {[5, 8, 10, 12, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Goal (correct to pass)
+                        <select
+                          value={measForm.passThreshold}
+                          onChange={e => setMeasForm(f => ({ ...f, passThreshold: Number(e.target.value) }))}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          {Array.from({ length: measForm.questionCount }, (_, i) => i + 1).map(n => (
+                            <option key={n} value={n}>{n} / {measForm.questionCount}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Seconds per question (optional)
+                        <input
+                          value={measForm.timerSeconds}
+                          onChange={e => setMeasForm(f => ({ ...f, timerSeconds: e.target.value }))}
+                          placeholder="No time limit"
+                          type="number"
+                          min={5}
+                          max={120}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 12px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600,
+                            color: "#111", outline: "none", boxSizing: "border-box" }}
+                        />
+                      </label>
+                    </div>
+                    {measFormError && <div style={{ fontSize: 12, color: "#dc2626" }}>{measFormError}</div>}
+                    <button
+                      onClick={handleCreateMeasAssignment}
+                      disabled={measFormSaving}
+                      style={{ padding: "11px 24px", borderRadius: 10, border: "none",
+                        background: measFormSaving ? "#5eead4" : "#0d9488",
+                        color: "#fff", fontWeight: 800, fontSize: 14,
+                        cursor: measFormSaving ? "not-allowed" : "pointer", alignSelf: "flex-start" }}>
+                      {measFormSaving ? "Creating…" : "Create Assignment"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {loadingMeas ? (
+                <div style={{ padding: "32px 0", textAlign: "center", color: "#888", fontWeight: 600 }}>Loading…</div>
+              ) : measAssignments.length === 0 ? (
+                <div style={{ padding: "40px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
+                  <div style={{ fontSize: 36, marginBottom: 10 }}>📏</div>
+                  No measurement assignments yet — click <strong>+ New Assignment</strong> to create one.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {measAssignments.map(a => {
+                    const isExpanded = expandedMeasId === a.id;
+                    const results = measResults[a.id] ?? [];
+                    const isLoadingResults = loadingMeasResultsId === a.id;
+                    const meta = TOOL_META[a.tool] ?? TOOL_META["ruler"];
+                    const modeLabel = meta.modes.find(m => m.value === a.config.mode)?.label ?? a.config.mode;
+                    const precLabel = meta.precisions(a.config.mode).find(p => p.value === a.config.precision)?.label;
+                    return (
+                      <div key={a.id} style={{ borderRadius: 14, border: "2px solid #99f6e4", background: "#f0fdfa", overflow: "hidden" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "16px 18px", flexWrap: "wrap", gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: "#115e59", marginBottom: 4 }}>
+                              {meta.icon} {a.title || "Measurement Assignment"}
+                            </div>
+                            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>{meta.label} · {modeLabel}{precLabel ? ` · ${precLabel}` : ""}</span>
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>{a.config.questionCount} questions · goal {a.config.passThreshold}</span>
+                              {a.config.timerSeconds ? (
+                                <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>⏱ {a.config.timerSeconds}s / question</span>
+                              ) : null}
+                              <span style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
+                                ✓ {a.attemptStudentCount} student{a.attemptStudentCount !== 1 ? "s" : ""} attempted
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <Link href={`/tools/measurement-lab/${a.tool}?assignment=${a.id}`}
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #99f6e4",
+                                background: "#fff", color: "#115e59", fontWeight: 700, fontSize: 12,
+                                textDecoration: "none" }}>
+                              ▶ Try It
+                            </Link>
+                            <button
+                              onClick={() => toggleMeasResults(a.id)}
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #0d9488",
+                                background: isExpanded ? "#0d9488" : "#fff", color: isExpanded ? "#fff" : "#115e59",
+                                fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                              {isExpanded ? "▲ Hide" : "📊 Results"}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteMeasAssignment(a.id)}
+                              disabled={deletingMeasId === a.id}
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #fca5a5",
+                                background: "#fff", color: "#dc2626", fontWeight: 700, fontSize: 12,
+                                cursor: deletingMeasId === a.id ? "not-allowed" : "pointer",
+                                opacity: deletingMeasId === a.id ? 0.6 : 1 }}>
+                              {deletingMeasId === a.id ? "Deleting…" : "✕ Delete"}
+                            </button>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div style={{ borderTop: "2px solid #99f6e4", padding: "20px 18px" }}>
+                            {isLoadingResults ? (
+                              <div style={{ color: "#888", fontSize: 13 }}>Loading…</div>
+                            ) : results.length === 0 ? (
+                              <div style={{ color: "#aaa", fontSize: 13, fontStyle: "italic" }}>No attempts yet.</div>
+                            ) : (
+                              <div style={{ overflowX: "auto", borderRadius: 10, border: "2px solid #99f6e4" }}>
+                                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 380 }}>
+                                  <thead>
+                                    <tr style={{ background: "#ccfbf1" }}>
+                                      <th style={{ ...TH }}>Student</th>
+                                      <th style={{ ...TH, textAlign: "center" }}>Best</th>
+                                      <th style={{ ...TH, textAlign: "center" }}>Attempts</th>
+                                      <th style={{ ...TH }}>Last Attempt</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {results.map((row, si) => {
+                                      const passed = row.best_correct >= a.config.passThreshold;
+                                      return (
+                                        <tr key={row.student_id} style={{ background: si % 2 === 0 ? "#fff" : "#f0fdfa" }}>
+                                          <td style={{ ...TD, fontWeight: 700 }}>{row.name}</td>
+                                          <td style={{ ...TD, textAlign: "center", fontWeight: 800,
+                                            color: passed ? "#16a34a" : "#dc2626" }}>
+                                            {row.best_correct}/{row.total} {passed ? "✓" : ""}
+                                          </td>
+                                          <td style={{ ...TD, textAlign: "center" }}>{row.attempts}</td>
+                                          <td style={{ ...TD, fontSize: 12, color: "#666" }}>
+                                            {new Date(row.last_at).toLocaleDateString()}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Measurement sprint leaderboard — class + combined scopes */}
+          {selectedTool === "measurement" && (
+            <div style={{ ...CARD, marginTop: 24, padding: "24px 28px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0d9488", margin: 0 }}>
+                    🏁 Sprint Leaderboard
+                  </h2>
+                  <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                    Best 60-second sprint scores. Points scale with precision and answer streaks.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {(["class", "combined"] as const).map(s => (
+                    <button key={s} onClick={() => switchMeasBoardScope(s)}
+                      style={{ padding: "7px 16px", borderRadius: 99, border: "2px solid",
+                        borderColor: measBoardScope === s ? "#0d9488" : "#e5e7eb",
+                        background: measBoardScope === s ? "#0d9488" : "#fff",
+                        color: measBoardScope === s ? "#fff" : "#374151",
+                        fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                      {s === "class" ? "This Class" : "All My Classes"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Student-visibility toggle */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18,
+                padding: "10px 14px", borderRadius: 10,
+                background: measLbEnabled ? "#f0fdfa" : "#fef2f2",
+                border: `2px solid ${measLbEnabled ? "#99f6e4" : "#fecaca"}` }}>
+                <button
+                  onClick={handleMeasLbToggle}
+                  disabled={measLbToggleSaving}
+                  style={{ width: 44, height: 24, borderRadius: 99, border: "none", cursor: "pointer",
+                    background: measLbEnabled ? "#0d9488" : "#d1d5db", position: "relative",
+                    transition: "background 150ms", flexShrink: 0 }}>
+                  <span style={{ position: "absolute", top: 3, left: measLbEnabled ? 23 : 3,
+                    width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                    transition: "left 150ms" }} />
+                </button>
+                <span style={{ fontSize: 13, fontWeight: 700, color: measLbEnabled ? "#115e59" : "#991b1b" }}>
+                  {measLbEnabled
+                    ? "Leaderboards are visible to students in this class"
+                    : "Leaderboards are hidden from students in this class (you can still see them here)"}
+                </span>
+              </div>
+
+              {loadingMeasBoard && !measBoardData[measBoardScope] ? (
+                <div style={{ textAlign: "center", padding: "24px 0", color: "#888", fontWeight: 600 }}>Loading…</div>
+              ) : measBoardData[measBoardScope] ? (
+                <LeaderboardBoards data={measBoardData[measBoardScope]!} accent="#0d9488" />
+              ) : (
+                <div style={{ textAlign: "center", padding: "24px 0", color: "#aaa", fontSize: 14 }}>
+                  Couldn&apos;t load the leaderboard.
+                </div>
               )}
             </div>
           )}
