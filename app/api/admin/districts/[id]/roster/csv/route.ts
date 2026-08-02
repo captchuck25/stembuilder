@@ -16,7 +16,7 @@ import { applyRoster } from '@/lib/roster/import.server'
 // Every run (including dry runs) is recorded in roster_imports and the real
 // runs are audit-logged.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin({ platform: true })
   if (isGuardError(ctx)) return ctx
   const { id: districtId } = await params
 
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
 // GET /api/admin/districts/[id]/roster/csv → the CSV template (download link).
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin({ platform: true })
   if (isGuardError(ctx)) return ctx
   const { id: districtId } = await params
   if (ctx.role === 'district_admin' && ctx.districtId !== districtId) {

@@ -15,7 +15,7 @@ import {
 // idempotent re-sync for free (Google ids are the sourcedIds: new students
 // are added, existing ones matched, nothing clobbered).
 export async function POST(req: NextRequest) {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin({ platform: true })
   if (isGuardError(ctx)) return ctx
 
   const body = await req.json().catch(() => null)

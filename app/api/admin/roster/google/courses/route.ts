@@ -7,7 +7,7 @@ import { listCourses, courseTitle, GoogleAuthError, GC_COOKIE, googleClassroomCl
 // can pick which ones to import. 401 with code 'reconnect' when the one-hour
 // token is gone — the UI turns that into the Connect button again.
 export async function GET(req: NextRequest) {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin({ platform: true })
   if (isGuardError(ctx)) return ctx
 
   const districtId = new URL(req.url).searchParams.get('districtId') ?? ''

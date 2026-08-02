@@ -78,7 +78,10 @@ export default function DistrictDetailPage() {
   const [students, setStudents] = useState<PersonRow[] | null>(null);
   const [studentSchool, setStudentSchool] = useState<string>("");
   const [audit, setAudit] = useState<AuditRow[] | null>(null);
-  const [tab, setTab] = useState<"schools" | "teachers" | "classes" | "students" | "roster" | "audit">("schools");
+  // Teachers first: in the teacher-driven model, adding teachers is the
+  // admin's primary job. Roster upload is platform-admin only (white-glove
+  // district-office imports) — district admins' teachers self-serve.
+  const [tab, setTab] = useState<"schools" | "teachers" | "classes" | "students" | "roster" | "audit">("teachers");
   const [classes, setClasses] = useState<{
     id: string; name: string; joinCode: string; teacherName: string;
     schoolId: string | null; source: string; studentCount: number; createdAt: string;
@@ -399,11 +402,11 @@ export default function DistrictDetailPage() {
     : `${d.counts.students} students (unlimited seats)`;
 
   const tabs: { key: typeof tab; label: string }[] = [
-    { key: "schools", label: `Schools (${d.counts.schools})` },
     { key: "teachers", label: `Teachers (${d.counts.teachers})` },
     { key: "classes", label: `Classes (${d.counts.classes})` },
     { key: "students", label: `Students (${d.counts.students})` },
-    { key: "roster", label: "Roster upload" },
+    { key: "schools", label: `Schools (${d.counts.schools})` },
+    ...(platform ? [{ key: "roster" as const, label: "Roster upload" }] : []),
     { key: "audit", label: "Audit log" },
   ];
 

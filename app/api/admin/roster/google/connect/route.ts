@@ -8,7 +8,7 @@ import { GOOGLE_CLASSROOM_SCOPES, googleClassroomClientId } from '@/lib/roster/g
 // (Google requires exact registration), so the district travels in a short-
 // lived signed state token — never trusted from the raw query on return.
 export async function GET(req: NextRequest) {
-  const ctx = await requireAdmin()
+  const ctx = await requireAdmin({ platform: true })
   if (isGuardError(ctx)) return ctx
 
   const districtId = new URL(req.url).searchParams.get('districtId') ?? ''
