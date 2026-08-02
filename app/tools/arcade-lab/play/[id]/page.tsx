@@ -209,7 +209,7 @@ export default function PlayArcadeGamePage() {
         const mini = miniCanvasRef.current;
         if (mini) {
           renderMinimap(mini.getContext('2d')!, def, cam, mini.width, mini.height,
-            { x: s.player.x, y: s.player.y });
+            { x: s.player.x, y: s.player.y }, s.entities);
         }
       }
       raf = requestAnimationFrame(loop);

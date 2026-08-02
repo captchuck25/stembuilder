@@ -32,7 +32,10 @@ export default function ArcadeWorkspace({ owner, genre = 'platformer', xml, onXm
       scrollbars: true,
       trashcan: true,
       sounds: false,
-      zoom: { controls: true, wheel: true, startScale: 0.8, maxScale: 2.5, minScale: 0.3, scaleSpeed: 1.2 },
+      // Wheel SCROLLS the workspace (kids kept zooming by accident) — zooming
+      // is the +/− buttons or pinch only
+      zoom: { controls: true, wheel: false, pinch: true, startScale: 0.8, maxScale: 2.5, minScale: 0.3, scaleSpeed: 1.2 },
+      move: { scrollbars: true, drag: true, wheel: true },
       grid: { spacing: 22, length: 3, colour: 'rgba(148,163,184,0.18)', snap: false },
     });
 

@@ -453,6 +453,171 @@ function drawAlien(ctx: CanvasRenderingContext2D, fx: number, fy: number, t: num
   ctx.fill();
 }
 
+function drawBrute(ctx: CanvasRenderingContext2D, fx: number, fy: number, t: number, seed = 0, dmg = 0) {
+  const px = fx * TILE, py = fy * TILE;
+  const cx = px + TILE / 2;
+  const wob = Math.sin(t / 380 + seed * 1.1);
+  const cy = py + TILE * 0.46 + wob * 1.2;
+  // stubby armored legs
+  ctx.strokeStyle = '#7C2D12';
+  ctx.lineWidth = 4;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + side * TILE * 0.18, cy + TILE * 0.2);
+    ctx.lineTo(cx + side * TILE * 0.22, cy + TILE * 0.42);
+    ctx.stroke();
+  }
+  // armor slab body (lightens as it takes dents)
+  ctx.fillStyle = dmg > 0 ? '#FB923C' : '#EA580C';
+  roundedRect(ctx, cx - TILE * 0.37, cy - TILE * 0.27, TILE * 0.74, TILE * 0.5, 7);
+  ctx.fill();
+  ctx.strokeStyle = '#7C2D12';
+  ctx.lineWidth = 2;
+  roundedRect(ctx, cx - TILE * 0.37, cy - TILE * 0.27, TILE * 0.74, TILE * 0.5, 7);
+  ctx.stroke();
+  // rivets
+  ctx.fillStyle = 'rgba(60,20,5,0.55)';
+  for (const [rx, ry] of [[-0.3, -0.19], [0.3, -0.19], [-0.3, 0.14], [0.3, 0.14]]) {
+    ctx.beginPath();
+    ctx.arc(cx + rx * TILE, cy + ry * TILE, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // cracks once dented
+  if (dmg > 0) {
+    ctx.strokeStyle = 'rgba(60,20,5,0.7)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - TILE * 0.2, cy - TILE * 0.24);
+    ctx.lineTo(cx - TILE * 0.1, cy - TILE * 0.08);
+    ctx.lineTo(cx - TILE * 0.18, cy + 0.04 * TILE);
+    if (dmg > 1) {
+      ctx.moveTo(cx + TILE * 0.24, cy - TILE * 0.1);
+      ctx.lineTo(cx + TILE * 0.12, cy + TILE * 0.02);
+      ctx.lineTo(cx + TILE * 0.2, cy + TILE * 0.16);
+    }
+    ctx.stroke();
+  }
+  // visor with glowing eyes
+  ctx.fillStyle = '#1E1B4B';
+  roundedRect(ctx, cx - TILE * 0.26, cy - TILE * 0.13, TILE * 0.52, TILE * 0.17, 5);
+  ctx.fill();
+  const pulse = 0.6 + 0.4 * Math.abs(Math.sin(t / 500 + seed));
+  ctx.fillStyle = `rgba(252,211,77,${pulse.toFixed(3)})`;
+  ctx.beginPath();
+  ctx.arc(cx - 7, cy - TILE * 0.045, 2.6, 0, Math.PI * 2);
+  ctx.arc(cx + 7, cy - TILE * 0.045, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  // stubby horns
+  ctx.fillStyle = '#7C2D12';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + side * TILE * 0.22, cy - TILE * 0.27);
+    ctx.lineTo(cx + side * TILE * 0.28, cy - TILE * 0.4);
+    ctx.lineTo(cx + side * TILE * 0.32, cy - TILE * 0.26);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawBomber(ctx: CanvasRenderingContext2D, fx: number, fy: number, t: number, seed = 0) {
+  const px = fx * TILE, py = fy * TILE;
+  const cx = px + TILE / 2;
+  const wob = Math.sin(t / 320 + seed * 1.5);
+  const cy = py + TILE * 0.4 + wob * 1.8;
+  // round indigo body
+  ctx.fillStyle = '#6366F1';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, TILE * 0.3, TILE * 0.26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(cx - 4, cy - 5, TILE * 0.12, TILE * 0.07, -0.4, 0, Math.PI * 2);
+  ctx.fill();
+  // bomb-bay hatch underneath, with the next bomb peeking out
+  ctx.fillStyle = '#312E81';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + TILE * 0.2, TILE * 0.16, TILE * 0.09, 0, 0, Math.PI);
+  ctx.fill();
+  ctx.fillStyle = '#1F2937';
+  ctx.beginPath();
+  ctx.arc(cx, cy + TILE * 0.24 + wob * 0.8, 4.2, 0, Math.PI * 2);
+  ctx.fill();
+  // single big eye, scanning for you
+  ctx.fillStyle = '#F4F7FA';
+  ctx.beginPath();
+  ctx.arc(cx, cy - 2, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1E1B4B';
+  ctx.beginPath();
+  ctx.arc(cx + Math.sin(t / 700 + seed) * 3, cy - 1, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  // side fins
+  ctx.fillStyle = '#4F46E5';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + side * TILE * 0.28, cy - 3);
+    ctx.lineTo(cx + side * TILE * 0.42, cy + 2 + wob * side);
+    ctx.lineTo(cx + side * TILE * 0.28, cy + 6);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+function drawBombSprite(ctx: CanvasRenderingContext2D, bx: number, by: number, t: number) {
+  const wig = Math.sin(t / 90 + bx) * 1.5;
+  ctx.fillStyle = '#1F2937';
+  ctx.beginPath();
+  ctx.arc(bx + wig, by, 6.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.arc(bx + wig - 2, by - 2, 2.2, 0, Math.PI * 2);
+  ctx.fill();
+  // sparking fuse on top
+  ctx.strokeStyle = '#9CA3AF';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(bx + wig, by - 6);
+  ctx.lineTo(bx + wig + 2, by - 10);
+  ctx.stroke();
+  const spark = 0.5 + 0.5 * Math.sin(t / 60);
+  ctx.fillStyle = `rgba(253,224,71,${(0.4 + 0.6 * spark).toFixed(3)})`;
+  ctx.beginPath();
+  ctx.arc(bx + wig + 2, by - 11, 1.6 + spark * 1.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawAmmo(ctx: CanvasRenderingContext2D, fx: number, fy: number, t: number, seed = 0) {
+  const cx = fx * TILE + TILE / 2;
+  const cy = fy * TILE + TILE / 2 + Math.sin(t / 260 + seed) * 2;
+  const pulse = 0.5 + 0.5 * Math.abs(Math.sin(t / 420 + seed));
+  // glow halo
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 16);
+  glow.addColorStop(0, `rgba(253,224,71,${(0.35 + 0.3 * pulse).toFixed(3)})`);
+  glow.addColorStop(1, 'rgba(253,224,71,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(cx - 16, cy - 16, 32, 32);
+  // capsule
+  ctx.fillStyle = '#0F172A';
+  roundedRect(ctx, cx - 8, cy - 10, 16, 20, 7);
+  ctx.fill();
+  ctx.strokeStyle = '#FDE047';
+  ctx.lineWidth = 2;
+  roundedRect(ctx, cx - 8, cy - 10, 16, 20, 7);
+  ctx.stroke();
+  // lightning bolt
+  ctx.fillStyle = '#FDE047';
+  ctx.beginPath();
+  ctx.moveTo(cx + 2, cy - 7);
+  ctx.lineTo(cx - 4, cy + 1);
+  ctx.lineTo(cx - 0.5, cy + 1);
+  ctx.lineTo(cx - 2, cy + 7);
+  ctx.lineTo(cx + 4, cy - 1);
+  ctx.lineTo(cx + 0.5, cy - 1);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawSpring(ctx: CanvasRenderingContext2D, px: number, py: number, squash: number) {
   const cx = px + TILE / 2;
   const base = py + TILE;
@@ -767,6 +932,10 @@ function drawShip(ctx: CanvasRenderingContext2D, s: GameState, t: number, cfg: B
   }
 }
 
+function drawBombs(ctx: CanvasRenderingContext2D, s: GameState, t: number) {
+  for (const b of s.bombs) drawBombSprite(ctx, b.x * TILE, b.y * TILE, t);
+}
+
 function drawBlasters(ctx: CanvasRenderingContext2D, s: GameState) {
   for (const b of s.blasters) {
     const bx = b.x * TILE, by = b.y * TILE;
@@ -813,7 +982,7 @@ function drawHUD(ctx: CanvasRenderingContext2D, s: GameState, w: number) {
   ctx.fillText(hearts, 12, 20);
   // defender: aliens-remaining counter; platformer: defeated-enemies counter
   if (s.genre === 'defender') {
-    const left = s.entities.filter(e => e.type === 'alien' && e.alive).length;
+    const left = s.entities.filter(e => (e.type === 'alien' || e.type === 'brute' || e.type === 'bomber') && e.alive).length;
     const al = `👽 ${left}`;
     const aw = ctx.measureText(al).width;
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -821,6 +990,17 @@ function drawHUD(ctx: CanvasRenderingContext2D, s: GameState, w: number) {
     ctx.fill();
     ctx.fillStyle = '#D8FF6A';
     ctx.fillText(al, 87, 20);
+    // shots remaining (only when a shot-limit block is in play)
+    if (s.ammo !== null) {
+      const sl = `🔫 ${s.ammo}`;
+      const sw = ctx.measureText(sl).width;
+      const sx = 78 + aw + 26;
+      ctx.fillStyle = s.ammo <= 0 ? 'rgba(153,27,27,0.55)' : 'rgba(0,0,0,0.35)';
+      roundedRect(ctx, sx, 8, sw + 18, 24, 12);
+      ctx.fill();
+      ctx.fillStyle = s.ammo <= 3 ? '#FCA5A5' : '#AEE9FF';
+      ctx.fillText(sl, sx + 9, 20);
+    }
   } else if (s.kills > 0) {
     const kl = `👾 ${s.kills}`;
     const kw = ctx.measureText(kl).width;
@@ -884,6 +1064,9 @@ function drawWorld(
     else if (e.type === 'flyer') drawFlyer(ctx, e.px, e.py, e.dir ?? 1, t, (e.maxHp ?? 1) - (e.hp ?? 1));
     else if (e.type === 'spring') drawSpring(ctx, e.px * TILE, e.py * TILE, e.springSquash ?? 0);
     else if (e.type === 'alien') drawAlien(ctx, e.px, e.py, t, e.id ?? e.px + e.py * 7);
+    else if (e.type === 'brute') drawBrute(ctx, e.px, e.py, t, e.id ?? e.px + e.py * 7, (e.maxHp ?? 1) - (e.hp ?? 1));
+    else if (e.type === 'bomber') drawBomber(ctx, e.px, e.py, t, e.id ?? e.px + e.py * 7);
+    else if (e.type === 'ammo') drawAmmo(ctx, e.px, e.py, t, e.id ?? e.px + e.py * 7);
   }
 }
 
@@ -905,6 +1088,7 @@ export function renderGame(
   drawWorld(ctx, def, state.solids, state.entities, t, cam.x, cam.y);
   if (state.genre === 'defender') {
     drawBlasters(ctx, state);
+    drawBombs(ctx, state, t);
     drawShip(ctx, state, t, bot ?? defaultBot());
   } else {
     drawPlayer(ctx, state, t, bot ?? defaultBot());
@@ -969,12 +1153,12 @@ export function renderDesign(
 
   for (const o of def.objects) {
     if (o.type === 'spawn') drawSpawnMarker(ctx, o.x, o.y, t);
-    else if (o.type === 'enemy' || o.type === 'spiky' || o.type === 'flyer' || o.type === 'alien') {
+    else if (o.type === 'enemy' || o.type === 'spiky' || o.type === 'flyer' || o.type === 'alien' || o.type === 'brute' || o.type === 'bomber' || o.type === 'ammo') {
       ctx.fillStyle = 'rgba(255,255,255,0.85)';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(o.type === 'flyer' ? '〰' : '↔', o.x * TILE + TILE / 2, o.y * TILE + 2);
+      ctx.fillText(o.type === 'flyer' ? '〰' : o.type === 'ammo' ? '↓' : '↔', o.x * TILE + TILE / 2, o.y * TILE + 2);
     }
   }
 
@@ -1016,6 +1200,7 @@ export function renderDesign(
 const MINI_COLORS: Record<string, string> = {
   coin: '#FFD54A', spike: '#EF4444', enemy: '#B06AE8', flag: '#22C55E', spawn: '#4C8DFF',
   spiky: '#F87171', flyer: '#38BDF8', spring: '#A3A3A3', alien: '#7CDB4F',
+  brute: '#F97316', bomber: '#818CF8', ammo: '#FDE047',
 };
 
 /** Draws the whole level small + the current viewport rectangle. Returns scale. */
@@ -1026,6 +1211,8 @@ export function renderMinimap(
   miniW: number,
   miniH: number,
   playerPos?: { x: number; y: number },
+  /** Play mode: live entity positions (marching aliens!) instead of design spots */
+  live?: { type: ObjectType; alive: boolean; px: number; py: number }[],
 ): number {
   const levelW = def.cols * TILE;
   const levelH = def.rows * TILE;
@@ -1036,12 +1223,18 @@ export function renderMinimap(
   ctx.fillRect(0, 0, def.cols * TILE * scale, def.rows * TILE * scale);
 
   const tileStyle = TILE_STYLE[def.backdrop];
+  const sz = Math.max(2, TILE * scale);
   for (const o of def.objects) {
-    const px = o.x * TILE * scale;
-    const py = o.y * TILE * scale;
-    const sz = Math.max(2, TILE * scale);
+    if (live && o.type !== 'platform') continue; // live entities drawn below
     ctx.fillStyle = o.type === 'platform' ? tileStyle.top : (MINI_COLORS[o.type] ?? '#fff');
-    ctx.fillRect(px, py, sz, sz);
+    ctx.fillRect(o.x * TILE * scale, o.y * TILE * scale, sz, sz);
+  }
+  if (live) {
+    for (const e of live) {
+      if (!e.alive) continue;
+      ctx.fillStyle = MINI_COLORS[e.type] ?? '#fff';
+      ctx.fillRect(e.px * TILE * scale, e.py * TILE * scale, sz, sz);
+    }
   }
 
   if (playerPos) {

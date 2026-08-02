@@ -5,8 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import SiteHeader from '@/app/components/SiteHeader';
 import {
-  Backdrop, CompiledRules, DEMO_LEVEL, GameDef, LevelShape, ObjectType, ScriptOwner,
-  TILE, LEVEL_SHAPES, VIEW_W, VIEW_H, emptyRules, genreOf, starterDefenderLevel, starterLevel, validDims, withScripts,
+  Backdrop, CompiledRules, DEMO_LEVEL, DefenderShape, GameDef, LevelShape, ObjectType, ScriptOwner,
+  TILE, DEFENDER_SHAPES, LEVEL_SHAPES, VIEW_W, VIEW_H, emptyRules, genreOf, starterDefenderLevel, starterLevel, validDims, withScripts,
 } from '../engine/types';
 import { initGame, stepGame, emptyInput, GameState, InputState, KEY_LOOKUP } from '../engine/physics';
 import { renderGame, renderDesign, renderMinimap, cameraFor, DesignHover } from '../engine/render';
@@ -43,7 +43,11 @@ function draftKey(slot: number) {
   return slot === 0 ? 'arcade_lab_draft' : `arcade_lab_draft_${slot}`;
 }
 function shapeName(d: GameDef): string {
-  if (genreOf(d) === 'defender') return 'Defender';
+  if (genreOf(d) === 'defender') {
+    if (d.cols * TILE > VIEW_W) return 'Defender · Wide';
+    if (d.rows * TILE > VIEW_H) return 'Defender · Tall';
+    return 'Defender';
+  }
   if (d.cols * TILE > VIEW_W) return 'Long';
   if (d.rows * TILE > VIEW_H) return 'Tall';
   return 'Classic';
@@ -69,14 +73,20 @@ const PALETTE: { tool: Tool; icon: string; label: string; hint: string }[] = [
 // your saucer's start spot, and three sheets (Ship / Alien / Game)
 const DEFENDER_PALETTE: { tool: Tool; icon: string; label: string; hint: string }[] = [
   { tool: 'alien',  icon: '👽', label: 'Alien',  hint: 'Joins the marching armada — place them in rows!' },
+  { tool: 'brute',  icon: '🤖', label: 'Brute',  hint: 'The armored one — give it 🛡 armor blocks so it takes extra hits' },
+  { tool: 'bomber', icon: '💣', label: 'Bomber', hint: 'Drops bombs while it marches — code what a bomb hit does!' },
+  { tool: 'ammo',   icon: '⚡', label: 'Ammo',   hint: 'Falls from where you place it — catch it to restock limited shots' },
   { tool: 'spawn',  icon: '🛸', label: 'Ship',   hint: 'Where your ship starts (one per level)' },
   { tool: 'eraser', icon: '🧽', label: 'Eraser', hint: 'Remove anything (or right-click)' },
 ];
 
 const DEFENDER_OWNERS: { owner: ScriptOwner; icon: string; label: string; hint: string }[] = [
-  { owner: 'player', icon: '🛸', label: 'Ship',  hint: 'Wire the keyboard — steer left/right and FIRE the blaster!' },
-  { owner: 'alien',  icon: '👽', label: 'Alien', hint: 'Blaster hits, reaching the bottom, touching your ship — you make the rules.' },
-  { owner: 'game',   icon: '🎮', label: 'Game',  hint: 'Starting lives, and the win when every alien is destroyed.' },
+  { owner: 'player', icon: '🛸', label: 'Ship',   hint: 'Wire the keyboard — steer left/right and FIRE the blaster!' },
+  { owner: 'alien',  icon: '👽', label: 'Alien',  hint: 'Blaster hits, reaching the bottom, touching your ship — you make the rules.' },
+  { owner: 'brute',  icon: '🤖', label: 'Brute',  hint: 'The armored one — add "🛡 I take 2 blaster hits" and make it worth more points.' },
+  { owner: 'bomber', icon: '💣', label: 'Bomber', hint: 'Its bombs fall on their own — "when my bomb hits the ship" decides the damage.' },
+  { owner: 'ammo',   icon: '⚡', label: 'Ammo',   hint: 'What happens when the ship catches a falling pickup? (Try: add shots!)' },
+  { owner: 'game',   icon: '🎮', label: 'Game',   hint: 'March pace, shot limit, lives — and the win when every alien is destroyed.' },
 ];
 
 const OWNERS: { owner: ScriptOwner; icon: string; label: string; hint: string }[] = [
@@ -557,6 +567,7 @@ function CreateInner() {
           modeRef.current === 'play' && stateRef.current
             ? { x: stateRef.current.player.x, y: stateRef.current.player.y }
             : undefined,
+          modeRef.current === 'play' && stateRef.current ? stateRef.current.entities : undefined,
         );
       }
 
@@ -589,10 +600,11 @@ function CreateInner() {
     focusSpawn(fresh);
   }, [focusSpawn]);
 
-  const newDefender = useCallback(() => {
-    if (!confirm('Start a fresh Space Defender level? A whole different game: your ship vs a marching alien armada. Your current design will be replaced — your code blocks are kept.')) return;
+  const newDefender = useCallback((shape: DefenderShape) => {
+    const s = DEFENDER_SHAPES[shape];
+    if (!confirm(`Start a fresh Space Defender level? (${s.blurb}.) A whole different game: your ship vs a marching alien armada. Your current design will be replaced — your code blocks are kept.`)) return;
     dirtyRef.current = true;
-    const fresh = starterDefenderLevel();
+    const fresh = starterDefenderLevel(shape);
     setDef(d => ({ ...fresh, title: d.title, scripts: d.scripts }));
     focusSpawn(fresh);
   }, [focusSpawn]);
@@ -964,11 +976,13 @@ function CreateInner() {
                       {sh === 'classic' ? '⬜' : sh === 'long' ? '↔️' : '↕️'} {LEVEL_SHAPES[sh].label}
                     </button>
                   ))}
-                  <button onClick={newDefender} title="Space Defender — your saucer vs a marching alien armada. Wire the blaster yourself!"
-                    style={{ padding: '7px 12px', borderRadius: 10, fontWeight: 700, fontSize: 12,
-                      background: 'rgba(34,197,94,0.12)', color: '#86efac', border: '1px solid rgba(34,197,94,0.4)', cursor: 'pointer' }}>
-                    🛸 Defender
-                  </button>
+                  {(Object.keys(DEFENDER_SHAPES) as DefenderShape[]).map(sh => (
+                    <button key={sh} onClick={() => newDefender(sh)} title={`Space Defender — ${DEFENDER_SHAPES[sh].blurb}`}
+                      style={{ padding: '7px 12px', borderRadius: 10, fontWeight: 700, fontSize: 12,
+                        background: 'rgba(34,197,94,0.12)', color: '#86efac', border: '1px solid rgba(34,197,94,0.4)', cursor: 'pointer' }}>
+                      🛸 {sh === 'classic' ? 'Defender' : sh === 'wide' ? '↔️ Wide' : '↕️ Tall'}
+                    </button>
+                  ))}
                 </div>
               </>
             )}
