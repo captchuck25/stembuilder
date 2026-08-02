@@ -41,11 +41,25 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const schools = schoolsRes.data ?? []
   const studentCount = studentCountRes.count ?? 0
 
-  // Per-school counts.
+  // Many-to-many school memberships for the teacher rows (0017).
+  const teacherIds = (teachersRes.data ?? []).map(t => t.id)
+  const { data: memberships } = teacherIds.length
+    ? await ctx.db.from('school_memberships').select('user_id, school_id').in('user_id', teacherIds)
+    : { data: [] }
+  const schoolsByTeacher = new Map<string, string[]>()
+  for (const m of memberships ?? []) {
+    schoolsByTeacher.set(m.user_id, [...(schoolsByTeacher.get(m.user_id) ?? []), m.school_id])
+  }
+  const teachers = (teachersRes.data ?? []).map(t => ({
+    ...t,
+    schoolIds: schoolsByTeacher.get(t.id) ?? (t.school_id ? [t.school_id] : []),
+  }))
+
+  // Per-school counts (teachers via memberships — a teacher can be in several).
   const schoolRows = await Promise.all(schools.map(async s => {
     const [t, st] = await Promise.all([
-      ctx.db.from('profiles').select('*', { count: 'exact', head: true })
-        .eq('school_id', s.id).eq('role', 'teacher').is('deleted_at', null),
+      ctx.db.from('school_memberships').select('*', { count: 'exact', head: true })
+        .eq('school_id', s.id),
       ctx.db.from('profiles').select('*', { count: 'exact', head: true })
         .eq('school_id', s.id).eq('role', 'student').is('deleted_at', null),
     ])
@@ -65,7 +79,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   return NextResponse.json({
     ...district,
     schools: schoolRows,
-    teachers: teachersRes.data ?? [],
+    teachers,
     admins: adminsRes.data ?? [],
     pendingInvites: invites ?? [],
     license: licenseSummary((licenseRes.data?.[0] as LicenseRow | undefined) ?? null, studentCount),

@@ -33,6 +33,7 @@ interface PersonRow {
   id: string; name: string; email: string | null; username?: string | null;
   school_id?: string | null; account_origin?: string | null; created_at: string;
   role?: string;
+  schoolIds?: string[];
   classCount?: number; enrollmentCount?: number;
 }
 interface RosterResult {
@@ -285,6 +286,21 @@ export default function DistrictDetailPage() {
       }
     } finally {
       setRosterBusy("");
+    }
+  }
+
+  async function toggleTeacherSchool(userId: string, schoolId: string, add: boolean) {
+    setBusy(`${userId}:${schoolId}`);
+    try {
+      const r = await fetch(`/api/admin/users/${userId}/schools`, {
+        method: add ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schoolId }),
+      });
+      if (r.ok) await load();
+      else setMsg((await r.json().catch(() => ({}))).error ?? "School update failed");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -617,9 +633,35 @@ export default function DistrictDetailPage() {
                       District Admin
                     </span>
                   )}
-                  <span style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, background: "#ede9fe",
-                    padding: "2px 8px", borderRadius: 999 }}>
-                    {d.schools.find(s => s.id === t.school_id)?.name ?? "No school"}
+                  {/* School memberships: chips (× to remove) + a picker to add — a
+                      teacher can serve several buildings. */}
+                  <span style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+                    {(t.schoolIds ?? []).map(sid => (
+                      <span key={sid} style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700,
+                        background: "#ede9fe", padding: "2px 8px", borderRadius: 999,
+                        display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        {d.schools.find(s => s.id === sid)?.name ?? "?"}
+                        <button onClick={() => toggleTeacherSchool(t.id, sid, false)}
+                          disabled={busy === `${t.id}:${sid}`}
+                          title="Remove from this school"
+                          style={{ background: "none", border: "none", color: "#7c3aed",
+                            cursor: "pointer", fontWeight: 900, padding: 0, fontSize: 11 }}>×</button>
+                      </span>
+                    ))}
+                    {d.schools.some(s => !(t.schoolIds ?? []).includes(s.id)) && (
+                      <select value="" title="Add to a school"
+                        onChange={e => { if (e.target.value) toggleTeacherSchool(t.id, e.target.value, true); }}
+                        style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", background: "#f5f3ff",
+                          border: "1px dashed #a78bfa", borderRadius: 999, padding: "2px 6px", cursor: "pointer" }}>
+                        <option value="">+ school</option>
+                        {d.schools.filter(s => !(t.schoolIds ?? []).includes(s.id)).map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    {(t.schoolIds ?? []).length === 0 && d.schools.length === 0 && (
+                      <span style={{ fontSize: 11, color: "#aaa", fontWeight: 600 }}>district-wide</span>
+                    )}
                   </span>
                   <a href={`/api/admin/users/${t.id}/export`} style={{ fontSize: 12, fontWeight: 700, color: "#2563eb" }}>Export</a>
                   {t.role !== "district_admin" && (
