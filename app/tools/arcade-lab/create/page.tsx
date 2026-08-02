@@ -580,6 +580,24 @@ function CreateInner() {
     // re-bind to the freshly mounted canvas element on every mode switch
   }, [userId, gate, mode, clampView]);
 
+  // Mouse wheel pans the design canvas — scroll up/down (shift or trackpad
+  // for sideways) instead of hunting for arrow keys or the minimap.
+  // Native listener with passive:false — React root wheel handlers are
+  // passive, so preventDefault (stopping the page scroll) needs this.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (e: WheelEvent) => {
+      if (modeRef.current !== 'design') return;
+      e.preventDefault();
+      viewRef.current.x += e.shiftKey ? e.deltaY : e.deltaX;
+      viewRef.current.y += e.shiftKey ? 0 : e.deltaY;
+      clampView();
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [mode, clampView]);
+
   const toggleMute = useCallback(() => {
     setMutedState(m => { setMuted(!m); return !m; });
   }, []);
@@ -602,10 +620,19 @@ function CreateInner() {
 
   const newDefender = useCallback((shape: DefenderShape) => {
     const s = DEFENDER_SHAPES[shape];
-    if (!confirm(`Start a fresh Space Defender level? (${s.blurb}.) A whole different game: your ship vs a marching alien armada. Your current design will be replaced — your code blocks are kept.`)) return;
+    if (!confirm(`Start a fresh Space Defender level? (${s.blurb}.) It starts READY TO PLAY — ship, blaster, and win rules all wired. Remix from there!`)) return;
     dirtyRef.current = true;
     const fresh = starterDefenderLevel(shape);
-    setDef(d => ({ ...fresh, title: d.title, scripts: d.scripts }));
+    setDef(d => ({
+      ...fresh,
+      title: d.title,
+      // Resizing an existing defender level keeps the student's remixed code;
+      // coming from a platformer level installs the wired defender sheets
+      // (platformer-only sheets like coin/spike/enemy are kept either way)
+      scripts: genreOf(d) === 'defender' ? d.scripts : { ...d.scripts,
+        player: fresh.scripts.player, game: fresh.scripts.game, alien: fresh.scripts.alien,
+        brute: fresh.scripts.brute, bomber: fresh.scripts.bomber, ammo: fresh.scripts.ammo },
+    }));
     focusSpawn(fresh);
   }, [focusSpawn]);
 
@@ -958,8 +985,8 @@ function CreateInner() {
                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
                   💡 Test with ▶ Play — a good level <strong style={{ color: '#cbd5e1' }}>can be beaten</strong>.
                   {genre === 'defender'
-                    ? ' The armada marches faster as it shrinks — more aliens = a longer battle.'
-                    : isBigLevel ? ' Arrow keys pan the view; click the map below to jump.' : ' Use crystals to show players the way.'}
+                    ? ` The armada marches faster as it shrinks — more aliens = a longer battle.${isBigLevel ? ' Scroll to move the view.' : ''}`
+                    : isBigLevel ? ' Scroll, arrow keys, or the map below move the view.' : ' Use crystals to show players the way.'}
                   {genre !== 'defender' && coinsPlaced > 0 && ` (${coinsPlaced} crystal${coinsPlaced === 1 ? '' : 's'} placed)`}
                 </span>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -989,7 +1016,7 @@ function CreateInner() {
             {mode === 'code' && (
               <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
                 {genre === 'defender' ? (
-                  <>🧪 The full recipe: <strong style={{ color: '#cbd5e1' }}>Ship</strong> — wire keys to move and &quot;fire the blaster&quot;. <strong style={{ color: '#cbd5e1' }}>Alien</strong> — &quot;when a blaster hits me → disappear&quot;, &quot;when I reach the bottom → game over&quot;. <strong style={{ color: '#cbd5e1' }}>Game</strong> — &quot;when every alien is destroyed → win&quot;!</>
+                  <>🧪 Everything&apos;s already wired — remix it! Try: <strong style={{ color: '#cbd5e1' }}>Game → &quot;aliens march 🔥 FAST&quot;</strong>, a <strong style={{ color: '#cbd5e1' }}>&quot;shot limit&quot;</strong> plus ⚡ ammo drops in Design, or <strong style={{ color: '#cbd5e1' }}>🛡 armor</strong> on the Brute sheet.</>
                 ) : (
                   <>🧪 Try stacking guards: <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me&quot; → &quot;only if score is at least 5 ✦&quot; → &quot;only if 2 enemies defeated&quot; → &quot;win&quot;</strong> on the Goal sheet…
                   or a toll spring: <strong style={{ color: '#cbd5e1' }}>&quot;only if score is at least 1&quot; → &quot;change score by -1&quot; → &quot;launch&quot;</strong>!</>

@@ -280,7 +280,8 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           }
           break;
         case 'fire':
-          if (s.timeMs >= s.fireCooldownUntil && (s.ammo === null || s.ammo > 0)) {
+          // Defender-only: in a platformer nothing would move or draw the bolts
+          if (s.genre === 'defender' && s.timeMs >= s.fireCooldownUntil && (s.ammo === null || s.ammo > 0)) {
             s.fireCooldownUntil = s.timeMs + FIRE_COOLDOWN_MS;
             if (s.ammo !== null) s.ammo--;
             s.blasters.push({ x: p.x + PW / 2, y: p.y - 0.15 });

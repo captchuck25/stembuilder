@@ -345,6 +345,30 @@ export const STARTER_SCRIPTS: Record<ScriptOwner, string> = {
   alien: EMPTY_SHEET, brute: EMPTY_SHEET, bomber: EMPTY_SHEET, ammo: EMPTY_SHEET,
 };
 
+// Defender is the OPPOSITE philosophy from platformer Free Build: it's a
+// quick remix toy, not a blank studio (there's no mission unit teaching its
+// blocks). Fresh defender levels start FULLY WIRED and instantly playable —
+// students tweak the pace, armor, ammo, and win rules from a working game.
+export const DEFENDER_STARTER_SCRIPTS: Record<ScriptOwner, string> = {
+  ...STARTER_SCRIPTS,
+  player: `${X}
+<block type="arcade_when_key" x="16" y="16"><field name="KEY">left</field><next><block type="arcade_move"><field name="DIR">left</field></block></next></block>
+<block type="arcade_when_key" x="16" y="130"><field name="KEY">right</field><next><block type="arcade_move"><field name="DIR">right</field></block></next></block>
+<block type="arcade_when_key" x="16" y="244"><field name="KEY">a</field><next><block type="arcade_move"><field name="DIR">left</field></block></next></block>
+<block type="arcade_when_key" x="16" y="358"><field name="KEY">d</field><next><block type="arcade_move"><field name="DIR">right</field></block></next></block>
+<block type="arcade_when_key" x="16" y="472"><field name="KEY">space</field><next><block type="arcade_fire"></block></next></block>
+<block type="arcade_when_key" x="16" y="586"><field name="KEY">w</field><next><block type="arcade_fire"></block></next></block>
+</xml>`,
+  alien: DEFAULT_SCRIPTS.alien,
+  brute: DEFAULT_SCRIPTS.brute,
+  bomber: DEFAULT_SCRIPTS.bomber,
+  ammo: DEFAULT_SCRIPTS.ammo,
+  game: `${X}
+<block type="arcade_when_game_starts" x="16" y="16"><next><block type="arcade_set_lives"><field name="N">3</field><next><block type="arcade_set_pace"><field name="PACE">normal</field></block></next></block></next></block>
+<block type="arcade_when_aliens_cleared" x="16" y="200"><next><block type="arcade_win"></block></next></block>
+</xml>`,
+};
+
 // ── Templates ────────────────────────────────────────────────────────────────
 
 export function span(type: ObjectType, x0: number, x1: number, y: number): PlacedObject[] {
@@ -379,7 +403,7 @@ export const DEFENDER_SHAPES: Record<DefenderShape, { cols: number; rows: number
 };
 
 /** Fresh Space Defender arena: an alien armada up top, your ship below —
- *  and every sheet empty. Wire the fire button yourself, commander. */
+ *  fully wired and ready to play. Remix the rules, commander. */
 export function starterDefenderLevel(shape: DefenderShape = 'classic'): GameDef {
   const { cols, rows } = DEFENDER_SHAPES[shape];
   const objects: PlacedObject[] = [];
@@ -395,7 +419,7 @@ export function starterDefenderLevel(shape: DefenderShape = 'classic'): GameDef 
     cols,
     rows,
     objects,
-    scripts: { ...STARTER_SCRIPTS },
+    scripts: { ...DEFENDER_STARTER_SCRIPTS },
     genre: 'defender',
   };
 }
