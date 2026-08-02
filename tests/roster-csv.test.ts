@@ -88,4 +88,24 @@ describe('csvToRoster', () => {
     expect(data.students[0].email).toBeUndefined()
     expect(data.students[0].username).toBeUndefined()
   })
+
+  describe('teacher self-serve flavor (defaultTeacherEmail)', () => {
+    it('teacher_email column becomes optional; classes default to the uploader', () => {
+      const data = csvToRoster('class_name,first_name,last_name\nP1,Ada,Lovelace\n',
+        { defaultTeacherEmail: 'me@school.org' })
+      expect(data.parseErrors).toEqual([])
+      expect(data.classes[0].teacherEmail).toBe('me@school.org')
+    })
+
+    it('a present teacher_email cell still wins over the default', () => {
+      const data = csvToRoster('class_name,teacher_email,first_name,last_name\nP1,other@school.org,Ada,Lovelace\n',
+        { defaultTeacherEmail: 'me@school.org' })
+      expect(data.classes[0].teacherEmail).toBe('other@school.org')
+    })
+
+    it('without the option, a missing teacher_email column is still an error', () => {
+      const data = csvToRoster('class_name,first_name,last_name\nP1,Ada,Lovelace\n')
+      expect(data.parseErrors[0].message).toContain('teacher_email')
+    })
+  })
 })

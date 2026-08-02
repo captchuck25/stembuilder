@@ -17,6 +17,13 @@ export const CSV_TEMPLATE =
   'Period 1 - STEM,teacher@district.org,Ada,Lovelace,,ada.lovelace,Springfield Middle\n' +
   'Period 1 - STEM,teacher@district.org,Grace,Hopper,grace@student.district.org,,Springfield Middle\n'
 
+// Teacher self-serve flavor: no teacher_email column — every class belongs to
+// the uploading teacher (csvToRoster is called with their email as default).
+export const CSV_TEMPLATE_TEACHER =
+  'class_name,first_name,last_name,email,username\n' +
+  'Period 1 - STEM,Ada,Lovelace,,ada.lovelace\n' +
+  'Period 1 - STEM,Grace,Hopper,grace@student.district.org,\n'
+
 // ─── Minimal RFC-4180-ish parser (quotes, escaped quotes, CRLF) ──────────────
 
 export function parseCsv(text: string): string[][] {
@@ -70,7 +77,13 @@ const USERNAME_RE = /^[a-z0-9._-]{3,20}$/
 
 // ─── CSV → RosterData ────────────────────────────────────────────────────────
 
-export function csvToRoster(text: string): RosterData {
+export interface CsvOptions {
+  /** Teacher self-serve: classes without a teacher_email cell belong to this
+   *  email, and the teacher_email column itself becomes optional. */
+  defaultTeacherEmail?: string
+}
+
+export function csvToRoster(text: string, opts: CsvOptions = {}): RosterData {
   const parseErrors: RosterRowError[] = []
   const rows = parseCsv(text)
   if (rows.length === 0) {
@@ -83,9 +96,12 @@ export function csvToRoster(text: string): RosterData {
     const idx = headerCells.findIndex(h => aliases.includes(h))
     if (idx >= 0) col[key as keyof typeof HEADER_ALIASES] = idx
   }
-  for (const required of ['className', 'teacherEmail', 'firstName', 'lastName'] as const) {
-    if (col[required] === undefined) {
-      parseErrors.push({ row: 1, message: `Missing required column "${HEADER_ALIASES[required][0]}". Found: ${rows[0].join(', ')}` })
+  const required = opts.defaultTeacherEmail
+    ? (['className', 'firstName', 'lastName'] as const)
+    : (['className', 'teacherEmail', 'firstName', 'lastName'] as const)
+  for (const key of required) {
+    if (col[key] === undefined) {
+      parseErrors.push({ row: 1, message: `Missing required column "${HEADER_ALIASES[key][0]}". Found: ${rows[0].join(', ')}` })
     }
   }
   if (parseErrors.length > 0) {
@@ -106,7 +122,7 @@ export function csvToRoster(text: string): RosterData {
     const r = rows[i]
     const rowNum = i + 1
     const className = cell(r, 'className')
-    const teacherEmail = cell(r, 'teacherEmail').toLowerCase()
+    const teacherEmail = (cell(r, 'teacherEmail') || opts.defaultTeacherEmail || '').toLowerCase()
     const firstName = cell(r, 'firstName')
     const lastName = cell(r, 'lastName')
     const email = cell(r, 'email').toLowerCase()
