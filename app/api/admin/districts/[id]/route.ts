@@ -24,8 +24,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const [schoolsRes, teachersRes, adminsRes, licenseRes, studentCountRes, classCountRes] = await Promise.all([
     ctx.db.from('schools').select('id, name, created_at')
       .eq('district_id', id).is('deleted_at', null).order('name'),
-    ctx.db.from('profiles').select('id, name, email, school_id, created_at')
-      .eq('district_id', id).eq('role', 'teacher').is('deleted_at', null).order('name'),
+    // District admins who also teach appear here too — they can own rostered
+    // classes (the importer accepts teacher-rank and above).
+    ctx.db.from('profiles').select('id, name, email, school_id, created_at, role')
+      .eq('district_id', id).in('role', ['teacher', 'district_admin']).is('deleted_at', null).order('name'),
     ctx.db.from('profiles').select('id, name, email, created_at')
       .eq('district_id', id).eq('role', 'district_admin').is('deleted_at', null).order('name'),
     ctx.db.from('licenses').select('type, seats, starts_at, ends_at, status')

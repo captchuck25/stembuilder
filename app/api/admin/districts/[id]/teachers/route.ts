@@ -50,7 +50,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (existing.role === 'student') {
       return NextResponse.json({ error: 'That email belongs to a student account.' }, { status: 400 })
     }
-    if (isAnyAdmin(existing.role)) {
+    // This district's own admin already outranks teacher (and can own rostered
+    // classes) — just confirm, optionally updating their school. Foreign
+    // admins stay off-limits.
+    if (isAnyAdmin(existing.role) && !(existing.role === 'district_admin' && existing.district_id === districtId)) {
       return NextResponse.json({ error: 'That email belongs to an admin account.' }, { status: 400 })
     }
     if (existing.district_id && existing.district_id !== districtId) {
