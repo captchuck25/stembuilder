@@ -22,8 +22,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!district) return NextResponse.json({ error: 'District not found' }, { status: 404 })
 
   let query = ctx.db.from('profiles')
-    .select('id, name, email, username, school_id, account_origin, created_at')
-    .eq('district_id', id).eq('role', role).is('deleted_at', null)
+    .select('id, name, email, username, school_id, account_origin, created_at, role')
+    .eq('district_id', id)
+    // Teaching district admins count as teachers (they can own classes).
+    .in('role', role === 'teacher' ? ['teacher', 'district_admin'] : [role])
+    .is('deleted_at', null)
     .order('name')
     .limit(500)
   if (schoolId) query = query.eq('school_id', schoolId)

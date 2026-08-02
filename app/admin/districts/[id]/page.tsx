@@ -32,6 +32,7 @@ interface SchoolRow { id: string; name: string; teacherCount: number; studentCou
 interface PersonRow {
   id: string; name: string; email: string | null; username?: string | null;
   school_id?: string | null; account_origin?: string | null; created_at: string;
+  role?: string;
   classCount?: number; enrollmentCount?: number;
 }
 interface RosterResult {
@@ -597,14 +598,22 @@ export default function DistrictDetailPage() {
                     <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{t.name}</div>
                     <div style={{ fontSize: 11, color: "#888" }}>{t.email}</div>
                   </div>
+                  {t.role === "district_admin" && (
+                    <span style={{ fontSize: 11, color: "#b45309", fontWeight: 700, background: "#fef3c7",
+                      padding: "2px 8px", borderRadius: 999 }}>
+                      District Admin
+                    </span>
+                  )}
                   <span style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, background: "#ede9fe",
                     padding: "2px 8px", borderRadius: 999 }}>
                     {d.schools.find(s => s.id === t.school_id)?.name ?? "No school"}
                   </span>
                   <a href={`/api/admin/users/${t.id}/export`} style={{ fontSize: 12, fontWeight: 700, color: "#2563eb" }}>Export</a>
-                  <button onClick={() => deleteUser(t, "teacher")} disabled={busy === t.id} style={BTN_DANGER}>
-                    {busy === t.id ? "…" : "Remove"}
-                  </button>
+                  {t.role !== "district_admin" && (
+                    <button onClick={() => deleteUser(t, "teacher")} disabled={busy === t.id} style={BTN_DANGER}>
+                      {busy === t.id ? "…" : "Remove"}
+                    </button>
+                  )}
                 </div>
               ))}
             </>)}
