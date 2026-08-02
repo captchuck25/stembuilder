@@ -169,6 +169,16 @@ const ARCADE_DEFS = [
     tooltip: 'Snap under "when the game starts" — without this block, shots are unlimited. Add ⚡ pickups so players can restock!',
   },
   {
+    type: 'arcade_damage',
+    message0: '💔 damage the ship: %1',
+    args0: [{
+      type: 'field_dropdown', name: 'AMT',
+      options: [['a full life', '1'], ['half a life', '0.5'], ['a quarter life', '0.25']],
+    }],
+    previousStatement: null, nextStatement: null, colour: DANGER,
+    tooltip: 'Chip the ship\'s hearts — smaller damage keeps the battle going (no respawn, just a hit flash)',
+  },
+  {
     type: 'arcade_add_shots',
     message0: 'add %1 shots 🔫',
     args0: [{
@@ -337,9 +347,9 @@ const TOOLBOX_BLOCKS: Record<ScriptOwner, string[]> = {
   spring: ['arcade_when_landed', 'arcade_launch', 'arcade_bounce_player', 'arcade_change_score', 'arcade_require_score', 'arcade_require_kills', 'arcade_hurt_player', 'arcade_disappear', 'arcade_play_sound'],
   flag:   ['arcade_when_touch_me', 'arcade_require_score', 'arcade_require_kills', 'arcade_win', 'arcade_change_score', 'arcade_disappear_all', 'arcade_play_sound'],
   game:   ['arcade_when_game_starts', 'arcade_when_score', 'arcade_when_kills', 'arcade_disappear_all', 'arcade_set_lives', 'arcade_set_score', 'arcade_win', 'arcade_game_over', 'arcade_play_sound'],
-  alien:  ['arcade_when_blaster_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_armor', 'arcade_disappear', 'arcade_change_score', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
-  brute:  ['arcade_when_blaster_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_armor', 'arcade_disappear', 'arcade_change_score', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
-  bomber: ['arcade_when_blaster_hits', 'arcade_when_bomb_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_armor', 'arcade_disappear', 'arcade_change_score', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
+  alien:  ['arcade_when_blaster_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_armor', 'arcade_disappear', 'arcade_change_score', 'arcade_damage', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
+  brute:  ['arcade_when_blaster_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_armor', 'arcade_disappear', 'arcade_change_score', 'arcade_damage', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
+  bomber: ['arcade_when_blaster_hits', 'arcade_when_bomb_hits', 'arcade_when_reach_bottom', 'arcade_when_touch_ship', 'arcade_armor', 'arcade_disappear', 'arcade_change_score', 'arcade_damage', 'arcade_hurt_player', 'arcade_game_over', 'arcade_require_score', 'arcade_play_sound'],
   ammo:   ['arcade_when_caught', 'arcade_add_shots', 'arcade_disappear', 'arcade_change_score', 'arcade_play_sound'],
 };
 
@@ -397,6 +407,7 @@ function chainToActions(block: Blockly.Block | null): ArcadeAction[] {
       case 'arcade_set_pace': actions.push({ kind: 'setPace', pace: (b.getFieldValue('PACE') as 'slow' | 'normal' | 'fast') || 'normal' }); break;
       case 'arcade_shot_limit': actions.push({ kind: 'setAmmo', n: Number(b.getFieldValue('N')) || 10 }); break;
       case 'arcade_add_shots': actions.push({ kind: 'addAmmo', n: Number(b.getFieldValue('N')) || 5 }); break;
+      case 'arcade_damage': actions.push({ kind: 'damage', amt: Number(b.getFieldValue('AMT')) || 1 }); break;
     }
     b = b.getNextBlock();
   }

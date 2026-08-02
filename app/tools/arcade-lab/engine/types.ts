@@ -99,7 +99,9 @@ export type ArcadeAction =
   | { kind: 'setPace'; pace: 'slow' | 'normal' | 'fast' }
   // Defender: limited blaster shots (setAmmo turns the limit on)
   | { kind: 'setAmmo'; n: number }
-  | { kind: 'addAmmo'; n: number };
+  | { kind: 'addAmmo'; n: number }
+  // Defender: partial damage — chip the ship by 1 / ½ / ¼ of a life
+  | { kind: 'damage'; amt: number };
 
 export interface CompiledRules {
   /** Player: run while the key is held */
@@ -252,10 +254,14 @@ export function summarizeRules(rules: CompiledRules, def?: GameDef): RulesSummar
   if (scriptsContain(rules.alienBottom, 'gameOver') || scriptsContain(rules.bruteBottom, 'gameOver') || scriptsContain(rules.bomberBottom, 'gameOver')) {
     danger.push("👽 Don't let the aliens reach the bottom!");
   }
-  if (scriptsContain(rules.alienShip, 'hurtPlayer') || scriptsContain(rules.bruteShip, 'hurtPlayer') || scriptsContain(rules.bomberShip, 'hurtPlayer')) {
+  if (scriptsContain(rules.alienShip, 'hurtPlayer') || scriptsContain(rules.bruteShip, 'hurtPlayer') || scriptsContain(rules.bomberShip, 'hurtPlayer')
+    || scriptsContain(rules.alienShip, 'damage') || scriptsContain(rules.bruteShip, 'damage') || scriptsContain(rules.bomberShip, 'damage')) {
     danger.push('👽 Alien contact hurts your ship');
   }
-  if (scriptsContain(rules.bombHit, 'hurtPlayer')) danger.push('💣 Dodge the falling bombs!');
+  if (scriptsContain(rules.bombHit, 'hurtPlayer') || scriptsContain(rules.bombHit, 'damage')) danger.push('💣 Dodge the falling bombs!');
+  if (scriptsContain(rules.alienBottom, 'damage') || scriptsContain(rules.bruteBottom, 'damage') || scriptsContain(rules.bomberBottom, 'damage')) {
+    danger.push('👽 Aliens that land chip away at your ship');
+  }
   const armor = Math.max(rules.alienToughness, rules.bruteToughness, rules.bomberToughness);
   if (armor > 1) danger.push(`🛡 Armored aliens take ${armor} blaster hits`);
   for (const script of rules.gameStart) {

@@ -208,6 +208,22 @@ function overlaps(
   return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
+/** Partial damage (defender): chip hearts in place — no respawn teleport,
+ *  no bomb-sky reset, just a hit flash + brief invulnerability. */
+function damageShip(s: GameState, events: GameEvent[], amt: number) {
+  const p = s.player;
+  if (s.timeMs < p.invulnUntil) return;
+  // quantize to quarter-hearts so floats can't drift past zero forever
+  s.lives = Math.round((s.lives - amt) * 4) / 4;
+  if (s.lives <= 0) {
+    s.status = 'lost';
+    events.push({ type: 'lose', x: p.x, y: p.y });
+    return;
+  }
+  events.push({ type: 'hurt', x: p.x + PW / 2, y: p.y + PH / 2 });
+  p.invulnUntil = s.timeMs + INVULN_MS;
+}
+
 function hurt(s: GameState, events: GameEvent[]) {
   const p = s.player;
   if (s.timeMs < p.invulnUntil) return;
@@ -295,6 +311,7 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
         case 'setScore': s.score = Math.max(0, a.n); break;
         case 'setLives': s.lives = a.n; break;
         case 'hurtPlayer': hurt(s, events); break;
+        case 'damage': damageShip(s, events, a.amt); break;
         case 'win':
           s.status = 'won';
           events.push({ type: 'win', x: p.x + PW / 2, y: p.y + PH / 2 });

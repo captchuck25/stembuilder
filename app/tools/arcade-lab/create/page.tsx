@@ -596,7 +596,9 @@ function CreateInner() {
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, [mode, clampView]);
+    // `gate` matters: on first render the access gate screen has no canvas —
+    // this must re-bind once the editor actually mounts
+  }, [gate, mode, clampView]);
 
   const toggleMute = useCallback(() => {
     setMutedState(m => { setMuted(!m); return !m; });

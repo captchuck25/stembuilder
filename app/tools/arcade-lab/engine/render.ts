@@ -975,11 +975,23 @@ function drawHUD(ctx: CanvasRenderingContext2D, s: GameState, w: number) {
   ctx.save();
   ctx.font = 'bold 17px sans-serif';
   ctx.textBaseline = 'middle';
-  // lives
+  // lives — hearts support quarter-fills (defender partial damage)
   ctx.textAlign = 'left';
-  let hearts = '';
-  for (let i = 0; i < 3; i++) hearts += i < s.lives ? '❤️' : '🖤';
-  ctx.fillText(hearts, 12, 20);
+  for (let i = 0; i < 3; i++) {
+    const hx = 12 + i * 21;
+    const frac = Math.max(0, Math.min(1, s.lives - i));
+    if (frac >= 1) ctx.fillText('❤️', hx, 20);
+    else if (frac <= 0) ctx.fillText('🖤', hx, 20);
+    else {
+      ctx.fillText('🖤', hx, 20);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(hx, 6, 19 * frac, 28);
+      ctx.clip();
+      ctx.fillText('❤️', hx, 20);
+      ctx.restore();
+    }
+  }
   // defender: aliens-remaining counter; platformer: defeated-enemies counter
   if (s.genre === 'defender') {
     const left = s.entities.filter(e => (e.type === 'alien' || e.type === 'brute' || e.type === 'bomber') && e.alive).length;
