@@ -5,8 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import SiteHeader from '@/app/components/SiteHeader';
 import {
-  Backdrop, CompiledRules, DEMO_LEVEL, GameDef, LevelShape, ObjectType, ScriptOwner,
-  TILE, LEVEL_SHAPES, VIEW_W, VIEW_H, emptyRules, starterLevel, validDims, withScripts,
+  Backdrop, CompiledRules, DEMO_LEVEL, DefenderShape, GameDef, LevelShape, ObjectType, ScriptOwner,
+  TILE, DEFENDER_SHAPES, LEVEL_SHAPES, VIEW_W, VIEW_H, emptyRules, genreOf, starterDefenderLevel, starterLevel, validDims, withScripts,
 } from '../engine/types';
 import { initGame, stepGame, emptyInput, GameState, InputState, KEY_LOOKUP } from '../engine/physics';
 import { renderGame, renderDesign, renderMinimap, cameraFor, DesignHover } from '../engine/render';
@@ -43,6 +43,11 @@ function draftKey(slot: number) {
   return slot === 0 ? 'arcade_lab_draft' : `arcade_lab_draft_${slot}`;
 }
 function shapeName(d: GameDef): string {
+  if (genreOf(d) === 'defender') {
+    if (d.cols * TILE > VIEW_W) return 'Defender · Wide';
+    if (d.rows * TILE > VIEW_H) return 'Defender · Tall';
+    return 'Defender';
+  }
   if (d.cols * TILE > VIEW_W) return 'Long';
   if (d.rows * TILE > VIEW_H) return 'Tall';
   return 'Classic';
@@ -64,11 +69,34 @@ const PALETTE: { tool: Tool; icon: string; label: string; hint: string }[] = [
   { tool: 'eraser',   icon: '🧽', label: 'Eraser',  hint: 'Remove anything (or right-click)' },
 ];
 
+// Space Defender swaps in its own palette + code rail: an alien armada,
+// your saucer's start spot, and three sheets (Ship / Alien / Game)
+const DEFENDER_PALETTE: { tool: Tool; icon: string; label: string; hint: string }[] = [
+  { tool: 'alien',  icon: '👽', label: 'Alien',  hint: 'Joins the marching armada — place them in rows!' },
+  { tool: 'brute',  icon: '🤖', label: 'Brute',  hint: 'The armored one — give it 🛡 armor blocks so it takes extra hits' },
+  { tool: 'bomber', icon: '💣', label: 'Bomber', hint: 'Drops bombs while it marches — code what a bomb hit does!' },
+  { tool: 'ammo',   icon: '⚡', label: 'Ammo',   hint: 'Falls from where you place it — catch it to restock limited shots' },
+  { tool: 'spawn',  icon: '🛸', label: 'Ship',   hint: 'Where your ship starts (one per level)' },
+  { tool: 'eraser', icon: '🧽', label: 'Eraser', hint: 'Remove anything (or right-click)' },
+];
+
+const DEFENDER_OWNERS: { owner: ScriptOwner; icon: string; label: string; hint: string }[] = [
+  { owner: 'player', icon: '🛸', label: 'Ship',   hint: 'Wire the keyboard — steer left/right and FIRE the blaster!' },
+  { owner: 'alien',  icon: '👽', label: 'Alien',  hint: 'Blaster hits, reaching the bottom, touching your ship — you make the rules.' },
+  { owner: 'brute',  icon: '🤖', label: 'Brute',  hint: 'The armored one — add "🛡 I take 2 blaster hits" and make it worth more points.' },
+  { owner: 'bomber', icon: '💣', label: 'Bomber', hint: 'Its bombs fall on their own — "when my bomb hits the ship" decides the damage.' },
+  { owner: 'ammo',   icon: '⚡', label: 'Ammo',   hint: 'What happens when the ship catches a falling pickup? (Try: add shots!)' },
+  { owner: 'game',   icon: '🎮', label: 'Game',   hint: 'March pace, shot limit, lives — and the win when every alien is destroyed.' },
+];
+
 const OWNERS: { owner: ScriptOwner; icon: string; label: string; hint: string }[] = [
   { owner: 'player', icon: '🤖', label: 'Player',  hint: 'Wire the keyboard — how does the player move?' },
   { owner: 'coin',   icon: '🪙', label: 'Crystal', hint: 'What happens when the player touches a crystal?' },
   { owner: 'spike',  icon: '🔺', label: 'Spikes',  hint: 'What do spikes do to the player?' },
-  { owner: 'enemy',  icon: '👾', label: 'Enemy',   hint: 'Rules for ALL enemies — walkers, spiky, and flyers. (Spiky treats every touch as a run-in.)' },
+  { owner: 'enemy',  icon: '👾', label: 'Enemy',   hint: 'The walker — head-stomps and side-bumps, you make the rules.' },
+  { owner: 'spiky',  icon: '🦔', label: 'Spiky',   hint: 'ANY touch counts (there is no safe stomp) — write what happens.' },
+  { owner: 'flyer',  icon: '🦇', label: 'Flyer',   hint: 'Head-stomps and side-bumps, up in the air.' },
+  { owner: 'spring', icon: '🌀', label: 'Spring',  hint: 'What happens when the player lands on it? (Try: launch!)' },
   { owner: 'flag',   icon: '🚩', label: 'Goal',    hint: 'What does reaching the flag do?' },
   { owner: 'game',   icon: '🎮', label: 'Game',    hint: 'Starting rules and score goals.' },
 ];
@@ -80,7 +108,7 @@ const BACKDROPS: { id: Backdrop; label: string; swatch: string }[] = [
   { id: 'space', label: 'Space', swatch: 'linear-gradient(135deg,#141B33,#5A6888)' },
 ];
 
-const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap } as const;
+const SOUND_FN = { chime: playCollect, pop: playStomp, thud: playBump, zap: playZap, boing: playBoing } as const;
 
 function loadLocalDraft(slot: number): GameDef | null {
   try {
@@ -189,9 +217,24 @@ function CreateInner() {
   const miniW = Math.round(def.cols * TILE * miniScale);
   const miniH = Math.round(def.rows * TILE * miniScale);
 
+  const genre = genreOf(def);
+  const paletteList = genre === 'defender' ? DEFENDER_PALETTE : PALETTE;
+  const ownersList = genre === 'defender' ? DEFENDER_OWNERS : OWNERS;
+
   const hasSpawn = def.objects.some(o => o.type === 'spawn');
   const hasFlag = def.objects.some(o => o.type === 'flag');
-  const playable = hasSpawn && hasFlag;
+  const hasAliens = def.objects.some(o => o.type === 'alien');
+  const playable = genre === 'defender' ? hasSpawn && hasAliens : hasSpawn && hasFlag;
+  const playableHint = genre === 'defender'
+    ? 'Your level needs a Ship start and at least one Alien'
+    : 'Your level needs a Start and a Goal first';
+
+  // Switching genres invalidates the selected tool / code sheet — snap back
+  useEffect(() => {
+    if (!paletteList.some(p => p.tool === tool)) setTool(genre === 'defender' ? 'alien' : 'platform');
+    if (!ownersList.some(o => o.owner === owner)) setOwner('player');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genre]);
 
   // ── Slot persistence ────────────────────────────────────────────────────────
   const fetchCloudSlot = useCallback(async (s: number): Promise<GameDef | null> => {
@@ -479,8 +522,9 @@ function CreateInner() {
             } else if (ev.type === 'needScore') {
               playBump();
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 6)];
-            } else if (ev.type === 'spring') {
-              playBoing();
+            } else if (ev.type === 'hit') {
+              playStomp();
+              particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFFFFF', 5)];
             } else if (ev.type === 'poof') {
               particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#FFD54A', 10)];
             } else if (ev.type === 'hurt' || ev.type === 'lose') {
@@ -523,6 +567,7 @@ function CreateInner() {
           modeRef.current === 'play' && stateRef.current
             ? { x: stateRef.current.player.x, y: stateRef.current.player.y }
             : undefined,
+          modeRef.current === 'play' && stateRef.current ? stateRef.current.entities : undefined,
         );
       }
 
@@ -551,7 +596,16 @@ function CreateInner() {
     if (!confirm(`Start a fresh ${s.label} level? (${s.blurb}.) Your current design will be replaced — your code blocks are kept.`)) return;
     dirtyRef.current = true;
     const fresh = starterLevel(shape);
-    setDef(d => ({ ...fresh, title: d.title, backdrop: d.backdrop, scripts: d.scripts }));
+    setDef(d => ({ ...fresh, title: d.title, backdrop: genreOf(d) === 'defender' ? fresh.backdrop : d.backdrop, scripts: d.scripts }));
+    focusSpawn(fresh);
+  }, [focusSpawn]);
+
+  const newDefender = useCallback((shape: DefenderShape) => {
+    const s = DEFENDER_SHAPES[shape];
+    if (!confirm(`Start a fresh Space Defender level? (${s.blurb}.) A whole different game: your ship vs a marching alien armada. Your current design will be replaced — your code blocks are kept.`)) return;
+    dirtyRef.current = true;
+    const fresh = starterDefenderLevel(shape);
+    setDef(d => ({ ...fresh, title: d.title, scripts: d.scripts }));
     focusSpawn(fresh);
   }, [focusSpawn]);
 
@@ -594,7 +648,7 @@ function CreateInner() {
   const publishUI = (
     <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       <button onClick={publishGame} disabled={publish.state === 'busy' || !playable}
-        title={playable ? 'Share this game to your class arcade (republishing replaces your old game and resets its leaderboard)' : 'Your level needs a Start and a Goal first'}
+        title={playable ? 'Share this game to your class arcade (republishing replaces your old game and resets its leaderboard)' : playableHint}
         style={{ padding: '7px 16px', borderRadius: 10, fontWeight: 800, fontSize: 12,
           background: '#FFD54A', color: '#0f172a', border: 'none',
           cursor: publish.state === 'busy' || !playable ? 'not-allowed' : 'pointer', opacity: publish.state === 'busy' ? 0.6 : 1 }}>
@@ -641,7 +695,7 @@ function CreateInner() {
 
   const coinsPlaced = def.objects.filter(o => o.type === 'coin').length;
   const stateNow = stateRef.current;
-  const ownerInfo = OWNERS.find(o => o.owner === owner)!;
+  const ownerInfo = ownersList.find(o => o.owner === owner) ?? ownersList[0];
 
   const SEG = (active: boolean): React.CSSProperties => ({
     padding: '9px 20px', fontSize: 14, fontWeight: 800, cursor: 'pointer', border: 'none',
@@ -666,7 +720,7 @@ function CreateInner() {
                 <button style={SEG(mode === 'design')} onClick={enterDesign}>🔨 Design</button>
                 <button style={SEG(mode === 'code')} onClick={enterCode}>🧩 Code</button>
                 <button style={SEG(mode === 'play')} onClick={enterPlay} disabled={!playable}
-                  title={playable ? 'Test your game' : `Your level needs ${!hasSpawn ? 'a Start' : ''}${!hasSpawn && !hasFlag ? ' and ' : ''}${!hasFlag ? 'a Goal flag' : ''}`}>
+                  title={playable ? 'Test your game' : playableHint}>
                   ▶ Play{!playable ? ' 🔒' : ''}
                 </button>
               </div>
@@ -792,7 +846,7 @@ function CreateInner() {
             {/* Design palette */}
             {mode === 'design' && (
               <div style={{ ...CARD, padding: 10, display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                {PALETTE.map(p => (
+                {paletteList.map(p => (
                   <button key={p.tool} onClick={() => setTool(p.tool)} title={p.hint}
                     style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, cursor: 'pointer', width: 130, textAlign: 'left',
                       background: tool === p.tool ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.05)',
@@ -807,7 +861,7 @@ function CreateInner() {
             {/* Code rail */}
             {mode === 'code' && (
               <div style={{ ...CARD, padding: 10, display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
-                {OWNERS.map(o => (
+                {ownersList.map(o => (
                   <button key={o.owner} onClick={() => setOwner(o.owner)} title={o.hint}
                     style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 10, cursor: 'pointer', width: 130, textAlign: 'left',
                       background: owner === o.owner ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.05)',
@@ -856,7 +910,9 @@ function CreateInner() {
                       </div>
                       <div style={{ fontSize: 14, color: '#6b7280', marginTop: 4 }}>
                         {status === 'won'
-                          ? `⏱ ${((stateNow?.timeMs ?? 0) / 1000).toFixed(2)}s — Crystals: ${stateNow?.score ?? 0} / ${stateNow?.coinsTotal ?? 0}${stateNow && stateNow.score === stateNow.coinsTotal && stateNow.coinsTotal > 0 ? ' — all of them!' : ''}`
+                          ? genre === 'defender'
+                            ? `⏱ ${((stateNow?.timeMs ?? 0) / 1000).toFixed(2)}s — invasion stopped! Score: ${stateNow?.score ?? 0}`
+                            : `⏱ ${((stateNow?.timeMs ?? 0) / 1000).toFixed(2)}s — Crystals: ${stateNow?.score ?? 0} / ${stateNow?.coinsTotal ?? 0}${stateNow && stateNow.score === stateNow.coinsTotal && stateNow.coinsTotal > 0 ? ' — all of them!' : ''}`
                           : 'Tweak the design or the rules and try again.'}
                       </div>
                       <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'center' }}>
@@ -884,8 +940,9 @@ function CreateInner() {
                 </div>
                 <div style={{ flex: 1 }}>
                   <ArcadeWorkspace
-                    key={owner}
+                    key={`${owner}-${genre}`}
                     owner={owner}
+                    genre={genre}
                     xml={def.scripts[owner] ?? ''}
                     onXmlChange={xml => setScriptXml(owner, xml)}
                   />
@@ -900,8 +957,10 @@ function CreateInner() {
               <>
                 <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
                   💡 Test with ▶ Play — a good level <strong style={{ color: '#cbd5e1' }}>can be beaten</strong>.
-                  {isBigLevel ? ' Arrow keys pan the view; click the map below to jump.' : ' Use crystals to show players the way.'}
-                  {coinsPlaced > 0 && ` (${coinsPlaced} crystal${coinsPlaced === 1 ? '' : 's'} placed)`}
+                  {genre === 'defender'
+                    ? ' The armada marches faster as it shrinks — more aliens = a longer battle.'
+                    : isBigLevel ? ' Arrow keys pan the view; click the map below to jump.' : ' Use crystals to show players the way.'}
+                  {genre !== 'defender' && coinsPlaced > 0 && ` (${coinsPlaced} crystal${coinsPlaced === 1 ? '' : 's'} placed)`}
                 </span>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
                   {publishUI}
@@ -917,13 +976,24 @@ function CreateInner() {
                       {sh === 'classic' ? '⬜' : sh === 'long' ? '↔️' : '↕️'} {LEVEL_SHAPES[sh].label}
                     </button>
                   ))}
+                  {(Object.keys(DEFENDER_SHAPES) as DefenderShape[]).map(sh => (
+                    <button key={sh} onClick={() => newDefender(sh)} title={`Space Defender — ${DEFENDER_SHAPES[sh].blurb}`}
+                      style={{ padding: '7px 12px', borderRadius: 10, fontWeight: 700, fontSize: 12,
+                        background: 'rgba(34,197,94,0.12)', color: '#86efac', border: '1px solid rgba(34,197,94,0.4)', cursor: 'pointer' }}>
+                      🛸 {sh === 'classic' ? 'Defender' : sh === 'wide' ? '↔️ Wide' : '↕️ Tall'}
+                    </button>
+                  ))}
                 </div>
               </>
             )}
             {mode === 'code' && (
               <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
-                🧪 Try experiments: lock your goal with <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me with at least 5 ✦&quot;</strong> on the Goal sheet…
-                make crystals worth <strong style={{ color: '#cbd5e1' }}>-1</strong>… add <strong style={{ color: '#cbd5e1' }}>&quot;when the score reaches 5 → win&quot;</strong> for a flag-free victory!
+                {genre === 'defender' ? (
+                  <>🧪 The full recipe: <strong style={{ color: '#cbd5e1' }}>Ship</strong> — wire keys to move and &quot;fire the blaster&quot;. <strong style={{ color: '#cbd5e1' }}>Alien</strong> — &quot;when a blaster hits me → disappear&quot;, &quot;when I reach the bottom → game over&quot;. <strong style={{ color: '#cbd5e1' }}>Game</strong> — &quot;when every alien is destroyed → win&quot;!</>
+                ) : (
+                  <>🧪 Try stacking guards: <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me&quot; → &quot;only if score is at least 5 ✦&quot; → &quot;only if 2 enemies defeated&quot; → &quot;win&quot;</strong> on the Goal sheet…
+                  or a toll spring: <strong style={{ color: '#cbd5e1' }}>&quot;only if score is at least 1&quot; → &quot;change score by -1&quot; → &quot;launch&quot;</strong>!</>
+                )}
               </span>
             )}
             {mode === 'play' && (

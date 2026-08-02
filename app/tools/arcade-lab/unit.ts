@@ -5,7 +5,7 @@
 
 import {
   ArcadeAction, Backdrop, CompiledRules, GameDef, PlacedObject, ScriptOwner,
-  COLS, ROWS, DEFAULT_SCRIPTS, span,
+  COLS, ROWS, DEFAULT_SCRIPTS, STARTER_SCRIPTS, span,
 } from './engine/types';
 
 const X = '<xml xmlns="https://developers.google.com/blockly/xml">';
@@ -37,7 +37,7 @@ function gameWinAtScore(n: number) {
 // ── Mission + check types ────────────────────────────────────────────────────
 
 export interface Requirement {
-  bucket: 'keys' | 'touchCoin' | 'touchSpike' | 'touchFlag' | 'enemyTop' | 'enemySide' | 'gameStart' | 'scoreRules';
+  bucket: 'keys' | 'touchCoin' | 'touchSpike' | 'touchFlag' | 'enemyTop' | 'enemySide' | 'spikyTouch' | 'flyerTop' | 'flyerSide' | 'springLand' | 'gameStart' | 'scoreRules' | 'killRules' | 'touchFlagKills';
   kind: ArcadeAction['kind'];
   min?: number;
   max?: number;
@@ -51,6 +51,9 @@ export interface CapstoneSpec {
   minCoins: number;
   minSpikes: number;
   minEnemies: number;
+  minSprings?: number;
+  minSpiky?: number;
+  minFlyers?: number;
 }
 
 export interface ArcadeMission {
@@ -252,10 +255,111 @@ export const ARCADE_MISSIONS: ArcadeMission[] = [
     backdrop: 'hills',
     objects: [...ground(), { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 }],
     scripts: scriptsWith({}),
-    editableOwners: ['player', 'coin', 'spike', 'enemy', 'flag', 'game'],
+    editableOwners: ['player', 'coin', 'spike', 'enemy', 'spiky', 'flyer', 'spring', 'flag', 'game'],
     designEditable: true,
     requirements: [],
     capstone: { minCoins: 3, minSpikes: 1, minEnemies: 1 },
+  },
+];
+
+// ── Power Pack (Missions II) — unlocked after certification ──────────────────
+// Teaches the Phase B toolbox: springs/launch, spiky, flyers, toughness, kill
+// gates. Stored separately (progress level_idx 3) so pack-1 indexes never move.
+
+const ENEMY_TOUGH_2 = `${X}
+<block type="arcade_when_stomped" x="16" y="16"><next><block type="arcade_disappear"><next><block type="arcade_bounce_player"><next><block type="arcade_play_sound"><field name="SOUND">pop</field></block></next></block></next></block></next></block>
+<block type="arcade_when_touch_side" x="16" y="200"><next><block type="arcade_hurt_player"><next><block type="arcade_play_sound"><field name="SOUND">thud</field></block></next></block></next></block>
+<block type="arcade_when_game_starts" x="360" y="16"><next><block type="arcade_toughness"><field name="N">2</field></block></next></block>
+</xml>`;
+
+export const ARCADE_MISSIONS_2: ArcadeMission[] = [
+  {
+    title: 'Spring Loaded',
+    brief: 'That wall is 5 blocks tall — no jump clears it. The spring in front of it does NOTHING, because its sheet is empty. Write the spring rule: when the player lands on it, LAUNCH them. Pick a power that clears the wall!',
+    hint: 'Spring sheet: "when the player lands on me" → "launch the player 🌀". 2× power clears this wall — what would 4× do?',
+    backdrop: 'hills',
+    objects: [
+      ...ground(),
+      { type: 'platform', x: 10, y: 10 }, { type: 'platform', x: 10, y: 9 }, { type: 'platform', x: 10, y: 8 },
+      { type: 'platform', x: 10, y: 7 }, { type: 'platform', x: 10, y: 6 },
+      { type: 'spring', x: 8, y: 10 },
+      { type: 'coin', x: 10, y: 4 },
+      { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 },
+    ],
+    scripts: scriptsWith({ spring: EMPTY }),
+    editableOwners: ['spring'],
+    designEditable: false,
+    requirements: [
+      { bucket: 'springLand', kind: 'launch', label: 'The spring must launch the player' },
+    ],
+  },
+  {
+    title: 'Cactus Crossing',
+    brief: 'A spiky is pacing the path — and right now it is completely harmless, which is no fun. Spiky has only ONE event hat, because there is NO safe way to stomp it. Make any touch hurt, then get past it the honest way.',
+    hint: 'Spiky sheet: "when the player touches me" → "hurt the player". Then time your jump OVER it — never onto it!',
+    backdrop: 'cave',
+    objects: [
+      ...ground(),
+      { type: 'spiky', x: 9, y: 10 },
+      { type: 'coin', x: 6, y: 10 }, { type: 'coin', x: 13, y: 10 },
+      { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 },
+    ],
+    scripts: scriptsWith({ spiky: EMPTY }),
+    editableOwners: ['spiky'],
+    designEditable: false,
+    requirements: [
+      { bucket: 'spikyTouch', kind: 'hurtPlayer', label: 'Spiky must hurt on ANY touch' },
+    ],
+  },
+  {
+    title: 'Air Patrol',
+    brief: 'A flyer swoops over the path in a wave — but its sheet is empty, so it is just decoration. Give it BOTH rules: a head-stomp squashes it, a side-hit hurts. Then cross — stomp it mid-air or slip under its wave.',
+    hint: 'Flyer sheet has two hats, just like a walker: "lands on my head" → disappear + bounce; "runs into me" → hurt.',
+    backdrop: 'space',
+    objects: [
+      ...ground(),
+      { type: 'flyer', x: 10, y: 9 },
+      { type: 'coin', x: 8, y: 10 }, { type: 'coin', x: 12, y: 10 },
+      { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 },
+    ],
+    scripts: scriptsWith({ flyer: EMPTY }),
+    editableOwners: ['flyer'],
+    designEditable: false,
+    requirements: [
+      { bucket: 'flyerTop', kind: 'disappear', label: 'A head-stomp must squash the flyer' },
+      { bucket: 'flyerSide', kind: 'hurtPlayer', label: 'A side-hit must hurt the player' },
+    ],
+  },
+  {
+    title: 'The Gatekeeper',
+    brief: 'Two tough guards patrol this hall — each takes TWO stomps to squash (feel the flinch!). The flag has no rules at all. Write the gate: it should only open after you have defeated both guards. Watch the 👾 counter climb.',
+    hint: 'Goal sheet: "when the player touches me" → "only if at least 2 enemies defeated" → "win the game 🏆". The guards\' 🛡 toughness block lives on their sheet.',
+    backdrop: 'candy',
+    objects: [
+      ...ground(),
+      { type: 'enemy', x: 7, y: 10 }, { type: 'enemy', x: 13, y: 10 },
+      { type: 'coin', x: 10, y: 10 },
+      { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 },
+    ],
+    scripts: scriptsWith({ enemy: ENEMY_TOUGH_2, flag: EMPTY }),
+    editableOwners: ['flag'],
+    designEditable: false,
+    requirements: [
+      { bucket: 'touchFlag', kind: 'requireKills', label: 'The flag must require defeated enemies (only if… guard)' },
+      { bucket: 'touchFlag', kind: 'win', label: 'Reaching the guarded flag must win the game' },
+    ],
+  },
+  {
+    title: 'Grand Opening',
+    brief: 'Your hardest build yet: EVERY sheet starts empty — keys, crystals, dangers, the win, all of it is yours to wire. Design a level using the whole new toolbox: a spring, a spiky, AND a flyer. Then prove it plays fair.',
+    hint: 'Start with the Player keys, then wire each object as you place it. The Rules panel in ▶ Play shows what is still missing.',
+    backdrop: 'hills',
+    objects: [...ground(), { type: 'spawn', x: 1, y: 10 }, { type: 'flag', x: 18, y: 10 }],
+    scripts: { ...STARTER_SCRIPTS },
+    editableOwners: ['player', 'coin', 'spike', 'enemy', 'spiky', 'flyer', 'spring', 'flag', 'game'],
+    designEditable: true,
+    requirements: [],
+    capstone: { minCoins: 3, minSpikes: 0, minEnemies: 0, minSprings: 1, minSpiky: 1, minFlyers: 1 },
   },
 ];
 
@@ -279,7 +383,13 @@ function bucketActions(rules: CompiledRules, bucket: Requirement['bucket']): Arc
     case 'touchFlag': return rules.touchFlag.flat();
     case 'enemyTop': return rules.enemyTop.flat();
     case 'enemySide': return rules.enemySide.flat();
+    case 'spikyTouch': return rules.spikyTouch.flat();
+    case 'flyerTop': return rules.flyerTop.flat();
+    case 'flyerSide': return rules.flyerSide.flat();
+    case 'springLand': return rules.springLand.flat();
     case 'gameStart': return rules.gameStart.flat();
+    case 'killRules': return rules.killRules.flatMap(r => r.actions);
+    case 'touchFlagKills': return rules.touchFlagKills.flatMap(r => r.actions);
   }
 }
 
@@ -299,6 +409,9 @@ export function checkCapstone(def: GameDef, spec: CapstoneSpec): string[] {
   if (count('coin') < spec.minCoins) missing.push(`Place at least ${spec.minCoins} crystals (you have ${count('coin')})`);
   if (count('spike') < spec.minSpikes) missing.push(`Place at least ${spec.minSpikes} spike${spec.minSpikes > 1 ? 's' : ''}`);
   if (enemies < spec.minEnemies) missing.push(`Place at least ${spec.minEnemies} enem${spec.minEnemies > 1 ? 'ies' : 'y'}`);
+  if (spec.minSprings && count('spring') < spec.minSprings) missing.push(`Place at least ${spec.minSprings} spring${spec.minSprings > 1 ? 's' : ''}`);
+  if (spec.minSpiky && count('spiky') < spec.minSpiky) missing.push(`Place at least ${spec.minSpiky} spiky enem${spec.minSpiky > 1 ? 'ies' : 'y'}`);
+  if (spec.minFlyers && count('flyer') < spec.minFlyers) missing.push(`Place at least ${spec.minFlyers} flyer${spec.minFlyers > 1 ? 's' : ''}`);
   return missing;
 }
 
@@ -370,12 +483,14 @@ export interface ArcadeUnitProgress {
   completed: Record<number, boolean>;
   quizScore: number | null;
   unitComplete: boolean;
+  /** Power Pack (Missions II) — cloud level_idx 3 */
+  completed2: Record<number, boolean>;
 }
 
 const UNIT_KEY = 'arcade_lab_unit';
 
 export function emptyUnitProgress(): ArcadeUnitProgress {
-  return { completed: {}, quizScore: null, unitComplete: false };
+  return { completed: {}, quizScore: null, unitComplete: false, completed2: {} };
 }
 
 export function loadUnitProgress(): ArcadeUnitProgress {
@@ -396,11 +511,14 @@ export async function loadCloudUnitProgress(): Promise<ArcadeUnitProgress> {
     const res = await fetch('/api/progress?tool=arcade-lab');
     const rows = res.ok ? await res.json() : [];
     for (const row of rows ?? []) {
-      if (row.level_idx !== 1) continue;
-      if (row.challenge_idx >= 0 && row.completed) p.completed[row.challenge_idx] = true;
-      if (row.challenge_idx === -1) {
-        if (row.completed) p.unitComplete = true;
-        if (typeof row.quiz_score === 'number') p.quizScore = row.quiz_score;
+      if (row.level_idx === 1) {
+        if (row.challenge_idx >= 0 && row.completed) p.completed[row.challenge_idx] = true;
+        if (row.challenge_idx === -1) {
+          if (row.completed) p.unitComplete = true;
+          if (typeof row.quiz_score === 'number') p.quizScore = row.quiz_score;
+        }
+      } else if (row.level_idx === 3) {
+        if (row.challenge_idx >= 0 && row.completed) p.completed2[row.challenge_idx] = true;
       }
     }
   } catch { /* ignore */ }
@@ -412,15 +530,16 @@ export function mergeUnitProgress(a: ArcadeUnitProgress, b: ArcadeUnitProgress):
     completed: { ...a.completed, ...b.completed },
     quizScore: Math.max(a.quizScore ?? -1, b.quizScore ?? -1) >= 0 ? Math.max(a.quizScore ?? 0, b.quizScore ?? 0) : null,
     unitComplete: a.unitComplete || b.unitComplete,
+    completed2: { ...(a.completed2 ?? {}), ...(b.completed2 ?? {}) },
   };
 }
 
-export function syncUnitToCloud(ci: number | null, completed: boolean, quizScore?: number) {
+export function syncUnitToCloud(ci: number | null, completed: boolean, quizScore?: number, pack: 1 | 2 = 1) {
   fetch('/api/progress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      tool: 'arcade-lab', level_idx: 1, challenge_idx: ci ?? -1,
+      tool: 'arcade-lab', level_idx: pack === 2 ? 3 : 1, challenge_idx: ci ?? -1,
       completed, quiz_score: quizScore ?? null,
     }),
   }).catch(() => { /* offline is fine — localStorage has it */ });

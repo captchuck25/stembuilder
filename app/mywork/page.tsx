@@ -194,7 +194,8 @@ function ArcadeThumb({ def }: { def: GameDef }) {
     const colors: Record<string, string> = {
       platform: "#53B54B", coin: "#FFD54A", spike: "#EF4444",
       enemy: "#B06AE8", flag: "#22C55E", spawn: "#4C8DFF",
-      spiky: "#F87171", flyer: "#38BDF8", spring: "#A3A3A3",
+      spiky: "#F87171", flyer: "#38BDF8", spring: "#A3A3A3", alien: "#7CDB4F",
+      brute: "#F97316", bomber: "#818CF8", ammo: "#FDE047",
     };
     ctx.fillStyle = "#0e1830";
     ctx.fillRect(0, 0, canvas.width, canvas.height);

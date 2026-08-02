@@ -1,12 +1,14 @@
 'use client';
 import { useEffect, useRef } from 'react';
 import * as Blockly from 'blockly';
-import { ScriptOwner } from '../engine/types';
+import { Genre, ScriptOwner } from '../engine/types';
 import { registerArcadeBlocks, buildArcadeToolbox } from '../engine/blocks';
 import { getDarkTheme } from '../../block-lab/engine/blocklyDefs';
 
 interface Props {
   owner: ScriptOwner;
+  /** Defender levels get genre-specific toolboxes (fire, alien hats) */
+  genre?: Genre;
   xml: string;
   /** Fires (debounced) whenever the student edits the sheet */
   onXmlChange: (xml: string) => void;
@@ -14,7 +16,7 @@ interface Props {
 
 // One Blockly workspace showing a single object type's script sheet.
 // Remounted via key={owner} when the student switches objects in the rail.
-export default function ArcadeWorkspace({ owner, xml, onXmlChange }: Props) {
+export default function ArcadeWorkspace({ owner, genre = 'platformer', xml, onXmlChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onChangeRef = useRef(onXmlChange);
   onChangeRef.current = onXmlChange;
@@ -24,13 +26,16 @@ export default function ArcadeWorkspace({ owner, xml, onXmlChange }: Props) {
     registerArcadeBlocks();
 
     const workspace = Blockly.inject(containerRef.current, {
-      toolbox: buildArcadeToolbox(owner) as Blockly.utils.toolbox.ToolboxInfo,
+      toolbox: buildArcadeToolbox(owner, genre) as Blockly.utils.toolbox.ToolboxInfo,
       renderer: 'zelos',
       theme: getDarkTheme(),
       scrollbars: true,
       trashcan: true,
       sounds: false,
-      zoom: { controls: true, wheel: true, startScale: 0.8, maxScale: 2.5, minScale: 0.3, scaleSpeed: 1.2 },
+      // Wheel SCROLLS the workspace (kids kept zooming by accident) — zooming
+      // is the +/− buttons or pinch only
+      zoom: { controls: true, wheel: false, pinch: true, startScale: 0.8, maxScale: 2.5, minScale: 0.3, scaleSpeed: 1.2 },
+      move: { scrollbars: true, drag: true, wheel: true },
       grid: { spacing: 22, length: 3, colour: 'rgba(148,163,184,0.18)', snap: false },
     });
 
@@ -57,7 +62,7 @@ export default function ArcadeWorkspace({ owner, xml, onXmlChange }: Props) {
       workspace.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owner]); // xml intentionally omitted — loaded once per mount; key remounts on owner switch
+  }, [owner, genre]); // xml intentionally omitted — loaded once per mount; key remounts on owner/genre switch
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%' }}>
