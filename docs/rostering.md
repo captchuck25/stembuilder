@@ -78,8 +78,25 @@ and env vars (`GOOGLE_CLASSROOM_CLIENT_ID/SECRET`) in
 `docs/google-classroom-setup.md`. Until configured, the section shows
 "Not configured" and everything else works normally.
 
+## Teacher self-serve import (shipped)
+
+District teachers (profile.district_id set) get a working "Import your
+classes" panel on the teacher dashboard: connect their OWN Google Classroom
+or upload a CSV (teacher template has no teacher_email column — every class
+lands under the uploading teacher, enforced server-side in
+`app/api/teacher/roster/*` via `lib/roster/teacher-guard.server.ts`).
+Freemium teachers see the district-plan teaser instead. This is the intended
+Google path: the Classroom API only lists courses the connected account
+teaches, so admins can't sync on teachers' behalf — admins roster at scale
+via CSV (`teacher_email` column decides ownership).
+
 ## Next
 
 - **Clever**: "Log in with Clever" SSO is an ACCESS feature (separate from
   rostering). Paid Secure Sync rostering is deliberately out of scope for
   Phase 1; the importer's OneRoster shape leaves room for it later.
+- **SIS / OneRoster API adapter** (Infinite Campus, PowerSchool, …): many
+  SIS platforms won't hand teachers/admins a usable CSV export, but they DO
+  speak the OneRoster API. District IT enables the connection; we pull
+  orgs/classes/enrollments into the same `RosterData` shape. Zero importer
+  rework — this is why the core is OneRoster-shaped.
