@@ -1,5 +1,24 @@
 # Rostering v1 — OneRoster-shaped importer, CSV adapter (Phase 1, Milestone 4)
 
+## The model (decided 2026-08-02): teacher-driven, admin-observed
+
+- **Teachers own their classes and rosters.** From their dashboard: import
+  their own Google Classroom, upload their own CSV, or just create a class
+  and share its join code. Every class always has a join code — even fully
+  rostered ones — so late arrivals can always join.
+- **District admins own the org and observe.** They add teachers (Teachers
+  tab: attach-or-invite by email), and they SEE everything — teachers,
+  classes (however created — see the read-only Classes tab), students,
+  usage, audit log, license. They do not enroll per-class; the admin bulk
+  CSV upload remains available for the rare district-office roster export.
+- **Membership follows the teacher** (migration 0016): a district teacher's
+  classes are district classes and their enrolled students become district
+  students, regardless of creation path. Students are never moved between
+  districts, and `account_origin` (consent basis) is untouched.
+- **One student account, many enrollments**: email/username matching links
+  imports and code-joins to the same account, so a student's work carries
+  across teachers. Username-only (no-email) accounts remain fully supported.
+
 Bulk-creates classes and student accounts for a district. Built around the
 OneRoster data shape (classes, users, enrollments with stable `sourcedId`s)
 behind a provider-agnostic interface, so Google Classroom — and later paid

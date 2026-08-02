@@ -78,7 +78,11 @@ export default function DistrictDetailPage() {
   const [students, setStudents] = useState<PersonRow[] | null>(null);
   const [studentSchool, setStudentSchool] = useState<string>("");
   const [audit, setAudit] = useState<AuditRow[] | null>(null);
-  const [tab, setTab] = useState<"schools" | "teachers" | "students" | "roster" | "audit">("schools");
+  const [tab, setTab] = useState<"schools" | "teachers" | "classes" | "students" | "roster" | "audit">("schools");
+  const [classes, setClasses] = useState<{
+    id: string; name: string; joinCode: string; teacherName: string;
+    schoolId: string | null; source: string; studentCount: number; createdAt: string;
+  }[] | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -146,6 +150,11 @@ export default function DistrictDetailPage() {
     setTab(next);
     if (next === "students" && students === null) loadStudents("");
     if (next === "audit" && audit === null) loadAudit();
+    if (next === "classes" && classes === null) {
+      fetch(`/api/admin/districts/${districtId}/classes`)
+        .then(async r => { if (r.ok) setClasses(await r.json()); })
+        .catch(() => {});
+    }
     // Picks up an existing Google connection (cookie) if there is one.
     if (next === "roster" && gcCourses === null && gcState === "") loadGoogleCourses();
   }
@@ -392,6 +401,7 @@ export default function DistrictDetailPage() {
   const tabs: { key: typeof tab; label: string }[] = [
     { key: "schools", label: `Schools (${d.counts.schools})` },
     { key: "teachers", label: `Teachers (${d.counts.teachers})` },
+    { key: "classes", label: `Classes (${d.counts.classes})` },
     { key: "students", label: `Students (${d.counts.students})` },
     { key: "roster", label: "Roster upload" },
     { key: "audit", label: "Audit log" },
@@ -618,6 +628,52 @@ export default function DistrictDetailPage() {
               ))}
             </>)}
 
+            {tab === "classes" && (
+              classes === null ? <div style={{ fontSize: 13, color: "#888" }}>Loading…</div>
+              : classes.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#aaa" }}>
+                  No classes yet. Teachers create their own classes (New Class, Google Classroom import,
+                  or CSV) — they&apos;ll appear here automatically.
+                </div>
+              ) : (
+                <>
+                  <p style={{ fontSize: 12, color: "#888", margin: "0 0 14px" }}>
+                    Every class taught by this district&apos;s teachers, however it was created.
+                    Each has a join code students can always use — even into a rostered class.
+                  </p>
+                  <div style={{ maxHeight: 480, overflowY: "auto", paddingRight: 4 }}>
+                    {classes.map(c => (
+                      <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                        padding: "10px 12px", borderRadius: 10, background: "#f9f9f9", border: "1px solid #eee",
+                        marginBottom: 8, gap: 12 }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>
+                            {c.name}
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#888", marginLeft: 8 }}>
+                              · join {c.joinCode}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#888" }}>Teacher: {c.teacherName}</div>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                          background: c.source === "manual" ? "#f3f4f6" : c.source === "csv" ? "#dbeafe" : "#dcfce7",
+                          color: c.source === "manual" ? "#6b7280" : c.source === "csv" ? "#1d4ed8" : "#166534" }}>
+                          {c.source === "google_classroom" ? "Google" : c.source === "csv" ? "CSV" : "teacher-made"}
+                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                          background: "#fef3c7", color: "#b45309", whiteSpace: "nowrap" }}>
+                          {c.studentCount} student{c.studentCount === 1 ? "" : "s"}
+                        </span>
+                        <span style={{ fontSize: 11, color: "#aaa", whiteSpace: "nowrap" }}>
+                          {new Date(c.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            )}
+
             {tab === "students" && (
               <>
                 <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
@@ -659,9 +715,11 @@ export default function DistrictDetailPage() {
             {tab === "roster" && (
               <div>
                 <p style={{ fontSize: 13, color: "#555", margin: "0 0 14px", lineHeight: 1.6 }}>
-                  Upload a class roster CSV to create classes and student accounts in bulk.
-                  Columns: <code>class_name, teacher_email, first_name, last_name</code> and optionally{" "}
-                  <code>email, username, school</code>. Teachers must already have accounts in this district.
+                  <strong>Teachers usually roster their own classes</strong> — from their dashboard they can
+                  import their Google Classroom, upload a CSV, or just share a class join code. This bulk
+                  upload is for when the district office has a full roster export instead: columns{" "}
+                  <code>class_name, teacher_email, first_name, last_name</code> and optionally{" "}
+                  <code>email, username, school</code>. Teachers must already be listed on the Teachers tab.
                   Re-uploading the same file is safe — existing students are matched, never duplicated.{" "}
                   <a href={`/api/admin/districts/${districtId}/roster/csv`} style={{ color: "#2563eb", fontWeight: 700 }}>
                     Download the template

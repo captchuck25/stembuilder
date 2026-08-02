@@ -30,5 +30,15 @@ export async function POST(req: NextRequest) {
   if (existing) return NextResponse.json({ error: 'You are already enrolled in this class.' }, { status: 409 })
 
   await db.from('enrollments').upsert({ class_id: cls.id, student_id: session.user.id, deleted_at: null }, { onConflict: 'class_id,student_id' })
+
+  // Membership follows the teacher: joining a district class pulls the student
+  // into that district — but only if they aren't in one already (a student is
+  // never silently moved between districts). account_origin is untouched.
+  if (cls.district_id) {
+    await db.from('profiles')
+      .update({ district_id: cls.district_id, school_id: cls.school_id ?? null })
+      .eq('id', session.user.id)
+      .is('district_id', null)
+  }
   return NextResponse.json({ ok: true })
 }

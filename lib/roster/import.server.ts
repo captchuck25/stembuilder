@@ -118,6 +118,27 @@ export async function applyRoster(args: ApplyRosterArgs): Promise<RosterImportSu
       results.push({ kind: 'class', key: c.sourcedId, label: c.title, action: 'link', message: 'Already imported — matched existing class' })
       continue
     }
+    // Adopt a hand-created class with the same teacher + name instead of
+    // duplicating it (teachers often make "Period 3" manually, then import).
+    const { data: byName } = await db.from('classes')
+      .select('id')
+      .eq('teacher_id', teacher.id)
+      .eq('district_id', districtId)
+      .ilike('name', c.title)
+      .is('roster_external_id', null)
+      .is('deleted_at', null)
+      .limit(1).maybeSingle()
+    if (byName) {
+      if (!dryRun) {
+        await db.from('classes')
+          .update({ roster_provider: data.provider, roster_external_id: c.sourcedId, school_id: schoolIdFor(c) ?? undefined })
+          .eq('id', byName.id)
+      }
+      classIdBySourcedId.set(c.sourcedId, byName.id)
+      counts.classesLinked++
+      results.push({ kind: 'class', key: c.sourcedId, label: c.title, action: 'link', message: 'Matched the teacher’s existing class with this name' })
+      continue
+    }
     if (dryRun) {
       counts.classesCreated++
       classIdBySourcedId.set(c.sourcedId, `dry-run-class:${c.sourcedId}`)

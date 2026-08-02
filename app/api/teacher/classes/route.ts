@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   // enroll students). Google-created accounts are verified at creation.
   const { data: me } = await db
     .from('profiles')
-    .select('email_verified_at')
+    .select('email_verified_at, district_id, school_id')
     .eq('id', session.user.id)
     .is('deleted_at', null)
     .maybeSingle()
@@ -57,7 +57,15 @@ export async function POST(req: NextRequest) {
   }
   const { data, error } = await db
     .from('classes')
-    .insert({ teacher_id: session.user.id, name: name.trim(), join_code: generateJoinCode() })
+    .insert({
+      teacher_id: session.user.id,
+      name: name.trim(),
+      join_code: generateJoinCode(),
+      // Membership follows the teacher: a district teacher's classes are
+      // district classes regardless of how they were created (see 0016).
+      district_id: me.district_id ?? null,
+      school_id: me.school_id ?? null,
+    })
     .select()
     .single()
 
