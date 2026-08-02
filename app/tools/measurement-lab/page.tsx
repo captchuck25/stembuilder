@@ -1,5 +1,6 @@
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
+import { StudentLeaderboards } from "./shared";
 
 const CARD: React.CSSProperties = {
   background: "rgba(255,255,255,0.97)",
@@ -105,6 +106,10 @@ export default function MeasurementLabPage() {
               ) : card;
             })}
           </div>
+
+          {/* Class sprint leaderboards — renders nothing when signed out or
+              when the student's classes have leaderboards disabled */}
+          <StudentLeaderboards />
         </div>
       </main>
 

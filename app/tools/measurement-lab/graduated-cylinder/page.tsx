@@ -1,17 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
-
-const CARD: React.CSSProperties = {
-  background: "rgba(255,255,255,0.97)",
-  border: "3px solid #1f1f1f",
-  borderRadius: 20,
-  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-};
+import {
+  CARD, TOOL_META, useMeasurementSession,
+  ModeSelector, ScoreHud, SprintBar, ResultScreen,
+  AssignmentBanner, AssignmentErrorCard,
+} from "../shared";
 
 // ─── Cylinder geometry ────────────────────────────────────────────────────────
 
@@ -288,7 +286,7 @@ function DisplacementDisplay({ sizeIdx, dt, answered }: {
 
 type Mode = "read" | "displace";
 
-export default function GraduatedCylinderPage() {
+function GraduatedCylinderPage() {
   const { data: session } = useSession();
   const userId = session?.user?.id ?? null;
   const [sizeIdx,        setSizeIdx]        = useState<SizeKey>(0);
@@ -306,17 +304,39 @@ export default function GraduatedCylinderPage() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const meas = useMeasurementSession({
+    tool: "graduated-cylinder",
+    getTier: () => TOOL_META["graduated-cylinder"].tier(mode, String(sizeIdx)),
+    onAdvance: () => nextQuestion(sizeIdx, mode),
+  });
+
   useEffect(() => {
     setTarget(newTarget(0));
     setDisplaceTarget(newDisplaceTarget(0));
   }, []);
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
+  // Deep-linked assignment: lock settings to its config and restart.
+  useEffect(() => {
+    if (!meas.assignment) return;
+    const cfg = meas.assignment.config;
+    const si = Math.min(3, Math.max(0, parseInt(cfg.precision, 10) || 0)) as SizeKey;
+    startFresh(si, cfg.mode === "displace" ? "displace" : "read");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meas.assignment]);
+
   function clearTimer() { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } }
 
   function nextQuestion(si: SizeKey, m: Mode) {
-    if (m === "read") setTarget(newTarget(si));
-    else setDisplaceTarget(newDisplaceTarget(si));
+    if (m === "read") {
+      const t = newTarget(si);
+      setTarget(t);
+      meas.noteQuestionShown(t.label);
+    } else {
+      const t = newDisplaceTarget(si);
+      setDisplaceTarget(t);
+      meas.noteQuestionShown(t.label);
+    }
     setInput(""); setAnswered(false); setCorrect(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
@@ -325,40 +345,57 @@ export default function GraduatedCylinderPage() {
     clearTimer();
     setSizeIdx(si);
     setMode(m);
-    if (m === "read") setTarget(newTarget(si));
-    else setDisplaceTarget(newDisplaceTarget(si));
+    if (m === "read") {
+      const t = newTarget(si);
+      setTarget(t);
+      meas.noteQuestionShown(t.label);
+    } else {
+      const t = newDisplaceTarget(si);
+      setDisplaceTarget(t);
+      meas.noteQuestionShown(t.label);
+    }
     setInput(""); setAnswered(false); setCorrect(false);
     setScore(0); setStrikes(0); setGameOver(false);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   function handleSubmit() {
-    if (answered || gameOver) return;
+    if (answered || gameOver || meas.sessionOver) return;
     const val = parseFloat(input);
     if (isNaN(val)) return;
     const { minorStep } = SIZES[sizeIdx];
     const tolerance = minorStep * 0.6;
     let isCorrect = false;
+    let targetLabel = "";
     if (mode === "read") {
       if (!target) return;
       isCorrect = Math.abs(val - target.value) <= tolerance;
+      targetLabel = target.label;
     } else {
       if (!displaceTarget) return;
       isCorrect = Math.abs(val - displaceTarget.objectVol) <= tolerance;
+      targetLabel = displaceTarget.label;
     }
     setAnswered(true);
     setCorrect(isCorrect);
-    if (isCorrect) {
-      const newScore = score + 1;
-      setScore(newScore);
-      if (userId) upsertToolHighScore(userId, "meas-cylinder", sizeIdx, mode === "read" ? 0 : 1, newScore);
-      timerRef.current = setTimeout(() => nextQuestion(sizeIdx, mode), 1200);
-    } else {
-      const ns = strikes + 1;
-      setStrikes(ns);
-      if (ns >= 3) {
-        timerRef.current = setTimeout(() => setGameOver(true), 1800);
-      } else timerRef.current = setTimeout(() => nextQuestion(sizeIdx, mode), 1800);
+    const res = meas.recordAnswer(isCorrect, { target: targetLabel, answer: `${val} mL` });
+    if (meas.playMode === "practice") {
+      if (isCorrect) {
+        const newScore = score + 1;
+        setScore(newScore);
+        if (userId) upsertToolHighScore(userId, "meas-cylinder", sizeIdx, mode === "read" ? 0 : 1, newScore);
+        timerRef.current = setTimeout(() => nextQuestion(sizeIdx, mode), 1200);
+      } else {
+        const ns = strikes + 1;
+        setStrikes(ns);
+        if (ns >= 3) {
+          timerRef.current = setTimeout(() => setGameOver(true), 1800);
+        } else timerRef.current = setTimeout(() => nextQuestion(sizeIdx, mode), 1800);
+      }
+    } else if (!res.sessionOver) {
+      // sprint keeps feedback brief so the 60s clock isn't eaten by delays
+      const delay = meas.playMode === "sprint" ? (isCorrect ? 700 : 1100) : (isCorrect ? 1200 : 1800);
+      timerRef.current = setTimeout(() => nextQuestion(sizeIdx, mode), delay);
     }
   }
 
@@ -391,38 +428,49 @@ export default function GraduatedCylinderPage() {
             </div>
             {/* Right: mode + size controls */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
-                  textTransform: "uppercase", letterSpacing: "0.5px", minWidth: 38 }}>Mode</span>
-                {(["read", "displace"] as Mode[]).map(m => (
-                  <button key={m} onClick={() => startFresh(sizeIdx, m)}
-                    style={{ ...NAV_BTN,
-                      borderColor: mode === m ? "#7c3aed" : "#e0e0e0",
-                      background:  mode === m ? "#f5f3ff" : "#f9f9f9",
-                      color:       mode === m ? "#7c3aed" : "#666",
-                    }}>
-                    {m === "read" ? "Read Volume" : "Measure Object"}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
-                  textTransform: "uppercase", letterSpacing: "0.5px", minWidth: 38 }}>Size</span>
-                {SIZES.map((s, i) => (
-                  <button key={i} onClick={() => startFresh(i as SizeKey)}
-                    style={{ ...NAV_BTN,
-                      borderColor: sizeIdx === i ? "#7c3aed" : "#e0e0e0",
-                      background:  sizeIdx === i ? "#f5f3ff" : "#f9f9f9",
-                      color:       sizeIdx === i ? "#7c3aed" : "#666",
-                    }}>
-                    {s.label}
-                  </button>
-                ))}
-              </div>
+              <ModeSelector session={meas} color="#7c3aed"
+                onSelect={() => startFresh(sizeIdx, mode)} />
+              {!meas.assignment && (
+                <>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
+                      textTransform: "uppercase", letterSpacing: "0.5px", minWidth: 38 }}>Mode</span>
+                    {(["read", "displace"] as Mode[]).map(m => (
+                      <button key={m} onClick={() => startFresh(sizeIdx, m)}
+                        style={{ ...NAV_BTN,
+                          borderColor: mode === m ? "#7c3aed" : "#e0e0e0",
+                          background:  mode === m ? "#f5f3ff" : "#f9f9f9",
+                          color:       mode === m ? "#7c3aed" : "#666",
+                        }}>
+                        {m === "read" ? "Read Volume" : "Measure Object"}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
+                      textTransform: "uppercase", letterSpacing: "0.5px", minWidth: 38 }}>Size</span>
+                    {SIZES.map((s, i) => (
+                      <button key={i} onClick={() => startFresh(i as SizeKey)}
+                        style={{ ...NAV_BTN,
+                          borderColor: sizeIdx === i ? "#7c3aed" : "#e0e0e0",
+                          background:  sizeIdx === i ? "#f5f3ff" : "#f9f9f9",
+                          color:       sizeIdx === i ? "#7c3aed" : "#666",
+                        }}>
+                        {s.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          {!(mode === "read" ? target : displaceTarget) ? null : gameOver ? (
+          <AssignmentErrorCard session={meas} />
+          <AssignmentBanner session={meas} />
+
+          {meas.sessionOver ? (
+            <ResultScreen session={meas} color="#7c3aed" onPlayAgain={() => meas.restart()} />
+          ) : !(mode === "read" ? target : displaceTarget) ? null : gameOver ? (
             <div style={{ ...CARD, padding: "64px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 56, marginBottom: 14 }}>💥</div>
               <h2 style={{ fontSize: 28, fontWeight: 900, color: "#111", marginBottom: 8 }}>Game Over!</h2>
@@ -440,6 +488,8 @@ export default function GraduatedCylinderPage() {
             </div>
           ) : (
             <div style={{ ...CARD, padding: "16px 20px 14px" }}>
+
+              {meas.playMode === "sprint" && <SprintBar secondsLeft={meas.sprintSecondsLeft} />}
 
               {/* Prompt */}
               <div style={{ textAlign: "center", marginBottom: 12 }}>
@@ -532,7 +582,8 @@ export default function GraduatedCylinderPage() {
                         </span>
                       )}
                     </div>
-                    {/* Score + Strikes */}
+                    {/* Score + Strikes (practice only) */}
+                    {meas.playMode === "practice" && (
                     <div style={{ display: "flex", gap: 16, alignItems: "center", flexShrink: 0 }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
                         <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
@@ -556,9 +607,12 @@ export default function GraduatedCylinderPage() {
                         </div>
                       </div>
                     </div>
+                    )}
                   </div>
                 );
               })()}
+
+              {meas.playMode !== "practice" && <ScoreHud session={meas} />}
 
             </div>
           ) /* end gameOver ternary */ }
@@ -568,5 +622,14 @@ export default function GraduatedCylinderPage() {
       <footer style={{ height: 40, width: "100%", backgroundImage: "url('/ui/footer-metal.png')",
         backgroundSize: "cover", backgroundPosition: "center" }} />
     </div>
+  );
+}
+
+// useMeasurementSession reads useSearchParams, which requires a Suspense boundary.
+export default function GraduatedCylinderPageRoot() {
+  return (
+    <Suspense fallback={null}>
+      <GraduatedCylinderPage />
+    </Suspense>
   );
 }

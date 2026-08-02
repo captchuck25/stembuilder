@@ -1,17 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
-
-const CARD: React.CSSProperties = {
-  background: "rgba(255,255,255,0.97)",
-  border: "3px solid #1f1f1f",
-  borderRadius: 20,
-  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-};
+import {
+  CARD, TOOL_META, useMeasurementSession,
+  ModeSelector, ScoreHud, SprintBar, ResultScreen,
+  AssignmentBanner, AssignmentErrorCard,
+} from "../shared";
 
 // ── Geometry (fixed section.svg viewBox: 0 0 1108 425) ───────────────────────
 const SVG_W       = 1108;
@@ -354,7 +352,7 @@ function CaliperSVG({ value, answered, correct, interactive, onDrag, unit }: {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export default function DialCaliperPage() {
+function DialCaliperPage() {
   const { data: session } = useSession();
   const userId = session?.user?.id ?? null;
   const [gameMode,  setGameMode]  = useState<GameMode>("read");
@@ -371,15 +369,31 @@ export default function DialCaliperPage() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const meas = useMeasurementSession({
+    tool: "dial-caliper",
+    getTier: () => TOOL_META["dial-caliper"].tier(gameMode, unit),
+    onAdvance: () => nextQuestion(gameMode, unit),
+  });
+
   useEffect(() => { setTarget(newTarget(unit)); }, []);
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  // Deep-linked assignment: lock settings to its config and restart.
+  useEffect(() => {
+    if (!meas.assignment) return;
+    const cfg = meas.assignment.config;
+    startFresh(cfg.mode === "set" ? "set" : "read", cfg.precision === "mm" ? "mm" : "in");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meas.assignment]);
 
   function clearTimer() {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
   }
 
   function nextQuestion(gm: GameMode, u: Unit = unit) {
-    setTarget(newTarget(u));
+    const t = newTarget(u);
+    setTarget(t);
+    meas.noteQuestionShown(t.label);
     setUserValue(0);
     setInput("");
     setAnswered(false);
@@ -391,7 +405,9 @@ export default function DialCaliperPage() {
     clearTimer();
     setGameMode(gm);
     setUnit(u);
-    setTarget(newTarget(u));
+    const t = newTarget(u);
+    setTarget(t);
+    meas.noteQuestionShown(t.label);
     setUserValue(0);
     setInput("");
     setAnswered(false);
@@ -403,8 +419,9 @@ export default function DialCaliperPage() {
   }
 
   function handleSubmit() {
-    if (answered || gameOver) return;
+    if (answered || gameOver || meas.sessionOver) return;
     let isCorrect = false;
+    let givenLabel = "";
     if (gameMode === "read") {
       const val = parseFloat(input);
       if (isNaN(val)) return;
@@ -412,21 +429,34 @@ export default function DialCaliperPage() {
       const valIn = unit === "mm" ? val / 25.4 : val;
       const tol   = unit === "mm" ? 0.01 / 25.4 : 0.0005;
       isCorrect = Math.abs(valIn - target.value) <= tol;
+      givenLabel = unit === "mm" ? `${val} mm` : `${val}"`;
     } else {
       isCorrect = Math.abs(userValue - target.value) <= (unit === "mm" ? 0.01 / 25.4 : 0.0005);
+      givenLabel = unit === "mm"
+        ? `${(Math.round(userValue * 25.4 * 100) / 100).toFixed(2)} mm`
+        : `${userValue.toFixed(3)}"`;
     }
     setAnswered(true);
     setCorrect(isCorrect);
-    if (isCorrect) {
-      const ns = score + 1;
-      setScore(ns);
-      if (userId) upsertToolHighScore(userId, "meas-dial-caliper", unit === "mm" ? 1 : 0, gameMode === "read" ? 0 : 1, ns);
-      timerRef.current = setTimeout(() => nextQuestion(gameMode, unit), 1400);
-    } else {
-      const ns = strikes + 1;
-      setStrikes(ns);
-      if (ns >= 3) timerRef.current = setTimeout(() => setGameOver(true), 1800);
-      else         timerRef.current = setTimeout(() => nextQuestion(gameMode, unit), 1800);
+    const res = meas.recordAnswer(isCorrect, { target: target.label, answer: givenLabel });
+
+    if (meas.playMode === "practice") {
+      if (isCorrect) {
+        const ns = score + 1;
+        setScore(ns);
+        if (userId) upsertToolHighScore(userId, "meas-dial-caliper", unit === "mm" ? 1 : 0, gameMode === "read" ? 0 : 1, ns);
+        timerRef.current = setTimeout(() => nextQuestion(gameMode, unit), 1400);
+      } else {
+        const ns = strikes + 1;
+        setStrikes(ns);
+        if (ns >= 3) timerRef.current = setTimeout(() => setGameOver(true), 1800);
+        else         timerRef.current = setTimeout(() => nextQuestion(gameMode, unit), 1800);
+      }
+    } else if (!res.sessionOver) {
+      // sprint + assignment: no strikes, no legacy high score — just advance
+      // (sprint keeps feedback brief so the 60s clock isn't eaten by delays)
+      const delay = meas.playMode === "sprint" ? (isCorrect ? 700 : 1100) : (isCorrect ? 1400 : 1800);
+      timerRef.current = setTimeout(() => nextQuestion(gameMode, unit), delay);
     }
   }
 
@@ -459,38 +489,49 @@ export default function DialCaliperPage() {
               🔩 Dial Caliper
             </h1>
             <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
-                  textTransform: "uppercase", letterSpacing: "0.5px" }}>Mode</span>
-                {(["read", "set"] as GameMode[]).map(gm => (
-                  <button key={gm} onClick={() => startFresh(gm, unit)}
-                    style={{ ...NAV_BTN,
-                      borderColor: gameMode === gm ? "#d97706" : "#e0e0e0",
-                      background:  gameMode === gm ? "#fffbeb" : "#f9f9f9",
-                      color:       gameMode === gm ? "#d97706" : "#666",
-                    }}>
-                    {gm === "read" ? "Read the Caliper" : "Set the Caliper"}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
-                  textTransform: "uppercase", letterSpacing: "0.5px" }}>Unit</span>
-                {(["in", "mm"] as Unit[]).map(u => (
-                  <button key={u} onClick={() => startFresh(gameMode, u)}
-                    style={{ ...NAV_BTN,
-                      borderColor: unit === u ? "#2563eb" : "#e0e0e0",
-                      background:  unit === u ? "#eff6ff" : "#f9f9f9",
-                      color:       unit === u ? "#2563eb" : "#666",
-                    }}>
-                    {u === "in" ? "Inches" : "Millimeters"}
-                  </button>
-                ))}
-              </div>
+              <ModeSelector session={meas} color="#d97706"
+                onSelect={() => startFresh(gameMode, unit)} />
+              {!meas.assignment && (
+                <>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
+                      textTransform: "uppercase", letterSpacing: "0.5px" }}>Mode</span>
+                    {(["read", "set"] as GameMode[]).map(gm => (
+                      <button key={gm} onClick={() => startFresh(gm, unit)}
+                        style={{ ...NAV_BTN,
+                          borderColor: gameMode === gm ? "#d97706" : "#e0e0e0",
+                          background:  gameMode === gm ? "#fffbeb" : "#f9f9f9",
+                          color:       gameMode === gm ? "#d97706" : "#666",
+                        }}>
+                        {gm === "read" ? "Read the Caliper" : "Set the Caliper"}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
+                      textTransform: "uppercase", letterSpacing: "0.5px" }}>Unit</span>
+                    {(["in", "mm"] as Unit[]).map(u => (
+                      <button key={u} onClick={() => startFresh(gameMode, u)}
+                        style={{ ...NAV_BTN,
+                          borderColor: unit === u ? "#2563eb" : "#e0e0e0",
+                          background:  unit === u ? "#eff6ff" : "#f9f9f9",
+                          color:       unit === u ? "#2563eb" : "#666",
+                        }}>
+                        {u === "in" ? "Inches" : "Millimeters"}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          {gameOver ? (
+          <AssignmentErrorCard session={meas} />
+          <AssignmentBanner session={meas} />
+
+          {meas.sessionOver ? (
+            <ResultScreen session={meas} color="#d97706" onPlayAgain={() => meas.restart()} />
+          ) : gameOver ? (
             <div style={{ ...CARD, padding: "64px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 56, marginBottom: 14 }}>💥</div>
               <h2 style={{ fontSize: 28, fontWeight: 900, color: "#111", marginBottom: 8 }}>Game Over!</h2>
@@ -508,6 +549,8 @@ export default function DialCaliperPage() {
             </div>
           ) : (
             <div style={{ ...CARD, padding: "24px 24px 20px" }}>
+
+              {meas.playMode === "sprint" && <SprintBar secondsLeft={meas.sprintSecondsLeft} />}
 
               {/* Prompt */}
               <div style={{ textAlign: "center", marginBottom: 16 }}>
@@ -662,6 +705,9 @@ export default function DialCaliperPage() {
               </div>
 
               {/* Score bar */}
+              {meas.playMode !== "practice" ? (
+                <ScoreHud session={meas} />
+              ) : (
               <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 14,
                 display: "flex", gap: 32, alignItems: "center", justifyContent: "center" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -685,6 +731,7 @@ export default function DialCaliperPage() {
                   </div>
                 </div>
               </div>
+              )}
 
             </div>
           )}
@@ -694,5 +741,14 @@ export default function DialCaliperPage() {
       <footer style={{ height: 40, width: "100%", backgroundImage: "url('/ui/footer-metal.png')",
         backgroundSize: "cover", backgroundPosition: "center" }} />
     </div>
+  );
+}
+
+// useMeasurementSession reads useSearchParams, which requires a Suspense boundary.
+export default function DialCaliperPageRoot() {
+  return (
+    <Suspense fallback={null}>
+      <DialCaliperPage />
+    </Suspense>
   );
 }

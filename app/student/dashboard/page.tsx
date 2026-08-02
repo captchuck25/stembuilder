@@ -39,6 +39,25 @@ interface BridgeAssignment {
   class_id: string;
 }
 
+interface MeasurementAssignment {
+  id: string;
+  class_id: string;
+  class_name: string;
+  title: string;
+  tool: string;
+  config: { mode: string; precision: string; questionCount: number; timerSeconds: number | null; passThreshold: number };
+  bestCorrect: number | null;
+  attemptCount: number;
+  passed: boolean;
+}
+
+const MEAS_TOOL_LABELS: Record<string, string> = {
+  "ruler": "Ruler",
+  "dial-caliper": "Dial Caliper",
+  "graduated-cylinder": "Graduated Cylinder",
+  "triple-beam": "Triple Beam",
+};
+
 // tool -> level_idx -> completed challenge count
 type ProgressMap = Record<string, Record<number, number>>;
 
@@ -47,6 +66,7 @@ export default function StudentDashboard() {
   const router = useRouter();
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
+  const [measAssignments, setMeasAssignments] = useState<MeasurementAssignment[]>([]);
   const [progressMap, setProgressMap] = useState<ProgressMap>({});
   // challenge_ids the student has a turtle_submissions row for — used to show
   // a "Complete" badge on assigned turtle items.
@@ -71,14 +91,16 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes, progressRes, turtleRes] = await Promise.all([
+    const [classRes, bridgeRes, measRes, progressRes, turtleRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
+      fetch("/api/student/measurement-assignments"),
       fetch("/api/student/my-progress"),
       fetch("/api/turtle"),
     ]);
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
+    setMeasAssignments(measRes.ok ? await measRes.json() : []);
     if (turtleRes.ok) {
       const subs: Array<{ challenge_id: string }> = await turtleRes.json();
       setTurtleCompletedIds(new Set(subs.map(s => s.challenge_id)));
@@ -217,8 +239,9 @@ export default function StudentDashboard() {
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
               {enrolledClasses.map(({ class: cls, assignments, turtleAssignedIds }) => {
                 const classBridgeAssignments = bridgeAssignments.filter(b => b.class_id === cls.id);
+                const classMeasAssignments = measAssignments.filter(m => m.class_id === cls.id);
                 const turtleIds = turtleAssignedIds ?? [];
-                const totalAssignments = assignments.length + classBridgeAssignments.length + turtleIds.length;
+                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + turtleIds.length;
                 return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
@@ -386,6 +409,44 @@ export default function StudentDashboard() {
                                     {b.passed && (
                                       <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>✓ Completed</div>
                                     )}
+                                  </div>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Measurement Lab Assignments */}
+                      {classMeasAssignments.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#0d9488",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            📏 Measurement Lab
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {classMeasAssignments.map(m => (
+                              <Link key={m.id} href={`/tools/measurement-lab/${m.tool}?assignment=${m.id}`} style={{ textDecoration: "none" }}>
+                                <div style={{ padding: "14px 20px", borderRadius: 14,
+                                  background: m.passed ? "linear-gradient(135deg, #dcfce722, #dcfce744)" : "linear-gradient(135deg, #ccfbf122, #99f6e444)",
+                                  border: `2px solid ${m.passed ? "#16a34a" : "#0d9488"}`,
+                                  display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ fontSize: 22 }}>📏</div>
+                                  <div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                      {m.title || "Measurement Assignment"}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: "#555" }}>
+                                      {MEAS_TOOL_LABELS[m.tool] ?? m.tool} · {m.config.questionCount} questions · goal {m.config.passThreshold}
+                                    </div>
+                                    {m.passed ? (
+                                      <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>
+                                        ✓ Completed (best {m.bestCorrect}/{m.config.questionCount})
+                                      </div>
+                                    ) : m.attemptCount > 0 ? (
+                                      <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 2 }}>
+                                        Best {m.bestCorrect}/{m.config.questionCount} · {m.attemptCount} {m.attemptCount === 1 ? "try" : "tries"}
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                               </Link>

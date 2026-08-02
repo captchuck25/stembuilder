@@ -1,17 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { Suspense, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertToolHighScore } from "@/lib/achievements";
-
-const CARD: React.CSSProperties = {
-  background: "rgba(255,255,255,0.97)",
-  border: "3px solid #1f1f1f",
-  borderRadius: 20,
-  boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-};
+import {
+  CARD, TOOL_META, useMeasurementSession,
+  ModeSelector, ScoreHud, SprintBar, ResultScreen,
+  AssignmentBanner, AssignmentErrorCard,
+} from "../shared";
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
 const SVG_W   = 1421;
@@ -402,7 +400,7 @@ function TripleBeamSVG({ riders, target, mode, answered, onDrag }: {
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
-export default function TripleBeamPage() {
+function TripleBeamPage() {
   const { data: session } = useSession();
   const userId = session?.user?.id ?? null;
   const [gameMode,  setGameMode]  = useState<GameMode>("read");
@@ -418,9 +416,22 @@ export default function TripleBeamPage() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const meas = useMeasurementSession({
+    tool: "triple-beam",
+    getTier: () => TOOL_META["triple-beam"].tier(gameMode, ""),
+    onAdvance: () => nextQuestion(),
+  });
+
   useEffect(() => {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
+
+  // Deep-linked assignment: lock settings to its config and restart.
+  useEffect(() => {
+    if (!meas.assignment) return;
+    startFresh(meas.assignment.config.mode === "balance" ? "balance" : "read");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meas.assignment]);
 
   const riderSum = Math.round((userRiders.hundreds + userRiders.tens + userRiders.ones) * 10) / 10;
 
@@ -428,35 +439,43 @@ export default function TripleBeamPage() {
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
   }
 
-  function submitAnswer(isCorrect: boolean) {
-    if (answered || gameOver) return;
+  function submitAnswer(isCorrect: boolean, givenLabel: string) {
+    if (answered || gameOver || meas.sessionOver) return;
     setAnswered(true);
     setCorrect(isCorrect);
-    if (isCorrect) {
-      const ns = score + 1;
-      setScore(ns);
-      if (userId) upsertToolHighScore(userId, "meas-triple-beam", 0, gameMode === "read" ? 0 : 1, ns);
-      timerRef.current = setTimeout(nextQuestion, 1400);
-    } else {
-      const ns = strikes + 1;
-      setStrikes(ns);
-      if (ns >= 3) timerRef.current = setTimeout(() => setGameOver(true), 1800);
-      else         timerRef.current = setTimeout(nextQuestion, 1800);
+    const res = meas.recordAnswer(isCorrect, { target: target.label, answer: givenLabel });
+    if (meas.playMode === "practice") {
+      if (isCorrect) {
+        const ns = score + 1;
+        setScore(ns);
+        if (userId) upsertToolHighScore(userId, "meas-triple-beam", 0, gameMode === "read" ? 0 : 1, ns);
+        timerRef.current = setTimeout(nextQuestion, 1400);
+      } else {
+        const ns = strikes + 1;
+        setStrikes(ns);
+        if (ns >= 3) timerRef.current = setTimeout(() => setGameOver(true), 1800);
+        else         timerRef.current = setTimeout(nextQuestion, 1800);
+      }
+    } else if (!res.sessionOver) {
+      // sprint keeps feedback brief so the 60s clock isn't eaten by delays
+      const delay = meas.playMode === "sprint" ? (isCorrect ? 700 : 1100) : (isCorrect ? 1400 : 1800);
+      timerRef.current = setTimeout(nextQuestion, delay);
     }
   }
 
   function handleSubmit() {
-    if (answered || gameOver) return;
+    if (answered || gameOver || meas.sessionOver) return;
     const val = parseFloat(input);
     if (isNaN(val)) return;
     const tolerance = gameMode === "balance" ? 1.5 : 0.05;
-    submitAnswer(Math.abs(val - target.total) <= tolerance);
+    submitAnswer(Math.abs(val - target.total) <= tolerance, `${val} g`);
   }
 
   function nextQuestion() {
     clearTimer();
     const t = newTarget();
     setTarget(t);
+    meas.noteQuestionShown(t.label);
     setUserRiders({ hundreds: 0, tens: 0, ones: 0 });
     setInput("");
     setAnswered(false);
@@ -467,7 +486,9 @@ export default function TripleBeamPage() {
   function startFresh(gm: GameMode = gameMode) {
     clearTimer();
     setGameMode(gm);
-    setTarget(newTarget());
+    const t = newTarget();
+    setTarget(t);
+    meas.noteQuestionShown(t.label);
     setUserRiders({ hundreds: 0, tens: 0, ones: 0 });
     setInput("");
     setAnswered(false);
@@ -513,23 +534,34 @@ export default function TripleBeamPage() {
           <div style={{ ...CARD, padding: "14px 20px", marginBottom: 16,
             display: "flex", gap: 20, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
             <h1 style={{ fontSize: 20, fontWeight: 900, color: "#111", margin: 0 }}>⚖️ Triple Beam Balance</h1>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
-                textTransform: "uppercase", letterSpacing: "0.5px" }}>Mode</span>
-              {(["read", "balance"] as GameMode[]).map(gm => (
-                <button key={gm} onClick={() => startFresh(gm)}
-                  style={{ ...NAV_BTN,
-                    borderColor: gameMode === gm ? "#d97706" : "#e0e0e0",
-                    background:  gameMode === gm ? "#fffbeb" : "#f9f9f9",
-                    color:       gameMode === gm ? "#d97706" : "#666",
-                  }}>
-                  {gm === "read" ? "Read the Balance" : "Balance It"}
-                </button>
-              ))}
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+              <ModeSelector session={meas} color="#dc2626"
+                onSelect={() => startFresh(gameMode)} />
+              {!meas.assignment && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#aaa",
+                    textTransform: "uppercase", letterSpacing: "0.5px" }}>Mode</span>
+                  {(["read", "balance"] as GameMode[]).map(gm => (
+                    <button key={gm} onClick={() => startFresh(gm)}
+                      style={{ ...NAV_BTN,
+                        borderColor: gameMode === gm ? "#d97706" : "#e0e0e0",
+                        background:  gameMode === gm ? "#fffbeb" : "#f9f9f9",
+                        color:       gameMode === gm ? "#d97706" : "#666",
+                      }}>
+                      {gm === "read" ? "Read the Balance" : "Balance It"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          {gameOver ? (
+          <AssignmentErrorCard session={meas} />
+          <AssignmentBanner session={meas} />
+
+          {meas.sessionOver ? (
+            <ResultScreen session={meas} color="#dc2626" onPlayAgain={() => meas.restart()} />
+          ) : gameOver ? (
             <div style={{ ...CARD, padding: "64px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 56, marginBottom: 14 }}>💥</div>
               <h2 style={{ fontSize: 28, fontWeight: 900, color: "#111", marginBottom: 8 }}>Game Over!</h2>
@@ -547,6 +579,8 @@ export default function TripleBeamPage() {
             </div>
           ) : (
             <div style={{ ...CARD, padding: "24px 24px 20px" }}>
+
+              {meas.playMode === "sprint" && <SprintBar secondsLeft={meas.sprintSecondsLeft} />}
 
               {/* Prompt */}
               <div style={{ textAlign: "center", marginBottom: 16 }}>
@@ -634,6 +668,9 @@ export default function TripleBeamPage() {
               </div>
 
               {/* Score bar */}
+              {meas.playMode !== "practice" ? (
+                <ScoreHud session={meas} />
+              ) : (
               <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 14,
                 display: "flex", gap: 32, alignItems: "center", justifyContent: "center" }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -657,6 +694,7 @@ export default function TripleBeamPage() {
                   </div>
                 </div>
               </div>
+              )}
 
             </div>
           )}
@@ -666,5 +704,14 @@ export default function TripleBeamPage() {
       <footer style={{ height: 40, width: "100%", backgroundImage: "url('/ui/footer-metal.png')",
         backgroundSize: "cover", backgroundPosition: "center" }} />
     </div>
+  );
+}
+
+// useMeasurementSession reads useSearchParams, which requires a Suspense boundary.
+export default function TripleBeamPageRoot() {
+  return (
+    <Suspense fallback={null}>
+      <TripleBeamPage />
+    </Suspense>
   );
 }
