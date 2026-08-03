@@ -32,6 +32,11 @@ const tiles = [
     href: "/tools/blueprint-lab",
     src: "/ui/blueprint_lab.png",
   },
+  {
+    label: "Electronics Lab",
+    href: "/tools/electronics-lab",
+    src: "/ui/electronics-lab.png",
+  },
 ];
 
 export default async function Home() {

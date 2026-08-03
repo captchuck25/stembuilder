@@ -14,6 +14,11 @@ const imageTiles = [
     href: "/tools/code-lab",
     src: "/ui/codelab.png",
   },
+  {
+    label: "Electronics Lab",
+    href: "/tools/electronics-lab",
+    src: "/ui/electronics-lab.png",
+  },
 ];
 
 export default function Home() {
