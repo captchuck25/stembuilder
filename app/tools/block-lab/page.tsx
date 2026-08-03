@@ -6,7 +6,7 @@ import Link from 'next/link';
 import SiteHeader from '@/app/components/SiteHeader';
 import { UNITS, chalKey, countCompleted, BlockUnit } from './units';
 import { blocksForLevel, BLOCK_MAP } from './engine/blocks';
-import { ScriptNode } from './engine/runtime';
+import { ScriptNode, countBlocks } from './engine/runtime';
 import { THEMES, Theme } from './engine/themes';
 import { STEMBotAnimator } from './engine/animation';
 import { renderBot } from './engine/mazeRenderer';
@@ -296,6 +296,7 @@ function ChallengeView({
   const [running, setRunning] = useState(false);
   const [solved, setSolved] = useState(progress.completedChallenges[chalKey(ui, ci)] ?? false);
   const [bumpFlash, setBumpFlash] = useState(false);
+  const [limitMsg, setLimitMsg] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
   const [muted, setMutedState] = useState(() => (typeof window === 'undefined' ? false : isMuted()));
 
@@ -304,10 +305,22 @@ function ChallengeView({
 
   const handleRun = useCallback(() => {
     if (running) return;
+    const script = editorRef.current?.getScript() ?? [];
+    // Hard block limit: too many blocks means brute force — nudge toward the
+    // unit's concept instead of running
+    if (ch.maxBlocks != null) {
+      const used = countBlocks(script);
+      if (used > ch.maxBlocks) {
+        setLimitMsg(`🧱 Block limit is ${ch.maxBlocks} — you're using ${used}. Find the repeating pattern and shrink your program!`);
+        setTimeout(() => setLimitMsg(null), 4500);
+        return;
+      }
+    }
+    setLimitMsg(null);
     setRunning(true);
     setBumpFlash(false);
-    boardRef.current?.run(editorRef.current?.getScript() ?? []);
-  }, [running]);
+    boardRef.current?.run(script);
+  }, [running, ch.maxBlocks]);
 
   const handleStop = useCallback(() => {
     boardRef.current?.stop();
@@ -495,6 +508,12 @@ function ChallengeView({
                 <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '2px 10px' }}>
                   Par: {ch.par} blocks
                 </span>
+                {ch.maxBlocks != null && (
+                  <span title="Run won't start above this — find the pattern instead of writing every step!"
+                    style={{ fontSize: 11, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 12, padding: '2px 10px' }}>
+                    Limit: {ch.maxBlocks}
+                  </span>
+                )}
                 {bestStars > 0 && (
                   <span style={{ fontSize: 13, letterSpacing: 1 }}>
                     {'⭐'.repeat(bestStars)}<span style={{ filter: 'grayscale(1) opacity(0.35)' }}>{'⭐'.repeat(3 - bestStars)}</span>
@@ -502,8 +521,8 @@ function ChallengeView({
                 )}
               </div>
               <div style={{ fontSize: 18, fontWeight: 900, color: '#e2e8f0', margin: '2px 0 4px' }}>{ch.title}</div>
-              <div style={{ fontSize: 13, color: bumpFlash ? '#fca5a5' : '#94a3b8', background: bumpFlash ? 'rgba(239,68,68,0.15)' : 'transparent', padding: bumpFlash ? '6px 10px' : 0, borderRadius: 8, transition: 'all 200ms' }}>
-                {bumpFlash ? '💥 STEM Bot hit a wall — the program stopped! Check your script.' : `💡 ${ch.hint}`}
+              <div style={{ fontSize: 13, color: bumpFlash || limitMsg ? '#fca5a5' : '#94a3b8', background: bumpFlash || limitMsg ? 'rgba(239,68,68,0.15)' : 'transparent', padding: bumpFlash || limitMsg ? '6px 10px' : 0, borderRadius: 8, transition: 'all 200ms' }}>
+                {limitMsg ?? (bumpFlash ? '💥 STEM Bot hit a wall — the program stopped! Check your script.' : `💡 ${ch.hint}`)}
               </div>
             </div>
 

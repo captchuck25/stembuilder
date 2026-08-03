@@ -8,6 +8,11 @@ export interface BlockChallenge {
   hint: string;
   /** Block-count target for the 3rd star — solve with this many blocks or fewer */
   par: number;
+  /** Hard cap: Run refuses above this. Set between par (with headroom for other
+   *  valid approaches) and the brute-force cost, so literal step-by-step
+   *  scripts can't skip the unit's concept. Unit 1 has none — sequencing IS
+   *  the lesson there. */
+  maxBlocks?: number;
   grid: number[][];
   startX: number; startY: number; startDir: Direction;
   exitX: number; exitY: number;
@@ -244,6 +249,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Long Trail',
       par: 3,
+      maxBlocks: 6,
       hint: 'That is a very long corridor! Use Repeat so you don\'t write Move Forward nine times.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:1, collectibles:[],
@@ -251,6 +257,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Double Stretch',
       par: 12,
+      maxBlocks: 13,
       hint: 'Use Repeat for each straight section — and Collect both acorns on the way.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1],[1,1,1,1,0,1,1,1,1],[1,1,1,1,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
@@ -259,6 +266,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Staircase',
       par: 15,
+      maxBlocks: 18,
       hint: 'Every stair is the same moves — put them (and a Collect) inside one Repeat!',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,0],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:6,
@@ -267,6 +275,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Tall Staircase',
       par: 16,
+      maxBlocks: 20,
       hint: 'Same staircase pattern but with 4 steps instead of 3. Just change the Repeat number!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1],[1,0,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1],[1,1,0,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1],[1,1,1,0,1,1,1,1,1],[1,1,1,0,0,1,1,1,1],[1,1,1,1,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:8,
@@ -275,6 +284,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Acorn Row',
       par: 5,
+      maxBlocks: 9,
       hint: 'Acorns every other cell: Repeat { Move, Move, Collect } scoops them all up!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:11, exitY:1,
@@ -283,6 +293,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Triple Corridor',
       par: 18,
+      maxBlocks: 24,
       hint: 'Three horizontal corridors stacked — Repeat gets you down each one.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,0,0,0,0,0,0,1],[1,0,1,1,1,1,1,1],[1,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -291,6 +302,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Square Route',
       par: 5,
+      maxBlocks: 8,
       hint: 'Travel three sides of a square. Repeat 3 with { Move×3, Turn Right } does it!',
       grid: [[1,1,1,1,1],[0,0,0,0,1],[1,1,1,0,1],[1,1,1,0,1],[0,0,0,0,1],[1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:0, exitY:4, collectibles:[],
@@ -298,6 +310,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Forest Maze',
       par: 18,
+      maxBlocks: 22,
       hint: 'A winding forest path — combine Repeat and single-use blocks.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1,1],[1,1,1,1,0,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:5,
@@ -306,6 +319,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Zigzag Valley',
       par: 9,
+      maxBlocks: 15,
       hint: 'The same zigzag repeats — one Repeat (with a Collect inside) solves it!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1],[1,0,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1],[1,1,0,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1],[1,1,1,0,1,1,1,1,1],[1,1,1,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:7,
@@ -314,6 +328,7 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
     {
       title: 'Forest Boss',
       par: 18,
+      maxBlocks: 24,
       hint: 'Long corridors and a staircase all in one maze. Use Repeat wisely!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,0,1,1,1,1,1],[1,1,1,1,1,0,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:6,
@@ -416,6 +431,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Autopilot',
       par: 3,
+      maxBlocks: 6,
       hint: 'Use "While not at goal" — STEM Bot drives itself no matter how far the goal is!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:1, collectibles:[],
@@ -423,6 +439,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Sensor Run',
       par: 9,
+      maxBlocks: 12,
       hint: 'Walk forward while the path is clear, then turn and use "While not at goal" for the rest.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -431,6 +448,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Path Detector',
       par: 7,
+      maxBlocks: 12,
       hint: 'Put "If path ahead" inside a "While not at goal" — the bot moves when it can.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,0,0,0,1],[1,0,1,0,1,0,1],[1,0,0,0,1,0,0],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
@@ -439,6 +457,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Left Explorer',
       par: 9,
+      maxBlocks: 14,
       hint: 'At each junction check left first. "If path left" + "If path ahead" inside while solves it.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,1,0,0,0,0,1],[1,0,1,0,1,1,0,1],[1,0,1,0,1,1,0,1],[1,0,0,0,1,1,0,1],[1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -447,6 +466,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Right Wall Hugger',
       par: 9,
+      maxBlocks: 14,
       hint: 'Always check right first, then ahead, then left. This is the right-hand rule!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,1,0,0,0,0,1],[1,1,0,1,0,1,1,0,1],[1,1,0,0,0,1,1,0,1],[1,1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:4,
@@ -455,6 +475,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Dead End',
       par: 10,
+      maxBlocks: 15,
       hint: 'Sometimes all paths are blocked! Add "If path right" as a fallback turn.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,1,0,0,0,1,0],[1,1,0,1,0,1,0,1,0],[1,1,0,0,0,1,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:1,
@@ -463,6 +484,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Data Nodes',
       par: 10,
+      maxBlocks: 16,
       hint: 'Put "If on a crystal → Collect" inside your loop — STEM Bot checks every square and picks up every node it crosses.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1,0,0],[1,1,1,0,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0,0,1],[1,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:5,
@@ -471,6 +493,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Space Station Alpha',
       par: 10,
+      maxBlocks: 16,
       hint: 'A real labyrinth. Combine while not at goal with if sensors to find the path.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1],[1,1,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0],[1,0,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:5,
@@ -479,6 +502,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Warp Grid',
       par: 10,
+      maxBlocks: 16,
       hint: 'Tall and wide — sensors handle it without knowing dimensions.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,1,0,0,1,0,0,1],[1,1,0,1,0,1,1,0,1,1],[1,0,0,0,0,1,0,0,1,1],[1,0,1,1,1,1,0,1,1,1],[1,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:5,
@@ -487,6 +511,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Final Mission',
       par: 10,
+      maxBlocks: 16,
       hint: 'The ultimate maze. A complete sensor program can solve any path — can yours?',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1,0,0],[1,1,1,0,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0,0,1],[1,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:5,
@@ -578,6 +603,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'First Lesson',
       par: 7,
+      maxBlocks: 8,
       hint: 'Teach Trick 1: Move, Move, Collect. Then Do Trick three times — the pattern is written once!',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:1,
@@ -586,6 +612,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'The Stair Step',
       par: 10,
+      maxBlocks: 12,
       hint: 'One stair = Move, Turn Right, Move, Turn Left. Teach it once, do it three times, then walk to the flag.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4, collectibles:[],
@@ -593,6 +620,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'Crystal Stairs',
       par: 11,
+      maxBlocks: 14,
       hint: 'Same stairs — but now add Collect INSIDE the trick. Fix the trick once and every step collects.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4,
@@ -601,6 +629,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'Two Tricks',
       par: 14,
+      maxBlocks: 16,
       hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a crystal dash (Move, Move, Collect). Teach both!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
@@ -609,6 +638,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'Trick × Repeat',
       par: 10,
+      maxBlocks: 15,
       hint: 'FIVE stair steps — too many to write out. Put Do Trick inside a Repeat 5! (Collect in the trick is safe on empty steps.)',
       grid: [[1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1],[1,0,0,1,1,1,1,1],[1,1,0,0,1,1,1,1],[1,1,1,0,0,1,1,1],[1,1,1,1,0,0,1,1],[1,1,1,1,1,0,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:6,
@@ -617,6 +647,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'The Square Dance',
       par: 8,
+      maxBlocks: 11,
       hint: 'One side of the square = Move, Move, Turn Right, Collect. Three sides in a Repeat, then one last step home.',
       grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
@@ -625,6 +656,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'A Trick Inside a Trick',
       par: 12,
+      maxBlocks: 16,
       hint: 'Trick 1 = the stair (with Collect). Trick 2 = Do Trick 1, then Move, Move. Yes — tricks can perform other tricks!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:4,
@@ -633,6 +665,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'The Hallway Trick',
       par: 8,
+      maxBlocks: 13,
       hint: 'Teach: While path ahead { Move, Collect }, then Turn Right. One trick walks ANY hallway — do it three times.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,0,0,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:4,
@@ -641,6 +674,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'The Spiral',
       par: 7,
+      maxBlocks: 14,
       hint: 'The hallway trick again — but this maze spirals inward. Repeat 5 { Do Trick } solves the WHOLE thing.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
@@ -649,6 +683,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
     {
       title: 'Graduation Day',
       par: 15,
+      maxBlocks: 20,
       hint: 'The final exam: hallways AND stairs in one maze. Two tricks (put Collect in both!), two Repeats — show the rookies how it\'s done, professor!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,0,0,1,1,1,1,1,0,1],[1,1,0,0,1,1,1,1,0,1],[1,1,1,0,0,1,1,1,0,1],[1,1,1,1,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:2,
