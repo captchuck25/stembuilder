@@ -271,7 +271,9 @@ export async function applyRoster(args: ApplyRosterArgs): Promise<RosterImportSu
       fail('student', s.sourcedId, label,
         error.message.includes('identifier_taken')
           ? `The ${s.email ? 'email' : 'username'} "${s.email ?? s.username}" is already taken.`
-          : `Could not create account: ${error.message}`,
+          : error.message.includes('teacher_student_cap')
+            ? 'Student cap reached — upgrade or start a free Pro trial to add more students.'
+            : `Could not create account: ${error.message}`,
         s.sourceRow)
       break
     }
@@ -317,7 +319,13 @@ export async function applyRoster(args: ApplyRosterArgs): Promise<RosterImportSu
     const { error } = existing
       ? await db.from('enrollments').update({ deleted_at: null }).eq('id', existing.id)
       : await db.from('enrollments').insert({ class_id: classId, student_id: studentId })
-    if (error) { fail('enrollment', `${e.classSourcedId}→${e.studentSourcedId}`, label, error.message); continue }
+    if (error) {
+      fail('enrollment', `${e.classSourcedId}→${e.studentSourcedId}`, label,
+        error.message.includes('teacher_student_cap')
+          ? 'Student cap reached — upgrade or start a free Pro trial to add more students.'
+          : error.message)
+      continue
+    }
     counts.enrollmentsCreated++
   }
 

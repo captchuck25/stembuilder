@@ -49,7 +49,16 @@ export async function POST(req: NextRequest) {
       const { error } = await db
         .from('enrollments')
         .upsert({ class_id: cls.id, student_id: session.user.id, deleted_at: null }, { onConflict: 'class_id,student_id' })
-      if (error) return NextResponse.json({ error: 'Could not join the class.' }, { status: 500 })
+      if (error) {
+        // Teacher plan cap (0018 trigger): the teacher is at their limit.
+        if (error.message.includes('teacher_student_cap')) {
+          return NextResponse.json(
+            { error: 'This class is full — ask your teacher.', code: 'class_full' },
+            { status: 403 },
+          )
+        }
+        return NextResponse.json({ error: 'Could not join the class.' }, { status: 500 })
+      }
       return NextResponse.json({ ok: true })
     }
     return NextResponse.json({ error: 'This account is already set up.' }, { status: 409 })
@@ -125,6 +134,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           { error: "That code didn't match a class. Ask your teacher for your class code." },
           { status: 404 },
+        )
+      }
+      // Teacher plan cap (0018 trigger) — transactional, so no orphan profile.
+      if (error.message.includes('teacher_student_cap')) {
+        return NextResponse.json(
+          { error: 'This class is full — ask your teacher.', code: 'class_full' },
+          { status: 403 },
         )
       }
       return NextResponse.json({ error: 'Could not create the account.' }, { status: 500 })

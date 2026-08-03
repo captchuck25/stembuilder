@@ -8,6 +8,7 @@ import { type Class } from "@/lib/supabase";
 import { getProfile } from "@/lib/profile";
 import { roleAtLeast } from "@/lib/roles";
 import SiteHeader from "@/app/components/SiteHeader";
+import PlanMeter from "./PlanMeter";
 
 
 const CARD: React.CSSProperties = {
@@ -248,6 +249,9 @@ export default function TeacherDashboard() {
       <main style={{ flex: 1, backgroundImage: "url('/ui/bg-tools-pattern.png')",
         backgroundRepeat: "repeat", backgroundSize: "auto" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", padding: "48px 40px" }}>
+
+          {/* Plan usage meter + cap prompts (individual plans only) */}
+          <PlanMeter />
 
           {/* Page title */}
           <div style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "space-between",

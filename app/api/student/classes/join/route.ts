@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { classHasCapacity } from '@/lib/plan.server'
+import { isCapError, STUDENT_JOIN_BLOCKED_MESSAGE } from '@/lib/plan'
 
 export async function POST(req: NextRequest) {
   const session = await auth()
@@ -29,7 +31,21 @@ export async function POST(req: NextRequest) {
 
   if (existing) return NextResponse.json({ error: 'You are already enrolled in this class.' }, { status: 409 })
 
-  await db.from('enrollments').upsert({ class_id: cls.id, student_id: session.user.id, deleted_at: null }, { onConflict: 'class_id,student_id' })
+  // Teacher plan cap: friendly pre-check here, atomically re-enforced by the
+  // 0018 DB trigger on the upsert below.
+  if (!(await classHasCapacity(cls.id, session.user.id))) {
+    return NextResponse.json({ error: STUDENT_JOIN_BLOCKED_MESSAGE, code: 'class_full' }, { status: 403 })
+  }
+
+  const { error: enrollError } = await db
+    .from('enrollments')
+    .upsert({ class_id: cls.id, student_id: session.user.id, deleted_at: null }, { onConflict: 'class_id,student_id' })
+  if (enrollError) {
+    if (isCapError(enrollError.message)) {
+      return NextResponse.json({ error: STUDENT_JOIN_BLOCKED_MESSAGE, code: 'class_full' }, { status: 403 })
+    }
+    return NextResponse.json({ error: 'Could not join the class. Please try again.' }, { status: 500 })
+  }
 
   // Membership follows the teacher: joining a district class pulls the student
   // into that district — but only if they aren't in one already (a student is

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { adminDb } from '@/lib/db.server'
+import { isCapError, STUDENT_JOIN_BLOCKED_MESSAGE } from '@/lib/plan'
 
 // Username: 3–20 chars, lowercase letters/numbers and . _ - (normalized to lower).
 const USERNAME_RE = /^[a-z0-9._-]{3,20}$/
@@ -52,6 +53,11 @@ export async function POST(req: NextRequest) {
   })
 
   if (error) {
+    // Teacher plan cap (0018 trigger): the class's teacher is at their student
+    // limit. The RPC is transactional, so no orphan profile was created.
+    if (isCapError(error.message)) {
+      return NextResponse.json({ error: STUDENT_JOIN_BLOCKED_MESSAGE, code: 'class_full' }, { status: 403 })
+    }
     if (error.message.includes('class_not_found')) {
       return NextResponse.json(
         { error: "That code didn't match a class. Ask your teacher for your class code." },
