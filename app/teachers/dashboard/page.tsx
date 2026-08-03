@@ -292,8 +292,8 @@ export default function TeacherDashboard() {
                   With <strong>StemBuilder for Districts</strong>, you connect your Google Classroom
                   or upload a roster and every class — with student accounts already created — appears
                   here automatically. No join codes, no manual setup. Interested? Have your school reach
-                  out at <a href="mailto:hello@stembuilder.io" style={{ color: "#5b21b6", fontWeight: 800 }}>
-                  hello@stembuilder.io</a> — district trials are free.
+                  out at <a href="mailto:info@stembuilder.io" style={{ color: "#5b21b6", fontWeight: 800 }}>
+                  info@stembuilder.io</a> — district trials are free.
                 </div>
               </div>
               <button onClick={() => setShowBulkInfo(false)} style={{ background: "none", border: "none",
