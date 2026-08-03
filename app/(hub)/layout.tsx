@@ -47,7 +47,7 @@ export default function HubLayout({ children }: { children: ReactNode }) {
           </div>
           <nav style={{ display: "flex", gap: 12 }}>
             <Link
-              href="/teachers"
+              href="/for-teachers"
               style={{
                 border: "1px solid #fff",
                 color: "#fff",

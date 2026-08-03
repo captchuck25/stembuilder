@@ -56,7 +56,7 @@ export default async function Home() {
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <SiteHeader>
         {showTeachersBtn && (
-          <Link href="/teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
+          <Link href="/for-teachers" style={{ border: "1px solid #fff", color: "#fff", padding: "8px 14px",
             borderRadius: 999, fontWeight: 600, fontSize: 14, textDecoration: "none",
             letterSpacing: "0.2px", background: "transparent" }}>
             Teachers
