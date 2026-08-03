@@ -38,6 +38,7 @@ export const BLOCK_DEFS: BlockDef[] = [
   { id: 'if_path_ahead',     label: 'If path ahead',     category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
   { id: 'if_path_left',      label: 'If path left',      category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
   { id: 'if_path_right',     label: 'If path right',     category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
+  { id: 'if_on_item',        label: 'If on a crystal',   category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
   { id: 'define_trick',      label: 'Teach a Trick',     category: 'trick',   color: '#DB2777', hasBody: true, unlockLevel: 12 },
   { id: 'do_trick',          label: 'Do Trick',          category: 'trick',   color: '#DB2777', unlockLevel: 12 },
 ];

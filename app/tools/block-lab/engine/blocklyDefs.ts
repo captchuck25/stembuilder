@@ -99,6 +99,16 @@ const BLOCKLY_JSON_DEFS = [
     tooltip: 'Run once if the cell to the right is open',
   },
   {
+    type: 'if_on_item',
+    message0: 'If on a crystal ✦',
+    message1: 'do %1',
+    args1: [{ type: 'input_statement', name: 'BODY' }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: '#7C3AED',
+    tooltip: 'Run once if STEM Bot is standing on an uncollected crystal',
+  },
+  {
     // No prev/next connectors: a definition stands alone on the workspace,
     // it never runs where it sits — only "Do Trick" performs it
     type: 'define_trick',

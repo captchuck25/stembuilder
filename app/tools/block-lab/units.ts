@@ -378,6 +378,7 @@ In Units 1 and 2 you told STEM Bot exactly how many steps to take. But what if t
 | **If path ahead** | Open cell ahead (runs body once if true) |
 | **If path left** | Open cell to the left |
 | **If path right** | Open cell to the right |
+| **If on a crystal** | STEM Bot is standing on an uncollected crystal |
 
 ## While Loops
 A **while** loop keeps running its body **as long as a condition is true**:
@@ -400,7 +401,7 @@ If the condition is never false, the loop runs forever (or until the safety limi
 ## Your Goal
 Use sensors so STEM Bot can navigate mazes without knowing the exact layout in advance. A good sensor program can solve many different mazes with the same code!
 
-> Tip: put **Collect** inside your while loop and STEM Bot will scoop up items automatically as it explores — Collect does nothing on empty squares, so it is always safe.`,
+> Tip: **"If on a crystal → Collect"** inside your loop is the cleanest way to grab everything — the bot checks each square and collects only when something is really there. (Plain Collect in the loop also works: it is a safe no-op on empty squares.)`,
 
   newBlocks: [
     { blockId: 'while_path_ahead',  label: 'While path ahead',  desc: 'Keep running the body as long as there is an open cell ahead.' },
@@ -408,6 +409,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     { blockId: 'if_path_ahead',     label: 'If path ahead',     desc: 'Run the body once if there is an open cell ahead.' },
     { blockId: 'if_path_left',      label: 'If path left',      desc: 'Run the body once if there is an open cell to the left.' },
     { blockId: 'if_path_right',     label: 'If path right',     desc: 'Run the body once if there is an open cell to the right.' },
+    { blockId: 'if_on_item',        label: 'If on a crystal',   desc: 'Run the body once if STEM Bot is standing on an uncollected crystal.' },
   ],
 
   challenges: [
@@ -461,7 +463,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Data Nodes',
       par: 10,
-      hint: 'Put Collect inside your loop — STEM Bot picks up every node it crosses.',
+      hint: 'Put "If on a crystal → Collect" inside your loop — STEM Bot checks every square and picks up every node it crosses.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,0,0,0,1,0,0],[1,1,1,0,1,0,1,0,1,0,1],[1,0,0,0,0,0,1,0,0,0,1],[1,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:10, exitY:5,
       collectibles:[{x:3,y:1},{x:5,y:1},{x:7,y:1},{x:5,y:3},{x:5,y:5}],

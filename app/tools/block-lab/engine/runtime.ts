@@ -237,6 +237,13 @@ export class MazeRuntime {
         break;
       }
 
+      case 'if_on_item': {
+        if (this.collectibles.has(`${this.botX},${this.botY}`)) {
+          await this.execMany(node.children ?? []);
+        }
+        break;
+      }
+
       case 'do_trick': {
         // The compiler embedded the taught trick's body as our children —
         // running it highlights the definition's blocks as they perform
