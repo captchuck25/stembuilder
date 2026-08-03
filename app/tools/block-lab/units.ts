@@ -434,7 +434,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Straight Shot',
       par: 3,
-      maxBlocks: 6,
+      maxBlocks: 4,
       hint: 'A condition beats counting: "While not at goal → Move Forward" walks any distance!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:1, collectibles:[],
@@ -442,7 +442,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Same Code, Longer Road',
       par: 3,
-      maxBlocks: 6,
+      maxBlocks: 4,
       hint: 'A much longer hallway — run the EXACT program from Challenge 1. Conditions adapt; counting does not!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:11, exitY:1, collectibles:[],
@@ -450,7 +450,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'One Right Turn',
       par: 6,
-      maxBlocks: 8,
+      maxBlocks: 6,
       hint: '"While path ahead" walks to the wall. Turn toward the goal, then let "While not at goal" finish the job.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4, collectibles:[],
@@ -458,7 +458,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Right Turns Only',
       par: 6,
-      maxBlocks: 9,
+      maxBlocks: 6,
       hint: 'Three turns — every one to the right. "If path ahead → Move" plus "If path right → Turn Right" in one loop handles them all.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:2, exitY:4, collectibles:[],
@@ -466,7 +466,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'One Left Turn',
       par: 6,
-      maxBlocks: 8,
+      maxBlocks: 6,
       hint: 'This goal is up the OTHER way — walk to the wall, Turn Left, then "While not at goal".',
       grid: [[1,1,1,1,1,1,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[0,0,0,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:4, startDir:'right', exitX:5, exitY:1, collectibles:[],
@@ -474,7 +474,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Left Turns Only',
       par: 6,
-      maxBlocks: 9,
+      maxBlocks: 6,
       hint: 'Three turns, all to the left this time. Swap your fallback to "If path left → Turn Left".',
       grid: [[1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:4, startDir:'right', exitX:1, exitY:1, collectibles:[],
@@ -482,7 +482,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Crystal Scanner',
       par: 8,
-      maxBlocks: 11,
+      maxBlocks: 9,
       hint: 'Crystals! Add "If on a crystal → Collect" to your loop and the bot grabs every one it crosses.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:4,
@@ -491,7 +491,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'Both Ways',
       par: 9,
-      maxBlocks: 13,
+      maxBlocks: 10,
       hint: 'This path turns BOTH ways. Your loop needs an "If path right" AND an "If path left" — plus the crystal scanner.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1],[1,1,1,1,0,1,1,1,1],[1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -500,7 +500,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'The Loop Trap',
       par: 9,
-      maxBlocks: 11,
+      maxBlocks: 10,
       hint: 'A ring that goes in circles! Check "If path left" BEFORE moving ahead — or the bot orbits forever. The ORDER of your conditions matters!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,1,1],[1,0,1,1,1,1,1,0,0,1],[1,0,1,1,1,1,1,0,1,1],[1,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:8, exitY:2,
@@ -509,7 +509,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     {
       title: 'The Mirror Trap',
       par: 9,
-      maxBlocks: 11,
+      maxBlocks: 10,
       hint: 'The mirror ring: this time check "If path right" FIRST. Try the wrong order and watch what happens!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,0,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:8, startY:1, startDir:'left', exitX:1, exitY:2,
