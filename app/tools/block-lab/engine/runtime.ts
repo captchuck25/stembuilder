@@ -134,6 +134,8 @@ export class MazeRuntime {
 
   private async execNode(node: ScriptNode): Promise<void> {
     if (!this._running) return;
+    // A trick definition never runs on its own — only "Do Trick" performs it
+    if (node.blockId === 'define_trick') return;
     this.cb.onStep?.(node.id);
 
     switch (node.blockId) {
@@ -234,15 +236,28 @@ export class MazeRuntime {
         }
         break;
       }
+
+      case 'do_trick': {
+        // The compiler embedded the taught trick's body as our children —
+        // running it highlights the definition's blocks as they perform
+        await this.execMany(node.children ?? []);
+        break;
+      }
     }
   }
 }
 
 // ── Script tree helpers ────────────────────────────────────────────────────
 
-/** Total blocks in a script, counting nested bodies (a Repeat with 2 blocks inside = 3) */
+/** Total blocks in a script, counting nested bodies (a Repeat with 2 blocks inside = 3).
+ *  "Do Trick" counts as ONE block — its children are a copy of the taught
+ *  definition, which is already counted once where it was defined. That's the
+ *  whole payoff of tricks: reuse costs 1 block, not the body again. */
 export function countBlocks(nodes: ScriptNode[]): number {
-  return nodes.reduce((sum, n) => sum + 1 + (n.children ? countBlocks(n.children) : 0), 0);
+  return nodes.reduce(
+    (sum, n) => sum + 1 + (n.children && n.blockId !== 'do_trick' ? countBlocks(n.children) : 0),
+    0,
+  );
 }
 
 export function appendNode(

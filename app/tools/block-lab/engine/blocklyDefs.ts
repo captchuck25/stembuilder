@@ -98,6 +98,32 @@ const BLOCKLY_JSON_DEFS = [
     colour: '#7C3AED',
     tooltip: 'Run once if the cell to the right is open',
   },
+  {
+    // No prev/next connectors: a definition stands alone on the workspace,
+    // it never runs where it sits — only "Do Trick" performs it
+    type: 'define_trick',
+    message0: '🎓 Teach Trick %1',
+    args0: [{
+      type: 'field_dropdown', name: 'NAME',
+      options: [['⭐ 1', '1'], ['🌟 2', '2'], ['✨ 3', '3']],
+    }],
+    message1: 'how: %1',
+    args1: [{ type: 'input_statement', name: 'BODY' }],
+    colour: '#DB2777',
+    tooltip: 'Teach STEM Bot a trick — a set of blocks with a name. Teaching does nothing by itself; use "Do Trick" to perform it.',
+  },
+  {
+    type: 'do_trick',
+    message0: 'Do Trick %1',
+    args0: [{
+      type: 'field_dropdown', name: 'NAME',
+      options: [['⭐ 1', '1'], ['🌟 2', '2'], ['✨ 3', '3']],
+    }],
+    previousStatement: null,
+    nextStatement: null,
+    colour: '#DB2777',
+    tooltip: 'Perform a taught trick. Counts as ONE block no matter how big the trick is!',
+  },
 ];
 
 let defsRegistered = false;
@@ -172,6 +198,13 @@ export function buildToolbox(availableBlocks: BlockDef[]) {
     contents.push(...conditionals.map(b => ({ kind: 'block', type: b.id })));
   }
 
+  const tricks = availableBlocks.filter(b => b.category === 'trick');
+  if (tricks.length > 0) {
+    contents.push({ kind: 'sep' });
+    contents.push({ kind: 'label', text: '— Tricks —' });
+    contents.push(...tricks.map(b => ({ kind: 'block', type: b.id })));
+  }
+
   // flyoutToolbox: all blocks always visible — no clicking to expand categories
   return { kind: 'flyoutToolbox', contents };
 }
@@ -186,6 +219,9 @@ function blockToNode(block: Blockly.Block): ScriptNode {
   if (blockId === 'repeat') {
     const raw = block.getFieldValue('TIMES');
     params.times = Math.max(1, Math.min(20, Number(raw) || 3));
+  }
+  if (blockId === 'define_trick' || blockId === 'do_trick') {
+    params.trick = String(block.getFieldValue('NAME') ?? '1');
   }
 
   const bodyBlock = block.getInputTargetBlock('BODY');
@@ -211,5 +247,27 @@ function seqToNodes(block: Blockly.Block): ScriptNode[] {
 
 export function workspaceToScript(workspace: Blockly.WorkspaceSvg): ScriptNode[] {
   const topBlocks = workspace.getTopBlocks(true);
-  return topBlocks.flatMap(block => seqToNodes(block));
+  const script = topBlocks.flatMap(block => seqToNodes(block));
+
+  // Tricks: collect the taught definitions, then embed each definition's body
+  // as the children of every "Do Trick" call. The runtime skips definitions
+  // and performs a call's children — and countBlocks counts a call as 1, so
+  // reusing a trick costs one block, exactly like calling a function.
+  const defs: Record<string, ScriptNode[]> = {};
+  for (const node of script) {
+    if (node.blockId === 'define_trick') defs[String(node.params.trick ?? '1')] = node.children ?? [];
+  }
+  if (Object.keys(defs).length === 0 && !script.some(n => n.blockId === 'do_trick')) return script;
+
+  const expand = (nodes: ScriptNode[], depth: number): ScriptNode[] =>
+    nodes.map(n => {
+      if (n.blockId === 'do_trick') {
+        // Depth cap: a trick that performs itself (or a cycle) stops quietly
+        const body = depth < 3 ? (defs[String(n.params.trick ?? '1')] ?? []) : [];
+        return { ...n, children: expand(body, depth + 1) };
+      }
+      if (n.children) return { ...n, children: expand(n.children, depth) };
+      return n;
+    });
+  return expand(script, 0);
 }
