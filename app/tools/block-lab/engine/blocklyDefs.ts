@@ -110,29 +110,29 @@ const BLOCKLY_JSON_DEFS = [
   },
   {
     // No prev/next connectors: a definition stands alone on the workspace,
-    // it never runs where it sits — only "Do Trick" performs it
+    // it never runs where it sits — only "Call Function" runs it
     type: 'define_trick',
-    message0: '🎓 Teach Trick %1',
+    message0: '🎓 Define Function %1',
     args0: [{
       type: 'field_dropdown', name: 'NAME',
-      options: [['⭐ 1', '1'], ['🌟 2', '2'], ['✨ 3', '3']],
+      options: [['1', '1'], ['2', '2'], ['3', '3']],
     }],
-    message1: 'how: %1',
+    message1: 'do: %1',
     args1: [{ type: 'input_statement', name: 'BODY' }],
     colour: '#DB2777',
-    tooltip: 'Teach STEM Bot a trick — a set of blocks with a name. Teaching does nothing by itself; use "Do Trick" to perform it.',
+    tooltip: 'Define a function — a named set of blocks. Defining does NOTHING by itself; use "Call Function" to run it.',
   },
   {
     type: 'do_trick',
-    message0: 'Do Trick %1',
+    message0: 'Call Function %1',
     args0: [{
       type: 'field_dropdown', name: 'NAME',
-      options: [['⭐ 1', '1'], ['🌟 2', '2'], ['✨ 3', '3']],
+      options: [['1', '1'], ['2', '2'], ['3', '3']],
     }],
     previousStatement: null,
     nextStatement: null,
     colour: '#DB2777',
-    tooltip: 'Perform a taught trick. Counts as ONE block no matter how big the trick is!',
+    tooltip: 'Run the function with this name. A call counts as ONE block, no matter how big the function is!',
   },
 ];
 
@@ -211,7 +211,7 @@ export function buildToolbox(availableBlocks: BlockDef[]) {
   const tricks = availableBlocks.filter(b => b.category === 'trick');
   if (tricks.length > 0) {
     contents.push({ kind: 'sep' });
-    contents.push({ kind: 'label', text: '— Tricks —' });
+    contents.push({ kind: 'label', text: '— Functions —' });
     contents.push(...tricks.map(b => ({ kind: 'block', type: b.id })));
   }
 

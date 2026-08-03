@@ -561,62 +561,74 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
 const U4: BlockUnit = {
   id: 4,
   title: 'Functions',
-  tagline: 'Teach STEM Bot tricks — name a routine once, use it anywhere',
+  tagline: 'Define a function once — call it anywhere',
   color: '#DB2777',
   theme: 'space',
-  story: 'STEM Bot made it home a hero — and landed a new job: professor at the Orbital Academy, where rookie robots learn to explore. A great teacher never repeats themselves. Instead of spelling out every step, STEM Bot now TEACHES each maneuver once as a named trick — then just says "do the trick!" Master this and you\'re thinking like a real programmer.',
+  story: 'STEM Bot made it home a hero — and landed a new job: professor at the Orbital Academy, training rookie robots to explore. A great programmer never writes the same code twice. Instead of spelling out every maneuver step by step, STEM Bot now DEFINES each one as a named function — then simply calls it by name, wherever it\'s needed. Master this and you are writing real code.',
   introNotes: `# Unit 4 — Functions
 
-## Teaching Tricks
-So far, when a maze repeats a pattern, you had to build the same blocks again (or wrap them in a Repeat). But what if the pattern shows up in *different places*, not just back-to-back?
+## The Problem Functions Solve
+Look at this program for a maze with the same stair pattern in two different places:
 
-A **function** is a set of blocks with a **name**. In Block Lab we call them **tricks**:
+> Move, Turn Right, Move, Turn Left, Collect ← the stair
+> Move Forward, Move Forward
+> Move, Turn Right, Move, Turn Left, Collect ← the SAME stair again!
+
+**12 blocks — and the stair is written twice.** A Repeat can't help: the two stairs aren't next to each other. What we need is a way to write the stair ONCE, give it a name, and use the name in both places.
+
+## Define, Then Call
+That is exactly what a **function** is: a named set of blocks.
 
 | Block | What it does |
 |---|---|
-| **🎓 Teach Trick** | Give a name to the blocks inside — this is the *definition* |
-| **Do Trick** | Perform the named trick, wherever you are |
+| **🎓 Define Function** | Give a name to the blocks inside — this runs NOTHING by itself |
+| **Call Function** | Run the named function, wherever you are, as many times as you like |
 
-## Teaching ≠ Doing
-This is the big idea: **Teach Trick does nothing by itself.** It just gets STEM Bot ready. The trick only runs when a **Do Trick** block asks for it — and you can ask as many times as you like.
-
-> Teach Trick ⭐1: how: Move Forward, Move Forward, Collect
+> 🎓 Define Function 1: do: Move, Turn Right, Move, Turn Left, Collect
 >
-> Do Trick ⭐1 · Do Trick ⭐1 · Do Trick ⭐1
+> Call Function 1 · Move · Move · Call Function 1
 
-That program takes 6 steps and collects 3 crystals — but the marching pattern is written only **once**.
+Same maze, and the stair is written **once**. Fewer blocks, and the program reads like a story: "stair, walk, stair."
 
-## Why Programmers Love Functions
-- **Fewer blocks:** Do Trick counts as ONE block, no matter how big the trick is. Watch your par scores!
-- **One fix, everywhere:** made a mistake inside the trick? Fix the definition once — every Do Trick is instantly repaired.
-- **Readable programs:** "stair-step, stair-step, dash" tells the story better than 14 raw blocks.
+## Defining ≠ Calling
+This is the big idea — and the #1 beginner mistake. **A definition alone does nothing when you press Run.** It just gets the function ready. The blocks only run when a **Call Function** block asks for them. A program that is all definitions and no calls sits perfectly still!
 
-## Mix and Match
-Tricks work with everything you already know: put **Do Trick inside a Repeat**, put a **while sensor inside a trick**, even have one trick **perform another trick**. The best programs in this unit combine all three.
+## Why Programmers Use Functions Everywhere
+- **Write once, use anywhere:** a call counts as ONE block, no matter how big the function is. Watch your par scores.
+- **One fix repairs every call:** mistake inside the function? Fix the definition — all the calls are instantly correct.
+- **Readable programs:** names tell the story better than 20 raw blocks.
 
-## Your Goal
-Every maze in the Academy has a repeating pattern hiding in it. Find the pattern, teach it as a trick, and reuse it. Beat par and you'll feel the power — in Python next year, you'll meet the exact same idea under its grown-up name: **def**, for defining a function.`,
+## Functions + Everything Else
+Functions work with all your earlier tools: put a **Call inside a Repeat**, put a **while sensor inside a function**, even have one function **call another function**. The strongest programs in this unit use all three.
+
+## The Real Vocabulary
+You are learning the exact words programmers use: you **define** a function, then **call** it. Next year in Python it looks like this:
+
+> def stair():
+>     ...
+
+Same idea, same words. You already know how it works.`,
 
   newBlocks: [
-    { blockId: 'define_trick', label: '🎓 Teach Trick', desc: 'Name a set of blocks. Teaching alone does nothing — it waits to be used.' },
-    { blockId: 'do_trick',     label: 'Do Trick',      desc: 'Perform a taught trick. Counts as one block, no matter how big the trick is.' },
+    { blockId: 'define_trick', label: '🎓 Define Function', desc: 'Name a set of blocks. Defining alone does nothing — the blocks wait to be called.' },
+    { blockId: 'do_trick',     label: 'Call Function',      desc: 'Run a defined function. A call counts as one block, no matter how big the function is.' },
   ],
 
   challenges: [
     {
-      title: 'First Lesson',
-      par: 7,
-      maxBlocks: 8,
-      hint: 'Teach Trick 1: Move, Move, Collect. Then Do Trick three times — the pattern is written once!',
-      grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:6, exitY:1,
-      collectibles:[{x:2,y:1},{x:4,y:1},{x:6,y:1}],
+      title: 'One Function, Two Places',
+      par: 11,
+      maxBlocks: 12,
+      hint: 'The stair pattern appears in TWO different spots — and a Repeat can\'t jump the gap between them. Define the stair as Function 1 (Move, Turn Right, Move, Turn Left, Collect), then CALL it in both places.',
+      grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,0,0,1,1],[1,1,1,1,0,0,1],[1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:5, exitY:3,
+      collectibles:[{x:1,y:2},{x:4,y:3}],
     },
     {
       title: 'The Stair Step',
       par: 10,
       maxBlocks: 12,
-      hint: 'One stair = Move, Turn Right, Move, Turn Left. Teach it once, do it three times, then walk to the flag.',
+      hint: 'One stair = Move, Turn Right, Move, Turn Left. Define it once, call it three times, then walk to the flag.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4, collectibles:[],
     },
@@ -624,25 +636,25 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
       title: 'Crystal Stairs',
       par: 11,
       maxBlocks: 14,
-      hint: 'Same stairs — but now add Collect INSIDE the trick. Fix the trick once and every step collects.',
+      hint: 'Same stairs — but now add Collect INSIDE the function. Fix the definition once and every call collects.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4,
       collectibles:[{x:1,y:2},{x:2,y:3},{x:3,y:4}],
     },
     {
-      title: 'Two Tricks',
+      title: 'Two Functions',
       par: 14,
       maxBlocks: 16,
-      hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a crystal dash (Move, Move, Collect). Teach both!',
+      hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a crystal dash (Move, Move, Collect). Define both — call each where it fits!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
       collectibles:[{x:4,y:3},{x:6,y:3},{x:8,y:3}],
     },
     {
-      title: 'Trick × Repeat',
+      title: 'Call It in a Loop',
       par: 10,
       maxBlocks: 15,
-      hint: 'FIVE stair steps — too many to write out. Put Do Trick inside a Repeat 5! (Collect in the trick is safe on empty steps.)',
+      hint: 'FIVE stair steps — too many calls to write out. Put Call Function inside a Repeat 5! (Collect in the function is safe on empty steps.)',
       grid: [[1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1],[1,0,0,1,1,1,1,1],[1,1,0,0,1,1,1,1],[1,1,1,0,0,1,1,1],[1,1,1,1,0,0,1,1],[1,1,1,1,1,0,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:6,
       collectibles:[{x:1,y:2},{x:3,y:4},{x:5,y:6}],
@@ -651,25 +663,25 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
       title: 'The Square Dance',
       par: 8,
       maxBlocks: 11,
-      hint: 'One side of the square = Move, Move, Turn Right, Collect. Three sides in a Repeat, then one last step home.',
+      hint: 'One side of the square = Move, Move, Turn Right, Collect. Define it, call it three times in a Repeat, then one last step home.',
       grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
       collectibles:[{x:3,y:1},{x:3,y:3},{x:1,y:3}],
     },
     {
-      title: 'A Trick Inside a Trick',
+      title: 'A Function Calls a Function',
       par: 12,
       maxBlocks: 16,
-      hint: 'Trick 1 = the stair (with Collect). Trick 2 = Do Trick 1, then Move, Move. Yes — tricks can perform other tricks!',
+      hint: 'Function 1 = the stair (with Collect). Function 2 = Call Function 1, then Move, Move. Yes — functions can call other functions!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:4,
       collectibles:[{x:1,y:2},{x:4,y:3},{x:7,y:4}],
     },
     {
-      title: 'The Hallway Trick',
+      title: 'The Hallway Function',
       par: 8,
       maxBlocks: 13,
-      hint: 'Teach: While path ahead { Move, Collect }, then Turn Right. One trick walks ANY hallway — do it three times.',
+      hint: 'Define: While path ahead { Move, Collect }, then Turn Right. One function walks ANY hallway — call it three times.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,0,0,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:4,
       collectibles:[{x:2,y:1},{x:4,y:1},{x:5,y:2},{x:5,y:3},{x:3,y:4}],
@@ -678,7 +690,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
       title: 'The Spiral',
       par: 7,
       maxBlocks: 14,
-      hint: 'The hallway trick again — but this maze spirals inward. Repeat 5 { Do Trick } solves the WHOLE thing.',
+      hint: 'The hallway function again — but this maze spirals inward. Repeat 5 { Call Function 1 } solves the WHOLE thing.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
       collectibles:[{x:4,y:1},{x:8,y:4},{x:4,y:6},{x:2,y:4},{x:5,y:3}],
@@ -687,7 +699,7 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
       title: 'Graduation Day',
       par: 15,
       maxBlocks: 20,
-      hint: 'The final exam: hallways AND stairs in one maze. Two tricks (put Collect in both!), two Repeats — show the rookies how it\'s done, professor!',
+      hint: 'The final exam: hallways AND stairs in one maze. Two functions (put Collect in both!), two Repeats — show the rookies real code, professor!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,0,0,1,1,1,1,1,0,1],[1,1,0,0,1,1,1,1,0,1],[1,1,1,0,0,1,1,1,0,1],[1,1,1,1,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:2,
       collectibles:[{x:3,y:1},{x:7,y:1},{x:8,y:3},{x:6,y:5},{x:2,y:3}],
@@ -696,34 +708,34 @@ Every maze in the Academy has a repeating pattern hiding in it. Find the pattern
 
   quiz: [
     {
-      question: 'Your program is ONLY a "Teach Trick 1" block with 5 blocks inside. What happens when you press Run?',
-      options: ['The 5 blocks run once', 'The 5 blocks run over and over', 'Nothing — teaching a trick does not perform it', 'STEM Bot crashes'],
+      question: 'Your program is ONLY a "Define Function 1" block with 5 blocks inside. What happens when you press Run?',
+      options: ['The 5 blocks run once', 'The 5 blocks run over and over', 'Nothing — defining a function does not run it', 'STEM Bot crashes'],
       answer: 2,
-      explanation: 'A definition just names the blocks and waits. Nothing runs until a "Do Trick" block asks for it.',
+      explanation: 'A definition just names the blocks and waits. Nothing runs until a "Call Function" block asks for it. Define, THEN call.',
     },
     {
-      question: 'Trick 1 is: Move Forward, Move Forward, Turn Right. You use "Do Trick 1" three times. How many times does STEM Bot move forward?',
+      question: 'Function 1 is: Move Forward, Move Forward, Turn Right. You call it three times. How many times does STEM Bot move forward?',
       options: ['2', '3', '6', '9'],
       answer: 2,
-      explanation: 'Each Do Trick performs the whole trick once — 2 moves each time. 3 performances × 2 moves = 6 moves.',
+      explanation: 'Each call runs the whole function once — 2 moves per call. 3 calls × 2 moves = 6 moves.',
     },
     {
-      question: 'You used Trick 1 in five different places, then spot a mistake inside the trick. What is the best fix?',
-      options: ['Fix the blocks inside the ONE Teach Trick definition', 'Find and fix all five Do Trick blocks', 'Delete the program and start over', 'Add extra Move Forward blocks to cover the mistake'],
+      question: 'You called Function 1 in five different places, then spot a mistake inside it. What is the best fix?',
+      options: ['Fix the blocks inside the ONE definition', 'Find and fix all five Call blocks', 'Delete the program and start over', 'Add extra Move Forward blocks to cover the mistake'],
       answer: 0,
-      explanation: 'Every Do Trick performs the definition. Fix the definition once and all five uses are repaired instantly — a superpower of functions.',
+      explanation: 'Every call runs the definition. Fix the definition once and all five calls are repaired instantly — a superpower of functions.',
     },
     {
-      question: 'What is the difference between "Repeat 3 { Move }" and a trick?',
-      options: ['There is no difference', 'Repeat runs blocks again right away; a trick has a NAME so you can use it anywhere in your program', 'Tricks can only hold 3 blocks', 'Repeat is only for crystals'],
+      question: 'A stair pattern appears at the START of a maze and again at the END, with other moves in between. Why is a function better than a Repeat here?',
+      options: ['Repeat blocks are slower', 'A Repeat only replays blocks in ONE spot — a function has a name, so you can call it in BOTH places', 'Functions can hold more blocks than Repeats', 'It is not better — they are the same'],
       answer: 1,
-      explanation: 'Repeat replays blocks in one spot. A trick is named and reusable — you can perform it here, later, inside a Repeat, or even inside another trick.',
+      explanation: 'Repeat replays its body back-to-back in one place. A function is named and callable anywhere — start, end, inside a loop, even inside another function.',
     },
     {
-      question: 'Next year in Python, "teaching a trick" has a grown-up name. What is it called?',
-      options: ['A loop', 'A variable', 'Defining a function', 'A comment'],
-      answer: 2,
-      explanation: 'Python uses def to define a function — a named set of instructions you can call whenever you need it. You already know how it works!',
+      question: 'In Python, which keyword DEFINES a function?',
+      options: ['loop', 'def', 'call', 'if'],
+      answer: 1,
+      explanation: 'Python uses def to define a function — then you call it by name, exactly like Call Function. You already know how it works!',
     },
   ],
 };
