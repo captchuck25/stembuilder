@@ -13,6 +13,11 @@ export interface BlockChallenge {
    *  scripts can't skip the unit's concept. Unit 1 has none — sequencing IS
    *  the lesson there. */
   maxBlocks?: number;
+  /** Exact toolbox for this challenge (block ids). Missing = cumulative
+   *  unlock via blocksForLevel. Used to keep each unit honest: no Repeat
+   *  count-cheese in the conditionals unit, no while wall-follow in the
+   *  nested unit, no repeat-of-raw-body in the functions unit. */
+  blockIds?: string[];
   grid: number[][];
   startX: number; startY: number; startDir: Direction;
   exitX: number; exitY: number;
@@ -62,6 +67,18 @@ In Block Lab you control STEM Bot through a desert maze. STEM Bot understands fo
 | **Turn Left** | Rotate 90° counter-clockwise (left) |
 | **Turn Right** | Rotate 90° clockwise (right) |
 | **Collect** | Pick up the item on the square you are standing on |
+
+Here is a real program — read it top to bottom, exactly like STEM Bot does:
+
+:::blocks
+move
+move
+collect
+turn right
+move
+:::
+
+That reads: two steps, pick up the crystal, turn, one more step.
 
 ## Turning vs. Moving
 Turning changes the direction STEM Bot faces — **but it does not move**. After turning you still need Move Forward to actually step forward.
@@ -209,7 +226,13 @@ const U2: BlockUnit = {
 ## The Problem With Counting
 In Unit 1 you probably wrote something like this to cross a long corridor:
 
-> Move Forward, Move Forward, Move Forward, Move Forward, Move Forward…
+:::blocks
+move
+move
+move
+move
+move
+:::
 
 That gets tedious. What if the corridor is 50 cells long? What if you want to change the number of steps?
 
@@ -225,7 +248,10 @@ The blocks you put **inside** Repeat are called the **body**. The body can conta
 ## Why This Is Powerful
 Instead of writing Move Forward ten times you write:
 
-> Repeat 10 { Move Forward }
+:::blocks
+repeat 10
+  move
+:::
 
 If you want twelve steps instead, just change the 10 to a 12.
 
@@ -398,17 +424,25 @@ In Units 1 and 2 you told STEM Bot exactly how many steps to take. But what if t
 ## While Loops
 A **while** loop keeps running its body **as long as a condition is true**:
 
-> While path ahead → keep moving forward
+:::blocks
+while ahead
+  move
+:::
 
 When the path is blocked the loop stops automatically. No counting needed!
 
 ## If Blocks
 An **if** block runs its body **once** only if the condition is true at that moment. Combine multiple if blocks inside a while loop to create decision logic:
 
-> While not at goal:
->   If path ahead → move forward
->   If path left → turn left
->   If path right → turn right
+:::blocks
+while goal
+  if ahead
+    move
+  if left
+    turn left
+  if right
+    turn right
+:::
 
 ## Order Is Part of the Program
 The ifs inside your loop run **in order, top to bottom, every single lap**. Early mazes won't care which check comes first — but keep going and you'll meet mazes where checking in the wrong order sends STEM Bot in circles forever. Choosing WHICH condition to check first is a real programming decision!
@@ -435,6 +469,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'Straight Shot',
       par: 3,
       maxBlocks: 4,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'A condition beats counting: "While not at goal → Move Forward" walks any distance!',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:1, collectibles:[],
@@ -443,6 +478,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'Same Code, Longer Road',
       par: 3,
       maxBlocks: 4,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'A much longer hallway — run the EXACT program from Challenge 1. Conditions adapt; counting does not!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:11, exitY:1, collectibles:[],
@@ -451,6 +487,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'One Right Turn',
       par: 6,
       maxBlocks: 6,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: '"While path ahead" walks to the wall. Turn toward the goal, then let "While not at goal" finish the job.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4, collectibles:[],
@@ -459,6 +496,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'Right Turns Only',
       par: 6,
       maxBlocks: 6,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'Three turns — every one to the right. "If path ahead → Move" plus "If path right → Turn Right" in one loop handles them all.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:2, exitY:4, collectibles:[],
@@ -467,6 +505,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'One Left Turn',
       par: 6,
       maxBlocks: 6,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'This goal is up the OTHER way — walk to the wall, Turn Left, then "While not at goal".',
       grid: [[1,1,1,1,1,1,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[0,0,0,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:4, startDir:'right', exitX:5, exitY:1, collectibles:[],
@@ -475,6 +514,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'Left Turns Only',
       par: 6,
       maxBlocks: 6,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'Three turns, all to the left this time. Swap your fallback to "If path left → Turn Left".',
       grid: [[1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:4, startDir:'right', exitX:1, exitY:1, collectibles:[],
@@ -483,6 +523,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'Crystal Scanner',
       par: 8,
       maxBlocks: 9,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'Crystals! Add "If on a crystal → Collect" to your loop and the bot grabs every one it crosses.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:4,
@@ -492,6 +533,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'Both Ways',
       par: 9,
       maxBlocks: 10,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'This path turns BOTH ways. Your loop needs an "If path right" AND an "If path left" — plus the crystal scanner.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1],[1,1,1,1,0,1,1,1,1],[1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
@@ -501,6 +543,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'The Loop Trap',
       par: 9,
       maxBlocks: 10,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'A ring that goes in circles! Check "If path left" BEFORE moving ahead — or the bot orbits forever. The ORDER of your conditions matters!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,1,1],[1,0,1,1,1,1,1,0,0,1],[1,0,1,1,1,1,1,0,1,1],[1,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:8, exitY:2,
@@ -510,6 +553,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       title: 'The Mirror Trap',
       par: 9,
       maxBlocks: 10,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
       hint: 'The mirror ring: this time check "If path right" FIRST. Try the wrong order and watch what happens!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,0,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:8, startY:1, startDir:'left', exitX:1, exitY:2,
@@ -570,17 +614,25 @@ const U4: BlockUnit = {
 ## A Loop Inside a Loop
 You already know Repeat. The new idea is simple to say and powerful to use: **the body of a loop can contain another loop.**
 
-> Repeat 4:
->   Repeat 3:
->     Move Forward
->   Turn Right
+:::blocks
+repeat 4
+  repeat 3
+    move
+  turn right
+:::
 
 Read it from the **inside out**: the inner loop takes 3 steps. The outer loop does that — plus a turn — 4 times. Result: STEM Bot walks a full **square**, 12 steps and 4 corners, from just 4 blocks of logic.
 
 ## The Multiplication Rule
 The inner loop runs ALL of its repeats during EACH single repeat of the outer loop:
 
-> Repeat 3 { Repeat 4 { Move } } → 3 × 4 = **12 moves**
+:::blocks
+repeat 3
+  repeat 4
+    move
+:::
+
+The inner loop takes 4 steps, the outer runs it 3 times: 3 × 4 = **12 moves**.
 
 If you can multiply, you can predict exactly what a nested loop will do.
 
@@ -607,6 +659,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Warm-Up Lap',
       par: 4,
       maxBlocks: 6,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'One loop, like old times: Repeat 4 { Move, Move, Collect } harvests the whole row.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:1,
@@ -616,6 +669,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'The Square',
       par: 5,
       maxBlocks: 7,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'One side = Repeat 2 { Move }, then Turn Right. Put THAT inside Repeat 3, add one last step home — a loop inside a loop!',
       grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
@@ -625,6 +679,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Crystal Corners',
       par: 6,
       maxBlocks: 8,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'Same square — now add ONE Collect after each turn. Where does it go: inner loop or outer loop?',
       grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
@@ -634,6 +689,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Zigzag Runs',
       par: 8,
       maxBlocks: 9,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'Each zig is TWO runs of 3: Repeat 3 { Move }, Turn Right, Repeat 3 { Move }, Turn Left. Stamp the whole zig with an outer Repeat 2.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1],[1,1,1,0,1,1,1,1],[1,1,1,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:7,
@@ -643,6 +699,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'The Grand Square',
       par: 7,
       maxBlocks: 9,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'A bigger square: sides of 3 now. Change ONE number in your inner loop — that\'s the power of nesting.',
       grid: [[1,1,1,1,1,1],[1,0,0,0,0,1],[1,0,1,1,0,1],[1,0,1,1,0,1],[1,0,0,0,0,1],[1,1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:3,
@@ -652,6 +709,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Triple Zig',
       par: 10,
       maxBlocks: 12,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'Three zigzags, and a crystal on the way down each one. Build one perfect zig (with its Collect), then Repeat 3.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:10,
@@ -661,6 +719,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Mow the Lawn',
       par: 11,
       maxBlocks: 13,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'Two rows, like mowing grass: harvest the top row, U-turn (Turn Right, Move, Move, Turn Right), harvest the bottom row the other way.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
@@ -670,6 +729,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'The Big Mow',
       par: 15,
       maxBlocks: 17,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'FOUR rows. Your two-row mowing pattern from last level — rows, U-turn right, row back, U-turn left — is the body. Outer Repeat 2 mows the whole field!',
       grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,1,1,1,1,1],[1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:0, exitY:9,
@@ -679,6 +739,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Crystal Farm',
       par: 10,
       maxBlocks: 12,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
       hint: 'Every single square of both rows has a crystal. Put Collect INSIDE the inner loop and harvest everything in one pass.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
@@ -688,6 +749,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'The Spiral Terrace',
       par: 6,
       maxBlocks: 8,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead'],
       hint: 'The final terrace spirals inward, and the hallways are all different lengths. Nest a "While path ahead { Move, Collect }" inside a Repeat 5 — a while INSIDE a repeat!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
@@ -743,9 +805,20 @@ const U5: BlockUnit = {
 ## The Problem Functions Solve
 Look at this program for a maze with the same stair pattern in two different places:
 
-> Move, Turn Right, Move, Turn Left, Collect ← the stair
-> Move Forward, Move Forward
-> Move, Turn Right, Move, Turn Left, Collect ← the SAME stair again!
+:::blocks
+move
+turn right
+move
+turn left
+collect
+move
+move
+move
+turn right
+move
+turn left
+collect
+:::
 
 **12 blocks — and the stair is written twice.** A Repeat can't help: the two stairs aren't next to each other. What we need is a way to write the stair ONCE, give it a name, and use the name in both places.
 
@@ -757,9 +830,18 @@ That is exactly what a **function** is: a named set of blocks.
 | **🎓 Define Function** | Give a name to the blocks inside — this runs NOTHING by itself |
 | **Call Function** | Run the named function, wherever you are, as many times as you like |
 
-> 🎓 Define Function 1: do: Move, Turn Right, Move, Turn Left, Collect
->
-> Call Function 1 · Move · Move · Call Function 1
+:::blocks
+define 1
+  move
+  turn right
+  move
+  turn left
+  collect
+call 1
+move
+move
+call 1
+:::
 
 Same maze, and the stair is written **once**. Fewer blocks, and the program reads like a story: "stair, walk, stair."
 
@@ -792,6 +874,7 @@ Same idea, same words. You already know how it works.`,
       title: 'One Function, Two Places',
       par: 11,
       maxBlocks: 12,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
       hint: 'The stair pattern appears in TWO different spots — and a Repeat can\'t jump the gap between them. Define the stair as Function 1 (Move, Turn Right, Move, Turn Left, Collect), then CALL it in both places.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,0,0,1,1],[1,1,1,1,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:3,
@@ -801,6 +884,7 @@ Same idea, same words. You already know how it works.`,
       title: 'The Stair Step',
       par: 10,
       maxBlocks: 12,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
       hint: 'One stair = Move, Turn Right, Move, Turn Left. Define it once, call it three times, then walk to the flag.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4, collectibles:[],
@@ -809,6 +893,7 @@ Same idea, same words. You already know how it works.`,
       title: 'Crystal Stairs',
       par: 11,
       maxBlocks: 14,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
       hint: 'Same stairs — but now add Collect INSIDE the function. Fix the definition once and every call collects.',
       grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,1,1,1,1],[1,1,0,0,1,1,1],[1,1,1,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4,
@@ -818,6 +903,7 @@ Same idea, same words. You already know how it works.`,
       title: 'Two Functions',
       par: 14,
       maxBlocks: 16,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
       hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a crystal dash (Move, Move, Collect). Define both — call each where it fits!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
@@ -825,27 +911,30 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'Call It in a Loop',
-      par: 10,
-      maxBlocks: 15,
-      hint: 'FIVE stair steps — too many calls to write out. Put Call Function inside a Repeat 5! (Collect in the function is safe on empty steps.)',
-      grid: [[1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1],[1,0,0,1,1,1,1,1],[1,1,0,0,1,1,1,1],[1,1,1,0,0,1,1,1],[1,1,1,1,0,0,1,1],[1,1,1,1,1,0,0,1],[1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:6, exitY:6,
-      collectibles:[{x:1,y:2},{x:3,y:4},{x:5,y:6}],
+      par: 11,
+      maxBlocks: 12,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
+      hint: 'FIVE stairs in a row — put Call Function inside a Repeat 5. Then look ahead: after the walkway, the SAME stair appears once more. Call it again!',
+      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1,1],[1,1,1,0,0,1,1,1,1,1],[1,1,1,1,0,0,1,1,1,1],[1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:8, exitY:7,
+      collectibles:[{x:1,y:2},{x:3,y:4},{x:5,y:6},{x:8,y:7}],
     },
     {
       title: 'The Square Dance',
-      par: 8,
-      maxBlocks: 11,
-      hint: 'One side of the square = Move, Move, Turn Right, Collect. Define it, call it three times in a Repeat, then one last step home.',
+      par: 9,
+      maxBlocks: 10,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
+      hint: 'One side of the square = Move, Move, Turn Right, Collect. Define it once, call it three times, then one last step home.',
       grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
       collectibles:[{x:3,y:1},{x:3,y:3},{x:1,y:3}],
     },
     {
       title: 'A Function Calls a Function',
-      par: 12,
-      maxBlocks: 16,
-      hint: 'Function 1 = the stair (with Collect). Function 2 = Call Function 1, then Move, Move. Yes — functions can call other functions!',
+      par: 13,
+      maxBlocks: 14,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
+      hint: 'Function 1 = the stair (with Collect). Function 2 = Call Function 1, then Move, Move. Call Function 2 three times — functions calling functions!',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:4,
       collectibles:[{x:1,y:2},{x:4,y:3},{x:7,y:4}],
@@ -853,7 +942,8 @@ Same idea, same words. You already know how it works.`,
     {
       title: 'The Hallway Function',
       par: 8,
-      maxBlocks: 13,
+      maxBlocks: 11,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'define_trick', 'do_trick'],
       hint: 'Define: While path ahead { Move, Collect }, then Turn Right. One function walks ANY hallway — call it three times.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,0,1],[1,1,1,1,1,0,1],[1,1,1,1,1,0,1],[1,0,0,0,0,0,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:4,
@@ -861,18 +951,20 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'The Spiral',
-      par: 7,
-      maxBlocks: 14,
-      hint: 'The hallway function again — but this maze spirals inward. Repeat 5 { Call Function 1 } solves the WHOLE thing.',
+      par: 10,
+      maxBlocks: 11,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'define_trick', 'do_trick'],
+      hint: 'You solved this terrace with nested loops — now do it the function way: define the hallway once, then CALL it five times. No Repeat blocks this time!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
       collectibles:[{x:4,y:1},{x:8,y:4},{x:4,y:6},{x:2,y:4},{x:5,y:3}],
     },
     {
       title: 'Graduation Day',
-      par: 15,
-      maxBlocks: 20,
-      hint: 'The final exam: hallways AND stairs in one maze. Two functions (put Collect in both!), two Repeats — show the rookies real code, professor!',
+      par: 17,
+      maxBlocks: 18,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'define_trick', 'do_trick'],
+      hint: 'The final exam: hallways AND stairs. Two functions with Collect in both — three calls each. Show the rookies real code, professor!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,0,0,1,1,1,1,1,0,1],[1,1,0,0,1,1,1,1,0,1],[1,1,1,0,0,1,1,1,0,1],[1,1,1,1,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:2,
       collectibles:[{x:3,y:1},{x:7,y:1},{x:8,y:3},{x:6,y:5},{x:2,y:3}],
