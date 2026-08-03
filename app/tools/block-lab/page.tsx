@@ -303,6 +303,19 @@ function ChallengeView({
   const boardRef = useRef<MazeBoardHandle>(null);
   const editorRef = useRef<BlocklyWorkspaceHandle>(null);
 
+  // This component is REUSED when the student switches challenges (no key on
+  // ChallengeView — only the Blockly editor remounts). Re-derive per-challenge
+  // state or the previous level's "Challenge complete!" banner sticks around.
+  // progress deliberately NOT a dep: re-running on a fresh win would wipe the
+  // banner the student just earned.
+  useEffect(() => {
+    setSolved(progress.completedChallenges[chalKey(ui, ci)] ?? false);
+    setBumpFlash(false);
+    setLimitMsg(null);
+    setRunning(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ui, ci]);
+
   const handleRun = useCallback(() => {
     if (running) return;
     const script = editorRef.current?.getScript() ?? [];
