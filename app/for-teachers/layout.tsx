@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { auth } from "@/auth";
 import SiteHeader from "@/app/components/SiteHeader";
 import styles from "./marketing.module.css";
 
-// Public marketing shell for the "For Teachers" pages — no auth, no student data.
-// Reuses the site header for brand consistency, adds a marketing subnav + footer.
+// Public marketing shell for the "For Teachers" pages — reuses the site header
+// for brand consistency, adds a marketing subnav + footer.
+//
+// Audience rule: these pages (including pricing) are for logged-out visitors
+// and teacher/admin sessions. Logged-in STUDENTS are redirected to their
+// dashboard — students never see teacher-hub or pricing content.
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://stembuilder.io"),
@@ -21,7 +27,10 @@ export const metadata: Metadata = {
   },
 };
 
-export default function ForTeachersLayout({ children }: { children: React.ReactNode }) {
+export default async function ForTeachersLayout({ children }: { children: React.ReactNode }) {
+  const session = await auth();
+  if (session?.user?.role === "student") redirect("/student/dashboard");
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       <SiteHeader />
@@ -30,6 +39,7 @@ export default function ForTeachersLayout({ children }: { children: React.ReactN
           <div className={styles.subnavInner}>
             <Link href="/for-teachers" className={styles.subnavLink}>Why STEM Builder</Link>
             <Link href="/for-teachers#tools" className={styles.subnavLink}>The tools</Link>
+            <Link href="/for-teachers/pricing" className={styles.subnavLink}>Pricing</Link>
             <Link href="/for-teachers/getting-started" className={styles.subnavLink}>Getting started</Link>
             <Link href="/for-teachers/trust" className={styles.subnavLink}>Trust &amp; privacy</Link>
             <Link href="/teachers" className={styles.subnavCta}>Start free</Link>
@@ -43,6 +53,7 @@ export default function ForTeachersLayout({ children }: { children: React.ReactN
         <div className={styles.container}>
           <div className={styles.footerLinks}>
             <Link href="/for-teachers">For Teachers</Link>
+            <Link href="/for-teachers/pricing">Pricing</Link>
             <Link href="/for-teachers/getting-started">Getting Started</Link>
             <Link href="/for-teachers/trust">Trust &amp; Privacy</Link>
             <Link href="/privacy">Privacy Policy</Link>

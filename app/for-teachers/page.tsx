@@ -242,6 +242,11 @@ export default function ForTeachersPage() {
             <Link href="/teachers" className={styles.btnOnDark}>Start free</Link>
             <a href="#tools" className={styles.btnOnDarkOutline}>Explore the tools</a>
           </div>
+          <p style={{ margin: "18px 0 0" }}>
+            <Link href="/for-teachers/pricing" className={styles.trustLink}>
+              See pricing — free for teachers to start →
+            </Link>
+          </p>
         </div>
       </section>
     </>
