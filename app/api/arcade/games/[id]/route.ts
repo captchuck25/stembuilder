@@ -6,7 +6,7 @@ import { canAccessClass, closedArcadeClassIds, nameMap } from '../../shared';
 async function loadGame(db: ReturnType<typeof adminDb>, id: string) {
   const { data } = await db
     .from('arcade_games')
-    .select('id, owner_id, class_id, title, data, bot, plays')
+    .select('id, owner_id, class_id, title, data, bot, plays, attempts, wins')
     .eq('id', id)
     .single();
   return data;
@@ -63,6 +63,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       plays: game.plays,
       ownerId: game.owner_id,
       ownerName: names[game.owner_id] ?? 'Student',
+      attempts: game.attempts ?? 0,
+      wins: game.wins ?? 0,
       isMine: game.owner_id === session.user.id,
       canRemove: game.owner_id === session.user.id || role !== 'student',
     },
@@ -93,6 +95,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (body?.type === 'play') {
     await db.from('arcade_games').update({ plays: (game.plays ?? 0) + 1 }).eq('id', id);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Every finished try (win or lose) feeds the difficulty stats
+  if (body?.type === 'attempt') {
+    await db.from('arcade_games').update({
+      attempts: (game.attempts ?? 0) + 1,
+      ...(body?.won ? { wins: (game.wins ?? 0) + 1 } : {}),
+    }).eq('id', id);
     return NextResponse.json({ ok: true });
   }
 

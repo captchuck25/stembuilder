@@ -114,6 +114,15 @@ export default function PlayArcadeGamePage() {
     setImproved(false);
   }, []);
 
+  // Every finished try (win or lose) feeds the game's difficulty stats
+  const reportAttempt = useCallback((won: boolean) => {
+    fetch(`/api/arcade/games/${gameId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'attempt', won }),
+    }).catch(() => { /* stats only — never block play */ });
+  }, [gameId]);
+
   const submitRun = useCallback((ms: number) => {
     fetch(`/api/arcade/games/${gameId}`, {
       method: 'POST',
@@ -188,13 +197,14 @@ export default function PlayArcadeGamePage() {
           } else if (ev.type === 'hurt' || ev.type === 'lose') {
             playBump();
             particlesRef.current = [...particlesRef.current, ...spawnParticles(px, py, '#EF4444')];
-            if (ev.type === 'lose') setStatus('lost');
+            if (ev.type === 'lose') { setStatus('lost'); reportAttempt(false); }
           } else if (ev.type === 'win') {
             playWin();
             particlesRef.current = [...particlesRef.current, ...spawnConfetti(px, py, CONFETTI)];
             setStatus('won');
             setFinishMs(s.timeMs);
             submitRun(Math.round(s.timeMs));
+            reportAttempt(true);
           }
         }
         renderGame(ctx, def, s, now, botRef.current);
@@ -217,7 +227,7 @@ export default function PlayArcadeGamePage() {
 
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [loaded, submitRun]);
+  }, [loaded, submitRun, reportAttempt]);
 
   const toggleMute = useCallback(() => {
     setMutedState(m => { setMuted(!m); return !m; });

@@ -263,16 +263,27 @@ function ArcadeLabSection() {
     d.cols * TILE > VIEW_W ? "Long (side-scroller)" : d.rows * TILE > VIEW_H ? "Tall (climber)" : "Classic (one screen)";
   const count = (d: GameDef, t: string) => d.objects.filter(o => o.type === t).length;
 
-  async function shareToClass(slot: number, def: GameDef) {
-    if (!confirm(`Share "${def.title || "Untitled level"}" with your class?\n\nYou can have ONE game in the Class Arcade — this replaces any game you've already published (and resets its leaderboard).`)) return;
+  async function shareToClass(slot: number, def: GameDef, removeId?: string) {
+    if (!removeId && !confirm(`Share "${def.title || "Untitled level"}" with your class?\n\nYou can have TWO games in the Class Arcade. Re-sharing this same level replaces it (and resets its leaderboard).`)) return;
     setSharingSlot(slot);
     try {
       const res = await fetch("/api/arcade/games", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: def.title, data: def, bot, slot }),
+        body: JSON.stringify({ title: def.title, data: def, bot, slot, removeId }),
       });
       const data = await res.json().catch(() => null);
+      // At the 2-game limit: ask which published game to retire, then retry
+      if (res.status === 409 && data?.error === "limit" && Array.isArray(data.games)) {
+        setSharingSlot(null);
+        for (const g of data.games as { id: string; title: string }[]) {
+          if (confirm(`You already have 2 games in the arcade.\n\nRetire "${g.title}" (its leaderboard goes too) and share this one instead?\n\nOK = retire it · Cancel = check your other game`)) {
+            return shareToClass(slot, def, g.id);
+          }
+        }
+        setShareMsg(m => ({ ...m, [slot]: { ok: false, text: "Kept your 2 published games — nothing changed." } }));
+        return;
+      }
       setShareMsg(m => ({
         ...m,
         [slot]: res.ok

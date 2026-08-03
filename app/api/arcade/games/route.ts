@@ -27,7 +27,7 @@ export async function GET() {
 
   const { data: games } = await db
     .from('arcade_games')
-    .select('id, owner_id, class_id, title, bot, plays, updated_at')
+    .select('id, owner_id, class_id, title, bot, plays, attempts, wins, slot, updated_at')
     .in('class_id', classIds)
     .order('updated_at', { ascending: false });
 
@@ -47,21 +47,30 @@ export async function GET() {
   type RunRow = { game_id: string; player_id: string; best_ms: number };
   const allRuns = (runs ?? []) as RunRow[];
 
-  const result = games.map((g: { id: string; owner_id: string; class_id: string; title: string; bot: unknown; plays: number; updated_at: string }) => {
-    const gameRuns = allRuns.filter(r => r.game_id === g.id);
-    let record: RunRow | null = null;
-    for (const r of gameRuns) if (!record || r.best_ms < record.best_ms) record = r;
+  const result = games.map((g: { id: string; owner_id: string; class_id: string; title: string; bot: unknown; plays: number; attempts: number; wins: number; slot: number; updated_at: string }) => {
+    const gameRuns = allRuns
+      .filter(r => r.game_id === g.id)
+      .sort((a, b) => a.best_ms - b.best_ms);
     const mine = gameRuns.find(r => r.player_id === session.user.id) ?? null;
     return {
       id: g.id,
       title: g.title,
       classId: g.class_id,
       plays: g.plays,
+      attempts: g.attempts ?? 0,
+      wins: g.wins ?? 0,
+      slot: g.slot ?? 0,
       updatedAt: g.updated_at,
       bot: g.bot ?? null,
       ownerId: g.owner_id,
       ownerName: names[g.owner_id] ?? 'Student',
-      record: record ? { ms: record.best_ms, name: names[record.player_id] ?? 'Student' } : null,
+      record: gameRuns[0] ? { ms: gameRuns[0].best_ms, name: names[gameRuns[0].player_id] ?? 'Student' } : null,
+      topRuns: gameRuns.slice(0, 5).map(r => ({
+        name: names[r.player_id] ?? 'Student',
+        ms: r.best_ms,
+        mine: r.player_id === session.user.id,
+        isDesigner: r.player_id === g.owner_id,
+      })),
       myBestMs: mine?.best_ms ?? null,
     };
   });
@@ -100,11 +109,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Certified beatable: the author must have beaten this save slot's level
+  // Certified beatable: the author must have beaten this save slot's level.
+  // quiz_score on the slot row holds their best playtest time — it seeds the
+  // fresh leaderboard so every published game opens with a time to beat.
   const slot = Number.isInteger(body?.slot) && body.slot >= 0 && body.slot < 6 ? body.slot : 0;
   const { data: beaten } = await db
     .from('user_progress')
-    .select('completed')
+    .select('completed, quiz_score')
     .eq('user_id', session.user.id)
     .eq('tool', 'arcade-lab')
     .eq('level_idx', 0)
@@ -112,6 +123,28 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
   if (!beaten?.completed) {
     return NextResponse.json({ error: 'not_beaten', message: 'Beat your own level in ▶ Play before publishing — every arcade game must be winnable!' }, { status: 412 });
+  }
+  const authorMs = Number(beaten.quiz_score);
+
+  // Two cabinets per student per class: republishing an already-published
+  // slot replaces it; a third distinct slot needs one of the two retired
+  const { data: published } = await db
+    .from('arcade_games')
+    .select('id, title, slot')
+    .eq('owner_id', session.user.id)
+    .eq('class_id', classId);
+  const others = (published ?? []).filter((g: { slot: number }) => g.slot !== slot);
+  if (others.length >= 2) {
+    const removeId = typeof body?.removeId === 'string' ? body.removeId : null;
+    const toRemove = removeId ? others.find((g: { id: string }) => g.id === removeId) : null;
+    if (!toRemove) {
+      return NextResponse.json({
+        error: 'limit',
+        message: 'You already have 2 games in the arcade — pick one to retire first.',
+        games: others.map((g: { id: string; title: string; slot: number }) => ({ id: g.id, title: g.title, slot: g.slot })),
+      }, { status: 409 });
+    }
+    await db.from('arcade_games').delete().eq('id', toRemove.id).eq('owner_id', session.user.id);
   }
 
   const bot = sanitizeBot(body?.bot) ?? null;
@@ -122,19 +155,30 @@ export async function POST(req: NextRequest) {
       {
         owner_id: session.user.id,
         class_id: classId,
+        slot,
         title,
         data,
         bot,
+        attempts: 0,
+        wins: 0,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: 'owner_id,class_id' },
+      { onConflict: 'owner_id,class_id,slot' },
     )
     .select('id')
     .single();
   if (error || !game) return NextResponse.json({ error: error?.message ?? 'Publish failed' }, { status: 500 });
 
-  // Fresh level → fresh leaderboard
+  // Fresh level → fresh leaderboard, seeded with the designer's own time
   await db.from('arcade_runs').delete().eq('game_id', game.id);
+  if (Number.isFinite(authorMs) && authorMs >= 500 && authorMs <= 60 * 60 * 1000) {
+    await db.from('arcade_runs').insert({
+      game_id: game.id,
+      player_id: session.user.id,
+      best_ms: Math.round(authorMs),
+      updated_at: new Date().toISOString(),
+    });
+  }
 
   return NextResponse.json({ ok: true, id: game.id });
 }

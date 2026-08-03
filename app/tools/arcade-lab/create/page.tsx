@@ -158,7 +158,10 @@ function CreateInner() {
   const [muted, setMutedState] = useState(() => (typeof window === 'undefined' ? false : isMuted()));
   const [synced, setSynced] = useState(false);
   const [keysUnwired, setKeysUnwired] = useState(false);
-  const [publish, setPublish] = useState<{ state: 'idle' | 'busy' | 'done' | 'error'; msg?: string }>({ state: 'idle' });
+  const [publish, setPublish] = useState<{ state: 'idle' | 'busy' | 'done' | 'error' | 'limit'; msg?: string; games?: { id: string; title: string; slot: number }[] }>({ state: 'idle' });
+  // Best playtest win this session (resets on edit) — synced to the slot's
+  // progress row so publishing seeds the leaderboard with the designer's time
+  const bestMsRef = useRef<number | null>(null);
   const [slot, setSlot] = useState(0);
   const [showLevels, setShowLevels] = useState(false);
   const [slotsMeta, setSlotsMeta] = useState<({ title: string; shape: string } | null)[] | null>(null);
@@ -258,6 +261,7 @@ function CreateInner() {
     slotRef.current = s;
     try { localStorage.setItem(SLOT_PICK_KEY, String(s)); } catch { /* ignore */ }
     setPublish({ state: 'idle' });
+    bestMsRef.current = null;
     stateRef.current = null;
     setMode('design');
     setShowLevels(false);
@@ -294,6 +298,9 @@ function CreateInner() {
   // Autosave — only after a real edit this session (dirty guard)
   useEffect(() => {
     if (!dirtyRef.current) return;
+    // An edited level invalidates this session's best time (old runs would be
+    // an unfair leaderboard seed for the changed level)
+    bestMsRef.current = null;
     try { localStorage.setItem(draftKey(slot), JSON.stringify(def)); } catch { /* ignore */ }
     if (!userId) return;
     setSynced(false);
@@ -535,12 +542,15 @@ function CreateInner() {
               playWin();
               particlesRef.current = [...particlesRef.current, ...spawnConfetti(px, py, CONFETTI)];
               setStatus('won');
-              // Beating your own level marks the arcade draft complete
+              // Beating your own level marks the arcade draft complete; the
+              // best win time rides quiz_score and seeds the leaderboard
+              const winMs = Math.round(s.timeMs);
+              if (bestMsRef.current === null || winMs < bestMsRef.current) bestMsRef.current = winMs;
               if (userId) {
                 fetch('/api/progress', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: slotRef.current, completed: true, saved_code: JSON.stringify(defRef.current) }),
+                  body: JSON.stringify({ tool: 'arcade-lab', level_idx: 0, challenge_idx: slotRef.current, completed: true, quiz_score: bestMsRef.current, saved_code: JSON.stringify(defRef.current) }),
                 });
               }
             }
@@ -658,16 +668,18 @@ function CreateInner() {
   }, []);
 
   // ── Publish to the Class Arcade ─────────────────────────────────────────────
-  const publishGame = useCallback(async () => {
+  // Two cabinets per student: publishing a third asks which one to retire
+  const publishGame = useCallback(async (removeId?: string) => {
     setPublish({ state: 'busy' });
     try {
       const res = await fetch('/api/arcade/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: defRef.current.title, data: defRef.current, bot: botRef.current, slot: slotRef.current }),
+        body: JSON.stringify({ title: defRef.current.title, data: defRef.current, bot: botRef.current, slot: slotRef.current, removeId }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok) setPublish({ state: 'done' });
+      else if (res.status === 409 && data?.error === 'limit') setPublish({ state: 'limit', games: data.games ?? [] });
       else setPublish({ state: 'error', msg: data?.message ?? 'Publish failed — try again.' });
     } catch {
       setPublish({ state: 'error', msg: 'Publish failed — check your connection.' });
@@ -676,7 +688,7 @@ function CreateInner() {
 
   const publishUI = (
     <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <button onClick={publishGame} disabled={publish.state === 'busy' || !playable}
+      <button onClick={() => publishGame()} disabled={publish.state === 'busy' || !playable}
         title={playable ? 'Share this game to your class arcade (republishing replaces your old game and resets its leaderboard)' : playableHint}
         style={{ padding: '7px 16px', borderRadius: 10, fontWeight: 800, fontSize: 12,
           background: '#FFD54A', color: '#0f172a', border: 'none',
@@ -690,6 +702,22 @@ function CreateInner() {
       )}
       {publish.state === 'error' && (
         <span style={{ fontSize: 12, fontWeight: 700, color: '#fca5a5' }}>{publish.msg}</span>
+      )}
+      {publish.state === 'limit' && (
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, fontWeight: 700, color: '#fbbf24' }}>
+          You have 2 games in the arcade — retire one:
+          {(publish.games ?? []).map(g => (
+            <button key={g.id}
+              onClick={() => { if (confirm(`Retire "${g.title}" from the arcade (its leaderboard goes too) and publish this game instead?`)) publishGame(g.id); }}
+              style={{ padding: '5px 10px', borderRadius: 8, fontWeight: 800, fontSize: 12, background: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.35)', cursor: 'pointer' }}>
+              🗑 {g.title || `Slot ${g.slot + 1}`}
+            </button>
+          ))}
+          <button onClick={() => setPublish({ state: 'idle' })}
+            style={{ padding: '5px 10px', borderRadius: 8, fontWeight: 700, fontSize: 12, background: 'rgba(255,255,255,0.08)', color: '#cbd5e1', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+            Keep both
+          </button>
+        </span>
       )}
     </span>
   );

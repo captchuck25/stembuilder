@@ -14,16 +14,29 @@ interface GalleryGame {
   id: string;
   title: string;
   plays: number;
+  attempts: number;
+  wins: number;
   updatedAt: string;
   bot: unknown;
   ownerId: string;
   ownerName: string;
   record: { ms: number; name: string } | null;
+  topRuns: { name: string; ms: number; mine: boolean; isDesigner: boolean }[];
   myBestMs: number | null;
 }
 
 function fmt(ms: number) {
   return `${(ms / 1000).toFixed(2)}s`;
+}
+
+/** Kid-readable difficulty from the class-wide win rate */
+function difficulty(attempts: number, wins: number): { label: string; color: string } | null {
+  if (attempts < 3) return null; // not enough tries to judge
+  const rate = wins / attempts;
+  if (rate >= 0.6) return { label: '😊 Chill', color: '#4ade80' };
+  if (rate >= 0.3) return { label: '😅 Tricky', color: '#fbbf24' };
+  if (rate > 0) return { label: '🔥 Brutal', color: '#f87171' };
+  return { label: '💀 Unbeaten', color: '#f87171' };
 }
 
 function BotFace({ bot }: { bot: unknown }) {
@@ -130,12 +143,32 @@ export default function ClassArcadePage() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: '#94a3b8', fontWeight: 700, marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: '#94a3b8', fontWeight: 700, marginBottom: 10 }}>
                   <span>🕹 {g.plays} play{g.plays === 1 ? '' : 's'}</span>
-                  {g.record
-                    ? <span title={`Record held by ${g.record.name}`}>🏆 {fmt(g.record.ms)} — {g.record.name}</span>
-                    : <span>🏆 No record yet</span>}
+                  {g.attempts >= 3 && (
+                    <span title={`${g.wins} win${g.wins === 1 ? '' : 's'} in ${g.attempts} tries across the class`}
+                      style={{ color: difficulty(g.attempts, g.wins)?.color }}>
+                      {difficulty(g.attempts, g.wins)?.label} · {g.wins}/{g.attempts}
+                    </span>
+                  )}
                   {g.myBestMs != null && <span style={{ color: '#7DF9FF' }}>Me: {fmt(g.myBestMs)}</span>}
+                </div>
+
+                {/* Top 5 — the class leaderboard at a glance */}
+                <div style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: '8px 12px', marginBottom: 12, minHeight: 34 }}>
+                  {g.topRuns.length === 0 ? (
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b' }}>🏆 No finishes yet — set the first time!</div>
+                  ) : (
+                    g.topRuns.map((r, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', fontSize: 11, fontWeight: 700, lineHeight: '18px', color: r.mine ? '#7DF9FF' : i === 0 ? '#FFD54A' : '#94a3b8' }}>
+                        <span style={{ width: 16, flexShrink: 0 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}</span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.name}{r.isDesigner ? ' 🛠' : ''}{r.mine ? ' (me)' : ''}
+                        </span>
+                        <span style={{ flexShrink: 0 }}>{fmt(r.ms)}</span>
+                      </div>
+                    ))
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>
