@@ -46,6 +46,7 @@ export default function ForTeachersLayout({ children }: { children: React.ReactN
             <Link href="/for-teachers/getting-started">Getting Started</Link>
             <Link href="/for-teachers/trust">Trust &amp; Privacy</Link>
             <Link href="/privacy">Privacy Policy</Link>
+            <Link href="/terms">Terms of Service</Link>
             <Link href="/teachers">Teacher Sign-Up</Link>
             <Link href="/sign-in">Log In</Link>
           </div>

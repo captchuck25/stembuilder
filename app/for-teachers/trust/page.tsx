@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ComingSoon } from "../components/ui";
 import styles from "../marketing.module.css";
 
 export const metadata: Metadata = {
@@ -154,7 +153,7 @@ export default function TrustPage() {
               <Link href="/privacy" className={styles.textLink}>Privacy Policy</Link>
             </li>
             <li className={styles.body}>
-              Terms of Service <ComingSoon>Coming soon</ComingSoon>
+              <Link href="/terms" className={styles.textLink}>Terms of Service</Link>
             </li>
           </ul>
         </div>
