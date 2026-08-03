@@ -9,6 +9,7 @@ import {
   ArcadeSound,
   CompiledRules,
   ScriptOwner,
+  SignalChannel,
   emptyRules,
 } from './types';
 
@@ -122,6 +123,28 @@ const ARCADE_DEFS = [
     message0: 'fire the blaster 🔫',
     previousStatement: null, nextStatement: null, colour: MOTION,
     tooltip: 'Shoot a bolt straight up from the ship (short reload between shots)',
+  },
+  // ── Signals: broadcast + listen, Scratch-style ──
+  {
+    type: 'arcade_when_signal',
+    message0: 'when the %1 signal arrives',
+    args0: [{
+      type: 'field_dropdown', name: 'SIG',
+      options: [['🔴 red', 'red'], ['🔵 blue', 'blue'], ['⭐ gold', 'gold']],
+    }],
+    nextStatement: null,
+    colour: EVENT,
+    tooltip: 'Runs when ANY object sends this signal — every copy of me responds',
+  },
+  {
+    type: 'arcade_send_signal',
+    message0: 'send the %1 signal 📡',
+    args0: [{
+      type: 'field_dropdown', name: 'SIG',
+      options: [['🔴 red', 'red'], ['🔵 blue', 'blue'], ['⭐ gold', 'gold']],
+    }],
+    previousStatement: null, nextStatement: null, colour: EVENT,
+    tooltip: 'Broadcast to every sheet listening with "when the signal arrives" — wire switches, doors, and chain reactions!',
   },
   {
     type: 'arcade_when_bomb_hits',
@@ -361,7 +384,9 @@ const DEFENDER_TOOLBOX: Partial<Record<ScriptOwner, string[]>> = {
 };
 
 export function buildArcadeToolbox(owner: ScriptOwner, genre: 'platformer' | 'defender' = 'platformer') {
-  const types = (genre === 'defender' && DEFENDER_TOOLBOX[owner]) || TOOLBOX_BLOCKS[owner];
+  const base = (genre === 'defender' && DEFENDER_TOOLBOX[owner]) || TOOLBOX_BLOCKS[owner];
+  // Signals live on EVERY sheet — any object can broadcast, any can listen
+  const types = [...base, 'arcade_when_signal', 'arcade_send_signal'];
   const contents: object[] = [];
   const events = types.filter(t => t.startsWith('arcade_when'));
   const actions = types.filter(t => !t.startsWith('arcade_when'));
@@ -408,6 +433,7 @@ function chainToActions(block: Blockly.Block | null): ArcadeAction[] {
       case 'arcade_shot_limit': actions.push({ kind: 'setAmmo', n: Number(b.getFieldValue('N')) || 10 }); break;
       case 'arcade_add_shots': actions.push({ kind: 'addAmmo', n: Number(b.getFieldValue('N')) || 5 }); break;
       case 'arcade_damage': actions.push({ kind: 'damage', amt: Number(b.getFieldValue('AMT')) || 1 }); break;
+      case 'arcade_send_signal': actions.push({ kind: 'signal', ch: (b.getFieldValue('SIG') as SignalChannel) || 'red' }); break;
     }
     b = b.getNextBlock();
   }
@@ -473,6 +499,9 @@ export function compileScripts(scripts: Partial<Record<ScriptOwner, string>>): C
             break;
           case 'arcade_when_caught':
             if (owner === 'ammo') rules.ammoCatch.push(actions);
+            break;
+          case 'arcade_when_signal':
+            rules.signalRules.push({ ch: (top.getFieldValue('SIG') as SignalChannel) || 'red', owner, actions });
             break;
           case 'arcade_when_aliens_cleared':
             if (owner === 'game') rules.aliensCleared.push(actions);

@@ -101,7 +101,11 @@ export type ArcadeAction =
   | { kind: 'setAmmo'; n: number }
   | { kind: 'addAmmo'; n: number }
   // Defender: partial damage — chip the ship by 1 / ½ / ¼ of a life
-  | { kind: 'damage'; amt: number };
+  | { kind: 'damage'; amt: number }
+  // Signals: one object broadcasts, any sheet can listen (Scratch-style)
+  | { kind: 'signal'; ch: SignalChannel };
+
+export type SignalChannel = 'red' | 'blue' | 'gold';
 
 export interface CompiledRules {
   /** Player: run while the key is held */
@@ -140,6 +144,8 @@ export interface CompiledRules {
   bombHit: ArcadeAction[][];
   /** Defender: falling ⚡ pickups — "when the ship catches me" */
   ammoCatch: ArcadeAction[][];
+  /** "when the X signal arrives" — owner decides which entities run it */
+  signalRules: { ch: SignalChannel; owner: ScriptOwner; actions: ArcadeAction[] }[];
   /** Kill-gated flag touches: only fire when kills >= n */
   touchFlagKills: { n: number; actions: ArcadeAction[] }[];
   /** Head-stomps needed to squash (1-3); property blocks on the sheets */
@@ -160,6 +166,7 @@ export function emptyRules(): CompiledRules {
     bruteHit: [], bruteBottom: [], bruteShip: [],
     bomberHit: [], bomberBottom: [], bomberShip: [], bombHit: [],
     ammoCatch: [],
+    signalRules: [],
     enemyToughness: 1, flyerToughness: 1,
     alienToughness: 1, bruteToughness: 1, bomberToughness: 1,
   };

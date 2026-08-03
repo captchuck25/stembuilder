@@ -1048,8 +1048,8 @@ function CreateInner() {
                 {genre === 'defender' ? (
                   <>🧪 Everything&apos;s already wired — remix it! Try: <strong style={{ color: '#cbd5e1' }}>Game → &quot;aliens march 🔥 FAST&quot;</strong>, a <strong style={{ color: '#cbd5e1' }}>&quot;shot limit&quot;</strong> plus ⚡ ammo drops in Design, or <strong style={{ color: '#cbd5e1' }}>🛡 armor</strong> on the Brute sheet.</>
                 ) : (
-                  <>🧪 Try stacking guards: <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me&quot; → &quot;only if score is at least 5 ✦&quot; → &quot;only if 2 enemies defeated&quot; → &quot;win&quot;</strong> on the Goal sheet…
-                  or a toll spring: <strong style={{ color: '#cbd5e1' }}>&quot;only if score is at least 1&quot; → &quot;change score by -1&quot; → &quot;launch&quot;</strong>!</>
+                  <>🧪 Try stacking guards: <strong style={{ color: '#cbd5e1' }}>&quot;when the player touches me&quot; → &quot;only if score is at least 5 ✦&quot; → &quot;win&quot;</strong> on the Goal sheet…
+                  or wire a switch with signals: Crystal → <strong style={{ color: '#cbd5e1' }}>&quot;send the 🔴 red signal 📡&quot;</strong>, Spikes → <strong style={{ color: '#cbd5e1' }}>&quot;when the red signal arrives → disappear&quot;</strong>!</>
                 )}
               </span>
             )}

@@ -89,6 +89,8 @@ export interface GameState {
   alienOffsetX: number;
   alienOffsetY: number;
   aliensClearedFired: boolean;
+  /** Signals broadcast this frame, delivered at end of step */
+  pendingSignals: string[];
 }
 
 export interface GameEvent {
@@ -171,6 +173,7 @@ export function initGame(def: GameDef, rules: CompiledRules): GameState {
     alienOffsetX: 0,
     alienOffsetY: 0,
     aliensClearedFired: false,
+    pendingSignals: [],
   };
 
   // "when the game starts" — only setup actions make sense before the first frame
@@ -182,6 +185,7 @@ export function initGame(def: GameDef, rules: CompiledRules): GameState {
       else if (a.kind === 'setPace') s.paceMult = PACE_MULT[a.pace];
       else if (a.kind === 'setAmmo') s.ammo = a.n;
       else if (a.kind === 'addAmmo' && s.ammo !== null) s.ammo += a.n;
+      else if (a.kind === 'signal') s.pendingSignals.push(a.ch); // delivered on frame 1
     }
   }
 
@@ -307,6 +311,7 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
         case 'setPace': s.paceMult = PACE_MULT[a.pace]; break;
         case 'setAmmo': s.ammo = a.n; break;
         case 'addAmmo': if (s.ammo !== null) s.ammo += a.n; break;
+        case 'signal': s.pendingSignals.push(a.ch); break;
         case 'changeScore': s.score = Math.max(0, s.score + a.n); break;
         case 'setScore': s.score = Math.max(0, a.n); break;
         case 'setLives': s.lives = a.n; break;
@@ -349,6 +354,33 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
           break;
       }
     }
+  };
+
+  // Deliver broadcast signals: each "when the X signal arrives" sheet runs —
+  // per living entity for object sheets, once for player/game sheets. Signals
+  // sent by receivers chain into the next round (capped so loops can't hang).
+  const deliverSignals = () => {
+    let rounds = 0;
+    while (s.pendingSignals.length && rounds++ < 8) {
+      if (s.status !== 'playing') return;
+      const batch = Array.from(new Set(s.pendingSignals));
+      s.pendingSignals = [];
+      for (const ch of batch) {
+        for (const rule of rules.signalRules) {
+          if (rule.ch !== ch) continue;
+          if (s.status !== 'playing') return;
+          if (rule.owner === 'game' || rule.owner === 'player') {
+            runActions(rule.actions, null);
+          } else {
+            for (const e of s.entities) {
+              if (e.type === rule.owner && e.alive) runActions(rule.actions, e);
+              if (s.status !== 'playing') return;
+            }
+          }
+        }
+      }
+    }
+    s.pendingSignals = [];
   };
 
   // ── Player input: only student-wired keys do anything ──
@@ -496,6 +528,7 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
         runActions(rule.actions, null);
       }
     });
+    deliverSignals();
     return events;
   }
 
@@ -653,5 +686,6 @@ export function stepGame(s: GameState, input: InputState, dtMs: number, rules: C
     }
   });
 
+  deliverSignals();
   return events;
 }
