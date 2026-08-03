@@ -556,10 +556,183 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
   ],
 };
 
-// ─── Unit 4 — Functions (Tricks) ─────────────────────────────────────────────
+// ─── Unit 4 — Nested Loops (Forest) ──────────────────────────────────────────
 
 const U4: BlockUnit = {
   id: 4,
+  title: 'Nested Loops',
+  tagline: 'Put a loop inside a loop — patterns made of patterns',
+  color: '#0D9488',
+  theme: 'forest',
+  story: 'Almost home! On the final descent, STEM Bot spots the Emerald Terraces — a legendary hillside farm planted in patterns of patterns: rows inside fields, squares inside spirals. The farmers need every terrace walked and every crystal harvested before the season turns. One loop won\'t cut it here. It\'s time to put loops INSIDE loops.',
+  introNotes: `# Unit 4 — Nested Loops
+
+## A Loop Inside a Loop
+You already know Repeat. The new idea is simple to say and powerful to use: **the body of a loop can contain another loop.**
+
+> Repeat 4:
+>   Repeat 3:
+>     Move Forward
+>   Turn Right
+
+Read it from the **inside out**: the inner loop takes 3 steps. The outer loop does that — plus a turn — 4 times. Result: STEM Bot walks a full **square**, 12 steps and 4 corners, from just 4 blocks of logic.
+
+## The Multiplication Rule
+The inner loop runs ALL of its repeats during EACH single repeat of the outer loop:
+
+> Repeat 3 { Repeat 4 { Move } } → 3 × 4 = **12 moves**
+
+If you can multiply, you can predict exactly what a nested loop will do.
+
+## Why Nest?
+Big jobs are usually patterns **of** patterns:
+- A square = 4 × (one side)
+- A staircase = 3 × (one zigzag run)
+- Mowing a field = rows × (one row plus a U-turn)
+
+Write the small pattern once as the inner loop. Let the outer loop stamp it across the maze. Your block counts will crash — check the pars in this unit!
+
+## Not Just Repeat × Repeat
+ANY loop can go inside any other. A **While path ahead** inside a **Repeat** says: "walk to the wall — whatever distance that is — then turn. Again." You'll use that one on the final terrace.
+
+## Watch the U-Turn
+The classic mowing bug: at the end of a row you need to turn, step DOWN to the next row, and turn again — and the second row runs the OPPOSITE direction. Walk it with your finger before you code it. If your bot mows two rows perfectly, the outer loop can mow the whole field.`,
+
+  newBlocks: [
+    { blockId: 'repeat', label: 'Repeat N (nested!)', desc: 'Nothing new to unlock — the discovery is that a Repeat fits INSIDE another Repeat. Inner pattern × outer stamps.' },
+  ],
+
+  challenges: [
+    {
+      title: 'Warm-Up Lap',
+      par: 4,
+      maxBlocks: 6,
+      hint: 'One loop, like old times: Repeat 4 { Move, Move, Collect } harvests the whole row.',
+      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:8, exitY:1,
+      collectibles:[{x:2,y:1},{x:4,y:1},{x:6,y:1},{x:8,y:1}],
+    },
+    {
+      title: 'The Square',
+      par: 5,
+      maxBlocks: 7,
+      hint: 'One side = Repeat 2 { Move }, then Turn Right. Put THAT inside Repeat 3, add one last step home — a loop inside a loop!',
+      grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
+      collectibles:[],
+    },
+    {
+      title: 'Crystal Corners',
+      par: 6,
+      maxBlocks: 8,
+      hint: 'Same square — now add ONE Collect after each turn. Where does it go: inner loop or outer loop?',
+      grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
+      collectibles:[{x:3,y:1},{x:3,y:3},{x:1,y:3}],
+    },
+    {
+      title: 'Zigzag Runs',
+      par: 8,
+      maxBlocks: 9,
+      hint: 'Each zig is TWO runs of 3: Repeat 3 { Move }, Turn Right, Repeat 3 { Move }, Turn Left. Stamp the whole zig with an outer Repeat 2.',
+      grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1],[1,1,1,0,1,1,1,1],[1,1,1,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:6, exitY:7,
+      collectibles:[],
+    },
+    {
+      title: 'The Grand Square',
+      par: 7,
+      maxBlocks: 9,
+      hint: 'A bigger square: sides of 3 now. Change ONE number in your inner loop — that\'s the power of nesting.',
+      grid: [[1,1,1,1,1,1],[1,0,0,0,0,1],[1,0,1,1,0,1],[1,0,1,1,0,1],[1,0,0,0,0,1],[1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:3,
+      collectibles:[{x:4,y:1},{x:4,y:4},{x:1,y:4}],
+    },
+    {
+      title: 'Triple Zig',
+      par: 10,
+      maxBlocks: 12,
+      hint: 'Three zigzags, and a crystal on the way down each one. Build one perfect zig (with its Collect), then Repeat 3.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:9, exitY:10,
+      collectibles:[{x:3,y:2},{x:6,y:5},{x:9,y:8}],
+    },
+    {
+      title: 'Mow the Lawn',
+      par: 11,
+      maxBlocks: 13,
+      hint: 'Two rows, like mowing grass: harvest the top row, U-turn (Turn Right, Move, Move, Turn Right), harvest the bottom row the other way.',
+      grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
+      collectibles:[{x:2,y:1},{x:4,y:1},{x:3,y:3}],
+    },
+    {
+      title: 'The Big Mow',
+      par: 15,
+      maxBlocks: 17,
+      hint: 'FOUR rows. Your two-row mowing pattern from last level — rows, U-turn right, row back, U-turn left — is the body. Outer Repeat 2 mows the whole field!',
+      grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,1,1,1,1,1],[1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:0, exitY:9,
+      collectibles:[{x:2,y:1},{x:3,y:3},{x:1,y:5},{x:2,y:7}],
+    },
+    {
+      title: 'Crystal Farm',
+      par: 10,
+      maxBlocks: 12,
+      hint: 'Every single square of both rows has a crystal. Put Collect INSIDE the inner loop and harvest everything in one pass.',
+      grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
+      collectibles:[{x:1,y:1},{x:2,y:1},{x:3,y:1},{x:4,y:1},{x:3,y:3},{x:2,y:3},{x:1,y:3}],
+    },
+    {
+      title: 'The Spiral Terrace',
+      par: 6,
+      maxBlocks: 8,
+      hint: 'The final terrace spirals inward, and the hallways are all different lengths. Nest a "While path ahead { Move, Collect }" inside a Repeat 5 — a while INSIDE a repeat!',
+      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
+      collectibles:[{x:4,y:1},{x:8,y:4},{x:4,y:6},{x:2,y:4},{x:5,y:3}],
+    },
+  ],
+
+  quiz: [
+    {
+      question: 'Repeat 3 { Repeat 4 { Move Forward } } — how many steps does STEM Bot take?',
+      options: ['7', '4', '12', '34'],
+      answer: 2,
+      explanation: 'The inner loop takes 4 steps, and the outer loop runs it 3 times: 3 × 4 = 12. Nested loops multiply.',
+    },
+    {
+      question: 'In a nested loop, when does the INNER loop run?',
+      options: ['Once, before the outer loop starts', 'All of its repeats, during EACH single repeat of the outer loop', 'Only on the last repeat of the outer loop', 'At the same time as the outer loop'],
+      answer: 1,
+      explanation: 'Each time the outer loop runs its body once, the inner loop inside that body runs completely — all of its repeats — before the outer loop continues.',
+    },
+    {
+      question: 'Repeat 4 { Repeat 3 { Move }, Turn Right } makes STEM Bot trace…',
+      options: ['A straight line of 12 steps', 'A full square — 4 sides of 3 steps with a turn at each corner', 'A zigzag', 'A circle'],
+      answer: 1,
+      explanation: 'The inner loop draws one side (3 steps), the turn makes a corner, and the outer loop stamps that side-plus-corner 4 times: a complete square lap.',
+    },
+    {
+      question: 'You want STEM Bot to mow 3 rows of grass. Which plan uses nesting correctly?',
+      options: ['One giant Repeat 30 { Move }', 'Repeat 3 { walk one row, then U-turn to the next row }', 'Write all three rows out block by block', 'Repeat 3 { Turn Right }'],
+      answer: 1,
+      explanation: 'The row-plus-U-turn is the repeating pattern. Build it once as the outer loop\'s body (with an inner loop walking the row), and Repeat 3 stamps it down the field.',
+    },
+    {
+      question: 'Repeat 2 { Repeat 3 { Move, Collect } } — how many times does Collect run?',
+      options: ['2', '3', '5', '6'],
+      answer: 3,
+      explanation: 'Collect is inside the inner loop: 3 runs per outer repeat, and 2 outer repeats. 2 × 3 = 6. (On empty squares it is a safe no-op!)',
+    },
+  ],
+};
+
+// ─── Unit 5 — Functions (Tricks) ─────────────────────────────────────────────
+
+const U5: BlockUnit = {
+  id: 5,
   title: 'Functions',
   tagline: 'Define a function once — call it anywhere',
   color: '#DB2777',
@@ -740,7 +913,7 @@ Same idea, same words. You already know how it works.`,
   ],
 };
 
-export const UNITS: BlockUnit[] = [U1, U2, U3, U4];
+export const UNITS: BlockUnit[] = [U1, U2, U3, U4, U5];
 
 export function chalKey(ui: number, ci: number) { return `${ui}_${ci}`; }
 export function countCompleted(ui: number, completed: Record<string, boolean>) {

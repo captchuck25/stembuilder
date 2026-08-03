@@ -41,8 +41,8 @@ export const BLOCK_DEFS: BlockDef[] = [
   { id: 'if_on_item',        label: 'If on a crystal',   category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
   // Block type ids stay 'define_trick'/'do_trick' so saved student XML keeps
   // loading — only the student-facing labels use the real vocabulary
-  { id: 'define_trick',      label: 'Define Function',   category: 'trick',   color: '#DB2777', hasBody: true, unlockLevel: 12 },
-  { id: 'do_trick',          label: 'Call Function',     category: 'trick',   color: '#DB2777', unlockLevel: 12 },
+  { id: 'define_trick',      label: 'Define Function',   category: 'trick',   color: '#DB2777', hasBody: true, unlockLevel: 16 },
+  { id: 'do_trick',          label: 'Call Function',     category: 'trick',   color: '#DB2777', unlockLevel: 16 },
 ];
 
 export const BLOCK_MAP = Object.fromEntries(BLOCK_DEFS.map(b => [b.id, b]));

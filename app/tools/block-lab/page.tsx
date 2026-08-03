@@ -289,7 +289,7 @@ function ChallengeView({
   const isLocked = levelLocked || (lockedCis?.has(ci) ?? false);
   const ch = unit.challenges[ci];
   const isLast = ci === unit.challenges.length - 1;
-  const availableBlocks = blocksForLevel(ui * 4); // desert=0, forest=4, space=8
+  const availableBlocks = blocksForLevel(ui * 4); // sequence=0, loops=4, conditionals=8, nested=12, functions=16
   const theme = THEMES[unit.theme];
 
   const [leftTab, setLeftTab] = useState<'script' | 'notes'>('script');
