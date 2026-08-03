@@ -537,10 +537,15 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       explanation: '"If" checks its condition once and runs the body at most once — it is not a loop itself. Placing it inside a while loop means it checks on each iteration.',
     },
     {
-      question: 'Why is there a safety limit (max steps) on while loops in this tool?',
-      options: ['To make the game harder', 'To prevent infinite loops that would freeze the browser', 'Because space mazes have limited fuel', 'Because while loops can only run 400 times in Python'],
-      answer: 1,
-      explanation: 'An infinite loop — where the condition never becomes false — would run forever and crash the program. The safety limit stops execution after 400 iterations.',
+      question: 'In the ring mazes, putting "If path ahead → Move" BEFORE "If path left → Turn Left" made STEM Bot circle forever. What is the lesson?',
+      options: [
+        'STEM Bot needs more Move Forward blocks',
+        'While loops should be avoided in mazes with rings',
+        'The ORDER of your conditions changes what the program does — check for the turn you need before charging ahead',
+        'Ring mazes are impossible to solve',
+      ],
+      answer: 2,
+      explanation: 'Your ifs run top to bottom on every lap. If "move ahead" fires first at the doorway, the bot sails right past it and the turn check never gets its moment. Same blocks, different order, completely different program — that is an infinite loop born from ordering.',
     },
     {
       question: 'Which program can cross a straight corridor of ANY length?',
