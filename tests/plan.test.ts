@@ -118,6 +118,39 @@ describe("buildUsage", () => {
   });
 });
 
+describe("curriculum access — paid Pro and institutional only", () => {
+  const base = {
+    plan: "free" as const,
+    proTrialStartedAt: null,
+    proTrialEndsAt: null,
+    overageBlocks: 0,
+    institutional: false,
+    count: 0,
+    now: NOW,
+  };
+
+  it("free has no curriculum access", () => {
+    expect(buildUsage(base).includesCurriculum).toBe(false);
+  });
+  it("the free Pro TRIAL has Pro caps but NO curriculum", () => {
+    const u = buildUsage({
+      ...base,
+      plan: "pro_trial",
+      proTrialStartedAt: "2026-08-01T00:00:00Z",
+      proTrialEndsAt: "2027-06-30T23:59:59Z",
+    });
+    expect(u.effective).toBe("pro_trial");
+    expect(u.cap).toBe(125);
+    expect(u.includesCurriculum).toBe(false);
+  });
+  it("paid Pro includes curriculum", () => {
+    expect(buildUsage({ ...base, plan: "pro" }).includesCurriculum).toBe(true);
+  });
+  it("institutional includes curriculum", () => {
+    expect(buildUsage({ ...base, institutional: true }).includesCurriculum).toBe(true);
+  });
+});
+
 describe("cap error plumbing", () => {
   it("the student-facing refusal is the spec'd message", () => {
     expect(STUDENT_JOIN_BLOCKED_MESSAGE).toBe("This class is full — ask your teacher.");

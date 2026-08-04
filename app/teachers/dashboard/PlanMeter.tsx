@@ -26,8 +26,6 @@ const BTN: React.CSSProperties = {
   border: "2px solid #1f1f1f",
 };
 
-const UPGRADE_MAILTO =
-  "mailto:info@stembuilder.io?subject=" + encodeURIComponent("Teacher Pro");
 const OVERAGE_MAILTO =
   "mailto:info@stembuilder.io?subject=" + encodeURIComponent("Add students to Teacher Pro");
 
@@ -149,7 +147,7 @@ export default function PlanMeter() {
                     {starting ? "Starting…" : "Start a free Pro trial (125 students, rest of the school year)"}
                   </button>
                 )}
-                <a href={UPGRADE_MAILTO} style={{ ...BTN, background: "#fff", color: "#1f1f1f", textAlign: "center" }}>
+                <a href="/teachers/upgrade" style={{ ...BTN, background: "#fff", color: "#1f1f1f", textAlign: "center" }}>
                   Upgrade to Teacher Pro — $60/year
                 </a>
                 <a href="/for-teachers/pricing" style={{ fontSize: 13, fontWeight: 700, color: "#2563eb", textAlign: "center", textDecoration: "none" }}>

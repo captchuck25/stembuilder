@@ -50,7 +50,7 @@ export const PLANS: PricingPlan[] = [
       `Up to ${FREE_STUDENT_CAP} students`,
       "Join by class code or Google Classroom",
       "Student progress & assignments",
-      "Student work saved for the school year",
+      "Student work saved automatically",
     ],
     ctas: [{ label: "Start free", href: "/teachers", primary: true }],
   },
@@ -63,11 +63,10 @@ export const PLANS: PricingPlan[] = [
       "Everything in Free",
       `Up to ${PRO_STUDENT_CAP} students (then just $${OVERAGE_PRICE_PER_BLOCK} per additional ${OVERAGE_BLOCK_SIZE})`,
       "Access to our growing library of ready-to-teach projects & units",
-      "Multi-year work history",
     ],
-    ctas: [{ label: "Go Pro", href: mailto("Teacher Pro"), primary: true }],
+    ctas: [{ label: "Go Pro", href: "/teachers/upgrade", primary: true }],
     footnote:
-      "Teaching a full load already? Ask us about a free Pro trial for the rest of the school year.",
+      "Teaching a full load already? Start a free Pro trial for the rest of the school year — everything in Pro except the curriculum library.",
   },
   {
     id: "school",

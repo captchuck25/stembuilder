@@ -74,6 +74,11 @@ export interface PlanUsage {
   trialUsed: boolean;
   trialEndsAt: string | null;
   overageBlocks: number;
+  /**
+   * Curriculum library access: paid Pro and institutional plans only. The
+   * free Pro TRIAL deliberately excludes it — Pro caps, no curriculum.
+   */
+  includesCurriculum: boolean;
 }
 
 export function buildUsage(args: {
@@ -97,5 +102,6 @@ export function buildUsage(args: {
     trialUsed: args.proTrialStartedAt !== null,
     trialEndsAt: args.proTrialEndsAt,
     overageBlocks: args.overageBlocks,
+    includesCurriculum: args.institutional || effective === "pro",
   };
 }
