@@ -33,11 +33,14 @@ export const BLOCK_DEFS: BlockDef[] = [
     params: [{ key: 'times', type: 'number', default: 3, min: 1, max: 20, label: 'times' }],
     unlockLevel: 4,
   },
-  { id: 'while_path_ahead',  label: 'While path ahead',  category: 'control', color: '#D97706', hasBody: true, unlockLevel: 8 },
-  { id: 'while_not_at_goal', label: 'While not at goal', category: 'control', color: '#D97706', hasBody: true, unlockLevel: 8 },
-  { id: 'if_path_ahead',     label: 'If path ahead',     category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
-  { id: 'if_path_left',      label: 'If path left',      category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
-  { id: 'if_path_right',     label: 'If path right',     category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
+  // Tier map (unit index × 4): sequence=0, loops=4, NESTED LOOPS=8 (repeat +
+  // if_on_item only), while&sensors=12, functions=16. Units with per-challenge
+  // blockIds override this; the tiers are the fallback.
+  { id: 'while_path_ahead',  label: 'While path ahead',  category: 'control', color: '#D97706', hasBody: true, unlockLevel: 12 },
+  { id: 'while_not_at_goal', label: 'While not at goal', category: 'control', color: '#D97706', hasBody: true, unlockLevel: 12 },
+  { id: 'if_path_ahead',     label: 'If path ahead',     category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 12 },
+  { id: 'if_path_left',      label: 'If path left',      category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 12 },
+  { id: 'if_path_right',     label: 'If path right',     category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 12 },
   { id: 'if_on_item',        label: 'If on a crystal',   category: 'control', color: '#7C3AED', hasBody: true, unlockLevel: 8 },
   // Block type ids stay 'define_trick'/'do_trick' so saved student XML keeps
   // loading — only the student-facing labels use the real vocabulary

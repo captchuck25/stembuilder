@@ -396,19 +396,21 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
   ],
 };
 
-// ─── Unit 3 — While & If (Space) ─────────────────────────────────────────────
+// ─── Unit 4 — While & If (Space) ─────────────────────────────────────────────
 
-const U3: BlockUnit = {
-  id: 3,
+const U4: BlockUnit = {
+  id: 4,
   title: 'While & If',
   tagline: 'Let STEM Bot sense its surroundings and decide what to do',
   color: '#7C3AED',
   theme: 'space',
   story: 'Fully fueled at last, STEM Bot blasts off! But docking at the orbital station is the trickiest part of the trip — its corridors rearrange themselves on every visit, so no map will help. Upgrade the bot\'s sensors and teach it to feel its own way to the warp portal home.',
-  introNotes: `# Unit 3 — While & If
+  introNotes: `# Unit 4 — While & If
 
 ## From Counting to Sensing
-In Units 1 and 2 you told STEM Bot exactly how many steps to take. But what if the maze changes, or you don't know the length in advance?
+In Units 1–3 you told STEM Bot exactly how many steps to take — even your nested loops counted their laps. But what if the maze changes, or you don't know the length in advance?
+
+You have already met one sensor: **If on a crystal**, from the Terraces. Now meet the whole family — sensors that feel for PATHS, and loops that run on conditions instead of counts.
 
 **Sensors** let STEM Bot check its surroundings at runtime:
 
@@ -419,7 +421,7 @@ In Units 1 and 2 you told STEM Bot exactly how many steps to take. But what if t
 | **If path ahead** | Open cell ahead (runs body once if true) |
 | **If path left** | Open cell to the left |
 | **If path right** | Open cell to the right |
-| **If on a crystal** | STEM Bot is standing on an uncollected crystal |
+| **If on a crystal** | STEM Bot is standing on an uncollected crystal (your friend from the Terraces) |
 
 ## While Loops
 A **while** loop keeps running its body **as long as a condition is true**:
@@ -461,7 +463,6 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
     { blockId: 'if_path_ahead',     label: 'If path ahead',     desc: 'Run the body once if there is an open cell ahead.' },
     { blockId: 'if_path_left',      label: 'If path left',      desc: 'Run the body once if there is an open cell to the left.' },
     { blockId: 'if_path_right',     label: 'If path right',     desc: 'Run the body once if there is an open cell to the right.' },
-    { blockId: 'if_on_item',        label: 'If on a crystal',   desc: 'Run the body once if STEM Bot is standing on an uncollected crystal.' },
   ],
 
   challenges: [
@@ -600,16 +601,16 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
   ],
 };
 
-// ─── Unit 4 — Nested Loops (Forest) ──────────────────────────────────────────
+// ─── Unit 3 — Nested Loops (Forest) ──────────────────────────────────────────
 
-const U4: BlockUnit = {
-  id: 4,
+const U3: BlockUnit = {
+  id: 3,
   title: 'Nested Loops',
   tagline: 'Put a loop inside a loop — patterns made of patterns',
   color: '#0D9488',
   theme: 'forest',
-  story: 'Almost home! On the final descent, STEM Bot spots the Emerald Terraces — a legendary hillside farm planted in patterns of patterns: rows inside fields, squares inside spirals. The farmers need every terrace walked and every crystal harvested before the season turns. One loop won\'t cut it here. It\'s time to put loops INSIDE loops.',
-  introNotes: `# Unit 4 — Nested Loops
+  story: 'The launch window is close — but the road to the launch pad crosses the Emerald Terraces, a legendary hillside farm planted in patterns of patterns: rows inside fields, squares inside squares. The farmers will trade launch fuel for a full harvest. One loop won\'t cut it here. It\'s time to put loops INSIDE loops.',
+  introNotes: `# Unit 3 — Nested Loops
 
 ## A Loop Inside a Loop
 You already know Repeat. The new idea is simple to say and powerful to use: **the body of a loop can contain another loop.**
@@ -644,14 +645,24 @@ Big jobs are usually patterns **of** patterns:
 
 Write the small pattern once as the inner loop. Let the outer loop stamp it across the maze. Your block counts will crash — check the pars in this unit!
 
-## Not Just Repeat × Repeat
-ANY loop can go inside any other. A **While path ahead** inside a **Repeat** says: "walk to the wall — whatever distance that is — then turn. Again." You'll use that one on the final terrace.
+## A Decision Inside a Loop
+Here is a sneak peek at something new — your first **if** block. Watch what happens when a loop carries a QUESTION inside it:
+
+:::blocks
+repeat 6
+  move
+  if crystal
+    collect
+:::
+
+Every lap, STEM Bot takes a step and then **checks**: am I standing on a crystal? If yes, collect it; if no, keep going. The loop runs a fixed number of times — but each lap can DECIDE something. You'll use this on the crystal terraces, and it is your warm-up for the next unit, where decisions take over completely.
 
 ## Watch the U-Turn
 The classic mowing bug: at the end of a row you need to turn, step DOWN to the next row, and turn again — and the second row runs the OPPOSITE direction. Walk it with your finger before you code it. If your bot mows two rows perfectly, the outer loop can mow the whole field.`,
 
   newBlocks: [
-    { blockId: 'repeat', label: 'Repeat N (nested!)', desc: 'Nothing new to unlock — the discovery is that a Repeat fits INSIDE another Repeat. Inner pattern × outer stamps.' },
+    { blockId: 'repeat', label: 'Repeat N (nested!)', desc: 'The big discovery: a Repeat fits INSIDE another Repeat. Inner pattern × outer stamps.' },
+    { blockId: 'if_on_item', label: 'If on a crystal', desc: 'Your first if! Runs its blocks only when STEM Bot is standing on a crystal — a decision inside your loop.' },
   ],
 
   challenges: [
@@ -659,7 +670,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Warm-Up Lap',
       par: 4,
       maxBlocks: 6,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'One loop, like old times: Repeat 4 { Move, Move, Collect } harvests the whole row.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:1,
@@ -679,7 +690,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Crystal Corners',
       par: 6,
       maxBlocks: 8,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'Same square — now add ONE Collect after each turn. Where does it go: inner loop or outer loop?',
       grid: [[1,1,1,1,1],[1,0,0,0,1],[1,0,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:2,
@@ -699,7 +710,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'The Grand Square',
       par: 7,
       maxBlocks: 9,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'A bigger square: sides of 3 now. Change ONE number in your inner loop — that\'s the power of nesting.',
       grid: [[1,1,1,1,1,1],[1,0,0,0,0,1],[1,0,1,1,0,1],[1,0,1,1,0,1],[1,0,0,0,0,1],[1,1,1,1,1,1]],
       startX:1, startY:1, startDir:'right', exitX:1, exitY:3,
@@ -709,7 +720,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Triple Zig',
       par: 10,
       maxBlocks: 12,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'Three zigzags, and a crystal on the way down each one. Build one perfect zig (with its Collect), then Repeat 3.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:10,
@@ -719,7 +730,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'Mow the Lawn',
       par: 11,
       maxBlocks: 13,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'Two rows, like mowing grass: harvest the top row, U-turn (Turn Right, Move, Move, Turn Right), harvest the bottom row the other way.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
@@ -729,7 +740,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       title: 'The Big Mow',
       par: 15,
       maxBlocks: 17,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'FOUR rows. Your two-row mowing pattern from last level — rows, U-turn right, row back, U-turn left — is the body. Outer Repeat 2 mows the whole field!',
       grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,1,1,1,1,1],[1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:0, exitY:9,
@@ -737,23 +748,23 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
     },
     {
       title: 'Crystal Farm',
-      par: 10,
-      maxBlocks: 12,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat'],
-      hint: 'Every single square of both rows has a crystal. Put Collect INSIDE the inner loop and harvest everything in one pass.',
+      par: 11,
+      maxBlocks: 13,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
+      hint: 'Every square of both rows has a crystal. Try "If on a crystal → Collect" inside the inner loop — the bot checks and harvests every step. (Plain Collect works too!)',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
       collectibles:[{x:1,y:1},{x:2,y:1},{x:3,y:1},{x:4,y:1},{x:3,y:3},{x:2,y:3},{x:1,y:3}],
     },
     {
-      title: 'The Spiral Terrace',
-      par: 6,
-      maxBlocks: 8,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead'],
-      hint: 'The final terrace spirals inward, and the hallways are all different lengths. Nest a "While path ahead { Move, Collect }" inside a Repeat 5 — a while INSIDE a repeat!',
-      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
-      collectibles:[{x:4,y:1},{x:8,y:4},{x:4,y:6},{x:2,y:4},{x:5,y:3}],
+      title: 'The Great Harvest',
+      par: 17,
+      maxBlocks: 18,
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
+      hint: 'SIX rows — the whole farm. Your two-row mowing body, outer Repeat 3, and "If on a crystal → Collect" checking every step. The full harvest, professor-level code!',
+      grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,1,1,1,1,1],[1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:0, exitY:13,
+      collectibles:[{x:2,y:1},{x:1,y:3},{x:3,y:5},{x:2,y:7},{x:4,y:9},{x:1,y:11}],
     },
   ],
 
@@ -954,7 +965,7 @@ Same idea, same words. You already know how it works.`,
       par: 10,
       maxBlocks: 11,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'You solved this terrace with nested loops — now do it the function way: define the hallway once, then CALL it five times. No Repeat blocks this time!',
+      hint: 'Five hallways of different lengths spiral inward. Define the hallway once — While path ahead { Move, Collect }, then Turn Right — and CALL it five times. No Repeat blocks needed!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,0,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:3,
       collectibles:[{x:4,y:1},{x:8,y:4},{x:4,y:6},{x:2,y:4},{x:5,y:3}],

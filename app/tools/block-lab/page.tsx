@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import Link from 'next/link';
 import SiteHeader from '@/app/components/SiteHeader';
+import { isAdmin } from '@/lib/roles';
 import { UNITS, chalKey, countCompleted, BlockUnit } from './units';
 import { blocksForLevel, BLOCK_MAP } from './engine/blocks';
 import { ScriptNode, countBlocks } from './engine/runtime';
@@ -53,6 +54,10 @@ async function syncToCloud(_userId: string, ui: number, ci: number | null, compl
       quiz_score: score ?? null,
     }),
   });
+}
+// Admin review helper: clear one cloud row (challenge, or quiz when ci=null).
+async function deleteCloudProgress(ui: number, ci: number | null) {
+  await fetch(`/api/progress?tool=block-lab&level_idx=${ui}&challenge_idx=${ci ?? -1}`, { method: 'DELETE' });
 }
 async function loadFromCloud(_userId: string): Promise<Progress> {
   const res = await fetch('/api/progress?tool=block-lab');
@@ -268,11 +273,13 @@ function LessonPanel({ text }: { text: string }) {
 
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
-function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
+function Overview({ progress, onSelect, assignedUnits, lockedLevels, onResetQuiz }: {
   progress: Progress;
   onSelect: (ui: number) => void;
   assignedUnits: number[] | null;
   lockedLevels: Set<number>;
+  /** Present only for admins — renders a quiz-reset button on completed unit cards. */
+  onResetQuiz?: (ui: number) => void;
 }) {
   const assignedSet = assignedUnits ? new Set(assignedUnits) : null;
   return (
@@ -315,6 +322,14 @@ function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
                   {done} / {total} challenges
                   {starSum > 0 && <span style={{ color: '#eab308', fontWeight: 700 }}> · ⭐ {starSum}/{total * 3}</span>}
                 </div>
+                {onResetQuiz && progress.completedUnits[ui] && (
+                  <button onClick={e => { e.stopPropagation(); onResetQuiz(ui); }}
+                    title="Admin only: clear your quiz result for this unit so you can retake it"
+                    style={{ marginTop: 10, padding: '4px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                      background: 'rgba(220,38,38,0.12)', color: '#f87171', border: '2px solid rgba(248,113,113,0.45)', cursor: 'pointer' }}>
+                    ↺ Reset quiz (admin)
+                  </button>
+                )}
               </div>
             );
           })}
@@ -380,7 +395,7 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
 
 function ChallengeView({
   ui, ci, progress, lockedCis,
-  onSolve, onNext, onFinish, onBack, onJump,
+  onSolve, onNext, onFinish, onBack, onJump, onAdminReset,
 }: {
   ui: number; ci: number; progress: Progress; lockedCis?: Set<number>;
   onSolve: (xml: string, stars: number) => void;
@@ -388,6 +403,8 @@ function ChallengeView({
   onFinish: (xml: string) => void;
   onBack: () => void;
   onJump: (ci: number, xml: string) => void;
+  /** Present only for admins on a completed challenge — renders the review reset button. */
+  onAdminReset?: () => void;
 }) {
   const unit = UNITS[ui];
   const levelLocked = lockedCis?.has(-1) ?? false;
@@ -395,7 +412,7 @@ function ChallengeView({
   const ch = unit.challenges[ci];
   const isLast = ci === unit.challenges.length - 1;
   // Per-challenge toolbox when specified; else cumulative unlock
-  // (sequence=0, loops=4, conditionals=8, nested=12, functions=16)
+  // (sequence=0, loops=4, nested=8, while&sensors=12, functions=16)
   const availableBlocks = ch.blockIds
     ? ch.blockIds.map(id => BLOCK_MAP[id]).filter(Boolean)
     : blocksForLevel(ui * 4);
@@ -527,6 +544,13 @@ function ChallengeView({
           <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: unit.color }}>{theme.emoji} Unit {unit.id} — {unit.title}</span>
           <span style={{ fontSize: 13, color: '#64748b' }}>Challenge {ci + 1} of {unit.challenges.length}</span>
+          {onAdminReset && (
+            <button onClick={onAdminReset} title="Admin only: clear your completion of this challenge so you can replay it"
+              style={{ marginLeft: 'auto', padding: '4px 12px', borderRadius: 14, fontSize: 12, fontWeight: 700,
+                background: 'rgba(220,38,38,0.12)', color: '#f87171', border: '2px solid rgba(248,113,113,0.45)', cursor: 'pointer' }}>
+              ↺ Reset challenge (admin)
+            </button>
+          )}
         </div>
 
         {/* Challenge dots */}
@@ -884,10 +908,42 @@ export default function BlockLabPage() {
     return next;
   }, [updateProgress, userId]);
 
+  // Admin-only review resets: wipe one challenge (or one unit quiz) locally and
+  // in the cloud so a changed activity can be replayed from scratch.
+  const admin = isAdmin(session?.user?.role);
+  const [resetNonce, setResetNonce] = useState(0);
+
+  const resetChallenge = useCallback((ui: number, ci: number) => {
+    if (!window.confirm(`Reset your progress on Unit ${UNITS[ui].id}, Challenge ${ci + 1}? (Admin review only — clears completion, stars, and your saved blocks.)`)) return;
+    const key = chalKey(ui, ci);
+    updateProgress(p => {
+      const completedChallenges = { ...p.completedChallenges };
+      const stars = { ...p.stars };
+      const savedXml = { ...p.savedXml };
+      delete completedChallenges[key];
+      delete stars[key];
+      delete savedXml[key];
+      return { ...p, completedChallenges, stars, savedXml };
+    });
+    setResetNonce(n => n + 1);
+    if (userId) deleteCloudProgress(ui, ci);
+  }, [updateProgress, userId]);
+
+  const resetQuiz = useCallback((ui: number) => {
+    if (!window.confirm(`Reset your quiz result for Unit ${UNITS[ui].id}? (Admin review only — later units re-lock until you pass it again.)`)) return;
+    updateProgress(p => {
+      const completedUnits = { ...p.completedUnits };
+      delete completedUnits[ui];
+      return { ...p, completedUnits };
+    });
+    if (userId) deleteCloudProgress(ui, null);
+  }, [updateProgress, userId]);
+
   const lockedLevels = new Set(lockedChallenges.filter(lc => lc.challenge_idx === -1).map(lc => lc.level_idx));
 
   if (phase.tag === 'overview') {
-    return <Overview progress={progress} assignedUnits={assignedUnits} lockedLevels={lockedLevels} onSelect={ui => setPhase({ tag: 'intro', ui })} />;
+    return <Overview progress={progress} assignedUnits={assignedUnits} lockedLevels={lockedLevels} onSelect={ui => setPhase({ tag: 'intro', ui })}
+      onResetQuiz={admin ? resetQuiz : undefined} />;
   }
 
   if (phase.tag === 'intro') {
@@ -900,7 +956,9 @@ export default function BlockLabPage() {
     const lockedCis = new Set(lockedChallenges.filter(lc => lc.level_idx === ui).map(lc => lc.challenge_idx));
     return (
       <ChallengeView
+        key={`cv:${resetNonce}`}
         ui={ui} ci={ci} progress={progress} lockedCis={lockedCis}
+        onAdminReset={admin && progress.completedChallenges[chalKey(ui, ci)] ? () => resetChallenge(ui, ci) : undefined}
         onSolve={(xml, stars) => handleSolve(ui, ci, xml, stars)}
         onNext={xml => {
           handleSolve(ui, ci, xml);
