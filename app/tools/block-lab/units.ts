@@ -669,7 +669,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
     {
       title: 'Warm-Up Lap',
       par: 4,
-      maxBlocks: 6,
+      maxBlocks: 5,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'One loop, like old times: Repeat 4 { Move, Move, Collect } harvests the whole row.',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
@@ -709,7 +709,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
     {
       title: 'The Grand Square',
       par: 7,
-      maxBlocks: 9,
+      maxBlocks: 8,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'A bigger square: sides of 3 now. Change ONE number in your inner loop — that\'s the power of nesting.',
       grid: [[1,1,1,1,1,1],[1,0,0,0,0,1],[1,0,1,1,0,1],[1,0,1,1,0,1],[1,0,0,0,0,1],[1,1,1,1,1,1]],
@@ -728,8 +728,8 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
     },
     {
       title: 'Mow the Lawn',
-      par: 11,
-      maxBlocks: 13,
+      par: 10,
+      maxBlocks: 11,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'Two rows, like mowing grass: harvest the top row, U-turn (Turn Right, Move, Move, Turn Right), harvest the bottom row the other way.',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
@@ -739,7 +739,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
     {
       title: 'The Big Mow',
       par: 15,
-      maxBlocks: 17,
+      maxBlocks: 16,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'FOUR rows. Your two-row mowing pattern from last level — rows, U-turn right, row back, U-turn left — is the body. Outer Repeat 2 mows the whole field!',
       grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,1,1,1,1,1],[1,1,1,1,1,1]],
@@ -748,7 +748,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
     },
     {
       title: 'Acorn Farm',
-      par: 11,
+      par: 12,
       maxBlocks: 13,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
       hint: 'Every square of both rows has an acorn. Try "If on an acorn → Collect" inside the inner loop — the bot checks and harvests every step. (Plain Collect works too!)',
