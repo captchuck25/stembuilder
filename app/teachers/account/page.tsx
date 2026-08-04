@@ -50,6 +50,8 @@ export default function TeacherAccountPage() {
   const [gradeLevels, setGradeLevels] = useState("");
   const [contentArea, setContentArea] = useState("");
   const [saveState, setSaveState] = useState<"" | "saving" | "saved" | "error">("");
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState("");
 
   useEffect(() => {
     if (status === "loading") return;
@@ -77,6 +79,20 @@ export default function TeacherAccountPage() {
     });
     setSaveState(res.ok ? "saved" : "error");
     if (res.ok) setTimeout(() => setSaveState(""), 2500);
+  }
+
+  async function openPortal() {
+    setPortalBusy(true);
+    setPortalError("");
+    try {
+      const res = await fetch("/api/teacher/billing/portal", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) { window.location.href = data.url; return; }
+      setPortalError(data.error ?? "Could not open billing management.");
+    } catch {
+      setPortalError("Could not reach the server — try again.");
+    }
+    setPortalBusy(false);
   }
 
   const usage = account?.usage ?? null;
@@ -200,12 +216,25 @@ export default function TeacherAccountPage() {
                         border: "2px solid #1f1f1f", fontWeight: 800, fontSize: 14, textDecoration: "none" }}>
                       {usage.plan === "pro" ? "Add students" : "Upgrade to Teacher Pro"}
                     </Link>
+                    {usage.plan === "pro" && (
+                      <button type="button" onClick={openPortal} disabled={portalBusy}
+                        style={{ padding: "11px 22px", borderRadius: 999, background: "#fff", color: "#1f1f1f",
+                          border: "2px solid #1f1f1f", fontWeight: 700, fontSize: 14, cursor: "pointer",
+                          opacity: portalBusy ? 0.6 : 1 }}>
+                        {portalBusy ? "Opening…" : "Manage billing / cancel"}
+                      </button>
+                    )}
                     <a href="mailto:support@stembuilder.io?subject=Billing%20question"
                       style={{ padding: "11px 22px", borderRadius: 999, background: "#fff", color: "#1f1f1f",
                         border: "2px solid #1f1f1f", fontWeight: 700, fontSize: 14, textDecoration: "none" }}>
                       Billing questions
                     </a>
                   </div>
+                  {portalError && (
+                    <p style={{ fontSize: 13, color: "#dc2626", fontWeight: 700, margin: "8px 0 0" }}>
+                      {portalError}
+                    </p>
+                  )}
                 )}
               </div>
             )}
