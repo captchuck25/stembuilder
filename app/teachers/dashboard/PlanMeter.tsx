@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PlanUsage } from "@/lib/plan";
+import TrialSignupForm from "../TrialSignupForm";
 
 // Teacher plan usage meter + upgrade prompts for the dashboard.
 // All state comes from GET /api/teacher/plan (server-derived); the only
@@ -31,8 +32,7 @@ const OVERAGE_MAILTO =
 
 export default function PlanMeter() {
   const [usage, setUsage] = useState<PlanUsage | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState("");
+  const [showTrialForm, setShowTrialForm] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const autoOpened = useRef(false);
 
@@ -61,18 +61,10 @@ export default function PlanMeter() {
     : usage.effective === "pro_trial" ? "Pro trial"
     : "Free plan";
 
-  async function startTrial() {
-    setStarting(true);
-    setError("");
-    const res = await fetch("/api/teacher/plan/trial", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error ?? "Could not start the trial.");
-    } else {
-      setUsage(data);
-      dialogRef.current?.close();
-    }
-    setStarting(false);
+  function onTrialStarted(next: PlanUsage) {
+    setUsage(next);
+    setShowTrialForm(false);
+    dialogRef.current?.close();
   }
 
   return (
@@ -131,31 +123,32 @@ export default function PlanMeter() {
               ? `Teacher Pro includes ${cap} students. Add more in blocks of 25 for $10/year per block.`
               : `The ${trialExpired ? "Free plan" : "free plan"} includes up to ${cap} students across all your classes. Upgrade to keep growing — or bring your school or district on board.`}
           </p>
-          {error && (
-            <p style={{ fontSize: 13, color: "#dc2626", fontWeight: 700, margin: "0 0 12px" }}>{error}</p>
+          {showTrialForm ? (
+            <TrialSignupForm onStarted={onTrialStarted} />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {usage.effective === "pro" ? (
+                <a href={OVERAGE_MAILTO} style={{ ...BTN, background: "#1f1f1f", color: "#fff", textAlign: "center" }}>
+                  Add students — $10 per 25
+                </a>
+              ) : (
+                <>
+                  {!usage.trialUsed && (
+                    <button type="button" onClick={() => setShowTrialForm(true)}
+                      style={{ ...BTN, background: "#1f1f1f", color: "#fff" }}>
+                      Start a free Pro trial (125 students, rest of the school year)
+                    </button>
+                  )}
+                  <a href="/teachers/upgrade" style={{ ...BTN, background: "#fff", color: "#1f1f1f", textAlign: "center" }}>
+                    Upgrade to Teacher Pro — $60/year
+                  </a>
+                  <a href="/for-teachers/pricing" style={{ fontSize: 13, fontWeight: 700, color: "#2563eb", textAlign: "center", textDecoration: "none" }}>
+                    See all plans →
+                  </a>
+                </>
+              )}
+            </div>
           )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {usage.effective === "pro" ? (
-              <a href={OVERAGE_MAILTO} style={{ ...BTN, background: "#1f1f1f", color: "#fff", textAlign: "center" }}>
-                Add students — $10 per 25
-              </a>
-            ) : (
-              <>
-                {!usage.trialUsed && (
-                  <button type="button" onClick={startTrial} disabled={starting}
-                    style={{ ...BTN, background: "#1f1f1f", color: "#fff", opacity: starting ? 0.6 : 1 }}>
-                    {starting ? "Starting…" : "Start a free Pro trial (125 students, rest of the school year)"}
-                  </button>
-                )}
-                <a href="/teachers/upgrade" style={{ ...BTN, background: "#fff", color: "#1f1f1f", textAlign: "center" }}>
-                  Upgrade to Teacher Pro — $60/year
-                </a>
-                <a href="/for-teachers/pricing" style={{ fontSize: 13, fontWeight: 700, color: "#2563eb", textAlign: "center", textDecoration: "none" }}>
-                  See all plans →
-                </a>
-              </>
-            )}
-          </div>
           <button type="button" onClick={() => dialogRef.current?.close()}
             style={{ marginTop: 16, background: "none", border: "none", color: "#6b7280", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
             Not now

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { adminDb } from "@/lib/db.server";
 import { roleAtLeast } from "@/lib/roles";
@@ -16,12 +16,20 @@ import { writeAudit } from "@/lib/audit.server";
 // Ends at PRO_TRIAL_ENDS_AT (env) or the coming June 30. Recorded with
 // pro_trial_started_at + an audit entry (who, when).
 //
-// TODO(stripe): when billing lands, "Upgrade to Teacher Pro" becomes a
-// Stripe Checkout session ($60/year + $10/25-student overage blocks).
-// The caps, trial, meter, and prompts here work independently of billing.
-export async function POST() {
+// The request body may carry OPTIONAL lead-gen context (course, grades,
+// state, district — trimmed short strings stored on the 0004 profile
+// columns for follow-up). It never influences plan state.
+export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const lead = (v: unknown, max: number): string | null =>
+    typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
+  const contentArea = lead(body.contentArea, 120);
+  const gradeLevels = lead(body.gradeLevels, 120);
+  const usState = lead(body.state, 40);
+  const districtName = lead(body.district, 120);
 
   const db = adminDb();
   const { data: profile } = await db
@@ -58,6 +66,11 @@ export async function POST() {
       plan: "pro_trial",
       pro_trial_started_at: now.toISOString(),
       pro_trial_ends_at: endsAt.toISOString(),
+      // Lead-gen context (only when provided — never blanks out onboarding data).
+      ...(contentArea ? { content_area: contentArea } : {}),
+      ...(gradeLevels ? { grade_levels: gradeLevels } : {}),
+      ...(usState ? { state: usState } : {}),
+      ...(districtName ? { district: districtName } : {}),
     })
     .eq("id", session.user.id)
     .eq("plan", "free")
@@ -73,7 +86,13 @@ export async function POST() {
     action: "plan.trial_start",
     targetType: "profile",
     targetId: session.user.id,
-    metadata: { ends_at: endsAt.toISOString() },
+    metadata: {
+      ends_at: endsAt.toISOString(),
+      content_area: contentArea,
+      grade_levels: gradeLevels,
+      state: usState,
+      district: districtName,
+    },
   });
 
   const usage = await getTeacherPlanUsage(session.user.id);

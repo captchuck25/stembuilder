@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense } from "react";
 import SiteHeader from "@/app/components/SiteHeader";
+import TrialSignupForm from "../TrialSignupForm";
 import { getProfile } from "@/lib/profile";
 import { roleAtLeast } from "@/lib/roles";
 import type { PlanUsage } from "@/lib/plan";
@@ -30,7 +31,8 @@ function UpgradeInner() {
   const canceled = params.get("canceled") === "1";
 
   const [usage, setUsage] = useState<PlanUsage | null>(null);
-  const [busy, setBusy] = useState<"" | "checkout" | "trial">("");
+  const [busy, setBusy] = useState<"" | "checkout">("");
+  const [showTrialForm, setShowTrialForm] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -57,14 +59,9 @@ function UpgradeInner() {
     setBusy("");
   }
 
-  async function startTrial() {
-    setBusy("trial");
-    setError("");
-    const res = await fetch("/api/teacher/plan/trial", { method: "POST" });
-    const data = await res.json();
-    if (res.ok) setUsage(data);
-    else setError(data.error ?? "Could not start the trial.");
-    setBusy("");
+  function onTrialStarted(next: PlanUsage) {
+    setUsage(next);
+    setShowTrialForm(false);
   }
 
   return (
@@ -116,15 +113,17 @@ function UpgradeInner() {
                     opacity: busy ? 0.6 : 1 }}>
                   {busy === "checkout" ? "Opening checkout…" : `Upgrade now — $${PRO_PRICE_PER_YEAR}/year`}
                 </button>
-                {!usage.trialUsed && usage.effective === "free" && (
-                  <button type="button" onClick={startTrial} disabled={busy !== ""}
+                {!usage.trialUsed && usage.effective === "free" && !showTrialForm && (
+                  <button type="button" onClick={() => setShowTrialForm(true)} disabled={busy !== ""}
                     style={{ padding: "12px 24px", borderRadius: 999, background: "#fff", color: "#1f1f1f",
-                      border: "2px solid #1f1f1f", fontWeight: 700, fontSize: 14, cursor: "pointer",
-                      opacity: busy ? 0.6 : 1 }}>
-                    {busy === "trial"
-                      ? "Starting…"
-                      : "Or start a free Pro trial — rest of the school year, curriculum library not included"}
+                      border: "2px solid #1f1f1f", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                    Or start a free Pro trial — rest of the school year, curriculum library not included
                   </button>
+                )}
+                {showTrialForm && (
+                  <div style={{ border: "2px solid #e5e7eb", borderRadius: 14, padding: 18 }}>
+                    <TrialSignupForm onStarted={onTrialStarted} />
+                  </div>
                 )}
                 {usage.plan === "pro_trial" && usage.effective === "pro_trial" && (
                   <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>
