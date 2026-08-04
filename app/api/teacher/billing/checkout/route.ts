@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { adminDb } from "@/lib/db.server";
 import { roleAtLeast } from "@/lib/roles";
@@ -8,7 +8,7 @@ import { isBillingConfigured, stripe, teacherProPriceId, siteOrigin } from "@/li
 // the $60/year Teacher Pro subscription. No client input is read; eligibility
 // is derived from the session + database. The plan itself is only ever set by
 // the webhook after Stripe confirms payment.
-export async function POST() {
+export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -40,7 +40,17 @@ export async function POST() {
     return NextResponse.json({ error: "You're already on Teacher Pro." }, { status: 409 });
   }
 
-  const origin = siteOrigin();
+  // Send the teacher back to the EXACT host they're browsing — a env-configured
+  // origin that differs from it (www vs apex, vercel.app) drops the session
+  // cookie on return and the success redirect looks like a logout. The Origin
+  // header is trustworthy here: the route requires a same-site session cookie.
+  const headerOrigin = req.headers.get("origin");
+  const origin =
+    headerOrigin &&
+    (new URL(headerOrigin).hostname.endsWith("stembuilder.io") ||
+      new URL(headerOrigin).hostname === "localhost")
+      ? headerOrigin
+      : siteOrigin();
   let checkout;
   try {
     checkout = await createCheckoutSession(origin, session.user.id, profile!);
