@@ -26,6 +26,10 @@ export interface BlockChallenge {
 
 export interface QuizQ {
   question: string;
+  /** Optional real-Blockly figure (same DSL as the notes' :::blocks fences,
+   *  newline-separated) rendered between the question and the options —
+   *  show the code as students see it, don't describe it */
+  blocks?: string;
   options: [string, string, string, string];
   answer: 0 | 1 | 2 | 3;
   explanation: string;
@@ -364,7 +368,8 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
 
   quiz: [
     {
-      question: 'Repeat 6 { Move Forward } moves STEM Bot forward how many times?',
+      question: 'This program moves STEM Bot forward how many times?',
+      blocks: 'repeat 6\n  move',
       options: ['1', '5', '6', '7'],
       answer: 2,
       explanation: 'Repeat 6 runs its body exactly 6 times — each time running Move Forward once.',
@@ -376,19 +381,22 @@ Solve each maze using as few blocks as possible. The hint on each challenge tell
       explanation: 'Repeat 12 { Move Forward } is shorter, easier to read, and easier to change if the corridor length changes.',
     },
     {
-      question: 'You put Turn Right INSIDE a Repeat 4 block. How many times does STEM Bot turn?',
+      question: 'You build this program. How many times does STEM Bot turn?',
+      blocks: 'repeat 4\n  turn right',
       options: ['1', '2', '4', '0'],
       answer: 2,
       explanation: 'Every block inside the loop body runs once per iteration. Repeat 4 means the body runs 4 times, so Turn Right runs 4 times.',
     },
     {
-      question: 'Repeat 3 { Move Forward, Turn Right } makes STEM Bot trace what shape?',
+      question: 'What shape does this program make STEM Bot trace?',
+      blocks: 'repeat 3\n  move\n  turn right',
       options: ['A straight line', 'An L-shape', 'Three sides of a square', 'A spiral'],
       answer: 2,
       explanation: 'Each iteration moves forward then turns 90° right. After 3 iterations you have moved along three sides of a square.',
     },
     {
-      question: 'Repeat 3 { Repeat 2 { Move Forward } } — how many steps does STEM Bot take in total?',
+      question: 'How many steps does STEM Bot take in total?',
+      blocks: 'repeat 3\n  repeat 2\n    move',
       options: ['5', '6', '8', '12'],
       answer: 1,
       explanation: 'The inner loop takes 2 steps, and the outer loop runs it 3 times: 3 × 2 = 6 steps. Putting a loop inside a loop is called nesting.',
@@ -564,7 +572,8 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
 
   quiz: [
     {
-      question: '"While path ahead" keeps running until…',
+      question: 'This loop keeps running until…',
+      blocks: 'while ahead\n  move',
       options: ['STEM Bot reaches the goal', 'There is no longer an open cell directly ahead', 'The program has run 10 times', 'STEM Bot turns around'],
       answer: 1,
       explanation: '"While path ahead" checks whether the cell directly in front is open. When that cell becomes a wall the condition is false and the loop stops.',
@@ -576,13 +585,15 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       explanation: 'Repeat counts iterations. While checks a condition each time — it can run 2 times or 200 times depending on the situation.',
     },
     {
-      question: '"If path left" inside a while loop will…',
+      question: 'The "If path left" inside this loop will…',
+      blocks: 'while goal\n  if left\n    turn left',
       options: ['Always turn left', 'Turn left only when there is an open cell to the left, once per loop iteration', 'Loop forever turning left', 'Check behind STEM Bot'],
       answer: 1,
       explanation: '"If" checks its condition once and runs the body at most once — it is not a loop itself. Placing it inside a while loop means it checks on each iteration.',
     },
     {
-      question: 'In the ring mazes, putting "If path ahead → Move" BEFORE "If path left → Turn Left" made STEM Bot circle forever. What is the lesson?',
+      question: 'In the ring mazes, THIS program made STEM Bot circle forever — moving ahead was checked before turning left. What is the lesson?',
+      blocks: 'while goal\n  if ahead\n    move\n  if left\n    turn left\n  if right\n    turn right',
       options: [
         'STEM Bot needs more Move Forward blocks',
         'While loops should be avoided in mazes with rings',
@@ -770,7 +781,8 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
 
   quiz: [
     {
-      question: 'Repeat 3 { Repeat 4 { Move Forward } } — how many steps does STEM Bot take?',
+      question: 'How many steps does STEM Bot take?',
+      blocks: 'repeat 3\n  repeat 4\n    move',
       options: ['7', '4', '12', '34'],
       answer: 2,
       explanation: 'The inner loop takes 4 steps, and the outer loop runs it 3 times: 3 × 4 = 12. Nested loops multiply.',
@@ -782,7 +794,8 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       explanation: 'Each time the outer loop runs its body once, the inner loop inside that body runs completely — all of its repeats — before the outer loop continues.',
     },
     {
-      question: 'Repeat 4 { Repeat 3 { Move }, Turn Right } makes STEM Bot trace…',
+      question: 'This program makes STEM Bot trace…',
+      blocks: 'repeat 4\n  repeat 3\n    move\n  turn right',
       options: ['A straight line of 12 steps', 'A full square — 4 sides of 3 steps with a turn at each corner', 'A zigzag', 'A circle'],
       answer: 1,
       explanation: 'The inner loop draws one side (3 steps), the turn makes a corner, and the outer loop stamps that side-plus-corner 4 times: a complete square lap.',
@@ -794,7 +807,8 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       explanation: 'The row-plus-U-turn is the repeating pattern. Build it once as the outer loop\'s body (with an inner loop walking the row), and Repeat 3 stamps it down the field.',
     },
     {
-      question: 'Repeat 2 { Repeat 3 { Move, Collect } } — how many times does Collect run?',
+      question: 'How many times does Collect run in this program?',
+      blocks: 'repeat 2\n  repeat 3\n    move\n    collect',
       options: ['2', '3', '5', '6'],
       answer: 3,
       explanation: 'Collect is inside the inner loop: 3 runs per outer repeat, and 2 outer repeats. 2 × 3 = 6. (On empty squares it is a safe no-op!)',
@@ -984,13 +998,15 @@ Same idea, same words. You already know how it works.`,
 
   quiz: [
     {
-      question: 'Your program is ONLY a "Define Function 1" block with 5 blocks inside. What happens when you press Run?',
+      question: 'Your whole program is ONLY this definition. What happens when you press Run?',
+      blocks: 'define 1\n  move\n  move\n  turn right\n  move\n  collect',
       options: ['The 5 blocks run once', 'The 5 blocks run over and over', 'Nothing — defining a function does not run it', 'STEM Bot crashes'],
       answer: 2,
       explanation: 'A definition just names the blocks and waits. Nothing runs until a "Call Function" block asks for it. Define, THEN call.',
     },
     {
-      question: 'Function 1 is: Move Forward, Move Forward, Turn Right. You call it three times. How many times does STEM Bot move forward?',
+      question: 'You run this program. How many times does STEM Bot move forward?',
+      blocks: 'define 1\n  move\n  move\n  turn right\ncall 1\ncall 1\ncall 1',
       options: ['2', '3', '6', '9'],
       answer: 2,
       explanation: 'Each call runs the whole function once — 2 moves per call. 3 calls × 2 moves = 6 moves.',

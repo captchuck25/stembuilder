@@ -748,6 +748,7 @@ function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: n
               return (
                 <div key={qi} style={{ marginBottom: 28 }}>
                   <div style={{ fontWeight: 700, fontSize: 14, color: '#e2e8f0', marginBottom: 10 }}>{qi + 1}. {q.question}</div>
+                  {q.blocks && <BlockStack lines={q.blocks.split('\n')} itemName={THEMES[unit.theme].itemName} />}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {order[qi].map(oi => {
                       const opt = q.options[oi];
