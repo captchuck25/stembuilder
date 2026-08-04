@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { adminDb } from "@/lib/db.server";
 import { roleAtLeast } from "@/lib/roles";
-import { isBillingConfigured, stripe, teacherProPriceId, siteOrigin } from "@/lib/billing.server";
+import { isCheckoutEnabled, stripe, teacherProPriceId, siteOrigin } from "@/lib/billing.server";
 
 // POST /api/teacher/billing/checkout — start a Stripe Checkout session for
 // the $60/year Teacher Pro subscription. No client input is read; eligibility
@@ -12,9 +12,9 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!isBillingConfigured()) {
+  if (!isCheckoutEnabled()) {
     return NextResponse.json(
-      { error: "Online checkout isn't available yet — email info@stembuilder.io to upgrade." },
+      { error: "Online checkout isn't open yet — email info@stembuilder.io and we'll set you up." },
       { status: 503 },
     );
   }
