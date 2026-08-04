@@ -64,9 +64,30 @@ export async function POST(req: NextRequest) {
     const existing = sub.items.data.find((i) => i.price.id === overagePriceId());
     newQuantity = (existing?.quantity ?? 0) + blocks;
 
+    // The card on file: Checkout attaches it to the SUBSCRIPTION, not as the
+    // customer default — resolve it from the subscription first, then fall
+    // back to the customer's invoice default.
+    let paymentMethod =
+      typeof sub.default_payment_method === "string"
+        ? sub.default_payment_method
+        : sub.default_payment_method?.id ?? null;
+    if (!paymentMethod) {
+      const customer = await stripe().customers.retrieve(customerId);
+      if (!customer.deleted) {
+        const cpm = customer.invoice_settings?.default_payment_method;
+        paymentMethod = typeof cpm === "string" ? cpm : cpm?.id ?? null;
+      }
+    }
+    if (!paymentMethod) {
+      return NextResponse.json(
+        { error: "We couldn't find a card on file for your subscription — email info@stembuilder.io and we'll add the students." },
+        { status: 409 },
+      );
+    }
+
     // 1. Charge the full price today — an immediate one-off invoice for
-    //    $10 × blocks against the card on file. Payment must succeed before
-    //    any capacity is granted.
+    //    $10 × blocks against that card. Payment must succeed before any
+    //    capacity is granted.
     await stripe().invoiceItems.create({
       customer: customerId,
       amount: blocks * 10_00,
@@ -75,6 +96,7 @@ export async function POST(req: NextRequest) {
     });
     const invoice = await stripe().invoices.create({
       customer: customerId,
+      default_payment_method: paymentMethod,
       auto_advance: false,
       pending_invoice_items_behavior: "include",
     });
