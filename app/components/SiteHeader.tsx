@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import { useState } from "react";
-import { isAnyAdmin } from "@/lib/roles";
+import { isAnyAdmin, roleAtLeast } from "@/lib/roles";
 
 const NAV_BTN: React.CSSProperties = {
   border: "1px solid #fff",
@@ -77,6 +77,13 @@ export default function SiteHeader({ children, onLogoClick, hideUserButton }: {
                         color: "#111", textDecoration: "none", borderBottom: "1px solid #f3f4f6" }}>
                       🏫 My Classes
                     </Link>
+                    {roleAtLeast(session.user.role, "teacher") && (
+                      <Link href="/teachers/account" onClick={() => setMenuOpen(false)}
+                        style={{ display: "block", padding: "10px 16px", fontSize: 14, fontWeight: 600,
+                          color: "#111", textDecoration: "none", borderBottom: "1px solid #f3f4f6" }}>
+                        👤 My Account
+                      </Link>
+                    )}
                     {isAnyAdmin(session.user.role) && (
                       <Link href="/admin" onClick={() => setMenuOpen(false)}
                         style={{ display: "block", padding: "10px 16px", fontSize: 14, fontWeight: 600,

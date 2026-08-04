@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { adminDb } from "@/lib/db.server";
 import { roleAtLeast } from "@/lib/roles";
-import { isCheckoutEnabled, stripe, teacherProPriceId, siteOrigin } from "@/lib/billing.server";
+import { isCheckoutEnabled, overagePriceId, stripe, teacherProPriceId, siteOrigin } from "@/lib/billing.server";
 
-// POST /api/teacher/billing/checkout — start a Stripe Checkout session for
-// the $60/year Teacher Pro subscription. No client input is read; eligibility
-// is derived from the session + database. The plan itself is only ever set by
-// the webhook after Stripe confirms payment.
+// POST /api/teacher/billing/checkout  { blocks? }
+//
+// Start a Stripe Checkout session for the $60/year Teacher Pro subscription,
+// optionally with extra-student blocks ($10/year each = 25 students) bought
+// up front — most teachers already know their roster size. The only client
+// input is the block quantity (validated 0-8); eligibility is derived from
+// the session + database, and the plan itself is only ever set by the
+// webhook after Stripe confirms payment.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -51,9 +55,16 @@ export async function POST(req: NextRequest) {
       new URL(headerOrigin).hostname === "localhost")
       ? headerOrigin
       : siteOrigin();
+
+  const body = await req.json().catch(() => ({}));
+  const blocks = Number(body.blocks ?? 0);
+  if (!Number.isInteger(blocks) || blocks < 0 || blocks > 8) {
+    return NextResponse.json({ error: "Choose between 0 and 8 blocks of 25 students." }, { status: 400 });
+  }
+
   let checkout;
   try {
-    checkout = await createCheckoutSession(origin, session.user.id, profile!);
+    checkout = await createCheckoutSession(origin, session.user.id, profile!, blocks);
   } catch (err) {
     // Surface Stripe's own message — it names the actual misconfiguration
     // (bad price id, key/mode mismatch, …) and contains nothing secret.
@@ -69,10 +80,15 @@ function createCheckoutSession(
   origin: string,
   teacherId: string,
   profile: { email: string | null; stripe_customer_id: string | null },
+  blocks: number,
 ) {
+  const lineItems = [{ price: teacherProPriceId(), quantity: 1 }];
+  const overage = overagePriceId();
+  if (blocks > 0 && overage) lineItems.push({ price: overage, quantity: blocks });
+
   return stripe().checkout.sessions.create({
     mode: "subscription",
-    line_items: [{ price: teacherProPriceId(), quantity: 1 }],
+    line_items: lineItems,
     client_reference_id: teacherId,
     ...(profile.stripe_customer_id
       ? { customer: profile.stripe_customer_id }

@@ -69,7 +69,8 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
         {busy ? "Adding…" : `Add ${blocks * 25} students — $${blocks * 10}/year`}
       </button>
       <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>
-        Billed to your card on file, prorated for the rest of your year.
+        $10 per 25 students, per year — billed to your card on file today, and
+        renews with your plan.
       </p>
     </div>
   );

@@ -34,6 +34,7 @@ function UpgradeInner() {
   const [usage, setUsage] = useState<PlanUsage | null>(null);
   const [busy, setBusy] = useState<"" | "checkout">("");
   const [showTrialForm, setShowTrialForm] = useState(false);
+  const [checkoutBlocks, setCheckoutBlocks] = useState(0);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -51,7 +52,11 @@ function UpgradeInner() {
     setBusy("checkout");
     setError("");
     try {
-      const res = await fetch("/api/teacher/billing/checkout", { method: "POST" });
+      const res = await fetch("/api/teacher/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blocks: checkoutBlocks }),
+      });
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.url) {
         window.location.href = data.url; // → Stripe-hosted checkout
@@ -120,11 +125,25 @@ function UpgradeInner() {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+                  How many students do you teach?
+                  <select value={checkoutBlocks} onChange={(e) => setCheckoutBlocks(Number(e.target.value))}
+                    style={{ display: "block", width: "100%", marginTop: 6, padding: "10px 12px",
+                      borderRadius: 10, border: "2px solid #e5e7eb", fontSize: 14, color: "#111" }}>
+                    <option value={0}>Up to 125 — included</option>
+                    <option value={1}>126–150 (+$10/year)</option>
+                    <option value={2}>151–175 (+$20/year)</option>
+                    <option value={3}>176–200 (+$30/year)</option>
+                    <option value={4}>201–225 (+$40/year)</option>
+                  </select>
+                </label>
                 <button type="button" onClick={startCheckout} disabled={busy !== ""}
                   style={{ padding: "14px 24px", borderRadius: 999, background: "#1f1f1f", color: "#fff",
                     border: "2px solid #1f1f1f", fontWeight: 800, fontSize: 16, cursor: "pointer",
                     opacity: busy ? 0.6 : 1 }}>
-                  {busy === "checkout" ? "Opening checkout…" : `Upgrade now — $${PRO_PRICE_PER_YEAR}/year`}
+                  {busy === "checkout"
+                    ? "Opening checkout…"
+                    : `Upgrade now — $${PRO_PRICE_PER_YEAR + checkoutBlocks * 10}/year`}
                 </button>
                 {!usage.trialUsed && usage.effective === "free" && !showTrialForm && (
                   <button type="button" onClick={() => setShowTrialForm(true)} disabled={busy !== ""}

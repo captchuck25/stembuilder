@@ -36,13 +36,28 @@ export async function POST(req: NextRequest) {
       const session = event.data.object as Stripe.Checkout.Session;
       const teacherId = session.client_reference_id ?? session.metadata?.teacher_id;
       if (!teacherId) break; // not one of ours — acknowledge and move on
+
+      // Blocks bought up front ride on the new subscription — read the
+      // confirmed quantity so the cap is right from the first second.
+      const subId = typeof session.subscription === "string" ? session.subscription : null;
+      let blocks = 0;
+      const priceId = overagePriceId();
+      if (subId && priceId) {
+        try {
+          const sub = await stripe().subscriptions.retrieve(subId);
+          blocks = sub.items.data.find((i) => i.price.id === priceId)?.quantity ?? 0;
+        } catch {
+          blocks = 0; // subscription.updated events re-converge this later
+        }
+      }
+
       const { error } = await db
         .from("profiles")
         .update({
           plan: "pro",
+          pro_overage_blocks: blocks,
           stripe_customer_id: typeof session.customer === "string" ? session.customer : null,
-          stripe_subscription_id:
-            typeof session.subscription === "string" ? session.subscription : null,
+          stripe_subscription_id: subId,
         })
         .eq("id", teacherId);
       if (error) {

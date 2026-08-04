@@ -9,11 +9,18 @@ import { writeAudit } from "@/lib/audit.server";
 // POST /api/teacher/billing/overage  { blocks }
 //
 // Adds overage blocks ($10/year each = 25 students) to a Pro teacher's
-// EXISTING Stripe subscription as a quantity on the overage price. Stripe
-// charges the card already on file (prorated) — no second checkout page.
-// The only client input is the purchase quantity, validated to a small
-// integer; the resulting cap is derived from Stripe's response, and the
-// webhook re-syncs it on every subscription update as a backstop.
+// EXISTING Stripe subscription as a quantity on the overage price, charged
+// to the card already on file — no second checkout page. Deliberately NOT
+// prorated: the full $10/block is invoiced today regardless of where the
+// teacher is in their year (business decision 2026-08-04), and the block
+// then renews at full price with the subscription. The only client input is
+// the purchase quantity, validated to a small integer; the resulting cap is
+// derived from Stripe's confirmed state, and the webhook re-syncs it on
+// every subscription update as a backstop.
+// Several sequential Stripe calls — give the function room beyond the
+// platform default so a slow Stripe response can't strand the client.
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -53,19 +60,39 @@ export async function POST(req: NextRequest) {
   try {
     const subId = profile!.stripe_subscription_id;
     const sub = await stripe().subscriptions.retrieve(subId);
+    const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
     const existing = sub.items.data.find((i) => i.price.id === overagePriceId());
     newQuantity = (existing?.quantity ?? 0) + blocks;
+
+    // 1. Charge the full price today — an immediate one-off invoice for
+    //    $10 × blocks against the card on file. Payment must succeed before
+    //    any capacity is granted.
+    await stripe().invoiceItems.create({
+      customer: customerId,
+      amount: blocks * 10_00,
+      currency: "usd",
+      description: `Extra Students (25-pack) × ${blocks} — first year`,
+    });
+    const invoice = await stripe().invoices.create({
+      customer: customerId,
+      auto_advance: false,
+      pending_invoice_items_behavior: "include",
+    });
+    const finalized = await stripe().invoices.finalizeInvoice(invoice.id!);
+    if (finalized.status !== "paid") await stripe().invoices.pay(invoice.id!);
+
+    // 2. Grant the capacity: bump the subscription quantity WITHOUT any
+    //    proration charge (they just paid full price); renewals bill the
+    //    block at full price alongside the base plan.
     await stripe().subscriptions.update(subId, {
       items: existing
         ? [{ id: existing.id, quantity: newQuantity }]
         : [{ price: overagePriceId()!, quantity: newQuantity }],
-      // Charge the prorated difference immediately rather than waiting for
-      // the next renewal — the teacher gets the seats the moment they pay.
-      proration_behavior: "always_invoice",
+      proration_behavior: "none",
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[billing] overage update failed:", message);
+    console.error("[billing] overage purchase failed:", message);
     return NextResponse.json({ error: `Stripe error: ${message}` }, { status: 502 });
   }
 
