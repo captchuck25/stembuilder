@@ -5,11 +5,17 @@ import { NextResponse } from 'next/server'
 // before the recipient has an account. Everything else under /admin requires
 // a session here, and the real role/scope gate is server-side in
 // lib/admin-guard.server.ts on every API call.
+//
+// Bare /teachers is the teacher SIGN-UP page — account creation can't require
+// an account. Its subpages (/teachers/dashboard, /teachers/classes, ...) stay
+// protected; the page itself sends signed-in users to /dashboard anyway.
 const protectedRoutes = ['/dashboard', '/mywork', '/onboarding', '/teachers', '/student', '/admin']
 
 export default auth((req) => {
   const path = req.nextUrl.pathname
-  const isProtected = protectedRoutes.some(r => path.startsWith(r)) && !path.startsWith('/admin/invite')
+  const isProtected = protectedRoutes.some(r => path.startsWith(r))
+    && !path.startsWith('/admin/invite')
+    && path !== '/teachers'
   if (isProtected && !req.auth) {
     return NextResponse.redirect(new URL('/sign-in', req.url))
   }
