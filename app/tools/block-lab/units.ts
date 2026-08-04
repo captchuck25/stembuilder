@@ -410,7 +410,7 @@ const U4: BlockUnit = {
 ## From Counting to Sensing
 In Units 1–3 you told STEM Bot exactly how many steps to take — even your nested loops counted their laps. But what if the maze changes, or you don't know the length in advance?
 
-You have already met one sensor: **If on a crystal**, from the Terraces. Now meet the whole family — sensors that feel for PATHS, and loops that run on conditions instead of counts.
+You have already met one sensor in the Terraces — there it checked for acorns; up here the same block reads **If on a data chip**. Now meet the whole family — sensors that feel for PATHS, and loops that run on conditions instead of counts.
 
 **Sensors** let STEM Bot check its surroundings at runtime:
 
@@ -421,7 +421,7 @@ You have already met one sensor: **If on a crystal**, from the Terraces. Now mee
 | **If path ahead** | Open cell ahead (runs body once if true) |
 | **If path left** | Open cell to the left |
 | **If path right** | Open cell to the right |
-| **If on a crystal** | STEM Bot is standing on an uncollected crystal (your friend from the Terraces) |
+| **If on a data chip** | STEM Bot is standing on an uncollected data chip (your friend from the Terraces) |
 
 ## While Loops
 A **while** loop keeps running its body **as long as a condition is true**:
@@ -455,7 +455,7 @@ If the condition is never false, the loop runs forever (or until the safety limi
 ## Your Goal
 Use sensors so STEM Bot can navigate mazes without knowing the exact layout in advance. A good sensor program can solve many different mazes with the same code!
 
-> Tip: **"If on a crystal → Collect"** inside your loop is the cleanest way to grab everything — the bot checks each square and collects only when something is really there. (Plain Collect in the loop also works: it is a safe no-op on empty squares.)`,
+> Tip: **"If on a data chip → Collect"** inside your loop is the cleanest way to grab everything — the bot checks each square and collects only when something is really there. (Plain Collect in the loop also works: it is a safe no-op on empty squares.)`,
 
   newBlocks: [
     { blockId: 'while_path_ahead',  label: 'While path ahead',  desc: 'Keep running the body as long as there is an open cell ahead.' },
@@ -521,11 +521,11 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       startX:0, startY:4, startDir:'right', exitX:1, exitY:1, collectibles:[],
     },
     {
-      title: 'Crystal Scanner',
+      title: 'Chip Scanner',
       par: 8,
       maxBlocks: 9,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
-      hint: 'Crystals! Add "If on a crystal → Collect" to your loop and the bot grabs every one it crosses.',
+      hint: 'Data chips! Add "If on a data chip → Collect" to your loop and the bot grabs every one it crosses.',
       grid: [[1,1,1,1,1,1,1,1],[0,0,0,0,0,0,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:6, exitY:4,
       collectibles:[{x:2,y:1},{x:5,y:1},{x:6,y:3}],
@@ -535,7 +535,7 @@ Use sensors so STEM Bot can navigate mazes without knowing the exact layout in a
       par: 9,
       maxBlocks: 10,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'while_path_ahead', 'while_not_at_goal', 'if_path_ahead', 'if_path_left', 'if_path_right', 'if_on_item'],
-      hint: 'This path turns BOTH ways. Your loop needs an "If path right" AND an "If path left" — plus the crystal scanner.',
+      hint: 'This path turns BOTH ways. Your loop needs an "If path right" AND an "If path left" — plus the chip scanner.',
       grid: [[1,1,1,1,1,1,1,1,1],[0,0,0,0,0,1,1,1,1],[1,1,1,1,0,1,1,1,1],[1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:7, exitY:5,
       collectibles:[{x:2,y:1},{x:6,y:3},{x:7,y:4}],
@@ -651,18 +651,18 @@ Here is a sneak peek at something new — your first **if** block. Watch what ha
 :::blocks
 repeat 6
   move
-  if crystal
+  if acorn
     collect
 :::
 
-Every lap, STEM Bot takes a step and then **checks**: am I standing on a crystal? If yes, collect it; if no, keep going. The loop runs a fixed number of times — but each lap can DECIDE something. You'll use this on the crystal terraces, and it is your warm-up for the next unit, where decisions take over completely.
+Every lap, STEM Bot takes a step and then **checks**: am I standing on an acorn? If yes, collect it; if no, keep going. The loop runs a fixed number of times — but each lap can DECIDE something. You'll use this on the acorn terraces, and it is your warm-up for the next unit, where decisions take over completely.
 
 ## Watch the U-Turn
 The classic mowing bug: at the end of a row you need to turn, step DOWN to the next row, and turn again — and the second row runs the OPPOSITE direction. Walk it with your finger before you code it. If your bot mows two rows perfectly, the outer loop can mow the whole field.`,
 
   newBlocks: [
     { blockId: 'repeat', label: 'Repeat N (nested!)', desc: 'The big discovery: a Repeat fits INSIDE another Repeat. Inner pattern × outer stamps.' },
-    { blockId: 'if_on_item', label: 'If on a crystal', desc: 'Your first if! Runs its blocks only when STEM Bot is standing on a crystal — a decision inside your loop.' },
+    { blockId: 'if_on_item', label: 'If on an acorn', desc: 'Your first if! Runs its blocks only when STEM Bot is standing on an acorn — a decision inside your loop.' },
   ],
 
   challenges: [
@@ -687,7 +687,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       collectibles:[],
     },
     {
-      title: 'Crystal Corners',
+      title: 'Acorn Corners',
       par: 6,
       maxBlocks: 8,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
@@ -721,7 +721,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       par: 10,
       maxBlocks: 12,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
-      hint: 'Three zigzags, and a crystal on the way down each one. Build one perfect zig (with its Collect), then Repeat 3.',
+      hint: 'Three zigzags, and an acorn on the way down each one. Build one perfect zig (with its Collect), then Repeat 3.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:9, exitY:10,
       collectibles:[{x:3,y:2},{x:6,y:5},{x:9,y:8}],
@@ -747,11 +747,11 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       collectibles:[{x:2,y:1},{x:3,y:3},{x:1,y:5},{x:2,y:7}],
     },
     {
-      title: 'Crystal Farm',
+      title: 'Acorn Farm',
       par: 11,
       maxBlocks: 13,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
-      hint: 'Every square of both rows has a crystal. Try "If on a crystal → Collect" inside the inner loop — the bot checks and harvests every step. (Plain Collect works too!)',
+      hint: 'Every square of both rows has an acorn. Try "If on an acorn → Collect" inside the inner loop — the bot checks and harvests every step. (Plain Collect works too!)',
       grid: [[1,1,1,1,1,1,1],[0,0,0,0,0,1,1],[1,1,1,1,0,1,1],[1,0,0,0,0,1,1],[1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:1, exitY:3,
       collectibles:[{x:1,y:1},{x:2,y:1},{x:3,y:1},{x:4,y:1},{x:3,y:3},{x:2,y:3},{x:1,y:3}],
@@ -761,7 +761,7 @@ The classic mowing bug: at the end of a row you need to turn, step DOWN to the n
       par: 17,
       maxBlocks: 18,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'if_on_item'],
-      hint: 'SIX rows — the whole farm. Your two-row mowing body, outer Repeat 3, and "If on a crystal → Collect" checking every step. The full harvest, professor-level code!',
+      hint: 'SIX rows — the whole farm. Your two-row mowing body, outer Repeat 3, and "If on an acorn → Collect" checking every step. The full harvest, professor-level code!',
       grid: [[1,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,0,0,0,0,1],[1,1,1,1,0,1],[0,0,0,0,0,1],[0,1,1,1,1,1],[0,1,1,1,1,1],[1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:0, exitY:13,
       collectibles:[{x:2,y:1},{x:1,y:3},{x:3,y:5},{x:2,y:7},{x:4,y:9},{x:1,y:11}],
@@ -901,7 +901,7 @@ Same idea, same words. You already know how it works.`,
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4, collectibles:[],
     },
     {
-      title: 'Crystal Stairs',
+      title: 'Chip Stairs',
       par: 11,
       maxBlocks: 14,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
@@ -915,7 +915,7 @@ Same idea, same words. You already know how it works.`,
       par: 14,
       maxBlocks: 16,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
-      hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a crystal dash (Move, Move, Collect). Define both — call each where it fits!',
+      hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a data-chip dash (Move, Move, Collect). Define both — call each where it fits!',
       grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
       collectibles:[{x:4,y:3},{x:6,y:3},{x:8,y:3}],

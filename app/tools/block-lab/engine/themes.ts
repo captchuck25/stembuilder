@@ -4,6 +4,8 @@ export interface Theme {
   name: ThemeName;
   label: string;
   emoji: string;
+  /** What the collectible is CALLED in this world (block labels + notes match the art) */
+  itemName: string;
   boardBg: string;
   boardBg2: string;
   grid: string;
@@ -25,7 +27,7 @@ export interface Theme {
 
 export const THEMES: Record<ThemeName, Theme> = {
   desert: {
-    name: 'desert', label: 'Desert', emoji: '🏜️',
+    name: 'desert', label: 'Desert', emoji: '🏜️', itemName: 'crystal',
     boardBg: '#EEDFAE', boardBg2: '#E4D08F',
     grid: 'rgba(160,120,60,0.15)',
     wallFill: '#9B8462', wallShade: '#7A6548', wallHighlight: '#BBA880',
@@ -38,7 +40,7 @@ export const THEMES: Record<ThemeName, Theme> = {
     textColor: '#5A4020',
   },
   forest: {
-    name: 'forest', label: 'Forest', emoji: '🌿',
+    name: 'forest', label: 'Forest', emoji: '🌿', itemName: 'acorn',
     boardBg: '#BFE38A', boardBg2: '#9ECD68',
     grid: 'rgba(40,90,30,0.13)',
     wallFill: '#4E6E28', wallShade: '#3A5220', wallHighlight: '#6A9040',
@@ -51,7 +53,7 @@ export const THEMES: Record<ThemeName, Theme> = {
     textColor: '#1E4010',
   },
   space: {
-    name: 'space', label: 'Space', emoji: '🚀',
+    name: 'space', label: 'Space', emoji: '🚀', itemName: 'data chip',
     boardBg: '#18233D', boardBg2: '#0B1020',
     grid: 'rgba(57,208,255,0.18)',
     wallFill: '#3A4866', wallShade: '#1E2A44', wallHighlight: '#5A6888',

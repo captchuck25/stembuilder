@@ -136,11 +136,23 @@ const BLOCKLY_JSON_DEFS = [
   },
 ];
 
-let defsRegistered = false;
-export function registerBlockDefs() {
-  if (defsRegistered) return;
-  Blockly.defineBlocksWithJsonArray(BLOCKLY_JSON_DEFS);
-  defsRegistered = true;
+// The collect-sensor's label matches the current world's collectible
+// (desert crystals, forest acorns, space data chips) — re-registering with a
+// new item name swaps the label; block TYPE stays 'if_on_item' so saved
+// scripts load everywhere.
+let registeredItemName: string | null = null;
+export function registerBlockDefs(itemName = 'crystal') {
+  if (registeredItemName === itemName) return;
+  const article = /^[aeiou]/i.test(itemName) ? 'an' : 'a';
+  const defs = BLOCKLY_JSON_DEFS.map(d => d.type === 'if_on_item'
+    ? {
+        ...d,
+        message0: `If on ${article} ${itemName} ✦`,
+        tooltip: `Run once if STEM Bot is standing on an uncollected ${itemName}`,
+      }
+    : d);
+  Blockly.defineBlocksWithJsonArray(defs);
+  registeredItemName = itemName;
 }
 
 // ─── Dark workspace theme (matches the Block Lab card UI) ────────────────────

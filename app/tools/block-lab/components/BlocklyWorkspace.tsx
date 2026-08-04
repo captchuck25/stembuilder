@@ -17,17 +17,19 @@ interface Props {
   availableBlocks: BlockDef[];
   initialXml?: string;
   disabled?: boolean;
+  /** Theme's collectible name — the sensor block's label matches the art */
+  itemName?: string;
 }
 
 const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
-  ({ availableBlocks, initialXml, disabled }, ref) => {
+  ({ availableBlocks, initialXml, disabled, itemName = 'crystal' }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
 
     useEffect(() => {
       if (!containerRef.current) return;
 
-      registerBlockDefs();
+      registerBlockDefs(itemName);
 
       const workspace = Blockly.inject(containerRef.current, {
         toolbox: buildToolbox(availableBlocks) as Blockly.utils.toolbox.ToolboxInfo,

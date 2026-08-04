@@ -141,7 +141,8 @@ function noteBlockFor(spec: string): Omit<StackNode, 'children'> | null {
     'move': ['move_forward', false], 'turn left': ['turn_left', false], 'turn right': ['turn_right', false],
     'collect': ['collect', false], 'while ahead': ['while_path_ahead', true], 'while goal': ['while_not_at_goal', true],
     'if ahead': ['if_path_ahead', true], 'if left': ['if_path_left', true], 'if right': ['if_path_right', true],
-    'if crystal': ['if_on_item', true],
+    // themed aliases for the same collect-sensor — authoring reads naturally
+    'if crystal': ['if_on_item', true], 'if acorn': ['if_on_item', true], 'if chip': ['if_on_item', true], 'if data chip': ['if_on_item', true],
   };
   const hit = map[s];
   return hit ? { type: hit[0], fields: {}, container: hit[1] } : null;
@@ -185,14 +186,14 @@ function stackXml(nodes: StackNode[]): string {
   return `<xml xmlns="https://developers.google.com/blockly/xml">${tops.join('')}</xml>`;
 }
 
-function BlockStack({ lines }: { lines: string[] }) {
+function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [h, setH] = useState(140);
   const linesKey = lines.join('\n');
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    registerBlockDefs();
+    registerBlockDefs(itemName);
     const ws = Blockly.inject(el, {
       readOnly: true,
       renderer: 'zelos',
@@ -209,7 +210,7 @@ function BlockStack({ lines }: { lines: string[] }) {
     } catch { /* bad snippet — leave the box empty rather than crash the notes */ }
     return () => ws.dispose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linesKey, h]);
+  }, [linesKey, h, itemName]);
   return (
     <div style={{ border: '1px solid rgba(99,179,237,0.18)', borderRadius: 12, margin: '10px 0', overflow: 'hidden' }}>
       <div ref={ref} style={{ height: h, width: '100%' }} />
@@ -219,7 +220,7 @@ function BlockStack({ lines }: { lines: string[] }) {
 
 // ─── Markdown renderer (same as Python) ───────────────────────────────────────
 
-function LessonPanel({ text }: { text: string }) {
+function LessonPanel({ text, itemName }: { text: string; itemName?: string }) {
   const lines = text.split('\n');
   const nodes: React.ReactNode[] = [];
   let k = 0;
@@ -241,7 +242,7 @@ function LessonPanel({ text }: { text: string }) {
       const buf: string[] = [];
       i++;
       while (i < lines.length && lines[i].trim() !== ':::') { buf.push(lines[i]); i++; }
-      nodes.push(<BlockStack key={k++} lines={buf} />);
+      nodes.push(<BlockStack key={k++} lines={buf} itemName={itemName} />);
       continue;
     }
     if (raw.startsWith('# '))  { flushTable(); nodes.push(<h2 key={k++} style={{ fontSize: 20, fontWeight: 900, color: '#e2e8f0', margin: '18px 0 6px' }}>{raw.slice(2)}</h2>); continue; }
@@ -369,7 +370,7 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
                 <div style={{ fontSize: 14, color: '#cbd5e1', lineHeight: 1.65, fontStyle: 'italic' }}>{unit.story}</div>
               </div>
             </div>
-            <LessonPanel text={unit.introNotes} />
+            <LessonPanel text={unit.introNotes} itemName={THEMES[unit.theme].itemName} />
             {unit.newBlocks.length > 0 && (
               <div style={{ background: 'rgba(99,179,237,0.06)', border: '1px solid rgba(99,179,237,0.2)', borderRadius: 14, padding: '16px 20px', margin: '16px 0' }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 10 }}>New Blocks This Unit</div>
@@ -598,6 +599,7 @@ function ChallengeView({
                   availableBlocks={availableBlocks}
                   initialXml={progress.savedXml[chalKey(ui, ci)]}
                   disabled={running}
+                  itemName={theme.itemName}
                 />
               </div>
 
@@ -641,7 +643,7 @@ function ChallengeView({
 
             {/* Notes tab */}
             <div style={{ flex: 1, overflowY: 'auto', display: leftTab === 'notes' ? 'block' : 'none' }}>
-              <LessonPanel text={unit.introNotes} />
+              <LessonPanel text={unit.introNotes} itemName={theme.itemName} />
             </div>
           </div>
 
