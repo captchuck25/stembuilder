@@ -38,9 +38,10 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        // The component may stay mounted (upgrade page) — always leave the
-        // button usable and confirm the purchase in place.
-        setSuccess(`✓ Added ${blocks * 25} students — you're covered for ${data.cap} now.`);
+        // Replace the form with the confirmation — the buy button disappears
+        // so an absent-minded second click can't buy (and charge) twice.
+        // Buying more is a deliberate re-open via the "Add more" link.
+        setSuccess(`✓ Added ${blocks * 25} students — you now have room for ${data.cap}.`);
         setBlocks(1);
         onDone(data);
       } else {
@@ -50,6 +51,23 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
       setError("Could not reach the server — try again.");
     }
     setBusy(false);
+  }
+
+  // Post-purchase: confirmation only, no armed buy button.
+  if (success) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <p style={{ fontSize: 14, color: "#16a34a", fontWeight: 800, margin: 0 }}>{success}</p>
+        <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>
+          Your receipt is on its way to your email.
+        </p>
+        <button type="button" onClick={() => setSuccess("")}
+          style={{ background: "none", border: "none", padding: 0, textAlign: "left",
+            color: "#2563eb", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+          Need even more room? Add more students →
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -72,9 +90,6 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
             Email us instead →
           </a>
         </p>
-      )}
-      {success && (
-        <p style={{ fontSize: 13, color: "#16a34a", fontWeight: 700, margin: 0 }}>{success}</p>
       )}
       <button type="button" onClick={buy} disabled={busy}
         style={{ ...BTN, background: "#1f1f1f", color: "#fff", opacity: busy ? 0.6 : 1 }}>
