@@ -24,10 +24,12 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
   const [blocks, setBlocks] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   async function buy() {
     setBusy(true);
     setError("");
+    setSuccess("");
     try {
       const res = await fetch("/api/teacher/billing/overage", {
         method: "POST",
@@ -35,8 +37,15 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
         body: JSON.stringify({ blocks }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) { onDone(data); return; }
-      setError(data.error ?? `Could not add students (HTTP ${res.status}).`);
+      if (res.ok) {
+        // The component may stay mounted (upgrade page) — always leave the
+        // button usable and confirm the purchase in place.
+        setSuccess(`✓ Added ${blocks * 25} students — you're covered for ${data.cap} now.`);
+        setBlocks(1);
+        onDone(data);
+      } else {
+        setError(data.error ?? `Could not add students (HTTP ${res.status}).`);
+      }
     } catch {
       setError("Could not reach the server — try again.");
     }
@@ -63,6 +72,9 @@ export default function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => v
             Email us instead →
           </a>
         </p>
+      )}
+      {success && (
+        <p style={{ fontSize: 13, color: "#16a34a", fontWeight: 700, margin: 0 }}>{success}</p>
       )}
       <button type="button" onClick={buy} disabled={busy}
         style={{ ...BTN, background: "#1f1f1f", color: "#fff", opacity: busy ? 0.6 : 1 }}>
