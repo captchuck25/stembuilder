@@ -49,13 +49,17 @@ function UpgradeInner() {
   async function startCheckout() {
     setBusy("checkout");
     setError("");
-    const res = await fetch("/api/teacher/billing/checkout", { method: "POST" });
-    const data = await res.json();
-    if (res.ok && data.url) {
-      window.location.href = data.url; // → Stripe-hosted checkout
-      return;
+    try {
+      const res = await fetch("/api/teacher/billing/checkout", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.location.href = data.url; // → Stripe-hosted checkout
+        return;
+      }
+      setError(data.error ?? `Could not start checkout (HTTP ${res.status}). Please try again.`);
+    } catch {
+      setError("Could not reach the server — check your connection and try again.");
     }
-    setError(data.error ?? "Could not start checkout. Please try again.");
     setBusy("");
   }
 

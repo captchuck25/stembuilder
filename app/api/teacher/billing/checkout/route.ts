@@ -41,21 +41,38 @@ export async function POST() {
   }
 
   const origin = siteOrigin();
-  const checkout = await stripe().checkout.sessions.create({
+  let checkout;
+  try {
+    checkout = await createCheckoutSession(origin, session.user.id, profile!);
+  } catch (err) {
+    // Surface Stripe's own message — it names the actual misconfiguration
+    // (bad price id, key/mode mismatch, …) and contains nothing secret.
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[billing] checkout session failed:", message);
+    return NextResponse.json({ error: `Stripe error: ${message}` }, { status: 502 });
+  }
+
+  return NextResponse.json({ url: checkout.url });
+}
+
+function createCheckoutSession(
+  origin: string,
+  teacherId: string,
+  profile: { email: string | null; stripe_customer_id: string | null },
+) {
+  return stripe().checkout.sessions.create({
     mode: "subscription",
     line_items: [{ price: teacherProPriceId(), quantity: 1 }],
-    client_reference_id: session.user.id,
-    ...(profile!.stripe_customer_id
-      ? { customer: profile!.stripe_customer_id }
-      : profile!.email
-        ? { customer_email: profile!.email }
+    client_reference_id: teacherId,
+    ...(profile.stripe_customer_id
+      ? { customer: profile.stripe_customer_id }
+      : profile.email
+        ? { customer_email: profile.email }
         : {}),
-    metadata: { teacher_id: session.user.id },
-    subscription_data: { metadata: { teacher_id: session.user.id } },
+    metadata: { teacher_id: teacherId },
+    subscription_data: { metadata: { teacher_id: teacherId } },
     allow_promotion_codes: true,
     success_url: `${origin}/teachers/dashboard?upgraded=1`,
     cancel_url: `${origin}/teachers/upgrade?canceled=1`,
   });
-
-  return NextResponse.json({ url: checkout.url });
 }
