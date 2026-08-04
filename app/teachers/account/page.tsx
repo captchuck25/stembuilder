@@ -210,6 +210,7 @@ export default function TeacherAccountPage() {
                     Full access through your school or district — nothing to manage here.
                   </p>
                 ) : (
+                  <>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
                     <Link href="/teachers/upgrade"
                       style={{ padding: "11px 22px", borderRadius: 999, background: "#1f1f1f", color: "#fff",
@@ -235,6 +236,7 @@ export default function TeacherAccountPage() {
                       {portalError}
                     </p>
                   )}
+                  </>
                 )}
               </div>
             )}
