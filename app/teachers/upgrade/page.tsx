@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import SiteHeader from "@/app/components/SiteHeader";
 import TrialSignupForm from "../TrialSignupForm";
+import OverageBuy from "../OverageBuy";
 import { getProfile } from "@/lib/profile";
 import { roleAtLeast } from "@/lib/roles";
 import type { PlanUsage } from "@/lib/plan";
@@ -106,9 +107,17 @@ function UpgradeInner() {
                 Your school or district plan already includes full access — nothing to buy here.
               </p>
             ) : usage.plan === "pro" ? (
-              <p style={{ fontSize: 15, fontWeight: 700, color: "#166534" }}>
-                ✓ You&apos;re on Teacher Pro. Thanks for supporting STEM Builder!
-              </p>
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: "#166534" }}>
+                  ✓ You&apos;re on Teacher Pro ({usage.cap} students). Thanks for supporting STEM Builder!
+                </p>
+                <div style={{ border: "2px solid #e5e7eb", borderRadius: 14, padding: 18, marginTop: 14 }}>
+                  <p style={{ fontSize: 14, fontWeight: 800, color: "#111", margin: "0 0 10px" }}>
+                    Need room for more students?
+                  </p>
+                  <OverageBuy onDone={setUsage} />
+                </div>
+              </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <button type="button" onClick={startCheckout} disabled={busy !== ""}

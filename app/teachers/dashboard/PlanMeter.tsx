@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { PlanUsage } from "@/lib/plan";
 import TrialSignupForm from "../TrialSignupForm";
+import OverageBuy from "../OverageBuy";
 
 // Teacher plan usage meter + upgrade prompts for the dashboard.
-// All state comes from GET /api/teacher/plan (server-derived); the only
-// mutation is the one-time free-trial start. Upgrade/overage purchases are
-// mailto stubs until Stripe lands (see TODO in /api/teacher/plan/trial).
+// All state comes from GET /api/teacher/plan (server-derived); mutations are
+// the one-time free-trial start and the overage purchase (OverageBuy).
 
 const CARD: React.CSSProperties = {
   background: "rgba(255,255,255,0.97)",
@@ -26,63 +26,6 @@ const BTN: React.CSSProperties = {
   textDecoration: "none",
   border: "2px solid #1f1f1f",
 };
-
-// Buys overage blocks against the existing Pro subscription (card on file,
-// prorated). Falls back to email while checkout is switched off.
-function OverageBuy({ onDone }: { onDone: (usage: PlanUsage) => void }) {
-  const [blocks, setBlocks] = useState(1);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function buy() {
-    setBusy(true);
-    setError("");
-    try {
-      const res = await fetch("/api/teacher/billing/overage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blocks }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) { onDone(data); return; }
-      setError(data.error ?? `Could not add students (HTTP ${res.status}).`);
-    } catch {
-      setError("Could not reach the server — try again.");
-    }
-    setBusy(false);
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
-        How many more students?
-        <select value={blocks} onChange={(e) => setBlocks(Number(e.target.value))}
-          style={{ display: "block", width: "100%", marginTop: 6, padding: "10px 12px",
-            borderRadius: 10, border: "2px solid #e5e7eb", fontSize: 14, color: "#111" }}>
-          {[1, 2, 3, 4].map((n) => (
-            <option key={n} value={n}>+{n * 25} students — ${n * 10}/year</option>
-          ))}
-        </select>
-      </label>
-      {error && (
-        <p style={{ fontSize: 13, color: "#dc2626", fontWeight: 700, margin: 0 }}>
-          {error}{" "}
-          <a href="mailto:info@stembuilder.io?subject=Add%20students%20to%20Teacher%20Pro"
-            style={{ color: "#2563eb" }}>
-            Email us instead →
-          </a>
-        </p>
-      )}
-      <button type="button" onClick={buy} disabled={busy}
-        style={{ ...BTN, background: "#1f1f1f", color: "#fff", opacity: busy ? 0.6 : 1 }}>
-        {busy ? "Adding…" : `Add ${blocks * 25} students — $${blocks * 10}/year`}
-      </button>
-      <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>
-        Billed to your card on file, prorated for the rest of your year.
-      </p>
-    </div>
-  );
-}
 
 export default function PlanMeter() {
   const [usage, setUsage] = useState<PlanUsage | null>(null);
