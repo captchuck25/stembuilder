@@ -927,10 +927,15 @@ Same idea, same words. You already know how it works.`,
     {
       title: 'Two Functions',
       par: 14,
-      maxBlocks: 16,
+      // 15, not 16: with the trimmed stair row below, "define stairs + inline
+      // the dash" costs 16 — the limit is what forces the SECOND definition.
+      maxBlocks: 15,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
       hint: 'This maze has TWO patterns: a stair (Move, Turn Right, Move, Turn Left) and a data-chip dash (Move, Move, Collect). Define both — call each where it fits!',
-      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
+      // Stair row y=2 is exactly the two cells the stairs touch — a stair
+      // function padded with extra Moves walks into the wall on its second
+      // call, so the two patterns can't be merged into one super-function.
+      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1],[1,1,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:8, exitY:3,
       collectibles:[{x:4,y:3},{x:6,y:3},{x:8,y:3}],
     },
