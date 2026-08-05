@@ -183,7 +183,10 @@ function stackXml(nodes: StackNode[]): string {
     } else run.push(n);
   }
   if (run.length) tops.push(chain(run));
-  return `<xml xmlns="https://developers.google.com/blockly/xml">${tops.join('')}</xml>`;
+  // Seed rough top-level coords so getTopBlocks(true) keeps authoring order;
+  // exact column layout happens after render when real heights are known
+  const placed = tops.map((t, i) => t.replace('<block ', `<block x="8" y="${i * 120}" `));
+  return `<xml xmlns="https://developers.google.com/blockly/xml">${placed.join('')}</xml>`;
 }
 
 function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string }) {
@@ -194,8 +197,10 @@ function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string })
     const el = ref.current;
     if (!el) return;
     registerBlockDefs(itemName);
+    // NOT readOnly: readOnly workspaces refuse block moves, which silently
+    // breaks layout (multi-stack figures pile up at the origin). Interaction
+    // is blocked with pointer-events instead.
     const ws = Blockly.inject(el, {
-      readOnly: true,
       renderer: 'zelos',
       theme: getDarkTheme(),
       scrollbars: false,
@@ -203,7 +208,13 @@ function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string })
     });
     try {
       Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(stackXml(parseStack(linesKey.split('\n')))), ws);
-      ws.cleanUp();
+      // Deterministic column layout with real rendered heights
+      let colY = 8;
+      for (const b of ws.getTopBlocks(true)) {
+        const xy = b.getRelativeToSurfaceXY();
+        b.moveBy(8 - xy.x, colY - xy.y);
+        colY += b.getHeightWidth().height + 14;
+      }
       const bb = ws.getBlocksBoundingBox();
       setH(Math.max(48, Math.ceil((bb.bottom - bb.top) * 0.75) + 28));
       requestAnimationFrame(() => { try { Blockly.svgResize(ws as Blockly.WorkspaceSvg); } catch { /* disposed */ } });
@@ -213,9 +224,18 @@ function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string })
   }, [linesKey, h, itemName]);
   return (
     <div style={{ border: '1px solid rgba(99,179,237,0.18)', borderRadius: 12, margin: '10px 0', overflow: 'hidden' }}>
-      <div ref={ref} style={{ height: h, width: '100%' }} />
+      <div ref={ref} style={{ height: h, width: '100%', pointerEvents: 'none' }} />
     </div>
   );
+}
+
+/** Inline markdown: **bold** and `code` spans */
+function inlineMd(text: string): React.ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, j) => {
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={j} style={{ color: '#e2e8f0' }}>{p.slice(2, -2)}</strong>;
+    if (p.startsWith('`') && p.endsWith('`')) return <code key={j} style={{ background: 'rgba(99,179,237,0.15)', color: '#93c5fd', padding: '1px 5px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace' }}>{p.slice(1, -1)}</code>;
+    return p;
+  });
 }
 
 // ─── Markdown renderer (same as Python) ───────────────────────────────────────
@@ -255,7 +275,7 @@ function LessonPanel({ text, itemName }: { text: string; itemName?: string }) {
       if (isHead) {
         tableRows[0] = <thead key={k++}><tr>{cells.map((c, j) => <th key={j} style={{ textAlign: 'left', padding: '6px 10px', background: 'rgba(99,179,237,0.12)', borderBottom: '1px solid rgba(99,179,237,0.2)', fontSize: 13, color: '#e2e8f0' }}>{c}</th>)}</tr></thead>;
       } else {
-        tableRows.push(<tr key={k++}>{cells.map((c, j) => <td key={j} style={{ padding: '5px 10px', borderBottom: '1px solid rgba(255,255,255,0.07)', fontSize: 13, color: '#cbd5e1', fontFamily: c.startsWith('`') ? 'monospace' : 'inherit' }}>{c.replace(/`/g, '')}</td>)}</tr>);
+        tableRows.push(<tr key={k++}>{cells.map((c, j) => <td key={j} style={{ padding: '5px 10px', borderBottom: '1px solid rgba(255,255,255,0.07)', fontSize: 13, color: '#cbd5e1' }}>{inlineMd(c)}</td>)}</tr>);
       }
       continue;
     }
