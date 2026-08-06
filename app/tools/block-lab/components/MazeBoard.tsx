@@ -36,6 +36,10 @@ type LevelProp = BlockChallenge & { theme: ThemeName; [key: string]: unknown };
 
 export interface WinResult {
   stars: number;
+  /** A non-empty function call executed during the winning run. */
+  usedFunction: boolean;
+  /** The level's palette offers Define Function — mastery expects its use. */
+  functionExpected: boolean;
   blocksUsed: number;
   collectedAll: boolean;
 }
@@ -154,15 +158,21 @@ const MazeBoard = forwardRef<MazeBoardHandle, Props>(({ level, speed = 1, onWin,
             },
             onWin(collectedAll) {
               wonRef.current = true;
-              const stars = 1 + (collectedAll ? 1 : 0) + (blocksUsed <= level.par ? 1 : 0);
+              // On levels that teach functions, the par star also requires a
+              // function to have actually RUN — a loop-only solve still wins,
+              // it just isn't mastery (the banner explains what's missing).
+              const functionExpected = level.blockIds.includes('define_trick');
+              const usedFunction = runtime.usedFunction;
+              const parStar = blocksUsed <= level.par && (!functionExpected || usedFunction);
+              const stars = 1 + (collectedAll ? 1 : 0) + (parStar ? 1 : 0);
               anim.celebrate();
               particlesRef.current = [
                 ...particlesRef.current,
                 ...spawnConfetti(anim.gridX * CELL + CELL / 2, anim.gridY * CELL + CELL / 2, theme.confetti),
               ];
               playWin();
-              setWon({ stars, blocksUsed, collectedAll });
-              onWin({ stars, blocksUsed, collectedAll });
+              setWon({ stars, blocksUsed, collectedAll, usedFunction, functionExpected });
+              onWin({ stars, blocksUsed, collectedAll, usedFunction, functionExpected });
             },
             onBump() {
               bumpedRef.current = true;
@@ -239,6 +249,8 @@ const MazeBoard = forwardRef<MazeBoardHandle, Props>(({ level, speed = 1, onWin,
               {won.blocksUsed} block{won.blocksUsed === 1 ? '' : 's'} used — par {level.par}
               {level.collectibles.length > 0 && !won.collectedAll && <><br />Use Collect ✦ on every item for another star!</>}
               {won.stars < 3 && won.collectedAll && won.blocksUsed > level.par && <><br />Solve it in {level.par} blocks or fewer for another star!</>}
+              {won.collectedAll && won.blocksUsed <= level.par && won.functionExpected && !won.usedFunction &&
+                <><br />Clever route — but no functions ran! Define the repeating pattern and call it to earn the last star.</>}
             </div>
           </div>
         </div>

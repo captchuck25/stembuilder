@@ -39,6 +39,9 @@ export class MazeRuntime {
   private _bumped = false;
   private _speed = 1;
   private readonly stepGap = 55;
+  /** True once a non-empty function call has EXECUTED this run — used to
+   *  gate the par star on function-unit levels (mastery = using the tool). */
+  usedFunction = false;
 
   constructor(
     grid: number[][],
@@ -82,6 +85,7 @@ export class MazeRuntime {
     this._running = true;
     this._stopped = false;
     this._bumped = false;
+    this.usedFunction = false;
     await this.execMany(script);
     this._running = false;
     this.cb.onStep?.(null);
@@ -247,6 +251,7 @@ export class MazeRuntime {
       case 'do_trick': {
         // The compiler embedded the taught trick's body as our children —
         // running it highlights the definition's blocks as they perform
+        if (node.children?.length) this.usedFunction = true;
         await this.execMany(node.children ?? []);
         break;
       }
