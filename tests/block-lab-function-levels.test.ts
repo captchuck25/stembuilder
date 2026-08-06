@@ -123,9 +123,11 @@ const INTENDED: { title: string; defs: Record<number, Tok[]>; main: Tok[] }[] = 
     main: [call(1), M, call(1), call(2), M, TL, call(2), M, M, TL, call(1)],
   },
   {
+    // Three staircases (3, 2, 1 steps) all built from ONE step function +
+    // Repeats of different sizes — the step is the atom, the loop is the length.
     title: "Graduation Day",
-    defs: { 1: STAIR, 2: HALLWAY },
-    main: [repeat(3, [call(1)]), M, call(2), M, TL, call(1), M, M, TR, call(2)],
+    defs: { 1: STAIR },
+    main: [repeat(3, [call(1)]), M, M, repeat(2, [call(1)]), M, call(1), M],
   },
 ];
 
@@ -159,6 +161,18 @@ describe("Functions unit — anti-cheat: Repeat-of-motif dies at the first irreg
     const ch = level("Two Patterns, Scattered");
     const padded = [...STAIR, M, M];
     const result = simulate(ch, { 1: padded }, [call(1), call(1)]);
+    expect(result.bumped).toBe(true);
+  });
+  it("Graduation Day: Repeat 4 overruns the first staircase and bumps", () => {
+    const ch = level("Graduation Day");
+    const result = simulate(ch, { 1: STAIR }, [repeat(4, [call(1)])]);
+    expect(result.bumped).toBe(true);
+  });
+  it("Graduation Day: Repeat 3 on the 2-step staircase bumps — counts matter", () => {
+    const ch = level("Graduation Day");
+    const result = simulate(ch, { 1: STAIR }, [
+      repeat(3, [call(1)]), M, M, repeat(3, [call(1)]),
+    ]);
     expect(result.bumped).toBe(true);
   });
 });

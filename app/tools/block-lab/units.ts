@@ -1011,16 +1011,20 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'Graduation Day',
-      par: 22,
-      // Everything at once: Repeat 3 [call stair] for the opening run, then
-      // scattered hallways + a stray stair. One-function routes cost 23+
-      // (complete, but under-starred); merged stair+Move costs 25.
-      maxBlocks: 24,
+      par: 15,
+      // The perception rule (user, 2026-08-06): the motif is what the EYE
+      // sees repeat. Staircases of different lengths would break a
+      // "staircase" function — so the lesson is the STEP as the atom:
+      // one function + Repeat of different sizes builds every staircase.
+      // Chip on every landing, identically. Cheat audit: function-only
+      // (six calls, no repeat) = 16 = limit, completes under-starred;
+      // Repeat 4 (or Repeat 3 on the 2-staircase) bumps — counts matter.
+      maxBlocks: 16,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'The final exam. THREE stairs in a row — that\'s a Call inside a Repeat 3. Then the maze goes wild: a hallway, a stray stair, another hallway down to the flag. Two functions plus one loop — that\'s real code. Go get \'em, professor!',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:10, exitY:8,
-      collectibles:[{x:1,y:2},{x:2,y:3},{x:3,y:4},{x:6,y:4},{x:8,y:6},{x:10,y:8}],
+      hint: 'The grand finale: THREE staircases — 3 steps, then 2 steps, then 1. Look close: they\'re all built from the SAME step, chip on every landing. Define the step ONCE, then build each staircase with a loop: Repeat 3 { Call }, Repeat 2 { Call }, and one last call on its own. One function, loops of every size — that\'s graduation.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
+      startX:0, startY:1, startDir:'right', exitX:10, exitY:7,
+      collectibles:[{x:1,y:2},{x:2,y:3},{x:3,y:4},{x:6,y:5},{x:7,y:6},{x:9,y:7}],
     },
   ],
 
