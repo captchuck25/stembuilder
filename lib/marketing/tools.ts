@@ -27,6 +27,11 @@ export interface MarketingTool {
   demoVideo: string;
   /** SEO meta description for the detail page. */
   seoDescription: string;
+  /**
+   * What kind of projects Pro/District lesson plans bring to this tool —
+   * completes the sentence "…bringing ___ to entire classrooms."
+   */
+  lessonPlanHook: string;
 }
 
 export const FLAGSHIP_CALLOUT =
@@ -42,13 +47,13 @@ export const TOOLS: MarketingTool[] = [
     name: "STEM Sketch",
     flagship: true,
     tagline:
-      "Design real, fabrication-ready parts — 3D prints, laser-cut SVGs, and CNC — without learning traditional CAD first. From screen straight to your makerspace.",
+      "Design real, fabrication-ready parts for 3D printing, laser cutting, and CNC — the perfect on-ramp to CAD production. From screen straight to your makerspace.",
     toolHref: "/tools/stem-sketch",
     image: "/ui/stem-sketch.png",
     gradeBand: "Grades 4–12",
     subjects: ["Engineering", "Design", "Makerspace"],
     description: [
-      "STEM Sketch is a browser-based 3D design studio built for classrooms. Students combine simple shapes — stack, carve, and cut — to model real objects, then export their work as fabrication-ready files: STL for 3D printers, SVG for laser cutters, and paths for CNC. There's nothing to install and no CAD training required: the tools are visual and forgiving, so a first-time user is modeling within minutes.",
+      "STEM Sketch is a browser-based 3D design studio built for classrooms. Students create real objects in an intuitive format that builds directly on how they first learn to draw — the same orthographic thinking they practice on paper carries straight into the software. Their work exports as fabrication-ready files: STL for 3D printers, SVG for laser cutters, and paths for CNC. There's nothing to install, and a first-time user is modeling within minutes.",
       "Under the hood it's genuinely capable — precise dimensions, boolean cuts, even threaded bolts and nuts — so the ceiling stays high for your strongest builders while the floor stays low for beginners.",
     ],
     classroomUse: [
@@ -64,7 +69,8 @@ export const TOOLS: MarketingTool[] = [
     ],
     demoVideo: "Demo video — from blank canvas to printable part (2 min)",
     seoDescription:
-      "STEM Sketch is a browser-based 3D design tool for schools. Students design fabrication-ready parts — 3D prints, laser-cut SVGs, and CNC — with no CAD training required.",
+      "STEM Sketch is a browser-based 3D design tool for schools. Students design fabrication-ready parts for 3D printing, laser cutting, and CNC — the perfect on-ramp to CAD production.",
+    lessonPlanHook: "3D-printed and CNC-style projects",
   },
   {
     slug: "blueprint-lab",
@@ -95,6 +101,7 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — drawing a small home to scale (2 min)",
     seoDescription:
       "Blueprint Lab lets students design homes and floor plans to scale in the browser — walls, dimensions, roofs, and a 3D walkthrough — with none of the CAD learning curve.",
+    lessonPlanHook: "to-scale architectural design projects",
   },
   {
     slug: "bridge-builder",
@@ -123,6 +130,7 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — design, load, and break a bridge (90 sec)",
     seoDescription:
       "Bridge Builder lets students design a bridge and stress-test it under load in the browser — live physics, class leaderboards, and engineering iteration in one tool.",
+    lessonPlanHook: "bridge-design challenges and class competitions",
   },
   {
     slug: "code-lab",
@@ -151,6 +159,7 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — from blocks to Python (2 min)",
     seoDescription:
       "Code Lab teaches students to code in the browser — block-based maze puzzles, turtle graphics, and a graduation path to real Python, with teacher progress tracking.",
+    lessonPlanHook: "block-coding and real Python projects",
   },
   {
     slug: "electronics-lab",
@@ -179,6 +188,7 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — building a first circuit (90 sec)",
     seoDescription:
       "Electronics Lab is a live circuit simulator for classrooms — students build circuits with batteries, bulbs, and switches, and progress from first circuits to breadboards and Ohm's Law.",
+    lessonPlanHook: "circuit-building units and hands-on companion builds",
   },
   {
     slug: "measurement-lab",
@@ -207,6 +217,7 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — a measurement sprint (60 sec)",
     seoDescription:
       "Measurement Lab builds measuring fluency with instant feedback, timed sprints, and class leaderboards — hands-on practice with rulers, scale, and precision.",
+    lessonPlanHook: "measurement sprints and precision practice",
   },
 ];
 

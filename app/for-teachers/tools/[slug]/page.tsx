@@ -6,9 +6,8 @@ import {
   getTool,
   toolDisplayName,
   FLAGSHIP_CALLOUT,
-  STANDARDS_FRAMEWORKS,
 } from "@/lib/marketing/tools";
-import { MediaSlot, ComingSoon } from "../../components/ui";
+import { MediaSlot } from "../../components/ui";
 import styles from "../../marketing.module.css";
 
 // One detail page per tool, generated from the shared tool list —
@@ -59,15 +58,11 @@ export default async function ToolDetailPage(
             {tool.flagship && <span className={styles.flagshipBadge}>★ Flagship</span>}
           </div>
           <p className={styles.lede} style={{ marginTop: 14, maxWidth: 820 }}>{tool.tagline}</p>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <span className={styles.chip}>{tool.gradeBand}</span>
             {tool.subjects.map((s) => (
               <span key={s} className={styles.chip}>{s}</span>
             ))}
-          </div>
-          <div className={styles.btnRow}>
-            <Link href="/teachers" className={styles.btnPrimary}>Start free</Link>
-            <Link href={tool.toolHref} className={styles.btnSecondary}>Try it</Link>
           </div>
         </div>
       </section>
@@ -113,9 +108,14 @@ export default async function ToolDetailPage(
               </li>
             ))}
           </ul>
-          <p style={{ marginTop: 24 }}>
-            <ComingSoon>📚 Lesson ideas — coming soon</ComingSoon>
-          </p>
+          <div className={styles.cardSoft} style={{ marginTop: 24, maxWidth: 820 }}>
+            <span className={styles.kicker}>Lesson plans &amp; projects</span>
+            <p className={styles.body} style={{ margin: "10px 0 0", fontSize: 16 }}>
+              Teacher Pro and District plans include ready-to-teach lesson plans
+              and projects — bringing {tool.lessonPlanHook} to entire
+              classrooms, not just one student at a time.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -131,22 +131,6 @@ export default async function ToolDetailPage(
         </div>
       </section>
 
-      {/* Standards connections — placeholders until per-tool mappings are written */}
-      <section className={styles.section}>
-        <div className={styles.container}>
-          <h2 className={styles.h2}>Standards connections</h2>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "16px 0" }}>
-            {STANDARDS_FRAMEWORKS.map((f) => (
-              <span key={f} className={styles.chip}>{f}</span>
-            ))}
-          </div>
-          <p className={styles.body} style={{ maxWidth: 720 }}>
-            Detailed standards connections for {toolDisplayName(tool)} are in
-            progress. <ComingSoon>Coming soon</ComingSoon>
-          </p>
-        </div>
-      </section>
-
       {/* CTA */}
       <section className={styles.ctaBand}>
         <div className={styles.container}>
@@ -154,7 +138,6 @@ export default async function ToolDetailPage(
           <p>It takes about a minute to start — and it&apos;s free for teachers.</p>
           <div className={styles.btnRow} style={{ justifyContent: "center" }}>
             <Link href="/teachers" className={styles.btnOnDark}>Start free</Link>
-            <Link href={tool.toolHref} className={styles.btnOnDarkOutline}>Try it</Link>
           </div>
         </div>
       </section>

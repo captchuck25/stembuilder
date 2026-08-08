@@ -42,7 +42,7 @@ export default async function ForTeachersLayout({ children }: { children: React.
             <Link href="/for-teachers/pricing" className={styles.subnavLink}>Pricing</Link>
             <Link href="/for-teachers/getting-started" className={styles.subnavLink}>Getting started</Link>
             <Link href="/for-teachers/trust" className={styles.subnavLink}>Trust &amp; privacy</Link>
-            <Link href="/teachers" className={styles.subnavCta}>Start free</Link>
+            <Link href="/teachers" className={styles.subnavCta}>Start here</Link>
           </div>
         </nav>
       </div>

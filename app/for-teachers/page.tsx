@@ -63,7 +63,7 @@ const LOVE_TILES = [
   },
   {
     title: "See real progress",
-    body: "Every student's creations and progress, together in your dashboard.",
+    body: "Every student's creations and progress, together on your dashboard.",
     demoLink: true,
   },
   {
@@ -88,16 +88,12 @@ export default function ForTeachersPage() {
         <div className={styles.container}>
           <div className={styles.heroCard}>
             <h1 className={styles.h1}>Students building on day one.</h1>
-            <p className={styles.lede}>
+            <p className={styles.lede} style={{ marginBottom: 0 }}>
               A growing suite of hands-on STEM tools — design, engineering, coding,
               electronics, and more — built to shorten the software learning curve,
               so students spend their time creating, not learning to navigate the
               software.
             </p>
-            <div className={styles.btnRow} style={{ justifyContent: "center" }}>
-              <Link href="/teachers" className={styles.btnPrimary}>Start free</Link>
-              <a href="#tools" className={styles.btnSecondary}>See the tools</a>
-            </div>
           </div>
         </div>
       </section>
