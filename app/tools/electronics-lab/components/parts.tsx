@@ -23,6 +23,35 @@ export function WireView({ part, segments, toPx, schematic, erasable, onErase }:
   const B = toPx(part.b);
   const baseColor = schematic ? '#1f2937' : part.fixed ? '#64748b' : '#b45309';
   const flowing = segments?.some(s => Math.abs(s.current) > 0.01);
+  // A student-PLACED broken segment shows its crack openly (they put it there
+  // on purpose). Hidden faults are fixed:true and render like healthy wires.
+  const cracked = part.broken && !part.fixed;
+  const M = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 };
+  const len = Math.hypot(B.x - A.x, B.y - A.y) || 1;
+  const ux = (B.x - A.x) / len;
+  const uy = (B.y - A.y) / len;
+  // Jumper wires arc over the board — they only touch at their endpoints.
+  if (part.jump) {
+    const bow = { x: M.x - uy * 22, y: M.y - Math.abs(ux) * 22 - (Math.abs(uy) > 0.5 ? 0 : 0) };
+    const d = `M ${A.x} ${A.y} Q ${bow.x} ${bow.y} ${B.x} ${B.y}`;
+    const seg = segments?.[0];
+    const rev = (seg?.current ?? 0) < 0;
+    const dFlow = rev ? `M ${B.x} ${B.y} Q ${bow.x} ${bow.y} ${A.x} ${A.y}` : d;
+    return (
+      <g style={{ cursor: erasable ? 'pointer' : undefined }}
+        onClick={erasable ? e => { e.stopPropagation(); onErase?.(part.id); } : undefined}>
+        {erasable && <path d={d} fill="none" stroke="transparent" strokeWidth={18} />}
+        <path d={d} fill="none" stroke={schematic ? '#1f2937' : '#b45309'} strokeWidth={schematic ? 3 : 5.5} strokeLinecap="round" />
+        {seg && Math.abs(seg.current) > 0.001 && (
+          <path d={dFlow} fill="none" stroke={Math.abs(seg.current) > 2 ? '#ef4444' : '#fbbf24'} strokeWidth={3}
+            strokeLinecap="round" strokeDasharray="4 9"
+            className={Math.abs(seg.current) > 2 ? 'elab-flow elab-flow-fast' : 'elab-flow'} />
+        )}
+        <circle cx={A.x} cy={A.y} r={4} fill="#92600a" />
+        <circle cx={B.x} cy={B.y} r={4} fill="#92600a" />
+      </g>
+    );
+  }
   return (
     <g
       style={{ cursor: erasable ? 'pointer' : undefined }}
@@ -30,7 +59,18 @@ export function WireView({ part, segments, toPx, schematic, erasable, onErase }:
     >
       {/* fat invisible hit area for erasing */}
       {erasable && <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="transparent" strokeWidth={16} />}
-      <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={baseColor} strokeWidth={schematic ? 3 : 6} strokeLinecap="round" />
+      {cracked ? (
+        <>
+          <line x1={A.x} y1={A.y} x2={M.x - ux * 7} y2={M.y - uy * 7} stroke={baseColor} strokeWidth={schematic ? 3 : 6} strokeLinecap="round" />
+          <line x1={M.x + ux * 7} y1={M.y + uy * 7} x2={B.x} y2={B.y} stroke={baseColor} strokeWidth={schematic ? 3 : 6} strokeLinecap="round" />
+          {/* jagged break ends */}
+          <line x1={M.x - ux * 7 - uy * 6} y1={M.y - uy * 7 + ux * 6} x2={M.x - ux * 3 + uy * 6} y2={M.y - uy * 3 - ux * 6} stroke="#dc2626" strokeWidth={2.5} strokeLinecap="round" />
+          <line x1={M.x + ux * 3 - uy * 6} y1={M.y + uy * 3 + ux * 6} x2={M.x + ux * 7 + uy * 6} y2={M.y + uy * 7 - ux * 6} stroke="#dc2626" strokeWidth={2.5} strokeLinecap="round" />
+          <text x={M.x} y={M.y - (Math.abs(uy) > 0.5 ? 0 : 14)} dx={Math.abs(uy) > 0.5 ? 16 : 0} textAnchor={Math.abs(uy) > 0.5 ? 'start' : 'middle'} fontSize={10.5} fontWeight={800} fill="#dc2626">broken</text>
+        </>
+      ) : (
+        <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke={baseColor} strokeWidth={schematic ? 3 : 6} strokeLinecap="round" />
+      )}
       {flowing && segments!.map((s, i) => {
         if (Math.abs(s.current) < 0.01) return null;
         const from = s.current > 0 ? toPx(s.a) : toPx(s.b);
@@ -233,6 +273,105 @@ export function SwitchView({ part, toPx, schematic, clickable, onToggle }: {
   );
 }
 
+// ── Resistor ──────────────────────────────────────────────────────────────────
+
+export function ResistorView({ part, toPx, schematic }: {
+  part: Part;
+  toPx: ToPx;
+  schematic: boolean;
+}) {
+  const A = toPx(part.a);
+  const B = toPx(part.b);
+  const M = mid(A, B);
+  const zig = (cx: number, cy: number, w: number, color: string, sw: number) => {
+    const s = w / 6;
+    return (
+      <path d={`M ${cx - w / 2} ${cy} l ${s * 0.5} -8 l ${s} 16 l ${s} -16 l ${s} 16 l ${s} -16 l ${s} 16 l ${s * 0.5} -8`}
+        fill="none" stroke={color} strokeWidth={sw} strokeLinejoin="round" />
+    );
+  };
+  if (schematic) {
+    return (
+      <g>
+        <line x1={A.x} y1={A.y} x2={M.x - 26} y2={M.y} stroke="#1f2937" strokeWidth={3} />
+        <line x1={M.x + 26} y1={M.y} x2={B.x} y2={B.y} stroke="#1f2937" strokeWidth={3} />
+        {zig(M.x, M.y, 52, '#1f2937', 2.5)}
+        {part.label && <text x={M.x} y={M.y + 26} textAnchor="middle" fontSize={11.5} fontWeight={700} fill="#475569">{part.label}</text>}
+      </g>
+    );
+  }
+  return (
+    <g>
+      <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="#475569" strokeWidth={5} strokeLinecap="round" />
+      <rect x={M.x - 30} y={M.y - 12} width={60} height={24} rx={8} fill="#fde68a" stroke="#b45309" strokeWidth={2} />
+      {zig(M.x, M.y, 40, '#b45309', 2.5)}
+      {part.label && <text x={M.x} y={M.y + 30} textAnchor="middle" fontSize={11.5} fontWeight={800} fill="#64748b">{part.label}</text>}
+    </g>
+  );
+}
+
+// ── LED ───────────────────────────────────────────────────────────────────────
+
+export function LEDView({ part, result, toPx, schematic, clickable, onFlip }: {
+  part: Part;
+  result?: PartResult;
+  toPx: ToPx;
+  schematic: boolean;
+  clickable: boolean;
+  onFlip?: (id: string) => void;
+}) {
+  const A = toPx(part.a); // anode (+, long leg)
+  const B = toPx(part.b); // cathode (−, flat side)
+  const M = mid(A, B);
+  const cur = result?.current ?? 0;
+  const lit = cur > 0.001;
+  const burned = Math.abs(cur) > 0.05;
+  const horizontal = Math.abs(B.x - A.x) >= Math.abs(B.y - A.y);
+  const flip = clickable ? (e: React.MouseEvent) => { e.stopPropagation(); onFlip?.(part.id); } : undefined;
+
+  if (schematic) {
+    // diode symbol: triangle points anode → cathode, bar at cathode
+    const dx = Math.sign(B.x - A.x) || 0;
+    const dy = Math.sign(B.y - A.y) || 0;
+    const px = -dy, py = dx;
+    return (
+      <g style={{ cursor: clickable ? 'pointer' : undefined }} onClick={flip}>
+        <line x1={A.x} y1={A.y} x2={B.x} y2={B.y} stroke="#1f2937" strokeWidth={3} />
+        <path d={`M ${M.x - dx * 10 + px * 10} ${M.y - dy * 10 + py * 10} L ${M.x - dx * 10 - px * 10} ${M.y - dy * 10 - py * 10} L ${M.x + dx * 10} ${M.y + dy * 10} Z`}
+          fill={lit ? '#fbbf24' : '#fff'} stroke="#1f2937" strokeWidth={2} />
+        <line x1={M.x + dx * 10 + px * 10} y1={M.y + dy * 10 + py * 10} x2={M.x + dx * 10 - px * 10} y2={M.y + dy * 10 - py * 10} stroke="#1f2937" strokeWidth={3} />
+        {/* light arrows */}
+        <path d={`M ${M.x + px * 14} ${M.y + py * 14 - 10} l 6 -6 M ${M.x + px * 14 + 8} ${M.y + py * 14 - 8} l 6 -6`} stroke={lit ? '#f59e0b' : '#94a3b8'} strokeWidth={2} fill="none" />
+        {part.label && <text x={M.x} y={Math.max(A.y, B.y) + 24} textAnchor="middle" fontSize={11} fontWeight={700} fill="#64748b">{part.label}</text>}
+      </g>
+    );
+  }
+
+  const domeY = M.y - 14;
+  return (
+    <g style={{ cursor: clickable ? 'pointer' : undefined }} onClick={flip}>
+      {/* legs */}
+      <line x1={A.x} y1={A.y} x2={M.x - 7} y2={domeY + 8} stroke="#94a3b8" strokeWidth={3.5} strokeLinecap="round" />
+      <line x1={B.x} y1={B.y} x2={M.x + 7} y2={domeY + 8} stroke="#94a3b8" strokeWidth={3.5} strokeLinecap="round" />
+      {/* glow */}
+      {lit && !burned && <circle cx={M.x} cy={domeY} r={26} fill={`rgba(248,113,113,${0.25 + 0.35 * Math.min(1, result?.brightness ?? 0)})`} className="elab-soft" />}
+      {/* dome (flat side toward cathode) */}
+      <path d={`M ${M.x - 9} ${domeY + 8} L ${M.x - 9} ${domeY - 2} A 9 9 0 0 1 ${M.x + 9} ${domeY - 2} L ${M.x + 9} ${domeY + 8} Z`}
+        fill={burned ? '#78716c' : lit ? '#f87171' : 'rgba(252,165,165,0.7)'}
+        stroke={burned ? '#44403c' : '#b91c1c'} strokeWidth={2} />
+      <rect x={M.x - 11} y={domeY + 6} width={22} height={4} rx={1.5} fill={burned ? '#57534e' : '#dc2626'} />
+      {burned && <text x={M.x} y={domeY - 14} textAnchor="middle" fontSize={15}>💥</text>}
+      {/* polarity marks */}
+      <text x={A.x + (horizontal ? 0 : -12)} y={A.y + (horizontal ? 18 : 4)} textAnchor="middle" fontSize={11} fontWeight={900} fill="#dc2626">+</text>
+      <text x={B.x + (horizontal ? 0 : -12)} y={B.y + (horizontal ? 18 : 4)} textAnchor="middle" fontSize={11} fontWeight={900} fill="#475569">−</text>
+      {clickable && (
+        <text x={M.x} y={domeY - (burned ? 28 : 16)} textAnchor="middle" fontSize={10} fontWeight={700} fill="#94a3b8">tap to flip</text>
+      )}
+      {part.label && <text x={M.x} y={Math.max(A.y, B.y) + 30} textAnchor="middle" fontSize={11} fontWeight={800} fill="#64748b">{part.label}</text>}
+    </g>
+  );
+}
+
 // ── Test material (sits between the alligator clips) ──────────────────────────
 
 export function MaterialView({ part, toPx, emoji }: {
@@ -264,6 +403,94 @@ export function MaterialView({ part, toPx, emoji }: {
       <rect x={M.x - 34} y={M.y - 15} width={68} height={30} rx={8} fill="#fff" stroke="#94a3b8" strokeWidth={2} />
       <text x={M.x} y={M.y + 6} textAnchor="middle" fontSize={16}>{emoji ?? '▫️'}</text>
       {part.label && <text x={M.x} y={M.y + 32} textAnchor="middle" fontSize={11} fontWeight={700} fill="#64748b">{part.label}</text>}
+    </g>
+  );
+}
+
+// ── Multimeter probe pen (Circuit Detective) ──────────────────────────────────
+
+/** A handheld test probe whose metal tip touches (x, y). `lean` tilts the
+ *  handle (positive = toward the meter on the right). When `leadFrom` (a meter
+ *  socket) is given, the lead plugs into the BUTT of the handle and arcs over,
+ *  entering along the handle's axis like a real test lead. */
+export function ProbePen({ x, y, color = '#dc2626', lean = 38, opacity = 1, badge, leadFrom }: {
+  x: number; y: number; color?: string; lean?: number; opacity?: number; badge?: string;
+  leadFrom?: { x: number; y: number };
+}) {
+  const rad = (lean * Math.PI) / 180;
+  // butt of the handle in global coords (local (0, -64) rotated by lean)
+  const butt = { x: x + 64 * Math.sin(rad), y: y - 64 * Math.cos(rad) };
+  const dir = { x: Math.sin(rad), y: -Math.cos(rad) }; // handle axis, tip → butt
+  return (
+    <g pointerEvents="none" opacity={opacity}>
+      {leadFrom && (
+        <path
+          d={`M ${leadFrom.x} ${leadFrom.y} C ${leadFrom.x} ${leadFrom.y + 46}, ${butt.x + 55 * dir.x} ${butt.y + 55 * dir.y}, ${butt.x} ${butt.y}`}
+          fill="none" stroke={color} strokeWidth={3.5} strokeLinecap="round" opacity={0.8} />
+      )}
+      <g transform={`translate(${x} ${y}) rotate(${lean})`}>
+        {/* metal needle */}
+        <line x1={0} y1={-2} x2={0} y2={-18} stroke="#94a3b8" strokeWidth={3.5} strokeLinecap="round" />
+        <line x1={0} y1={-2} x2={0} y2={-10} stroke="#e2e8f0" strokeWidth={1.2} strokeLinecap="round" />
+        {/* handle */}
+        <rect x={-6} y={-64} width={12} height={48} rx={6} fill={color} stroke="rgba(0,0,0,0.3)" strokeWidth={1.5} />
+        {/* grip rings */}
+        <line x1={-6} y1={-28} x2={6} y2={-28} stroke="rgba(0,0,0,0.22)" strokeWidth={2.5} />
+        <line x1={-6} y1={-34} x2={6} y2={-34} stroke="rgba(0,0,0,0.22)" strokeWidth={2.5} />
+      </g>
+      {/* contact point + badge */}
+      <circle cx={x} cy={y} r={4.5} fill={color} stroke="#fff" strokeWidth={1.5} />
+      {badge && (
+        <>
+          <circle cx={x - 16} cy={y + 12} r={8.5} fill={color} stroke="#fff" strokeWidth={2} />
+          <text x={x - 16} y={y + 16} textAnchor="middle" fontSize={11} fontWeight={900} fill="#fff">{badge}</text>
+        </>
+      )}
+    </g>
+  );
+}
+
+/** Where the meter's lead sockets sit, for wiring ProbePen leadFrom. */
+export const meterSockets = (x: number, y: number) => ({
+  red: { x: x + 52, y: y + 166 },
+  black: { x: x + 98, y: y + 166 },
+});
+
+// ── Multimeter (Circuit Detective) — the probes' home base ────────────────────
+
+export type MeterState = 'idle' | 'waiting' | 'beep' | 'open';
+
+/** A classic yellow handheld multimeter set to continuity mode. Its screen IS
+ *  the test result: green "BEEP!" for continuity, amber "OL" (open loop) for a
+ *  break. 150×190 px. */
+export function MultimeterView({ x, y, state }: {
+  x: number; y: number; state: MeterState;
+}) {
+  const { red: socketRed, black: socketBlack } = meterSockets(x, y);
+  const screen =
+    state === 'beep' ? { bg: '#bbf7d0', main: 'BEEP!', sub: '0 Ω — path found', color: '#14532d' }
+    : state === 'open' ? { bg: '#fde68a', main: 'OL', sub: 'open loop — no path', color: '#78350f' }
+    : state === 'waiting' ? { bg: '#cbd5e1', main: '· · ·', sub: 'place probe 2', color: '#334155' }
+    : { bg: '#cbd5e1', main: '— —', sub: 'tap two points', color: '#64748b' };
+  return (
+    <g pointerEvents="none">
+      {/* holster + face */}
+      <rect x={x} y={y} width={150} height={190} rx={16} fill="#eab308" stroke="#92600a" strokeWidth={3} />
+      <rect x={x + 10} y={y + 10} width={130} height={170} rx={10} fill="#1f2937" />
+      {/* screen */}
+      <rect x={x + 20} y={y + 20} width={110} height={54} rx={7} fill={screen.bg}
+        className={state === 'beep' ? 'elab-pulse' : undefined} stroke="rgba(0,0,0,0.25)" strokeWidth={1.5} />
+      <text x={x + 75} y={y + 48} textAnchor="middle" fontSize={state === 'beep' ? 19 : 21} fontWeight={900}
+        fontFamily="monospace" fill={screen.color}>{screen.main}</text>
+      <text x={x + 75} y={y + 66} textAnchor="middle" fontSize={9.5} fontWeight={700} fill={screen.color}>{screen.sub}</text>
+      {/* mode dial pointing at continuity */}
+      <circle cx={x + 75} cy={y + 118} r={25} fill="#334155" stroke="#0f172a" strokeWidth={2.5} />
+      <line x1={x + 75} y1={y + 118} x2={x + 92} y2={y + 101} stroke="#e2e8f0" strokeWidth={4} strokeLinecap="round" />
+      <text x={x + 104} y={y + 96} textAnchor="middle" fontSize={12} fill="#e2e8f0">🔊</text>
+      <text x={x + 75} y={y + 155} textAnchor="middle" fontSize={8.5} fontWeight={800} fill="#94a3b8" letterSpacing="1">CONTINUITY</text>
+      {/* lead sockets */}
+      <circle cx={socketRed.x} cy={socketRed.y} r={7} fill="#dc2626" stroke="#fff" strokeWidth={2} />
+      <circle cx={socketBlack.x} cy={socketBlack.y} r={7} fill="#1f2937" stroke="#fff" strokeWidth={2} />
     </g>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { isAdmin } from '@/lib/roles'
 
 export async function GET(req: NextRequest) {
   const session = await auth()
@@ -87,6 +88,37 @@ export async function POST(req: NextRequest) {
     },
     { onConflict: conflictKey }
   )
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}
+
+// Admin-only review helper: reset ONE of the caller's own progress rows so a
+// changed challenge/quiz can be replayed from scratch. Soft-delete keeps the
+// row inside the standard 30-day retention flow; a later re-completion upserts
+// over it (POST always writes deleted_at: null).
+export async function DELETE(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!isAdmin(session.user.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const tool = req.nextUrl.searchParams.get('tool')
+  const levelRaw = req.nextUrl.searchParams.get('level_idx')
+  const chalRaw = req.nextUrl.searchParams.get('challenge_idx')
+  const level_idx = Number(levelRaw)
+  const challenge_idx = Number(chalRaw)
+  if (!tool || levelRaw === null || chalRaw === null || Number.isNaN(level_idx) || Number.isNaN(challenge_idx)) {
+    return NextResponse.json({ error: 'Missing tool/level_idx/challenge_idx' }, { status: 400 })
+  }
+
+  const db = adminDb()
+  const { error } = await db
+    .from('user_progress')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('user_id', session.user.id)
+    .eq('tool', tool)
+    .eq('level_idx', level_idx)
+    .eq('challenge_idx', challenge_idx)
+    .is('deleted_at', null)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

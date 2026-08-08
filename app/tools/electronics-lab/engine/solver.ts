@@ -8,7 +8,7 @@
 
 import {
   BATTERY_R_INT, BATTERY_V, BULB_NOMINAL_P, BULB_R, CONTACT_R, CONTINUITY_MAX_R,
-  LIT_THRESHOLD, Part, Pt, PartResult, SHORT_CURRENT, SolveResult, WIRE_R,
+  LED_R, LIT_THRESHOLD, Part, Pt, PartResult, SHORT_CURRENT, SolveResult, WIRE_R,
   WireSegment, ptKey, wirePoints,
 } from './types';
 
@@ -26,21 +26,30 @@ interface SourceEl {
   partId: string;
 }
 
-function buildElements(parts: Part[]): { resistors: ResistorEl[]; sources: SourceEl[]; extraR: ResistorEl[] } {
+function buildElements(parts: Part[], blockedLeds: Set<string>): { resistors: ResistorEl[]; sources: SourceEl[]; extraR: ResistorEl[] } {
   const resistors: ResistorEl[] = [];
   const sources: SourceEl[] = [];
   const extraR: ResistorEl[] = []; // battery internal resistors
   for (const p of parts) {
+    if (p.broken) continue; // hidden fault — conducts nothing
     const ka = ptKey(p.a);
     const kb = ptKey(p.b);
     switch (p.kind) {
       case 'wire': {
+        if (p.jump) {
+          // jumper: endpoint-to-endpoint only, arcs over everything in between
+          resistors.push({ n1: ka, n2: kb, r: WIRE_R, partId: p.id, segIdx: 0 });
+          break;
+        }
         const pts = wirePoints(p.a, p.b);
         for (let i = 0; i + 1 < pts.length; i++) {
           resistors.push({ n1: ptKey(pts[i]), n2: ptKey(pts[i + 1]), r: WIRE_R, partId: p.id, segIdx: i });
         }
         break;
       }
+      case 'led':
+        if (!p.removed && !blockedLeds.has(p.id)) resistors.push({ n1: ka, n2: kb, r: LED_R, partId: p.id });
+        break;
       case 'bulb':
         if (!p.removed) resistors.push({ n1: ka, n2: kb, r: BULB_R, partId: p.id });
         break;
@@ -54,9 +63,15 @@ function buildElements(parts: Part[]): { resistors: ResistorEl[]; sources: Sourc
         if (!p.removed && p.conductive) resistors.push({ n1: ka, n2: kb, r: CONTACT_R, partId: p.id });
         break;
       case 'battery': {
-        const hidden = `__bat_${p.id}`;
-        sources.push({ nNeg: ka, nPos: hidden, v: p.voltage ?? BATTERY_V, partId: p.id });
-        extraR.push({ n1: hidden, n2: kb, r: BATTERY_R_INT, partId: p.id });
+        const rInt = p.internalR ?? BATTERY_R_INT;
+        if (rInt > 0) {
+          const hidden = `__bat_${p.id}`;
+          sources.push({ nNeg: ka, nPos: hidden, v: p.voltage ?? BATTERY_V, partId: p.id });
+          extraR.push({ n1: hidden, n2: kb, r: rInt, partId: p.id });
+        } else {
+          // ideal source (Ohm's Law unit): meter readings match I = V/R exactly
+          sources.push({ nNeg: ka, nPos: kb, v: p.voltage ?? BATTERY_V, partId: p.id });
+        }
         break;
       }
     }
@@ -85,8 +100,25 @@ function solveLinear(m: number[][], rhs: number[]): number[] {
   return x;
 }
 
+/**
+ * LEDs only conduct anode→cathode. Solve permitting every LED, then block any
+ * carrying reverse current and re-solve until stable (a couple of passes at
+ * most for these small circuits).
+ */
 export function solveCircuit(parts: Part[]): SolveResult {
-  const { resistors, sources, extraR } = buildElements(parts);
+  const blocked = new Set<string>();
+  for (let iter = 0; iter < 3; iter++) {
+    const result = solveOnce(parts, blocked);
+    const newlyBlocked = parts.filter(p =>
+      p.kind === 'led' && !blocked.has(p.id) && (result.parts[p.id]?.current ?? 0) < -1e-9);
+    if (!newlyBlocked.length) return result;
+    for (const p of newlyBlocked) blocked.add(p.id);
+  }
+  return solveOnce(parts, blocked);
+}
+
+function solveOnce(parts: Part[], blockedLeds: Set<string>): SolveResult {
+  const { resistors, sources, extraR } = buildElements(parts, blockedLeds);
   const allR = [...resistors, ...extraR];
 
   // Connected components over the element graph, so each island gets its own
@@ -188,13 +220,20 @@ export function solveCircuit(parts: Part[]): SolveResult {
         break;
       }
       case 'wire': {
+        if (p.jump) {
+          const cur = p.broken ? 0 : (vAt(p.a) - vAt(p.b)) / WIRE_R;
+          wireSegments[p.id] = [{ a: p.a, b: p.b, current: cur }];
+          partResults[p.id] = { current: Math.abs(cur), voltage: vAt(p.a) - vAt(p.b), power: 0 };
+          break;
+        }
         const pts = wirePoints(p.a, p.b);
         const segs: WireSegment[] = [];
         let maxI = 0;
         for (let i = 0; i + 1 < pts.length; i++) {
-          const v1 = vAt(pts[i]);
-          const v2 = vAt(pts[i + 1]);
-          const cur = (v1 - v2) / WIRE_R;
+          // A broken wire is excluded from the solve, so its endpoints sit in
+          // different voltage islands — computing dv/R there would paint a
+          // phantom "hot" flow right across the hidden fault. Force zero.
+          const cur = p.broken ? 0 : (vAt(pts[i]) - vAt(pts[i + 1])) / WIRE_R;
           segs.push({ a: pts[i], b: pts[i + 1], current: cur });
           maxI = Math.max(maxI, Math.abs(cur));
         }
@@ -204,7 +243,9 @@ export function solveCircuit(parts: Part[]): SolveResult {
       }
       default: {
         const r =
-          p.kind === 'bulb' ? (p.removed ? Infinity : BULB_R)
+          p.broken ? Infinity
+          : p.kind === 'bulb' ? (p.removed ? Infinity : BULB_R)
+          : p.kind === 'led' ? (p.removed || blockedLeds.has(p.id) ? Infinity : LED_R)
           : p.kind === 'resistor' ? (p.resistance ?? 100)
           : p.kind === 'switch' ? (p.closed ? CONTACT_R : Infinity)
           : p.conductive && !p.removed ? CONTACT_R : Infinity;
@@ -213,6 +254,9 @@ export function solveCircuit(parts: Part[]): SolveResult {
         const power = Math.abs(dv * cur);
         const res: PartResult = { current: cur, voltage: dv, power };
         if (p.kind === 'bulb') res.brightness = p.removed ? 0 : power / BULB_NOMINAL_P;
+        // LED brightness: full at 20 mA and above (until it burns — the UI
+        // handles the 💥); reverse/blocked LEDs read 0.
+        if (p.kind === 'led') res.brightness = cur > 0 ? Math.min(1, cur / 0.02) : 0;
         partResults[p.id] = res;
       }
     }
@@ -230,7 +274,7 @@ export function solveCircuit(parts: Part[]): SolveResult {
 // ── Free-build spec checker ───────────────────────────────────────────────────
 
 export interface FreeSpec {
-  check: 'lit' | 'series' | 'redundant' | 'master-switch';
+  check: 'lit' | 'series' | 'redundant' | 'master-switch' | 'broken-branch';
   minBulbs: number;
   minBrightness?: number;
 }
@@ -260,6 +304,21 @@ export function evaluateFreeBuild(parts: Part[], spec: FreeSpec): boolean {
       const r = solveCircuit(withStates(s.id));
       return !r.shorted && bulbs.every(b => (r.parts[b.id]?.brightness ?? 0) <= 0.05);
     });
+  }
+
+  if (spec.check === 'broken-branch') {
+    // A parallel fault demo: at least one bulb bright, at least one dark, a
+    // broken segment present — and repairing the break must light EVERY bulb
+    // brightly, proving the dark branch was dark because of the break alone.
+    const r = solveCircuit(parts);
+    if (r.shorted) return false;
+    const bright = bulbs.filter(b => (r.parts[b.id]?.brightness ?? 0) > min);
+    const dark = bulbs.filter(b => (r.parts[b.id]?.brightness ?? 0) <= 0.05);
+    if (!bright.length || !dark.length) return false;
+    if (!parts.some(p => p.broken)) return false;
+    const r2 = solveCircuit(parts.map(p => ({ ...p, broken: false })));
+    if (r2.shorted) return false;
+    return bulbs.every(b => (r2.parts[b.id]?.brightness ?? 0) > min);
   }
 
   const r = solveCircuit(parts);
@@ -333,10 +392,12 @@ export function continuity(parts: Part[], probeA: Pt, probeB: Pt): { connected: 
     edges.get(b)!.push(a);
   };
   for (const p of parts) {
+    if (p.broken) continue; // a faulty part never passes the tester's signal
     const ka = ptKey(p.a);
     const kb = ptKey(p.b);
     switch (p.kind) {
       case 'wire': {
+        if (p.jump) { add(ka, kb); break; } // jumpers connect endpoints only
         const pts = wirePoints(p.a, p.b);
         for (let i = 0; i + 1 < pts.length; i++) add(ptKey(pts[i]), ptKey(pts[i + 1]));
         break;
@@ -344,6 +405,8 @@ export function continuity(parts: Part[], probeA: Pt, probeB: Pt): { connected: 
       case 'bulb':
         if (!p.removed && BULB_R <= CONTINUITY_MAX_R) add(ka, kb);
         break;
+      case 'led':
+        break; // a diode blocks the tester's tiny signal (kid-simple model)
       case 'resistor':
         if ((p.resistance ?? 100) <= CONTINUITY_MAX_R) add(ka, kb);
         break;

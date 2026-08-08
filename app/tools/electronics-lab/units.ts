@@ -24,7 +24,17 @@ export type Goal =
   | { type: 'switch-test'; tests: { switchId: string; darkWhenOpen: string[]; litWhenOpen: string[] }[] }
   /** Freebuild capstone: judged against a spec over whatever the student
    *  placed, not fixed part ids — any correct design passes. */
-  | { type: 'free-spec'; check: 'lit' | 'series' | 'redundant' | 'master-switch'; minBulbs: number; minBrightness?: number };
+  | { type: 'free-spec'; check: 'lit' | 'series' | 'redundant' | 'master-switch' | 'broken-branch'; minBulbs: number; minBrightness?: number }
+  /** Circuit Detective: find and repair every hidden broken part (or, for the
+   *  intro, just observe one beep and one no-beep). */
+  | { type: 'detective' }
+  /** Ohm's Law bench: dial the sliders until the ammeter hits the target. */
+  | { type: 'meter-target' }
+  /** Ohm's Law worksheet: answer every computation round. */
+  | { type: 'compute-set' }
+  /** Breadboard: every LED lit at a safe current, none burned; with
+   *  requireSwitch, some switch must darken every LED when opened. */
+  | { type: 'led-safe'; requireSwitch?: boolean };
 
 export interface MaterialDef {
   label: string;
@@ -37,7 +47,10 @@ export interface ElecChallenge {
   title: string;
   /** One-line coaching hint shown under the challenge title. */
   hint: string;
-  mode: 'build' | 'materials' | 'predict' | 'freebuild';
+  /** Optional explicit objective panel — use whenever a challenge introduces a
+   *  new mechanic, so students know exactly what to do and when they are done. */
+  objective?: { goal: string; steps: string[] };
+  mode: 'build' | 'materials' | 'predict' | 'freebuild' | 'detective' | 'meters' | 'compute';
   /** Build mode: wire count for 3 stars (par+2 → 2 stars, more → 1). */
   par: number;
   given: Part[];
@@ -55,11 +68,36 @@ export interface ElecChallenge {
     targetBulb: string;
   };
   materials?: MaterialDef[];
-  /** Freebuild only: the parts bin — what the student may place, and how many. */
-  palette?: { kind: 'battery' | 'bulb' | 'switch'; count: number }[];
+  /** Parts bin — what the student may place, and how many. Used by freebuild
+   *  and by build challenges that require placing components (U7 capstone).
+   *  'breakwire' = a wire segment with a visible crack that conducts nothing. */
+  palette?: { kind: 'battery' | 'bulb' | 'switch' | 'breakwire' | 'resistor' | 'led'; count: number }[];
+  /** Detective only. Faulty parts are the `given` entries with `broken: true`.
+   *  intro = complete on observing one beep + one silence (no repairs). */
+  detective?: { intro?: boolean };
+  /** Meters only: the Ohm's Law bench configuration. requirePlan makes the
+   *  student COMPUTE the unknown ('r', 'v', or 'both') before the dials
+   *  unlock — no slide-until-it-works. */
+  meters?: {
+    targetCurrent: number;
+    tolerance: number;
+    vRange: [number, number];
+    vStep: number;
+    rRange: [number, number];
+    rStep: number;
+    vLocked?: number;
+    rLocked?: number;
+    requirePlan?: 'r' | 'v' | 'both';
+  };
+  /** Compute only: worksheet rounds (answer within ±0.01). */
+  compute?: { prompt: string; answer: number; unit: 'V' | 'A' | 'Ω'; explain: string }[];
   /** Board size override (default 10×6) for challenges needing more room. */
   gridW?: number;
   gridH?: number;
+  /** Breadboard challenge: renders the skin, x-ray toggle, jumper wires. */
+  breadboard?: boolean;
+  /** Capstone: a read-only schematic the student must translate to the board. */
+  reference?: { parts: Part[]; gridW: number; gridH: number };
 }
 
 export interface VocabTerm {
@@ -930,11 +968,773 @@ Before placing a switch, trace the current with your finger. Ask: *which bulbs n
   ],
 };
 
-export const UNITS: ElecUnit[] = [UNIT1, UNIT2, UNIT3, UNIT4];
+// ══════════════════════════════════════════════════════════════════════════════
+// UNIT 5 — Circuit Detective
+// ══════════════════════════════════════════════════════════════════════════════
+
+const brokenWire = (id: string, a: Pt, b: Pt): Part => ({ id, kind: 'wire', a, b, fixed: true, broken: true });
+
+const UNIT5: ElecUnit = {
+  id: 5,
+  title: 'Circuit Detective',
+  tagline: 'Hunt hidden breaks with a continuity tester',
+  color: '#0ea5e9',
+  emoji: '🔍',
+  story:
+    'Broken gadgets have been piling up on the workshop bench — a flashlight, a string of lights, an old radio switch. They all LOOK fine. That is the thing about electrical faults: you cannot see them. But with a continuity tester and a detective’s method, you can find every single one.',
+  schematicUnlocked: true,
+  vocab: [
+    { term: 'Continuity', def: 'An unbroken conductive path between two points' },
+    { term: 'Continuity tester', def: 'A tool that beeps when there is continuity between its two probes' },
+    { term: 'Multimeter', def: 'The electrician’s measuring tool — its beep mode tests continuity' },
+    { term: 'Probe', def: 'One of the tester’s two metal tips' },
+    { term: 'Fault', def: 'A hidden problem in a circuit, like a break inside a wire' },
+    { term: 'Troubleshooting', def: 'Finding a fault step by step instead of guessing' },
+  ],
+  introNotes: `# Finding invisible problems
+
+A broken wire looks exactly like a working wire. So how do electricians find a **fault** — the hidden problem — without tearing everything apart? They test for **continuity**: an unbroken path that electricity can flow through.
+
+## The continuity tester
+
+A **multimeter** set to beep mode (our **continuity tester**) has two **probes**. Touch them to two points:
+
+| The meter screen shows | Meaning |
+|---|---|
+| 🔊 **BEEP!** | There IS an unbroken path between your probes |
+| **OL** (open loop) | The path between your probes is broken somewhere |
+
+The tester beeps through wires, closed switches — and even bulb filaments! A working bulb has a thin unbroken wire inside, so it passes the signal. A burned-out bulb stays silent.
+
+## Think in halves — that is troubleshooting
+
+**Troubleshooting** means narrowing down step by step. Don't test every part from the start! Probe the middle of the circuit first:
+
+- Beep on the first half? The fault is in the **other** half.
+- Now split THAT half and probe again.
+
+Each test cuts your search area in half. A good detective finds one fault in a long string of parts with just two or three tests.
+
+> One rule from real electricians: continuity testing is for circuits with the **power off**. The tester sends its own tiny signal — and it never beeps through a battery.`,
+  challenges: [
+    {
+      id: 'u5c1',
+      title: 'Meet the Probe',
+      hint: 'A continuity tester tells you whether two points are connected — even when your eyes cannot.',
+      objective: {
+        goal: 'Learn to use the continuity tester: get one BEEP and one SILENCE.',
+        steps: [
+          'Tap any point on the circuit — that places the red probe.',
+          'Tap a second point, then read the meter screen: 🔊 BEEP! means the path between your probes is unbroken. OL (open loop) means there is a break between them.',
+          'Get one BEEP (try the two ends of a wire, or even across the bulb) and one OL (try across the open switch).',
+        ],
+      },
+      mode: 'detective',
+      par: 0,
+      detective: { intro: true },
+      given: [
+        fwire('w1', P(1, 3), P(4, 3)),
+        bulb('b1', P(4, 3), P(6, 3), 'Bulb'),
+        fswitch('s1', P(6, 3), P(7, 3), 'Open switch'),
+        fwire('w2', P(7, 3), P(9, 3)),
+      ],
+      goal: { type: 'detective' },
+      successNote:
+        'You heard both answers: BEEP through wires and even through the bulb’s filament — silence across the open switch. Notice there is no battery here: testers work on unpowered circuits and send their own tiny signal.',
+    },
+    {
+      id: 'u5c2',
+      title: 'The Dead Flashlight',
+      hint: 'Every part LOOKS fine — but one wire is broken inside, and only the tester can tell which.',
+      objective: {
+        goal: 'Find the hidden broken wire and repair it so the flashlight lights up.',
+        steps: [
+          'Probe pairs of points to hunt: OL means the break is somewhere between your probes.',
+          'To catch the culprit, put one probe on EACH end of the part you suspect. OL straight across a part proves IT is the fault — it gets a "⚠ fault found" tag.',
+          'Only a tagged part can be repaired with the 🔧 tool. Fewer tests = more stars!',
+        ],
+      },
+      mode: 'detective',
+      par: 3,
+      given: [
+        battery('bat', P(3, 5), P(7, 5)),
+        bulb('b1', P(4, 1), P(6, 1), 'Bulb'),
+        brokenWire('w1', P(3, 5), P(3, 1)),
+        fwire('w2', P(3, 1), P(4, 1)),
+        fwire('w3', P(7, 5), P(7, 1)),
+        fwire('w4', P(7, 1), P(6, 1)),
+      ],
+      goal: { type: 'detective' },
+      successNote:
+        'Fault found and fixed! Silence between two points means the break is between them. That dead wire looked perfect from the outside — only the tester could tell.',
+    },
+    {
+      id: 'u5c3',
+      title: 'The String of Lights',
+      hint: 'Five bulbs, one burned out, all dark. Guessing one-by-one wastes tests — think in halves.',
+      objective: {
+        goal: 'Find the ONE burned-out bulb and replace it — in 3 tests or fewer for 3 stars.',
+        steps: [
+          'Probe across the FIRST HALF of the string. BEEP? The fault is in the other half.',
+          'Split the silent half again and probe it. Keep narrowing.',
+          'Finish the job like a pro: probe straight across the suspect bulb to condemn it (⚠), then repair it.',
+        ],
+      },
+      mode: 'detective',
+      par: 3,
+      gridW: 12,
+      given: [
+        // five bulbs in series need a stronger supply — just like real light strings
+        { id: 'bat', kind: 'battery' as const, a: P(4, 5), b: P(8, 5), fixed: true, voltage: 12 },
+        bulb('b1', P(1, 1), P(3, 1), 'Bulb A'),
+        bulb('b2', P(3, 1), P(5, 1), 'Bulb B'),
+        bulb('b3', P(5, 1), P(7, 1), 'Bulb C'),
+        { id: 'b4', kind: 'bulb' as const, a: P(7, 1), b: P(9, 1), fixed: true, broken: true, label: 'Bulb D' },
+        bulb('b5', P(9, 1), P(11, 1), 'Bulb E'),
+        fwire('w1', P(1, 1), P(1, 5)),
+        fwire('w2', P(1, 5), P(4, 5)),
+        fwire('w3', P(11, 1), P(11, 5)),
+        fwire('w4', P(11, 5), P(8, 5)),
+      ],
+      goal: { type: 'detective' },
+      successNote:
+        'That is real troubleshooting: every probe cut the search in half. Old-style holiday lights died exactly like this — and now you know how the repair techs found the bad bulb.',
+    },
+    {
+      id: 'u5c4',
+      title: 'Double Trouble',
+      hint: 'TWO faults this time — and one hides inside a part that looks perfectly healthy.',
+      objective: {
+        goal: 'Find and repair BOTH hidden faults to bring the circuit back to life.',
+        steps: [
+          'Probe section by section — OL means at least one fault is between your probes.',
+          'Condemn each fault by probing straight across it (⚠), repair it… then keep testing! The circuit stays dead until every fault is fixed.',
+          'Remember: even a switch that looks closed can be broken inside. Test it like everything else.',
+        ],
+      },
+      mode: 'detective',
+      par: 5,
+      given: [
+        battery('bat', P(3, 5), P(7, 5)),
+        { id: 's1', kind: 'switch' as const, a: P(3, 1), b: P(4, 1), fixed: true, closed: true, broken: true, label: 'Switch' },
+        bulb('b1', P(4, 1), P(6, 1), 'Bulb'),
+        fwire('w1', P(3, 5), P(3, 1)),
+        brokenWire('w2', P(6, 1), P(7, 1)),
+        fwire('w3', P(7, 1), P(7, 5)),
+      ],
+      goal: { type: 'detective' },
+      successNote:
+        'Two faults, both found! The sneaky one: a switch can be CLOSED and still be broken inside — its contacts corrode. Never trust a part just because it looks right. Test it.',
+    },
+    {
+      id: 'u5c5',
+      title: 'The Fault Demo Board',
+      hint: 'The workshop wants a display that PROVES why buildings use parallel wiring: even with a broken wire, only one light goes out.',
+      objective: {
+        goal: 'Build a parallel circuit that contains the broken wire segment — one bulb dark, the other still shining bright.',
+        steps: [
+          'Place the battery and BOTH bulbs, giving each bulb its own branch — a parallel circuit, just like Unit 3.',
+          'Place the broken wire segment (you can see its crack!) inside ONE bulb’s branch, then wire everything together.',
+          'Done right, the branch with the break goes dark while the other bulb shines at full brightness — a break in a parallel circuit only kills its own branch.',
+          'The checker will also secretly repair your broken segment in a test copy: with the crack fixed, BOTH bulbs must light. That proves your dark bulb is dark because of the break — not because of missing wires!',
+        ],
+      },
+      mode: 'freebuild',
+      par: 0,
+      given: [],
+      palette: [
+        { kind: 'battery', count: 1 },
+        { kind: 'bulb', count: 2 },
+        { kind: 'breakwire', count: 1 },
+      ],
+      goal: { type: 'free-spec', check: 'broken-branch', minBulbs: 2, minBrightness: 0.6 },
+      successNote:
+        'A perfect demonstration: the broken branch went dark and its neighbor never flickered. You built the exact reason every home is wired in parallel — and after this unit, you also know how to FIND a break like that with a tester.',
+    },
+  ],
+  quiz: [
+    {
+      question: 'Continuity means…',
+      options: [
+        'An unbroken path that electricity can flow through',
+        'A circuit with two batteries',
+        'A wire that is very long',
+        'A bulb at full brightness',
+      ],
+      answer: 0,
+      explanation: 'Continuity = continuous. If the path between two points has no breaks, there is continuity between them.',
+    },
+    {
+      question: 'The electrician’s measuring tool with a continuity beep mode is called a…',
+      options: ['Multimeter', 'Thermometer', 'Telescope', 'Stopwatch'],
+      answer: 0,
+      explanation: 'A multimeter measures many things — voltage, current, resistance — and its beep mode tests continuity.',
+    },
+    {
+      question: 'A hidden problem in a circuit — like a break inside a wire — is called a…',
+      options: ['Fault', 'Glitch bug', 'Dent', 'Leak'],
+      answer: 0,
+      explanation: 'Electricians call any hidden defect a fault. Faults are invisible from the outside, which is why we test instead of look.',
+    },
+    {
+      question: 'The tester BEEPS when its two probes touch…',
+      options: [
+        'Two points connected by an unbroken conductive path',
+        'Any two points made of metal',
+        'Two points on opposite sides of a break',
+        'The same point twice',
+      ],
+      answer: 0,
+      explanation: 'A beep means the tester’s signal made it from one probe to the other — the path between them has continuity.',
+    },
+    {
+      question: 'You probe the two ends of a wire and hear NO beep. What do you know?',
+      options: [
+        'The wire is broken somewhere inside',
+        'The wire is working perfectly',
+        'The battery is dead',
+        'The wire is too short to test',
+      ],
+      answer: 0,
+      explanation: 'Silence between two points means the path between them is broken — even if the wire looks fine on the outside.',
+    },
+    {
+      question: 'A dark string of lights: the tester beeps across the first half but stays silent across the second half. Where is the fault?',
+      options: [
+        'Somewhere in the second half',
+        'Somewhere in the first half',
+        'In the plug',
+        'In every bulb at once',
+      ],
+      answer: 0,
+      explanation: 'The beeping half is healthy. The silent half contains the break — now split THAT half and keep narrowing.',
+    },
+    {
+      question: 'What is the smartest way to find one fault in a long circuit?',
+      options: [
+        'Split the circuit in half, test each half, and keep narrowing down',
+        'Replace every part one at a time starting from the left side of the screen',
+        'Shake the circuit and listen for rattles',
+        'Add a second battery to push through the break',
+      ],
+      answer: 0,
+      explanation: 'Halving is real troubleshooting: every test eliminates half the remaining suspects, so even a long circuit takes just a few probes.',
+    },
+  ],
+  tryReal: [
+    'If your class has multimeters: set one to beep mode and go on a continuity scavenger hunt — test a paper clip, a pencil (tip to tip!), scissors, and a rubber band.',
+    'Test a flashlight bulb between its side and bottom tip. Beep = good filament. Then try a burned-out bulb if you can find one — silence.',
+    'No multimeter? Use the test lamp you designed in the capstone: battery + bulb + two foil leads. If the bulb lights across an object, that is continuity.',
+    'Detective challenge: a partner secretly cuts one strip in a chain of foil strips taped under paper. Find the break with your tester — using as few tests as you can.',
+  ],
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UNIT 6 — Ohm's Law & Meters
+// ══════════════════════════════════════════════════════════════════════════════
+
+const UNIT6: ElecUnit = {
+  id: 6,
+  title: "Ohm's Law & Meters",
+  tagline: 'Voltage pushes, resistance resists, current results',
+  color: '#f97316',
+  emoji: '📐',
+  story:
+    'The workshop just got a proper lab bench: a power supply with a voltage dial, a box of resistors, and two shiny meters. Time to stop describing circuits with words like "brighter" and "dimmer" — today you measure them with numbers, and one small formula explains everything you have seen since Unit 1.',
+  schematicUnlocked: true,
+  vocab: [
+    { term: 'Resistance', def: 'How strongly a component pushes back against the flow of current' },
+    { term: 'Ohm (Ω)', def: 'The unit for resistance' },
+    { term: 'Resistor', def: 'A component built to add an exact amount of resistance' },
+    { term: 'Ampere (A)', def: 'The unit for current — how much charge flows each second' },
+    { term: "Ohm's Law", def: 'Current = Voltage ÷ Resistance (I = V ÷ R)' },
+    { term: 'Voltmeter', def: 'The meter that measures voltage — the push' },
+    { term: 'Ammeter', def: 'The meter that measures current — the flow' },
+  ],
+  introNotes: `# The formula behind everything
+
+You already know **voltage** — the battery's push, in volts. Now meet its opponent: **resistance**, how strongly a component pushes back against the flow. Resistance is measured in **ohms (Ω)**, and a **resistor** is a component built to add an exact amount of it.
+
+The result of push versus push-back is the **current** — the flow you have been watching since Unit 1 — measured in **amperes (A)**, or amps.
+
+## Ohm's Law
+
+| | |
+|---|---|
+| **The law** | Current = Voltage ÷ Resistance |
+| **In symbols** | I = V ÷ R |
+| **More push (V up)** | More current — brighter |
+| **More push-back (R up)** | Less current — dimmer |
+
+Try it: 6 volts across 12 ohms → I = 6 ÷ 12 = **0.5 amps**. That is the whole law.
+
+## Reading the meters
+
+A **voltmeter** measures the push (volts). An **ammeter** measures the flow (amps). On your lab bench both meters read live — change a dial and watch them respond instantly.
+
+## This explains Unit 2!
+
+Remember bulbs dimming in series? Each bulb adds resistance, so the chain's total R goes up — and I = V ÷ R means the current drops. Everything you saw with your eyes, this formula predicts with numbers.`,
+  challenges: [
+    {
+      id: 'u6c1',
+      title: 'The Lab Bench',
+      hint: 'Welcome to your first real lab bench — two dials you control, two meters that never lie.',
+      objective: {
+        goal: 'Dial in a current of exactly 0.50 A on the ammeter.',
+        steps: [
+          'Drag the VOLTAGE dial (the push) and watch the ammeter jump.',
+          'Drag the RESISTANCE dial (the push-back) and watch it drop.',
+          'Use the formula card — I = V ÷ R — to find a combination that lands exactly on 0.50 A. More than one combo works!',
+        ],
+      },
+      mode: 'meters',
+      par: 0,
+      given: [],
+      meters: {
+        targetCurrent: 0.5,
+        tolerance: 0.005,
+        vRange: [1.5, 9], vStep: 0.5,
+        rRange: [2, 30], rStep: 1,
+      },
+      goal: { type: 'meter-target' },
+      successNote:
+        'You hit 0.50 A — and here is the secret: every combination that worked has V ÷ R = 0.5. Try another one: 3V with 6Ω, 6V with 12Ω… same current, same law.',
+    },
+    {
+      id: 'u6c2',
+      title: 'Solve for Resistance',
+      hint: 'The power supply is locked at 6 V. The fan motor needs exactly 0.30 A. The dial stays locked until your math says what R must be.',
+      objective: {
+        goal: 'Calculate the resistance first — then dial in your answer and let the ammeter prove it.',
+        steps: [
+          'Read the knowns: V = 6 V (locked) and the target I = 0.30 A. The unknown is R.',
+          'Rearrange Ohm’s Law with the triangle: cover the R and what is left is V ÷ I. Compute it and type your answer.',
+          'A correct answer unlocks the resistance dial. Set it to YOUR number and watch the ammeter land exactly on 0.30 A.',
+        ],
+      },
+      mode: 'meters',
+      par: 0,
+      given: [],
+      meters: {
+        targetCurrent: 0.3,
+        tolerance: 0.005,
+        vRange: [1.5, 9], vStep: 0.5,
+        rRange: [2, 30], rStep: 1,
+        vLocked: 6,
+        requirePlan: 'r',
+      },
+      goal: { type: 'meter-target' },
+      successNote:
+        'R = V ÷ I = 6 ÷ 0.30 = 20 Ω — you rearranged Ohm’s Law and the ammeter proved you right. Engineers do this exact calculation every time they pick a resistor.',
+    },
+    {
+      id: 'u6c3',
+      title: 'Solve for Voltage',
+      hint: 'This time the resistor is fixed at 15 Ω and the circuit needs exactly 0.40 A. Your math unlocks the voltage dial.',
+      objective: {
+        goal: 'Calculate the voltage first — then dial in your answer and let the meters prove it.',
+        steps: [
+          'Read the knowns: R = 15 Ω (locked) and the target I = 0.40 A. The unknown is V.',
+          'Cover the V on the triangle: what is left is I × R. Compute it and type your answer.',
+          'A correct answer unlocks the voltage dial. Set it to YOUR number and watch the ammeter hit 0.40 A on the nose.',
+        ],
+      },
+      mode: 'meters',
+      par: 0,
+      given: [],
+      meters: {
+        targetCurrent: 0.4,
+        tolerance: 0.005,
+        vRange: [1.5, 9], vStep: 0.5,
+        rRange: [2, 30], rStep: 1,
+        rLocked: 15,
+        requirePlan: 'v',
+      },
+      goal: { type: 'meter-target' },
+      successNote:
+        'V = I × R = 0.40 × 15 = 6 V. That is the third face of Ohm’s Law. You now own all three: I = V ÷ R, V = I × R, R = V ÷ I.',
+    },
+    {
+      id: 'u6c4',
+      title: 'Circuit Math',
+      hint: 'Time to work like an engineer: calculate first, then let the meters check you.',
+      objective: {
+        goal: 'Solve all three bench problems using Ohm’s Law.',
+        steps: [
+          'Read each problem and decide which face of the law you need: I = V ÷ R, V = I × R, or R = V ÷ I.',
+          'Type your answer and press Check — the bench meters confirm it.',
+          'No mistakes across all three = 3 stars. Calculators allowed, thinking required!',
+        ],
+      },
+      mode: 'compute',
+      par: 0,
+      given: [],
+      compute: [
+        {
+          prompt: 'The supply is set to 6 V and the resistor is 12 Ω. How much current flows?',
+          answer: 0.5, unit: 'A',
+          explain: 'I = V ÷ R = 6 ÷ 12 = 0.5 A. The ammeter agrees: 0.50 A.',
+        },
+        {
+          prompt: 'The ammeter reads 0.25 A through a 12 Ω resistor. What is the supply voltage?',
+          answer: 3, unit: 'V',
+          explain: 'V = I × R = 0.25 × 12 = 3 V. The voltmeter agrees: 3.0 V.',
+        },
+        {
+          prompt: 'The supply is 9 V and the ammeter reads 0.3 A. What is the resistance?',
+          answer: 30, unit: 'Ω',
+          explain: 'R = V ÷ I = 9 ÷ 0.3 = 30 Ω. Check the resistor’s label: 30 Ω.',
+        },
+      ],
+      goal: { type: 'compute-set' },
+      successNote:
+        'Three problems, three faces of the same law. When the math and the meters agree, you KNOW the circuit — no guessing left.',
+    },
+    {
+      id: 'u6c5',
+      title: 'The Precision Job',
+      hint: 'Capstone: a delicate motor needs exactly 0.75 A — too much burns it out, too little stalls it. Engineers commit to their numbers BEFORE touching the equipment.',
+      objective: {
+        goal: 'Plan a voltage-and-resistance pair that gives exactly 0.75 A — then dial in your own plan.',
+        steps: [
+          'Only the target is given: I = 0.75 A. YOU choose both V and R — any pair where V ÷ R = 0.75 works.',
+          'Pick values the dials can actually reach: V in steps of 0.5 V (up to 9 V), R in whole ohms (up to 30 Ω). Try R = 8 Ω... what V do you need?',
+          'Type your plan. If the math checks out, both dials unlock — set them to your plan and the ammeter will read exactly 0.75 A.',
+        ],
+      },
+      mode: 'meters',
+      par: 0,
+      given: [],
+      meters: {
+        targetCurrent: 0.75,
+        tolerance: 0.005,
+        vRange: [1.5, 9], vStep: 0.5,
+        rRange: [2, 30], rStep: 1,
+        requirePlan: 'both',
+      },
+      goal: { type: 'meter-target' },
+      successNote:
+        'Precision work: 0.75 A on the nose (6 V ÷ 8 Ω, 4.5 V ÷ 6 Ω — any pair with V ÷ R = 0.75). This is exactly how engineers protect real motors, LEDs, and chips.',
+    },
+  ],
+  quiz: [
+    {
+      question: 'Resistance is…',
+      options: [
+        'How strongly a component pushes back against the flow of current',
+        'How fast electricity travels through a wire',
+        'The number of bulbs in a circuit',
+        'How hot a battery gets',
+      ],
+      answer: 0,
+      explanation: 'Resistance opposes the flow. More resistance in the path means less current gets through.',
+    },
+    {
+      question: 'Resistance is measured in…',
+      options: ['Ohms (Ω)', 'Volts (V)', 'Amps (A)', 'Degrees (°)'],
+      answer: 0,
+      explanation: 'Ohms, symbol Ω — named after Georg Ohm, the scientist who discovered the law you just learned.',
+    },
+    {
+      question: 'Current is measured in…',
+      options: ['Amperes (A)', 'Ohms (Ω)', 'Volts (V)', 'Watts (W)'],
+      answer: 0,
+      explanation: 'Amperes — amps for short — measure how much charge flows past a point each second.',
+    },
+    {
+      question: "What does Ohm's Law say?",
+      options: [
+        'Current = Voltage ÷ Resistance',
+        'Current = Voltage × Resistance',
+        'Voltage = Current ÷ Resistance',
+        'Resistance = Current × Voltage',
+      ],
+      answer: 0,
+      explanation: 'I = V ÷ R. More push means more current; more push-back means less current.',
+    },
+    {
+      question: 'A 6 V supply is connected to a 12 Ω resistor. How much current flows?',
+      options: ['0.5 A', '2 A', '72 A', '6 A'],
+      answer: 0,
+      explanation: 'I = V ÷ R = 6 ÷ 12 = 0.5 A.',
+    },
+    {
+      question: 'You need 0.3 A from a 6 V supply. What resistance should you use?',
+      options: ['20 Ω', '2 Ω', '18 Ω', '0.05 Ω'],
+      answer: 0,
+      explanation: 'R = V ÷ I = 6 ÷ 0.3 = 20 Ω.',
+    },
+    {
+      question: 'Which meter measures the battery’s push?',
+      options: ['The voltmeter', 'The ammeter', 'The thermometer', 'The odometer'],
+      answer: 0,
+      explanation: 'Voltmeter = voltage = the push. The ammeter measures the flow (current) instead.',
+    },
+  ],
+  tryReal: [
+    'With a multimeter on the resistance (Ω) setting, measure a real resistor — then decode its color bands and see if they match.',
+    'Predict before you measure: for a battery and resistor you have, compute I = V ÷ R on paper.',
+    'Now build the circuit with the multimeter in amp mode and compare the reading to your prediction. Being within 10% counts as a win — real parts are never perfect!',
+    'Find the resistor inside an old LED gadget (with permission!) and work out from Ohm’s Law why the designer chose it.',
+  ],
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UNIT 7 — Breadboard Bootcamp
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** The standard kid breadboard: + rail along y=0, − rail along y=5, terminal
+ *  strip columns x=1..9 spanning y=1..4. All internals are hidden wires — the
+ *  same engine as every other unit, wearing a breadboard skin. */
+const breadboardFixture = (withBattery: boolean): Part[] => {
+  const parts: Part[] = [
+    { id: 'railP', kind: 'wire', a: P(0, 0), b: P(10, 0), fixed: true, hidden: true },
+    { id: 'railN', kind: 'wire', a: P(0, 5), b: P(10, 5), fixed: true, hidden: true },
+  ];
+  for (let x = 1; x <= 9; x++) {
+    parts.push({ id: `strip${x}`, kind: 'wire', a: P(x, 1), b: P(x, 4), fixed: true, hidden: true });
+  }
+  if (withBattery) {
+    // − to the blue rail, + to the red rail, standing at the board's left edge
+    parts.push({ id: 'bat', kind: 'battery', a: P(0, 5), b: P(0, 0), fixed: true });
+  }
+  return parts;
+};
+
+const UNIT7: ElecUnit = {
+  id: 7,
+  title: 'Breadboard Bootcamp',
+  tagline: 'Build like a real engineer — no solder needed',
+  color: '#a16207',
+  emoji: '🍞',
+  story:
+    'The final bench in the workshop holds the tool every inventor uses to try ideas fast: the breadboard. No tape, no solder — push parts in, pull them out, rebuild in seconds. Learn its secret wiring, meet your first LED, and graduate by building a circuit from nothing but its schematic.',
+  schematicUnlocked: true,
+  vocab: [
+    { term: 'Breadboard', def: 'A reusable building board — push parts into its holes, no soldering needed' },
+    { term: 'Terminal strip', def: 'A hidden metal strip connecting a column of holes inside the board' },
+    { term: 'Power rail', def: 'The long rows along the edges that carry + and − to everything' },
+    { term: 'Jumper', def: 'A short wire that hops between holes, connecting only at its two ends' },
+    { term: 'LED', def: 'A light-emitting diode — a one-way light that needs a resistor to survive' },
+    { term: 'Polarity', def: 'Which way around a part goes: an LED only works with + to its long leg' },
+  ],
+  introNotes: `# The board with hidden wiring
+
+A **breadboard** looks like a plastic block full of holes — but the magic is inside. Metal **terminal strips** connect each COLUMN of holes, and long **power rails** run along the edges: red for **+**, blue for **−**. Push two part legs into the same column and they are connected, instantly, no soldering.
+
+## The rules of the board
+
+| Holes | Connected? |
+|---|---|
+| Same column (same terminal strip) | **Yes** — the hidden strip joins them |
+| Different columns | **No** — you must add a part or a jumper |
+| Along a power rail | **Yes** — the whole rail is one long strip |
+
+A **jumper** is a short hop wire. Unlike the bare wires from earlier units, a jumper connects ONLY at its two ends — it arcs safely over everything in between.
+
+## Meet the LED
+
+The **LED** (light-emitting diode) is a one-way light. It has **polarity**: current may only enter its **+ leg** (the long one) and leave its **− leg** (the flat side). Backwards? It simply stays dark — no harm done.
+
+But an LED has no self-control: connect it straight to the battery and it gulps far too much current and **burns out** 💥. Its bodyguard is a **resistor** in its path — exactly the R you mastered in Unit 6, doing a real job.
+
+> This unit puts everything together: continuity (Unit 5) to explore the board, Ohm's Law (Unit 6) to protect the LED, and schematics (Unit 2) to build the final circuit.`,
+  challenges: [
+    {
+      id: 'u7c1',
+      title: 'X-Ray the Board',
+      hint: 'Before you build on a breadboard, you must know which holes are secretly connected. Your multimeter and the X-ray view will show you.',
+      objective: {
+        goal: 'Prove the breadboard’s hidden wiring with the continuity tester: get one BEEP and one OL.',
+        steps: [
+          'Probe two holes in the SAME column — the hidden terminal strip connects them, so the meter BEEPs.',
+          'Probe two holes in DIFFERENT columns — no connection, so the meter reads OL.',
+          'Try the + rail too: any two holes along it beep, end to end.',
+          'Tap 🩻 X-ray view to see the metal strips you just discovered!',
+        ],
+      },
+      mode: 'detective',
+      par: 0,
+      detective: { intro: true },
+      breadboard: true,
+      gridH: 5,
+      given: breadboardFixture(false),
+      goal: { type: 'detective' },
+      successNote:
+        'Now you can read a breadboard blind: columns are connected by terminal strips, rails run the whole edge, and neighbors across columns are strangers until YOU connect them.',
+    },
+    {
+      id: 'u7c2',
+      title: 'First Light',
+      hint: 'A resistor and an LED are plugged in. Jumper the circuit together — and mind the LED’s polarity!',
+      objective: {
+        goal: 'Light the LED safely: + rail → resistor → LED → − rail.',
+        steps: [
+          'Trace what is plugged in: the resistor bridges columns 2 and 4; the LED bridges columns 4 and 6.',
+          'Add a jumper from the + rail down into column 2, and a jumper from column 6 down to the − rail.',
+          'Dark? Check the LED’s polarity — current must enter its + leg. Tap the LED to flip it around.',
+          'NEVER let the LED skip the resistor: a jumper straight from the + rail to the LED’s column burns it out 💥 (try it if you dare — then remove the jumper).',
+        ],
+      },
+      mode: 'build',
+      par: 2,
+      breadboard: true,
+      gridH: 5,
+      given: [
+        ...breadboardFixture(true),
+        { id: 'r1', kind: 'resistor' as const, a: P(2, 2), b: P(4, 2), fixed: true, resistance: 100, label: '100 Ω' },
+        { id: 'led1', kind: 'led' as const, a: P(6, 2), b: P(4, 2), fixed: true, label: 'LED' }, // starts backwards!
+      ],
+      goal: { type: 'led-safe' },
+      successNote:
+        'First light! The resistor tames the current (I = 3 ÷ 110 ≈ 0.03 A — safely small), and the LED only agreed to shine once its + leg faced the + side. Polarity matters!',
+    },
+    {
+      id: 'u7c3',
+      title: 'Switch It On',
+      hint: 'Real gadgets have power buttons. Wire the switch into the LED’s path so one tap controls the light.',
+      objective: {
+        goal: 'Wire the circuit so the switch turns the LED on and off.',
+        steps: [
+          'The path must be: + rail → resistor (columns 2–4) → LED (columns 4–6) → switch (columns 6–7) → − rail.',
+          'Add a jumper from the + rail into column 2, and a jumper from column 7 down to the − rail.',
+          'The checker flips your switch both ways: closed = LED on, open = LED off.',
+        ],
+      },
+      mode: 'build',
+      par: 2,
+      breadboard: true,
+      gridH: 5,
+      given: [
+        ...breadboardFixture(true),
+        { id: 'r1', kind: 'resistor' as const, a: P(2, 2), b: P(4, 2), fixed: true, resistance: 100, label: '100 Ω' },
+        { id: 'led1', kind: 'led' as const, a: P(4, 3), b: P(6, 3), fixed: true, label: 'LED' },
+        fswitch('s1', P(6, 2), P(7, 2), 'Switch'),
+      ],
+      goal: { type: 'led-safe', requireSwitch: true },
+      successNote:
+        'A complete gadget: power, protection, light, and control — all on a board you could rebuild in a minute. This is exactly how real prototypes start.',
+    },
+    {
+      id: 'u7c4',
+      title: 'Graduation: Schematic to Board',
+      hint: 'The final exam every engineer takes daily: here is the schematic — build it. An empty board, a bin of parts, and no step-by-step this time.',
+      objective: {
+        goal: 'Build the schematic on the breadboard from scratch: place every component, then jumper the loop together.',
+        steps: [
+          'Read the schematic card: follow the loop from the battery’s + through each symbol and back to −.',
+          'Place the switch, resistor, and LED from the parts bin — each one must bridge two DIFFERENT columns, in the order the schematic shows.',
+          'Jumper the loop closed: + rail into the first column, column to column where parts don’t already connect, last column down to the − rail.',
+          'Mind the LED’s polarity (tap it to flip). When the switch controls a safely-lit LED, you have graduated. 🎓',
+        ],
+      },
+      mode: 'build',
+      par: 3,
+      breadboard: true,
+      gridH: 5,
+      given: breadboardFixture(true),
+      palette: [
+        { kind: 'switch', count: 1 },
+        { kind: 'resistor', count: 1 },
+        { kind: 'led', count: 1 },
+      ],
+      reference: {
+        gridW: 8,
+        gridH: 5,
+        parts: [
+          { id: 'ref-bat', kind: 'battery', a: P(1, 4), b: P(7, 4), fixed: true },
+          { id: 'ref-sw', kind: 'switch', a: P(1, 1), b: P(3, 1), fixed: true, closed: true },
+          { id: 'ref-r', kind: 'resistor', a: P(3, 1), b: P(5, 1), fixed: true, resistance: 100, label: '100 Ω' },
+          // anode faces the battery's + side (current arrives via the right-hand wire)
+          { id: 'ref-led', kind: 'led', a: P(7, 1), b: P(5, 1), fixed: true, label: 'LED' },
+          { id: 'ref-w1', kind: 'wire', a: P(1, 4), b: P(1, 1), fixed: true },
+          { id: 'ref-w2', kind: 'wire', a: P(7, 4), b: P(7, 1), fixed: true },
+        ],
+      },
+      goal: { type: 'led-safe', requireSwitch: true },
+      successNote:
+        '🎓 Graduated! You read a schematic cold and made it real — the exact skill that turns ideas into working electronics. The whole lab led here: circuits, series, parallel, switches, testing, Ohm’s Law, and now the builder’s board.',
+    },
+  ],
+  quiz: [
+    {
+      question: 'What is a breadboard for?',
+      options: [
+        'Building and changing circuits quickly, without soldering',
+        'Storing spare parts safely',
+        'Measuring voltage and current',
+        'Charging batteries',
+      ],
+      answer: 0,
+      explanation: 'Push parts in, pull them out, rebuild in seconds — the breadboard is the inventor’s scratchpad.',
+    },
+    {
+      question: 'The hidden metal piece that connects a COLUMN of holes is called a…',
+      options: ['Terminal strip', 'Power cord', 'Fuse', 'Antenna'],
+      answer: 0,
+      explanation: 'Each column of holes shares one terminal strip inside the plastic — that is the board’s secret wiring.',
+    },
+    {
+      question: 'The long + and − rows along the edges of a breadboard are called…',
+      options: ['Power rails', 'Border strips', 'Speed lanes', 'Ground floors'],
+      answer: 0,
+      explanation: 'The power rails carry + and − along the whole board so every column can reach power with one jumper.',
+    },
+    {
+      question: 'Two part legs are pushed into the SAME column of the breadboard. Are they connected?',
+      options: [
+        'Yes — the column’s terminal strip joins them',
+        'No — holes never connect to each other',
+        'Only if they touch each other',
+        'Only when the battery is on',
+      ],
+      answer: 0,
+      explanation: 'Same column = same terminal strip = connected. Different columns need a part or jumper to bridge them.',
+    },
+    {
+      question: 'What does polarity mean for an LED?',
+      options: [
+        'It only works one way around — current must enter its + leg',
+        'It gets brighter the longer it runs',
+        'It can only be used once',
+        'It works best upside down',
+      ],
+      answer: 0,
+      explanation: 'An LED is a diode — a one-way street. Backwards, it simply stays dark.',
+    },
+    {
+      question: 'Why must an LED have a resistor in its path?',
+      options: [
+        'The resistor limits the current so the LED doesn’t burn out',
+        'The resistor makes the LED brighter',
+        'The resistor changes the LED’s color',
+        'The resistor charges the LED',
+      ],
+      answer: 0,
+      explanation: 'On its own an LED gulps far too much current. The resistor is its bodyguard — Ohm’s Law doing a real job.',
+    },
+    {
+      question: 'An LED is wired backwards in a circuit (− to its + leg). What happens?',
+      options: [
+        'It stays dark until you flip it around',
+        'It explodes instantly',
+        'It glows a different color',
+        'It drains the battery faster',
+      ],
+      answer: 0,
+      explanation: 'A backwards LED just blocks — no light, no harm. Flip it so current enters the + leg and it shines.',
+    },
+  ],
+  tryReal: [
+    'Get a real mini breadboard, a battery pack, a 100–330 Ω resistor, an LED, and a few jumper wires.',
+    'First, X-ray it with your multimeter: beep-test two holes in the same column, then two in different columns — just like Challenge 1.',
+    'Build First Light for real: + rail → resistor → LED (long leg toward the resistor!) → − rail.',
+    'If the LED stays dark, flip it — you already know why. Then add a switch or a second LED branch and keep going: you are an electronics builder now.',
+  ],
+};
+
+export const UNITS: ElecUnit[] = [UNIT1, UNIT2, UNIT3, UNIT4, UNIT5, UNIT6, UNIT7];
 
 /** Future units shown as locked "coming soon" cards on the overview. */
-export const COMING_SOON = [
-  { id: 5, title: 'Circuit Detective', tagline: 'Hunt hidden breaks with a continuity tester', emoji: '🔍' },
-  { id: 6, title: "Ohm's Law & Meters", tagline: 'Voltage pushes, resistance resists, current results', emoji: '📐' },
-  { id: 7, title: 'Breadboard Bootcamp', tagline: 'Build like a real engineer — no solder needed', emoji: '🍞' },
-];
+export const COMING_SOON: { id: number; title: string; tagline: string; emoji: string }[] = [];

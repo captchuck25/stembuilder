@@ -6,7 +6,7 @@ export interface Pt {
   y: number;
 }
 
-export type PartKind = 'battery' | 'bulb' | 'switch' | 'wire' | 'resistor' | 'material';
+export type PartKind = 'battery' | 'bulb' | 'switch' | 'wire' | 'resistor' | 'material' | 'led';
 
 export interface Part {
   id: string;
@@ -27,6 +27,19 @@ export interface Part {
   conductive?: boolean;
   /** Bulb unscrewed / material lifted out of the clips. */
   removed?: boolean;
+  /** Hidden fault: the part LOOKS normal but conducts nothing (Circuit
+   *  Detective). Never rendered differently — that is the point. */
+  broken?: boolean;
+  /** Battery only: override internal resistance (0 = ideal source, used by the
+   *  Ohm's Law unit so meter readings match I = V/R exactly). */
+  internalR?: number;
+  /** Wire only: jumper — conducts ONLY at its two endpoints (arcs over the
+   *  holes in between), unlike a bare wire that connects everywhere it touches.
+   *  This is what makes breadboard jumpers safe to route over strips. */
+  jump?: boolean;
+  /** Render-only: the part conducts but is not drawn (breadboard internals —
+   *  the skin draws them instead, and x-ray view reveals them). */
+  hidden?: boolean;
   label?: string;
 }
 
@@ -74,6 +87,12 @@ export const LIT_THRESHOLD = 0.05;
 export const SHORT_CURRENT = 2;
 /** Continuity tester "beeps" through anything under this resistance. */
 export const CONTINUITY_MAX_R = 100;
+/** LED forward resistance (kid-simple linear model). */
+export const LED_R = 10;
+/** LED current above this burns it out — it needs a series resistor. */
+export const LED_SAFE_MAX = 0.05;
+/** LED current below this is effectively dark. */
+export const LED_MIN_LIT = 0.001;
 
 export const ptKey = (p: Pt) => `${p.x},${p.y}`;
 

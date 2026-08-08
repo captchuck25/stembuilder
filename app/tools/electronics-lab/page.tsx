@@ -3,17 +3,20 @@ import { useSession } from 'next-auth/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import SiteHeader from '@/app/components/SiteHeader';
+import { isAdmin } from '@/lib/roles';
 
 import { COMING_SOON, ElecChallenge, ElecUnit, UNITS, chalKey, countCompleted } from './units';
-import { Part, PartKind, Pt, SolveResult } from './engine/types';
-import { solveCircuit, isSeries, clipWireAtSwitches, evaluateFreeBuild } from './engine/solver';
-import CircuitBoard, { BoardTool } from './components/CircuitBoard';
+import { LED_MIN_LIT, LED_SAFE_MAX, Part, PartKind, Pt, SolveResult } from './engine/types';
+import { solveCircuit, isSeries, clipWireAtSwitches, evaluateFreeBuild, continuity } from './engine/solver';
+import { ptKey, wirePoints } from './engine/types';
+import CircuitBoard, { BoardTool, CELL, PAD } from './components/CircuitBoard';
+import { MeterState, MultimeterView, ProbePen, meterSockets } from './components/parts';
 
 // ─── Progress ─────────────────────────────────────────────────────────────────
 
 /** One saved piece of a student build. kind is absent for plain wires
  *  (backwards-compatible with earlier saves, which were wires only). */
-interface SavedWire { kind?: PartKind; a: Pt; b: Pt }
+interface SavedWire { kind?: PartKind; a: Pt; b: Pt; broken?: boolean }
 interface Progress {
   completedChallenges: Record<string, boolean>;
   completedUnits: Record<number, boolean>;
@@ -47,6 +50,10 @@ async function syncToCloud(ui: number, ci: number | null, completed: boolean, sa
       quiz_score: score ?? null,
     }),
   });
+}
+// Admin review helper: clear one cloud row (challenge, or quiz when ci=null).
+async function deleteCloudProgress(ui: number, ci: number | null) {
+  await fetch(`/api/progress?tool=electronics-lab&level_idx=${ui}&challenge_idx=${ci ?? -1}`, { method: 'DELETE' });
 }
 async function loadFromCloud(): Promise<Progress> {
   const res = await fetch('/api/progress?tool=electronics-lab');
@@ -143,13 +150,24 @@ function LessonPanel({ text }: { text: string }) {
   return <div style={{ padding: '16px 20px' }}>{nodes}</div>;
 }
 
+// ─── Unit icon (Unit 6 wears the actual Ohm's Law triangle) ───────────────────
+
+function UnitIcon({ unit, size }: { unit: { id: number; emoji: string }; size: number }) {
+  if (unit.id === 6) {
+    return <span style={{ display: 'inline-flex', verticalAlign: 'middle' }}><OhmTriangle size={size} /></span>;
+  }
+  return <span style={{ fontSize: size * 0.8, lineHeight: 1 }}>{unit.emoji}</span>;
+}
+
 // ─── Overview ─────────────────────────────────────────────────────────────────
 
-function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
+function Overview({ progress, onSelect, assignedUnits, lockedLevels, onResetQuiz }: {
   progress: Progress;
   onSelect: (ui: number) => void;
   assignedUnits: number[] | null;
   lockedLevels: Set<number>;
+  /** Present only for admins — renders a quiz-reset button on completed unit cards. */
+  onResetQuiz?: (ui: number) => void;
 }) {
   const assignedSet = assignedUnits ? new Set(assignedUnits) : null;
   return (
@@ -180,7 +198,7 @@ function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 6, background: unit.color }} />
                 {locked && <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18 }}>🔒</div>}
                 {progress.completedUnits[ui] && <div style={{ position: 'absolute', top: 12, right: 14, fontSize: 18 }}>✅</div>}
-                <div style={{ fontSize: 26, marginTop: 8 }}>{unit.emoji}</div>
+                <div style={{ marginTop: 8, minHeight: 34 }}><UnitIcon unit={unit} size={34} /></div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px', marginTop: 4 }}>Unit {unit.id}</div>
                 <div style={{ fontSize: 20, fontWeight: 900, color: '#1f2937', margin: '4px 0 6px' }}>{unit.title}</div>
                 <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>{unit.tagline}</div>
@@ -191,6 +209,14 @@ function Overview({ progress, onSelect, assignedUnits, lockedLevels }: {
                   {done} / {total} challenges
                   {starSum > 0 && <span style={{ color: '#d97706', fontWeight: 700 }}> · ⭐ {starSum}/{total * 3}</span>}
                 </div>
+                {onResetQuiz && progress.completedUnits[ui] && (
+                  <button onClick={e => { e.stopPropagation(); onResetQuiz(ui); }}
+                    title="Admin only: clear your quiz result for this unit so you can retake it"
+                    style={{ marginTop: 10, padding: '4px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                      background: '#fff', color: '#dc2626', border: '2px solid #fca5a5', cursor: 'pointer' }}>
+                    ↺ Reset quiz (admin)
+                  </button>
+                )}
               </div>
             );
           })}
@@ -227,7 +253,7 @@ function UnitIntro({ ui, onStart, onBack }: { ui: number; onStart: () => void; o
               <div style={{ fontSize: 26, fontWeight: 900, color: '#fff', marginTop: 2 }}>{unit.title}</div>
               <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 }}>{unit.tagline}</div>
             </div>
-            <div style={{ fontSize: 56, filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.25))' }}>{unit.emoji}</div>
+            <div style={{ filter: 'drop-shadow(0 6px 10px rgba(0,0,0,0.25))' }}><UnitIcon unit={unit} size={70} /></div>
           </div>
           <div style={{ padding: '0 28px 28px' }}>
             <div style={{ marginTop: 20, background: `${unit.color}12`, border: `1px solid ${unit.color}55`, borderRadius: 14, padding: '14px 18px' }}>
@@ -261,24 +287,36 @@ function UnitIntro({ ui, onStart, onBack }: { ui: number; onStart: () => void; o
 
 // ─── Challenge chrome (breadcrumb + dots + hint header, shared by all modes) ──
 
-function ChallengeShell({ unit, ui, ci, progress, lockedCis, banner, onBack, onJump, children }: {
+function ChallengeShell({ unit, ui, ci, progress, lockedCis, banner, onBack, onJump, onAdminReset, children }: {
   unit: ElecUnit; ui: number; ci: number; progress: Progress; lockedCis: Set<number>;
   banner?: React.ReactNode;
   onBack: () => void; onJump: (ci: number) => void;
+  /** Present only for admins on a completed challenge — renders the review reset button. */
+  onAdminReset?: () => void;
   children: React.ReactNode;
 }) {
   const ch = unit.challenges[ci];
   const bestStars = progress.stars[chalKey(ui, ci)] ?? 0;
+  const [showNotes, setShowNotes] = useState(false);
   return (
     <SiteChrome>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px 28px 32px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
           <button onClick={onBack} style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>← Units</button>
           <span style={{ color: 'rgba(0,0,0,0.2)' }}>|</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: unit.color }}>{unit.emoji} Unit {unit.id} — {unit.title}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: unit.color, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <UnitIcon unit={unit} size={16} /> Unit {unit.id} — {unit.title}
+          </span>
           <span style={{ fontSize: 13, color: '#64748b' }}>Challenge {ci + 1} of {unit.challenges.length}</span>
+          {onAdminReset && (
+            <button onClick={onAdminReset} title="Admin only: clear your completion of this challenge so you can replay it"
+              style={{ marginLeft: 'auto', padding: '4px 12px', borderRadius: 14, fontSize: 12, fontWeight: 700,
+                background: '#fff', color: '#dc2626', border: '2px solid #fca5a5', cursor: 'pointer' }}>
+              ↺ Reset challenge (admin)
+            </button>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
           {unit.challenges.map((_, idx) => {
             const done = progress.completedChallenges[chalKey(ui, idx)];
             const active = idx === ci;
@@ -296,13 +334,45 @@ function ChallengeShell({ unit, ui, ci, progress, lockedCis, banner, onBack, onJ
               </div>
             );
           })}
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setShowNotes(s => !s)}
+            style={{ padding: '5px 14px', borderRadius: 16, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              border: `2px solid ${showNotes ? unit.color : '#cbd5e1'}`,
+              background: showNotes ? `${unit.color}18` : '#fff',
+              color: showNotes ? unit.color : '#64748b' }}>
+            📖 {showNotes ? 'Hide notes' : 'Lesson notes'}
+          </button>
         </div>
+        {showNotes && (
+          <div style={{ ...CARD, padding: '8px 12px', marginBottom: 14, maxHeight: 420, overflowY: 'auto' }}>
+            <div style={{ margin: '10px 8px 0', background: '#f8fafc', border: '2px solid #cbd5e1', borderRadius: 12, padding: '12px 16px' }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.7px', marginBottom: 8 }}>
+                📖 Words to Know
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '5px 16px' }}>
+                {unit.vocab.map(v => (
+                  <div key={v.term} style={{ fontSize: 12.5, color: '#374151', lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 800, color: unit.color }}>{v.term}</span>
+                    <span style={{ color: '#94a3b8' }}> — </span>
+                    {v.def}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <LessonPanel text={unit.introNotes} />
+          </div>
+        )}
         <div style={{ ...CARD, padding: '14px 20px', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Challenge {ci + 1}</div>
             {ch.mode === 'build' && ch.par > 0 && (
               <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 12, padding: '2px 10px' }}>
                 Par: {ch.par} wires
+              </span>
+            )}
+            {ch.mode === 'detective' && ch.par > 0 && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 12, padding: '2px 10px' }}>
+                ⭐⭐⭐ at {ch.par} tests or fewer
               </span>
             )}
             {bestStars > 0 && (
@@ -314,6 +384,16 @@ function ChallengeShell({ unit, ui, ci, progress, lockedCis, banner, onBack, onJ
           <div style={{ fontSize: 18, fontWeight: 900, color: '#1f2937', margin: '2px 0 4px' }}>{ch.title}</div>
           <div style={{ fontSize: 13, color: '#64748b' }}>💡 {ch.hint}</div>
         </div>
+        {ch.objective && (
+          <div style={{ ...CARD, padding: '14px 20px', marginBottom: 14, borderLeft: `8px solid ${unit.color}` }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#1f2937', marginBottom: 8 }}>🎯 Your goal: <span style={{ fontWeight: 700 }}>{ch.objective.goal}</span></div>
+            <ol style={{ margin: 0, paddingLeft: 22 }}>
+              {ch.objective.steps.map((step, i) => (
+                <li key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: 3 }}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        )}
         {banner}
         {children}
       </div>
@@ -359,17 +439,28 @@ function BuildChallenge({ unit, ch, savedWires, alreadySolved, onSolved, onWires
   onWiresChange: (wires: SavedWire[]) => void;
 }) {
   const [given, setGiven] = useState<Part[]>(ch.given);
+  // Components the student placed from the parts bin (palette challenges only)
+  const [placed, setPlaced] = useState<Part[]>(() =>
+    (savedWires ?? []).filter(w => w.kind && w.kind !== 'wire')
+      .map(c => stampPart(c.kind as StampKind, c.a, c.b)));
   const [wires, setWires] = useState<Part[]>(() =>
     (savedWires ?? []).filter(w => (w.kind ?? 'wire') === 'wire')
-      .map(w => ({ id: newWireId(), kind: 'wire' as const, a: w.a, b: w.b })));
+      .map(w => ({ id: newWireId(), kind: 'wire' as const, a: w.a, b: w.b, ...(ch.breadboard ? { jump: true } : {}) })));
   const [tool, setTool] = useState<BoardTool>('wire');
+  const [stamp, setStamp] = useState<StampKind | null>(null);
   const [schematic, setSchematic] = useState(false);
+  const [xray, setXray] = useState(false);
   const solvedRef = useRef(alreadySolved);
   // Was this challenge already done when the student opened it? (stable per mount)
   const [openedSolved] = useState(alreadySolved);
 
-  const allParts = useMemo(() => [...given, ...wires], [given, wires]);
+  const allParts = useMemo(() => [...given, ...placed, ...wires], [given, placed, wires]);
+
+  const serializeAll = useCallback((comps: Part[], ws: Part[]): SavedWire[] =>
+    [...comps.map(p => ({ kind: p.kind, a: p.a, b: p.b })), ...ws.map(w => ({ a: w.a, b: w.b }))], []);
   const result: SolveResult = useMemo(() => solveCircuit(allParts), [allParts]);
+  const refParts = ch.reference?.parts;
+  const refResult = useMemo(() => (refParts ? solveCircuit(refParts) : null), [refParts]);
 
   const goalMet = useMemo(() => {
     const g = ch.goal;
@@ -408,8 +499,33 @@ function BuildChallenge({ unit, ch, savedWires, alreadySolved, onSolved, onWires
         return t.darkWhenOpen.every(id => !lit(r2, id)) && t.litWhenOpen.every(id => lit(r2, id));
       });
     }
+    if (g.type === 'led-safe') {
+      // Every LED lit at a safe current with all switches closed; if a switch
+      // is required, opening some switch must darken every LED.
+      const withStates = (open: string | null) => allParts.map(p =>
+        p.kind === 'switch' ? { ...p, closed: p.id !== open } : p);
+      const base = solveCircuit(withStates(null));
+      if (base.shorted) return false;
+      const comps = [...given, ...placed];
+      const leds = comps.filter(p => p.kind === 'led');
+      if (!leds.length) return false;
+      const safeLit = leds.every(l => {
+        const c = base.parts[l.id]?.current ?? 0;
+        return c > LED_MIN_LIT && c <= LED_SAFE_MAX;
+      });
+      if (!safeLit) return false;
+      if (g.requireSwitch) {
+        const switches = comps.filter(p => p.kind === 'switch');
+        const controls = switches.some(s => {
+          const r2 = solveCircuit(withStates(s.id));
+          return !r2.shorted && leds.every(l => Math.abs(r2.parts[l.id]?.current ?? 0) < LED_MIN_LIT);
+        });
+        if (!controls) return false;
+      }
+      return true;
+    }
     return false;
-  }, [ch.goal, result, given, allParts]);
+  }, [ch.goal, result, given, placed, allParts]);
 
   // The parent owns "solved" (it drives the success banner via progress); this
   // effect only reports the win upward — no local setState, no cascade.
@@ -417,38 +533,75 @@ function BuildChallenge({ unit, ch, savedWires, alreadySolved, onSolved, onWires
     if (goalMet && !solvedRef.current) {
       solvedRef.current = true;
       const stars = ch.par <= 0 ? 3 : wires.length <= ch.par ? 3 : wires.length <= ch.par + 2 ? 2 : 1;
-      onSolved(stars, wires.map(w => ({ a: w.a, b: w.b })));
+      onSolved(stars, serializeAll(placed, wires));
     }
-  }, [goalMet, ch.par, wires, onSolved]);
+  }, [goalMet, ch.par, placed, wires, serializeAll, onSolved]);
 
   const addWire = useCallback((a: Pt, b: Pt) => {
-    setWires(prev => {
-      const next = [...prev, { id: newWireId(), kind: 'wire' as const, a, b }];
-      onWiresChange(next.map(w => ({ a: w.a, b: w.b })));
-      return next;
-    });
-  }, [onWiresChange]);
+    const next = [...wires, { id: newWireId(), kind: 'wire' as const, a, b, ...(ch.breadboard ? { jump: true } : {}) }];
+    setWires(next);
+    onWiresChange(serializeAll(placed, next));
+  }, [wires, placed, ch.breadboard, serializeAll, onWiresChange]);
 
   const eraseWire = useCallback((id: string) => {
-    setWires(prev => {
-      const next = prev.filter(w => w.id !== id);
-      onWiresChange(next.map(w => ({ a: w.a, b: w.b })));
-      return next;
-    });
-  }, [onWiresChange]);
+    const nextW = wires.filter(w => w.id !== id);
+    const nextP = placed.filter(p => p.id !== id);
+    setWires(nextW);
+    setPlaced(nextP);
+    onWiresChange(serializeAll(nextP, nextW));
+  }, [wires, placed, serializeAll, onWiresChange]);
 
   const resetWires = useCallback(() => {
     setWires([]);
+    setPlaced([]);
+    setStamp(null);
+    setTool('wire');
     onWiresChange([]);
   }, [onWiresChange]);
 
+  const remaining = useCallback((kind: StampKind) =>
+    (ch.palette?.find(p => p.kind === kind)?.count ?? 0) - placed.filter(p => stampOf(p) === kind).length,
+  [ch.palette, placed]);
+
+  const place = useCallback((at: Pt) => {
+    if (!stamp || remaining(stamp) <= 0) return;
+    const span = STAMP_META[stamp].span;
+    const candA = at.x;
+    const candB = at.x + span;
+    const blocked = [...given.filter(p => p.kind !== 'wire'), ...placed].some(o => {
+      if (o.a.y !== at.y || o.b.y !== at.y) return false;
+      const oA = Math.min(o.a.x, o.b.x);
+      const oB = Math.max(o.a.x, o.b.x);
+      return candA < oB && oA < candB;
+    });
+    if (blocked) return;
+    const part = stampPart(stamp, { x: candA, y: at.y }, { x: candB, y: at.y });
+    const next = [...placed, part];
+    setPlaced(next);
+    onWiresChange(serializeAll(next, wires));
+    if (remaining(stamp) <= 1) {
+      setStamp(null);
+      setTool('wire');
+    }
+  }, [stamp, remaining, given, placed, wires, serializeAll, onWiresChange]);
+
   const toggleSwitch = useCallback((id: string) => {
-    setGiven(prev => prev.map(p => (p.id === id ? { ...p, closed: !p.closed } : p)));
+    const flip = (prev: Part[]) => prev.map(p => (p.id === id ? { ...p, closed: !p.closed } : p));
+    setGiven(flip);
+    setPlaced(flip);
   }, []);
 
   const toggleBulb = useCallback((id: string) => {
     setGiven(prev => prev.map(p => (p.id === id ? { ...p, removed: !p.removed } : p)));
   }, []);
+
+  const flipLed = useCallback((id: string) => {
+    const swap = (prev: Part[]) => prev.map(p => (p.id === id ? { ...p, a: p.b, b: p.a } : p));
+    setGiven(swap);
+    setPlaced(swap);
+  }, []);
+
+  const burnedLeds = [...given, ...placed].filter(p => p.kind === 'led' && Math.abs(result.parts[p.id]?.current ?? 0) > LED_SAFE_MAX);
 
   const TOOL_BTN = (active: boolean): React.CSSProperties => ({
     padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer',
@@ -466,13 +619,76 @@ function BuildChallenge({ unit, ch, savedWires, alreadySolved, onSolved, onWires
           </div>
         </div>
       )}
+      {burnedLeds.length > 0 && (
+        <div style={{ ...CARD, padding: '12px 18px', marginBottom: 14, background: '#fef2f2', border: '3px solid #ef4444', display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 24 }}>💥</span>
+          <div style={{ fontSize: 13.5, color: '#991b1b', fontWeight: 700 }}>
+            The LED is burning out — way too much current! It needs the resistor in its path. Remove the shortcut jumper and route through the resistor.
+          </div>
+        </div>
+      )}
+      {ch.reference && (
+        <div style={{ ...CARD, padding: 18, marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 10 }}>
+            📋 The schematic — build exactly this
+          </div>
+          <div style={{ maxWidth: 440 }}>
+            <CircuitBoard
+              parts={ch.reference.parts}
+              result={refResult!}
+              schematic
+              interactive={false}
+              allowSwitch={false}
+              gridW={ch.reference.gridW}
+              gridH={ch.reference.gridH}
+            />
+          </div>
+        </div>
+      )}
       <div style={{ ...CARD, padding: 18 }}>
+        {ch.palette && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: '#64748b' }}>🧰 Parts bin:</span>
+            {ch.palette.map(item => {
+              const left = remaining(item.kind);
+              const active = stamp === item.kind;
+              const meta = STAMP_META[item.kind];
+              return (
+                <button key={item.kind} disabled={left <= 0}
+                  onClick={() => {
+                    if (active) { setStamp(null); setTool('wire'); }
+                    else { setStamp(item.kind); setTool('place'); }
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 10,
+                    border: `2px solid ${active ? unit.color : left > 0 ? '#cbd5e1' : '#e2e8f0'}`,
+                    background: active ? `${unit.color}14` : '#fff',
+                    cursor: left > 0 ? 'pointer' : 'not-allowed', opacity: left > 0 ? 1 : 0.45 }}>
+                  <span style={{ fontSize: 17 }}>{meta.emoji}</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: '#374151' }}>{meta.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: left > 0 ? '#64748b' : '#16a34a' }}>
+                    {left > 0 ? `×${left}` : '✓'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button style={TOOL_BTN(tool === 'wire')} onClick={() => setTool('wire')}>🔌 Wire</button>
-          <button style={TOOL_BTN(tool === 'erase')} onClick={() => setTool('erase')}>🧽 Erase</button>
-          <button style={TOOL_BTN(false)} onClick={resetWires}>↺ Clear my wires</button>
+          <button style={TOOL_BTN(tool === 'wire' && !stamp)} onClick={() => { setStamp(null); setTool('wire'); }}>🔌 {ch.breadboard ? 'Jumper' : 'Wire'}</button>
+          <button style={TOOL_BTN(tool === 'erase')} onClick={() => { setStamp(null); setTool('erase'); }}>🧽 Erase</button>
+          <button style={TOOL_BTN(false)} onClick={resetWires}>↺ Clear the {ch.palette ? 'bench' : ch.breadboard ? 'jumpers' : 'wires'}</button>
           <div style={{ flex: 1 }} />
-          {unit.schematicUnlocked && (
+          <span style={{ fontSize: 12.5, fontWeight: 800, padding: '5px 12px', borderRadius: 12,
+            background: goalMet ? '#f0fdf4' : '#f8fafc',
+            border: `2px solid ${goalMet ? '#4ade80' : '#cbd5e1'}`,
+            color: goalMet ? '#16a34a' : '#94a3b8' }}>
+            {goalMet ? '✓ Checker: passing!' : 'Checker: not passing yet'}
+          </span>
+          {ch.breadboard ? (
+            <button style={TOOL_BTN(xray)} onClick={() => setXray(x => !x)}>
+              {xray ? '🎨 Normal view' : '🩻 X-ray view'}
+            </button>
+          ) : unit.schematicUnlocked && (
             <button style={TOOL_BTN(schematic)} onClick={() => setSchematic(s => !s)}>
               {schematic ? '🎨 Picture view' : '📐 Schematic view'}
             </button>
@@ -481,23 +697,31 @@ function BuildChallenge({ unit, ch, savedWires, alreadySolved, onSolved, onWires
         <CircuitBoard
           parts={allParts}
           result={result}
-          schematic={schematic}
+          schematic={!ch.breadboard && schematic}
           tool={tool}
           interactive
           allowSwitch
           allowUnscrew={!!ch.allowUnscrew}
           gridW={ch.gridW ?? 10}
           gridH={ch.gridH ?? 6}
-          clipEnd={(from, to) => clipWireAtSwitches(from, to, given)}
+          breadboard={ch.breadboard ? { xray } : undefined}
+          placeSpan={stamp ? STAMP_META[stamp].span : undefined}
+          clipEnd={(from, to) => clipWireAtSwitches(from, to, [...given, ...placed])}
+          onPlace={place}
           onAddWire={addWire}
           onErase={eraseWire}
           onToggleSwitch={toggleSwitch}
           onToggleBulb={toggleBulb}
+          onFlipLed={[...given, ...placed].some(p => p.kind === 'led') ? flipLed : undefined}
         />
         <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
-          {tool === 'wire'
-            ? 'Drag from one dot to another to place a wire. Wires connect wherever they touch.'
-            : 'Tap one of your wires to remove it. (Built-in parts can’t be erased.)'}
+          {stamp
+            ? `Tap the board to place your ${STAMP_META[stamp].label.toLowerCase()} — its two legs must land in DIFFERENT columns.`
+            : tool === 'wire'
+              ? ch.breadboard
+                ? 'Drag from one hole to another to place a jumper — it arcs over the board and connects ONLY at its two ends.'
+                : 'Drag from one dot to another to place a wire. Wires connect wherever they touch.'
+              : `Tap one of your ${ch.palette ? 'parts or jumpers' : ch.breadboard ? 'jumpers' : 'wires'} to remove it. (Built-in parts can’t be erased.)`}
         </div>
       </div>
       {openedSolved && (
@@ -513,8 +737,22 @@ const STAMP_META = {
   battery: { span: 4, emoji: '🔋', label: 'Battery pack' },
   bulb: { span: 2, emoji: '💡', label: 'Bulb' },
   switch: { span: 1, emoji: '🎚️', label: 'Switch' },
+  breakwire: { span: 2, emoji: '💔', label: 'Broken wire' },
+  resistor: { span: 2, emoji: '〰️', label: 'Resistor (100 Ω)' },
+  led: { span: 2, emoji: '🔴', label: 'LED' },
 } as const;
 type StampKind = keyof typeof STAMP_META;
+
+/** Palette stamps map onto engine parts; a breakwire is a wire born broken. */
+const stampPart = (stamp: StampKind, a: Pt, b: Pt): Part => {
+  const id = newPartId(stamp);
+  if (stamp === 'breakwire') return { id, kind: 'wire', a, b, broken: true };
+  if (stamp === 'resistor') return { id, kind: 'resistor', a, b, resistance: 100, label: '100 Ω' };
+  if (stamp === 'led') return { id, kind: 'led', a, b, label: 'LED' };
+  if (stamp === 'switch') return { id, kind: 'switch', a, b, closed: false };
+  return { id, kind: stamp, a, b };
+};
+const stampOf = (p: Part): StampKind => (p.kind === 'wire' ? 'breakwire' : p.kind as StampKind);
 
 let partSeq = 0;
 const newPartId = (kind: string) => `fp_${kind}${++partSeq}_${Math.random().toString(36).slice(2, 6)}`;
@@ -537,10 +775,13 @@ function FreeBuildChallenge({ unit, ch, saved, alreadySolved, onSolved, onSave }
   onSave: (parts: SavedWire[]) => void;
 }) {
   const [placed, setPlaced] = useState<Part[]>(() => {
-    const comps = (saved ?? []).filter(w => w.kind && w.kind !== 'wire');
+    // components = every saved entry with a non-wire kind, plus broken wires
+    // (deliberately-placed break segments live in the palette, not the wire list)
+    const comps = (saved ?? []).filter(w => (w.kind && w.kind !== 'wire') || (w.kind === 'wire' && w.broken));
     const restored: Part[] = [];
     for (const c of comps) {
       const p: Part = { id: newPartId(c.kind!), kind: c.kind!, a: c.a, b: c.b };
+      if (c.broken) p.broken = true;
       if (c.kind === 'bulb') p.label = nextBulbLabel(restored);
       if (c.kind === 'switch') p.closed = false;
       restored.push(p);
@@ -548,7 +789,7 @@ function FreeBuildChallenge({ unit, ch, saved, alreadySolved, onSolved, onSave }
     return restored;
   });
   const [wires, setWires] = useState<Part[]>(() =>
-    (saved ?? []).filter(w => (w.kind ?? 'wire') === 'wire')
+    (saved ?? []).filter(w => (w.kind ?? 'wire') === 'wire' && !w.broken)
       .map(w => ({ id: newWireId(), kind: 'wire' as const, a: w.a, b: w.b })));
   const [tool, setTool] = useState<BoardTool>('wire');
   const [stamp, setStamp] = useState<StampKind | null>(null);
@@ -563,7 +804,7 @@ function FreeBuildChallenge({ unit, ch, saved, alreadySolved, onSolved, onSave }
   [allParts, spec]);
 
   const serialize = useCallback((comps: Part[], ws: Part[]): SavedWire[] =>
-    [...comps, ...ws].map(p => ({ kind: p.kind, a: p.a, b: p.b })), []);
+    [...comps, ...ws].map(p => ({ kind: p.kind, a: p.a, b: p.b, ...(p.broken ? { broken: true } : {}) })), []);
 
   useEffect(() => {
     if (goalMet && !solvedRef.current) {
@@ -573,7 +814,7 @@ function FreeBuildChallenge({ unit, ch, saved, alreadySolved, onSolved, onSave }
   }, [goalMet, placed, wires, serialize, onSolved]);
 
   const remaining = useCallback((kind: StampKind) =>
-    (ch.palette?.find(p => p.kind === kind)?.count ?? 0) - placed.filter(p => p.kind === kind).length,
+    (ch.palette?.find(p => p.kind === kind)?.count ?? 0) - placed.filter(p => stampOf(p) === kind).length,
   [ch.palette, placed]);
 
   const place = useCallback((at: Pt) => {
@@ -589,39 +830,31 @@ function FreeBuildChallenge({ unit, ch, saved, alreadySolved, onSolved, onSave }
       return candA < oB && oA < candB;
     });
     if (blocked) return;
-    const part: Part = { id: newPartId(stamp), kind: stamp, a: { x: candA, y: at.y }, b: { x: candB, y: at.y } };
+    const part = stampPart(stamp, { x: candA, y: at.y }, { x: candB, y: at.y });
     if (stamp === 'bulb') part.label = nextBulbLabel(placed);
     if (stamp === 'switch') part.closed = false;
-    setPlaced(prev => {
-      const next = [...prev, part];
-      onSave(serialize(next, wires));
-      if (remaining(stamp) <= 1) {
-        setStamp(null);
-        setTool('wire');
-      }
-      return next;
-    });
+    const next = [...placed, part];
+    setPlaced(next);
+    onSave(serialize(next, wires));
+    if (remaining(stamp) <= 1) {
+      setStamp(null);
+      setTool('wire');
+    }
   }, [stamp, remaining, placed, wires, serialize, onSave]);
 
   const addWire = useCallback((a: Pt, b: Pt) => {
-    setWires(prev => {
-      const next = [...prev, { id: newWireId(), kind: 'wire' as const, a, b }];
-      onSave(serialize(placed, next));
-      return next;
-    });
-  }, [placed, serialize, onSave]);
+    const next = [...wires, { id: newWireId(), kind: 'wire' as const, a, b }];
+    setWires(next);
+    onSave(serialize(placed, next));
+  }, [wires, placed, serialize, onSave]);
 
   const erase = useCallback((id: string) => {
-    setWires(prevW => {
-      const nextW = prevW.filter(w => w.id !== id);
-      setPlaced(prevP => {
-        const nextP = prevP.filter(p => p.id !== id);
-        onSave(serialize(nextP, nextW));
-        return nextP;
-      });
-      return nextW;
-    });
-  }, [serialize, onSave]);
+    const nextW = wires.filter(w => w.id !== id);
+    const nextP = placed.filter(p => p.id !== id);
+    setWires(nextW);
+    setPlaced(nextP);
+    onSave(serialize(nextP, nextW));
+  }, [wires, placed, serialize, onSave]);
 
   const clearAll = useCallback(() => {
     setPlaced([]);
@@ -682,6 +915,12 @@ function FreeBuildChallenge({ unit, ch, saved, alreadySolved, onSolved, onSave }
           <button style={TOOL_BTN(tool === 'erase')} onClick={() => { setStamp(null); setTool('erase'); }}>🧽 Erase</button>
           <button style={TOOL_BTN(false)} onClick={clearAll}>↺ Clear the bench</button>
           <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 800, padding: '5px 12px', borderRadius: 12,
+            background: goalMet ? '#f0fdf4' : '#f8fafc',
+            border: `2px solid ${goalMet ? '#4ade80' : '#cbd5e1'}`,
+            color: goalMet ? '#16a34a' : '#94a3b8' }}>
+            {goalMet ? '✓ Checker: passing!' : 'Checker: not passing yet'}
+          </span>
           {unit.schematicUnlocked && (
             <button style={TOOL_BTN(schematic)} onClick={() => setSchematic(s => !s)}>
               {schematic ? '🎨 Picture view' : '📐 Schematic view'}
@@ -907,6 +1146,562 @@ function PredictChallenge({ unit, ch, alreadySolved, onSolved }: {
   );
 }
 
+// ─── Detective mode: continuity probing + hidden-fault repair (Unit 5) ────────
+
+function DetectiveChallenge({ unit, ch, alreadySolved, onSolved }: {
+  unit: ElecUnit; ch: ElecChallenge; alreadySolved: boolean;
+  onSolved: (stars: number) => void;
+}) {
+  const intro = !!ch.detective?.intro;
+  const [parts, setParts] = useState<Part[]>(ch.given);
+  const [tool, setTool] = useState<'probe' | 'repair'>('probe');
+  const [xray, setXray] = useState(false);
+  const [red, setRed] = useState<Pt | null>(null);
+  const [black, setBlack] = useState<Pt | null>(null);
+  const [reading, setReading] = useState<{ connected: boolean; reached: Set<string> } | null>(null);
+  const [probes, setProbes] = useState(0);
+  /** Parts caught red-handed: an OL reading taken directly across their ends.
+   *  Only condemned parts can be repaired — no guess-spamming the wrench. */
+  const [condemned, setCondemned] = useState<Set<string>>(new Set());
+  const [flash, setFlash] = useState<string | null>(null);
+  const [seen, setSeen] = useState({ beep: false, silent: false });
+  const dragOrigin = useRef<Pt | null>(null);
+  const solvedRef = useRef(alreadySolved);
+
+  const result = useMemo(() => solveCircuit(parts), [parts]);
+  const fixedAll = parts.every(p => !p.broken);
+
+  // Only points that belong to the circuit are probe-able
+  const circuitPoints = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of parts) {
+      if (p.kind === 'wire') for (const pt of wirePoints(p.a, p.b)) set.add(ptKey(pt));
+      else { set.add(ptKey(p.a)); set.add(ptKey(p.b)); }
+    }
+    return set;
+  }, [parts]);
+
+  const finish = useCallback((cost: number) => {
+    if (solvedRef.current) return;
+    solvedRef.current = true;
+    onSolved(intro || ch.par <= 0 ? 3 : cost <= ch.par ? 3 : cost <= ch.par + 3 ? 2 : 1);
+  }, [intro, ch.par, onSolved]);
+
+  /** Run a measurement between two points — costs one test. */
+  const measure = useCallback((a: Pt, b: Pt) => {
+    const test = continuity(parts, a, b);
+    setReading({ connected: test.connected, reached: test.reached });
+    setProbes(n => n + 1);
+    if (!test.connected) {
+      // OL directly across a part's own points condemns it (a healthy part
+      // would have beeped through itself, so this can never be wrong).
+      const ka = ptKey(a);
+      const kb = ptKey(b);
+      const caught = parts.filter(p => {
+        const pts = p.kind === 'wire' ? wirePoints(p.a, p.b).map(ptKey) : [ptKey(p.a), ptKey(p.b)];
+        return pts.includes(ka) && pts.includes(kb);
+      });
+      if (caught.length) {
+        setCondemned(prev => new Set([...prev, ...caught.map(p => p.id)]));
+        setFlash(null);
+      }
+    }
+    const nextSeen = { beep: seen.beep || test.connected, silent: seen.silent || !test.connected };
+    setSeen(nextSeen);
+    if (intro && nextSeen.beep && nextSeen.silent) finish(0);
+  }, [parts, seen, intro, finish]);
+
+  const handleProbe = useCallback((pt: Pt) => {
+    if (!circuitPoints.has(ptKey(pt))) return; // must touch the circuit
+    if (!red || (red && black)) {
+      // fresh pair: place (or re-place) the red probe first
+      setRed(pt);
+      setBlack(null);
+      setReading(null);
+      return;
+    }
+    if (red.x === pt.x && red.y === pt.y) return;
+    setBlack(pt);
+    measure(red, pt);
+  }, [circuitPoints, red, black, measure]);
+
+  // Grab-and-move an already-placed probe; the measurement re-runs on drop.
+  const handleMarkerDrag = useCallback((id: string, at: Pt) => {
+    if (!dragOrigin.current) dragOrigin.current = id === 'red' ? red : black;
+    setReading(null);
+    if (id === 'red') setRed(at); else setBlack(at);
+  }, [red, black]);
+
+  const handleMarkerDrop = useCallback((id: string, at: Pt) => {
+    const origin = dragOrigin.current;
+    dragOrigin.current = null;
+    if (!origin) return; // tapped without moving
+    const other = id === 'red' ? black : red;
+    const valid = circuitPoints.has(ptKey(at)) && !(other && other.x === at.x && other.y === at.y);
+    const finalPt = valid ? at : origin; // invalid drop → snap back
+    if (id === 'red') setRed(finalPt); else setBlack(finalPt);
+    if (!other) return;
+    const moved = finalPt.x !== origin.x || finalPt.y !== origin.y;
+    if (moved) {
+      measure(id === 'red' ? finalPt : other, id === 'red' ? other : finalPt);
+    } else {
+      // back where it started — restore the reading without charging a test
+      const test = continuity(parts, id === 'red' ? finalPt : other, id === 'red' ? other : finalPt);
+      setReading({ connected: test.connected, reached: test.reached });
+    }
+  }, [red, black, circuitPoints, parts, measure]);
+
+  const handleRepair = useCallback((id: string) => {
+    const part = parts.find(p => p.id === id);
+    if (!part) return;
+    if (!condemned.has(id)) {
+      setFlash('🔒 The meter hasn’t identified that part yet. Put one probe on EACH end of it — OL straight across a part proves it is the fault.');
+      return;
+    }
+    const next = parts.map(p => (p.id === id ? { ...p, broken: false } : p));
+    setParts(next);
+    const remaining = next.filter(p => p.broken).length;
+    setFlash(remaining > 0
+      ? `🔧 Fixed! But the circuit is still dead — ${remaining} more fault to find.`
+      : '🔧 Fixed! Power restored!');
+    if (remaining === 0) finish(probes);
+  }, [parts, condemned, probes, finish]);
+
+  const TOOL_BTN = (active: boolean): React.CSSProperties => ({
+    padding: '8px 16px', borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+    border: `2px solid ${active ? unit.color : '#cbd5e1'}`,
+    background: active ? `${unit.color}18` : '#fff', color: active ? unit.color : '#64748b',
+  });
+
+  const probePx = (p: Pt) => ({ x: PAD + p.x * CELL, y: PAD + p.y * CELL });
+
+  // The multimeter lives in a dock to the right of the grid; its screen IS the
+  // test result, and its leads run out to wherever the probes touch.
+  const DOCK_W = 170;
+  const meterX = PAD * 2 + (ch.gridW ?? 10) * CELL + 4;
+  const meterState: MeterState = reading ? (reading.connected ? 'beep' : 'open') : red ? 'waiting' : 'idle';
+
+  const sockets = meterSockets(meterX, 16);
+  const overlay = (
+    <g pointerEvents="none">
+      {reading?.connected && [...reading.reached].map(k => {
+        const [x, y] = k.split(',').map(Number);
+        const px = probePx({ x, y });
+        return <circle key={k} cx={px.x} cy={px.y} r={5} fill="rgba(34,197,94,0.55)" />;
+      })}
+      <MultimeterView x={meterX} y={16} state={meterState} />
+      {/* condemned parts wear a ⚠ tag until repaired */}
+      {parts.filter(p => condemned.has(p.id) && p.broken).map(p => {
+        const A = probePx(p.a);
+        const B = probePx(p.b);
+        const mx = (A.x + B.x) / 2;
+        const my = (A.y + B.y) / 2;
+        return (
+          <g key={`c${p.id}`} className="elab-pulse">
+            <rect x={mx - 44} y={my + 18} width={88} height={20} rx={10} fill="#fef2f2" stroke="#dc2626" strokeWidth={2} />
+            <text x={mx} y={my + 32} textAnchor="middle" fontSize={11} fontWeight={800} fill="#dc2626">⚠ fault found</text>
+          </g>
+        );
+      })}
+      {red && <ProbePen x={probePx(red).x} y={probePx(red).y} color="#dc2626" lean={38} badge="1" leadFrom={sockets.red} />}
+      {black && <ProbePen x={probePx(black).x} y={probePx(black).y} color="#1f2937" lean={22} badge="2" leadFrom={sockets.black} />}
+    </g>
+  );
+
+  const dragMarkers = [
+    ...(red ? [{ id: 'red', at: red }] : []),
+    ...(black ? [{ id: 'black', at: black }] : []),
+  ];
+
+  return (
+    <div>
+      {flash && !fixedAll && (
+        <div style={{ ...CARD, padding: '10px 18px', marginBottom: 14, background: '#fffbeb', border: '3px solid #f59e0b', fontSize: 13.5, fontWeight: 700, color: '#92400e' }}>
+          {flash}
+        </div>
+      )}
+      <div style={{ ...CARD, padding: 18 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button style={TOOL_BTN(tool === 'probe')} onClick={() => setTool('probe')}>🎧 Probe</button>
+          {!intro && <button style={TOOL_BTN(tool === 'repair')} onClick={() => setTool('repair')}>🔧 Repair</button>}
+          {ch.breadboard && (
+            <button style={TOOL_BTN(xray)} onClick={() => setXray(x => !x)}>
+              {xray ? '🎨 Normal view' : '🩻 X-ray view'}
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: '#64748b' }}>
+            Tests used: {probes}{!intro && ch.par > 0 && ` · ⭐⭐⭐ ≤ ${ch.par}`}
+          </span>
+        </div>
+        <CircuitBoard
+          parts={parts}
+          result={result}
+          tool={tool}
+          interactive
+          allowSwitch={false}
+          gridW={ch.gridW ?? 10}
+          gridH={ch.gridH ?? 6}
+          breadboard={ch.breadboard ? { xray } : undefined}
+          onProbe={handleProbe}
+          dragMarkers={dragMarkers}
+          onMarkerDrag={handleMarkerDrag}
+          onMarkerDrop={handleMarkerDrop}
+          onPartTap={handleRepair}
+          overlay={overlay}
+          dockWidth={DOCK_W}
+        />
+        <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>
+          {tool === 'probe'
+            ? red && black
+              ? 'Grab either probe and drag it to a new point to keep testing (each move counts as a test) — or tap an empty point to start a fresh pair.'
+              : red
+                ? 'Now tap a second point for the black probe — then read the meter screen.'
+                : 'Tap a point on the circuit to place the red probe. The meter screen shows the result. (It never beeps through a battery!)'
+            : 'Tap a part marked "⚠ fault found" to repair it. Parts must be caught by the meter first — OL straight across their two ends.'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Meters mode: the Ohm's Law lab bench (Unit 6) ────────────────────────────
+
+/** The classic V / I·R memory triangle: cover the unknown, read the rest. */
+function OhmTriangle({ size = 110 }: { size?: number }) {
+  const w = size, h = size * 0.82;
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
+      <path d={`M ${w / 2} 4 L ${w - 4} ${h - 4} L 4 ${h - 4} Z`} fill="#fffbeb" stroke="#f59e0b" strokeWidth={2.5} strokeLinejoin="round" />
+      <line x1={w * 0.22} y1={h * 0.62} x2={w * 0.78} y2={h * 0.62} stroke="#f59e0b" strokeWidth={2} />
+      <line x1={w / 2} y1={h * 0.62} x2={w / 2} y2={h - 6} stroke="#f59e0b" strokeWidth={2} />
+      <text x={w / 2} y={h * 0.5} textAnchor="middle" fontSize={22} fontWeight={900} fill="#92400e" fontFamily="monospace">V</text>
+      <text x={w * 0.36} y={h * 0.9} textAnchor="middle" fontSize={20} fontWeight={900} fill="#92400e" fontFamily="monospace">I</text>
+      <text x={w * 0.64} y={h * 0.9} textAnchor="middle" fontSize={20} fontWeight={900} fill="#92400e" fontFamily="monospace">R</text>
+    </svg>
+  );
+}
+
+function MetersChallenge({ unit, ch, alreadySolved, onSolved }: {
+  unit: ElecUnit; ch: ElecChallenge; alreadySolved: boolean;
+  onSolved: (stars: number) => void;
+}) {
+  const cfg = ch.meters!;
+  const plan = cfg.requirePlan;
+  const [phase, setPhase] = useState<'plan' | 'dial'>(plan && !alreadySolved ? 'plan' : 'dial');
+  const [pv, setPv] = useState('');
+  const [pr, setPr] = useState('');
+  const [planWrong, setPlanWrong] = useState<string | null>(null);
+  const [planMistakes, setPlanMistakes] = useState(0);
+  const [planned, setPlanned] = useState<{ v?: number; r?: number } | null>(null);
+  const [volts, setVolts] = useState(cfg.vLocked ?? cfg.vRange[0]);
+  const [ohms, setOhms] = useState(cfg.rLocked ?? cfg.rRange[1]);
+  const solvedRef = useRef(alreadySolved);
+
+  const parts = useMemo<Part[]>(() => [
+    { id: 'bat', kind: 'battery', a: { x: 1, y: 4 }, b: { x: 9, y: 4 }, fixed: true, voltage: volts, internalR: 0 },
+    { id: 'res', kind: 'resistor', a: { x: 3, y: 1 }, b: { x: 7, y: 1 }, fixed: true, resistance: ohms, label: `${ohms} Ω` },
+    { id: 'w1', kind: 'wire', a: { x: 1, y: 4 }, b: { x: 1, y: 1 }, fixed: true },
+    { id: 'w2', kind: 'wire', a: { x: 1, y: 1 }, b: { x: 3, y: 1 }, fixed: true },
+    { id: 'w3', kind: 'wire', a: { x: 9, y: 4 }, b: { x: 9, y: 1 }, fixed: true },
+    { id: 'w4', kind: 'wire', a: { x: 9, y: 1 }, b: { x: 7, y: 1 }, fixed: true },
+  ], [volts, ohms]);
+
+  const result = useMemo(() => solveCircuit(parts), [parts]);
+  const amps = Math.abs(result.parts['res']?.current ?? 0);
+  const vAcross = Math.abs(result.parts['res']?.voltage ?? 0);
+  const onTarget = Math.abs(amps - cfg.targetCurrent) <= cfg.tolerance;
+
+  useEffect(() => {
+    if (onTarget && phase === 'dial' && !solvedRef.current) {
+      solvedRef.current = true;
+      onSolved(planMistakes === 0 ? 3 : planMistakes <= 2 ? 2 : 1);
+    }
+  }, [onTarget, phase, planMistakes, onSolved]);
+
+  const nearlyEq = (a: number, b: number) => Math.abs(a - b) <= 0.011;
+  const onStep = (val: number, step: number) => Math.abs(Math.round(val / step) * step - val) < 1e-9;
+
+  const checkPlan = () => {
+    if (plan === 'r') {
+      const val = Number(pr);
+      if (!isFinite(val) || pr.trim() === '') return;
+      if (nearlyEq(val, (cfg.vLocked ?? 0) / cfg.targetCurrent)) {
+        setPlanned({ r: val });
+        setPhase('dial');
+        setPlanWrong(null);
+      } else {
+        setPlanMistakes(m => m + 1);
+        setPlanWrong('Not quite. Cover the R on the triangle — what is left is V ÷ I. Try the division again!');
+      }
+    } else if (plan === 'v') {
+      const val = Number(pv);
+      if (!isFinite(val) || pv.trim() === '') return;
+      if (nearlyEq(val, cfg.targetCurrent * (cfg.rLocked ?? 0))) {
+        setPlanned({ v: val });
+        setPhase('dial');
+        setPlanWrong(null);
+      } else {
+        setPlanMistakes(m => m + 1);
+        setPlanWrong('Not quite. Cover the V on the triangle — what is left is I × R. Try the multiplication again!');
+      }
+    } else if (plan === 'both') {
+      const v = Number(pv);
+      const r = Number(pr);
+      if (!isFinite(v) || !isFinite(r) || pv.trim() === '' || pr.trim() === '') return;
+      if (v < cfg.vRange[0] || v > cfg.vRange[1] || r < cfg.rRange[0] || r > cfg.rRange[1] || !onStep(v, cfg.vStep) || !onStep(r, cfg.rStep)) {
+        setPlanMistakes(m => m + 1);
+        setPlanWrong(`Pick values the dials can reach: V from ${cfg.vRange[0]} to ${cfg.vRange[1]} in steps of ${cfg.vStep}, R from ${cfg.rRange[0]} to ${cfg.rRange[1]} in whole ohms.`);
+      } else if (Math.abs(v / r - cfg.targetCurrent) <= cfg.tolerance) {
+        setPlanned({ v, r });
+        setPhase('dial');
+        setPlanWrong(null);
+      } else {
+        setPlanMistakes(m => m + 1);
+        setPlanWrong(`Check the law: I = V ÷ R = ${v} ÷ ${r} = ${(v / r).toFixed(2)} A, but the motor needs ${cfg.targetCurrent.toFixed(2)} A. Adjust one of your numbers.`);
+      }
+    }
+  };
+
+  const VALUE_TILE = (label: string, sub: string, content: React.ReactNode, accent: string): React.ReactNode => (
+    <div style={{ flex: '1 1 130px', minWidth: 120, borderRadius: 12, border: `3px solid ${accent}`, background: '#fff', padding: '10px 12px', textAlign: 'center' }}>
+      <div style={{ fontSize: 11, fontWeight: 800, color: accent, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 900, color: '#1f2937', fontFamily: 'monospace', margin: '4px 0 2px' }}>{content}</div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: '#94a3b8' }}>{sub}</div>
+    </div>
+  );
+
+  const planInput = (value: string, setValue: (s: string) => void, unitLabel: string) => (
+    <span>
+      <input type="number" inputMode="decimal" step="any" value={value}
+        onChange={e => { setValue(e.target.value); setPlanWrong(null); }}
+        onKeyDown={e => { if (e.key === 'Enter') checkPlan(); }}
+        placeholder="?"
+        style={{ width: 74, padding: '4px 6px', fontSize: 19, fontWeight: 800, fontFamily: 'monospace', textAlign: 'center',
+          border: `2px solid ${planWrong ? '#ef4444' : unit.color}`, borderRadius: 8, color: '#1f2937' }} />
+      <span style={{ fontSize: 15, fontWeight: 800, color: '#475569', marginLeft: 4 }}>{unitLabel}</span>
+    </span>
+  );
+
+  // ── Phase 1: do the math before the dials unlock ────────────────────────────
+  if (phase === 'plan') {
+    return (
+      <div style={{ maxWidth: 760 }}>
+        <div style={{ ...CARD, padding: '24px 28px' }}>
+          <div style={{ fontSize: 14, fontWeight: 900, color: '#1f2937', marginBottom: 4 }}>🧮 Step 1 — Work it out with Ohm&apos;s Law</div>
+          <div style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
+            The dials are locked until your math is done. Fill in the missing value{plan === 'both' ? 's' : ''}:
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', flex: '1 1 380px' }}>
+              {VALUE_TILE('V — Voltage', plan === 'v' || plan === 'both' ? 'the unknown push' : 'given · locked',
+                plan === 'v' || plan === 'both' ? planInput(pv, setPv, 'V') : `${cfg.vLocked} V`,
+                plan === 'v' || plan === 'both' ? unit.color : '#64748b')}
+              {VALUE_TILE('I — Current', 'the target', `${cfg.targetCurrent.toFixed(2)} A`, '#16a34a')}
+              {VALUE_TILE('R — Resistance', plan === 'r' || plan === 'both' ? 'the unknown push-back' : 'given · locked',
+                plan === 'r' || plan === 'both' ? planInput(pr, setPr, 'Ω') : `${cfg.rLocked} Ω`,
+                plan === 'r' || plan === 'both' ? unit.color : '#64748b')}
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <OhmTriangle />
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', marginTop: 4 }}>cover the unknown!</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+            <button onClick={checkPlan} style={BTN(unit.color)}>Check my math</button>
+            <div style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 800, color: '#64748b' }}>
+              I = V ÷ R &nbsp;·&nbsp; V = I × R &nbsp;·&nbsp; R = V ÷ I
+            </div>
+          </div>
+          {planWrong && (
+            <div style={{ marginTop: 12, fontSize: 13.5, color: '#92400e', background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: 10, padding: '10px 14px', lineHeight: 1.55 }}>
+              {planWrong}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Phase 2: dial in the plan and watch the meters agree ────────────────────
+  const METER: React.CSSProperties = {
+    background: '#0f172a', borderRadius: 12, padding: '10px 16px', textAlign: 'center', minWidth: 130,
+  };
+
+  const slider = (label: string, value: number, unitLabel: string, range: [number, number], step: number,
+    locked: number | undefined, onChange: (v: number) => void) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: '#374151' }}>{label}</span>
+        <span style={{ fontSize: 13, fontWeight: 900, color: locked !== undefined ? '#94a3b8' : unit.color }}>
+          {value} {unitLabel}{locked !== undefined && ' 🔒'}
+        </span>
+      </div>
+      {locked !== undefined ? (
+        <div style={{ fontSize: 11.5, color: '#94a3b8', fontWeight: 600 }}>Locked for this challenge — solve for the other dial!</div>
+      ) : (
+        <input type="range" min={range[0]} max={range[1]} step={step} value={value}
+          onChange={e => onChange(Number(e.target.value))} style={{ width: '100%', accentColor: unit.color }} />
+      )}
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ ...CARD, padding: 18, flex: '1 1 460px', minWidth: 380 }}>
+        <div style={{ display: 'flex', gap: 12, marginBottom: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div style={METER}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Ammeter — flow</div>
+            <div style={{ fontSize: 28, fontWeight: 900, color: onTarget ? '#4ade80' : '#fbbf24', fontFamily: 'monospace' }}>
+              {amps.toFixed(2)} A
+            </div>
+          </div>
+          <div style={METER}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#93c5fd', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Voltmeter — push</div>
+            <div style={{ fontSize: 28, fontWeight: 900, color: '#e2e8f0', fontFamily: 'monospace' }}>
+              {vAcross.toFixed(1)} V
+            </div>
+          </div>
+        </div>
+        <CircuitBoard parts={parts} result={result} interactive={false} allowSwitch={false} gridW={10} gridH={5} />
+      </div>
+      <div style={{ ...CARD, padding: 20, flex: '1 1 300px', minWidth: 280 }}>
+        {planned && (
+          <div style={{ background: '#f0fdf4', border: '2px solid #4ade80', borderRadius: 12, padding: '8px 14px', marginBottom: 12, fontSize: 13, fontWeight: 800, color: '#166534', textAlign: 'center' }}>
+            📋 Your plan: {planned.v !== undefined && `V = ${planned.v} V`}{planned.v !== undefined && planned.r !== undefined && ' · '}{planned.r !== undefined && `R = ${planned.r} Ω`} — now dial it in!
+          </div>
+        )}
+        <div style={{ background: `${unit.color}12`, border: `2px solid ${unit.color}`, borderRadius: 12, padding: '10px 14px', marginBottom: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px' }}>🎯 Target</div>
+          <div style={{ fontSize: 24, fontWeight: 900, color: '#1f2937', fontFamily: 'monospace' }}>{cfg.targetCurrent.toFixed(2)} A</div>
+          <div style={{ fontSize: 12.5, fontWeight: 800, color: onTarget ? '#16a34a' : amps < cfg.targetCurrent ? '#b45309' : '#dc2626' }}>
+            {onTarget ? '✓ Locked in!' : amps < cfg.targetCurrent - cfg.tolerance ? 'Too little current — more push or less push-back' : 'Too much current — less push or more push-back'}
+          </div>
+        </div>
+        {slider('Voltage dial (the push)', volts, 'V', cfg.vRange, cfg.vStep, cfg.vLocked, setVolts)}
+        {slider('Resistance dial (the push-back)', ohms, 'Ω', cfg.rRange, cfg.rStep, cfg.rLocked, setOhms)}
+        <div style={{ background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: 12, padding: '12px 14px', display: 'flex', gap: 16, alignItems: 'center', justifyContent: 'center' }}>
+          <OhmTriangle size={72} />
+          {/* show-your-work: every line keeps I on the left, same columns throughout */}
+          <div style={{ fontFamily: 'monospace', fontWeight: 800, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 16, color: '#1f2937' }}>I = V ÷ R</div>
+            <div style={{ fontSize: 16, color: '#92400e' }}>I = {volts} ÷ {ohms}</div>
+            <div style={{ fontSize: 16, color: '#16a34a' }}>I = {(volts / ohms).toFixed(2)} A</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Compute mode: Ohm's Law worksheet with meter confirmation (Unit 6) ───────
+
+function ComputeChallenge({ unit, ch, alreadySolved, onSolved }: {
+  unit: ElecUnit; ch: ElecChallenge; alreadySolved: boolean;
+  onSolved: (stars: number) => void;
+}) {
+  const rounds = ch.compute!;
+  const [idx, setIdx] = useState(0);
+  const [input, setInput] = useState('');
+  const [state, setState] = useState<'ask' | 'correct' | 'wrong'>('ask');
+  const [mistakes, setMistakes] = useState(0);
+  const solvedRef = useRef(alreadySolved);
+
+  const round = rounds[Math.min(idx, rounds.length - 1)];
+  const done = idx >= rounds.length;
+
+  const check = () => {
+    const val = Number(input);
+    if (!isFinite(val) || input.trim() === '') return;
+    if (Math.abs(val - round.answer) <= 0.011) {
+      setState('correct');
+    } else {
+      setState('wrong');
+      setMistakes(m => m + 1);
+    }
+  };
+
+  const next = () => {
+    const nextIdx = idx + 1;
+    setIdx(nextIdx);
+    setInput('');
+    setState('ask');
+    if (nextIdx >= rounds.length && !solvedRef.current) {
+      solvedRef.current = true;
+      onSolved(mistakes === 0 ? 3 : mistakes <= 2 ? 2 : 1);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start', maxWidth: 900 }}>
+      <div style={{ ...CARD, padding: '24px 28px', flex: '1 1 420px', minWidth: 360 }}>
+        {done ? (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 40 }}>🧮</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: '#1f2937' }}>Worksheet complete!</div>
+            <div style={{ fontSize: 13.5, color: '#64748b', marginTop: 4 }}>
+              {mistakes === 0 ? 'Every answer right the first time — the meters never disagreed with you once.' : 'The meters kept you honest — that is exactly what they are for.'}
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 800, color: unit.color, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
+              Problem {idx + 1} of {rounds.length}
+            </div>
+            <div style={{ fontSize: 15.5, fontWeight: 700, color: '#1f2937', lineHeight: 1.55, marginBottom: 16 }}>{round.prompt}</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+              <input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                value={input}
+                disabled={state === 'correct'}
+                onChange={e => { setInput(e.target.value); if (state === 'wrong') setState('ask'); }}
+                onKeyDown={e => { if (e.key === 'Enter' && state !== 'correct') check(); }}
+                placeholder="your answer"
+                style={{ flex: 1, maxWidth: 200, padding: '12px 14px', fontSize: 18, fontWeight: 800, fontFamily: 'monospace',
+                  border: `2px solid ${state === 'correct' ? '#22c55e' : state === 'wrong' ? '#ef4444' : '#cbd5e1'}`,
+                  borderRadius: 10, color: '#1f2937', background: '#fff' }}
+              />
+              <span style={{ fontSize: 18, fontWeight: 900, color: '#475569' }}>{round.unit}</span>
+              {state !== 'correct' ? (
+                <button onClick={check} style={BTN(unit.color)}>Check</button>
+              ) : (
+                <button onClick={next} style={BTN('#16a34a')}>{idx + 1 >= rounds.length ? 'Finish →' : 'Next →'}</button>
+              )}
+            </div>
+            {state === 'correct' && (
+              <div style={{ fontSize: 13.5, color: '#166534', background: '#f0fdf4', border: '2px solid #4ade80', borderRadius: 10, padding: '10px 14px', lineHeight: 1.55 }}>
+                ✓ {round.explain}
+              </div>
+            )}
+            {state === 'wrong' && (
+              <div style={{ fontSize: 13.5, color: '#92400e', background: '#fffbeb', border: '2px solid #f59e0b', borderRadius: 10, padding: '10px 14px', lineHeight: 1.55 }}>
+                Not quite — remember the three faces of Ohm&apos;s Law: I = V ÷ R, &nbsp;V = I × R, &nbsp;R = V ÷ I. Try again!
+              </div>
+            )}
+            <div style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>
+              The bench meters will confirm your answer — no guessing needed, just the law.
+            </div>
+          </>
+        )}
+      </div>
+      <div style={{ ...CARD, padding: '18px 20px', flex: '0 1 240px', minWidth: 210, textAlign: 'center' }}>
+        <div style={{ fontSize: 11, fontWeight: 800, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 8 }}>
+          Your helper
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center' }}><OhmTriangle /></div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: '#92400e', margin: '4px 0 10px' }}>cover the unknown!</div>
+        <div style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 14, color: '#374151', lineHeight: 1.7, textAlign: 'center' }}>
+          <div>I = V ÷ R</div>
+          <div>V = I × R</div>
+          <div>R = V ÷ I</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Quiz ─────────────────────────────────────────────────────────────────────
 
 function QuizView({ ui, onDone }: { ui: number; onDone: (score: number, total: number) => void }) {
@@ -1038,9 +1833,10 @@ function UnitComplete({ ui, score, total, onNext, onRetake, onBack }: {
             </button>
           ) : (
             <div style={{ background: '#f0fdf4', border: '2px solid #4ade80', borderRadius: 12, padding: 16, marginBottom: 12 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#16a34a' }}>⚡ You’re up to date!</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#16a34a' }}>🎓 Electronics Lab complete!</div>
               <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
-                More units are on the way — parallel circuits, switches, and the circuit detective are coming soon.
+                Circuits, series, parallel, switches, troubleshooting, Ohm&apos;s Law, and the breadboard — you built and understood every one.
+                Take what you know to a real breadboard: the workshop is wherever you are now.
               </div>
             </div>
           )}
@@ -1120,11 +1916,43 @@ export default function ElectronicsLabPage() {
     updateProgress(p => ({ ...p, savedWires: { ...p.savedWires, [chalKey(ui, ci)]: wires } }));
   }, [updateProgress]);
 
+  // Admin-only review resets: wipe one challenge (or one unit quiz) locally and
+  // in the cloud so a changed activity can be replayed from scratch.
+  const admin = isAdmin(session?.user?.role);
+  const [resetNonce, setResetNonce] = useState(0);
+
+  const resetChallenge = useCallback((ui: number, ci: number) => {
+    if (!window.confirm(`Reset your progress on Unit ${UNITS[ui].id}, Challenge ${ci + 1}? (Admin review only — clears completion, stars, and your saved build.)`)) return;
+    const key = chalKey(ui, ci);
+    updateProgress(p => {
+      const completedChallenges = { ...p.completedChallenges };
+      const stars = { ...p.stars };
+      const savedWires = { ...p.savedWires };
+      delete completedChallenges[key];
+      delete stars[key];
+      delete savedWires[key];
+      return { ...p, completedChallenges, stars, savedWires };
+    });
+    setResetNonce(n => n + 1);
+    if (userId) deleteCloudProgress(ui, ci);
+  }, [updateProgress, userId]);
+
+  const resetQuiz = useCallback((ui: number) => {
+    if (!window.confirm(`Reset your quiz result for Unit ${UNITS[ui].id}? (Admin review only — later units re-lock until you pass it again.)`)) return;
+    updateProgress(p => {
+      const completedUnits = { ...p.completedUnits };
+      delete completedUnits[ui];
+      return { ...p, completedUnits };
+    });
+    if (userId) deleteCloudProgress(ui, null);
+  }, [updateProgress, userId]);
+
   const lockedLevels = new Set(lockedChallenges.filter(lc => lc.challenge_idx === -1).map(lc => lc.level_idx));
 
   if (phase.tag === 'overview') {
     return <Overview progress={progress} assignedUnits={assignedUnits} lockedLevels={lockedLevels}
-      onSelect={ui => setPhase({ tag: 'intro', ui })} />;
+      onSelect={ui => setPhase({ tag: 'intro', ui })}
+      onResetQuiz={admin ? resetQuiz : undefined} />;
   }
 
   if (phase.tag === 'intro') {
@@ -1138,6 +1966,8 @@ export default function ElectronicsLabPage() {
     const unit = UNITS[ui];
     const ch = unit.challenges[ci];
     const key = chalKey(ui, ci);
+    // Bump on admin reset so the active challenge component remounts fresh.
+    const mountKey = `${key}:${resetNonce}`;
     const lockedCis = new Set(lockedChallenges.filter(lc => lc.level_idx === ui).map(lc => lc.challenge_idx));
     const isLocked = lockedCis.has(-1) || lockedCis.has(ci);
     const isLast = ci === unit.challenges.length - 1;
@@ -1169,28 +1999,41 @@ export default function ElectronicsLabPage() {
     return (
       <ChallengeShell unit={unit} ui={ui} ci={ci} progress={progress} lockedCis={lockedCis} banner={banner}
         onBack={() => setPhase({ tag: 'overview' })}
-        onJump={newCi => setPhase({ tag: 'challenge', ui, ci: newCi })}>
+        onJump={newCi => setPhase({ tag: 'challenge', ui, ci: newCi })}
+        onAdminReset={admin && solved ? () => resetChallenge(ui, ci) : undefined}>
         {ch.mode === 'build' && (
-          <BuildChallenge key={key} unit={unit} ch={ch}
+          <BuildChallenge key={mountKey} unit={unit} ch={ch}
             savedWires={progress.savedWires[key]}
             alreadySolved={solved}
             onSolved={(stars, wires) => handleSolve(ui, ci, stars, wires)}
             onWiresChange={wires => handleWiresChange(ui, ci, wires)} />
         )}
         {ch.mode === 'materials' && (
-          <MaterialsChallenge key={key} unit={unit} ch={ch} alreadySolved={solved}
+          <MaterialsChallenge key={mountKey} unit={unit} ch={ch} alreadySolved={solved}
             onSolved={stars => handleSolve(ui, ci, stars)} />
         )}
         {ch.mode === 'predict' && (
-          <PredictChallenge key={key} unit={unit} ch={ch} alreadySolved={solved}
+          <PredictChallenge key={mountKey} unit={unit} ch={ch} alreadySolved={solved}
             onSolved={stars => handleSolve(ui, ci, stars)} />
         )}
         {ch.mode === 'freebuild' && (
-          <FreeBuildChallenge key={key} unit={unit} ch={ch}
+          <FreeBuildChallenge key={mountKey} unit={unit} ch={ch}
             saved={progress.savedWires[key]}
             alreadySolved={solved}
             onSolved={(stars, parts) => handleSolve(ui, ci, stars, parts)}
             onSave={parts => handleWiresChange(ui, ci, parts)} />
+        )}
+        {ch.mode === 'detective' && (
+          <DetectiveChallenge key={mountKey} unit={unit} ch={ch} alreadySolved={solved}
+            onSolved={stars => handleSolve(ui, ci, stars)} />
+        )}
+        {ch.mode === 'meters' && (
+          <MetersChallenge key={mountKey} unit={unit} ch={ch} alreadySolved={solved}
+            onSolved={stars => handleSolve(ui, ci, stars)} />
+        )}
+        {ch.mode === 'compute' && (
+          <ComputeChallenge key={mountKey} unit={unit} ch={ch} alreadySolved={solved}
+            onSolved={stars => handleSolve(ui, ci, stars)} />
         )}
       </ChallengeShell>
     );
