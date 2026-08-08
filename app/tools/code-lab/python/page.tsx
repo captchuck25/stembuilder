@@ -8,7 +8,7 @@ import React, { useEffect, useRef, useState, useCallback, createContext, useCont
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import { getProfile } from "@/lib/profile";
-import { roleAtLeast } from "@/lib/roles";
+import { roleAtLeast, isAdmin } from "@/lib/roles";
 import { EditorView, basicSetup } from "codemirror";
 import { pythonLanguage } from "@codemirror/lang-python";
 import { CompletionContext, CompletionResult } from "@codemirror/autocomplete";
@@ -101,6 +101,13 @@ async function syncCodeToCloud(userId: string, li: number, ci: number, code: str
       saved_code: code,
     }),
   });
+}
+
+// Admin review helper: clear cloud rows — one challenge, the level quiz (ci=null),
+// or the entire level (ci="all": every challenge plus the quiz row).
+async function deleteCloudProgress(li: number, ci: number | null | "all") {
+  const chal = ci === "all" ? "all" : String(ci ?? -1);
+  await fetch(`/api/progress?tool=code-lab-python&level_idx=${li}&challenge_idx=${chal}`, { method: "DELETE" });
 }
 
 async function loadProgressFromCloud(_userId: string): Promise<Progress> {
@@ -734,7 +741,13 @@ const CARD: React.CSSProperties = { background:"#1a2540",border:"1px solid rgba(
 
 // ─── Overview screen ──────────────────────────────────────────────────────────
 
-function Overview({ progress, onSelect, isTeacher, lockedLevels }: { progress: Progress; onSelect: (li: number) => void; isTeacher: boolean; lockedLevels: Set<number> }) {
+function Overview({ progress, onSelect, isTeacher, lockedLevels, onResetQuiz, onResetLevel }: {
+  progress: Progress; onSelect: (li: number) => void; isTeacher: boolean; lockedLevels: Set<number>;
+  /** Present only for admins — renders a quiz-reset button on completed level cards. */
+  onResetQuiz?: (li: number) => void;
+  /** Present only for admins — renders a full-level reset button on any card with progress. */
+  onResetLevel?: (li: number) => void;
+}) {
   return (
     <SiteChrome>
       <div style={{maxWidth:900,margin:"0 auto",padding:"40px 32px"}}>
@@ -768,6 +781,26 @@ function Overview({ progress, onSelect, isTeacher, lockedLevels }: { progress: P
                   <div style={{width:`${pct}%`,height:"100%",background:lv.color,borderRadius:20,transition:"width 400ms ease"}}/>
                 </div>
                 <div style={{fontSize:11,color:"#64748b",marginTop:5}}>{done} / {total} challenges</div>
+                {(onResetQuiz || onResetLevel) && (
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+                    {onResetQuiz && progress.completedLevels[li] && (
+                      <button onClick={e => { e.stopPropagation(); onResetQuiz(li); }}
+                        title="Admin only: clear your quiz result for this level so you can retake it"
+                        style={{padding:"4px 10px",borderRadius:12,fontSize:11,fontWeight:700,
+                          background:"rgba(220,38,38,0.12)",color:"#f87171",border:"2px solid rgba(248,113,113,0.45)",cursor:"pointer"}}>
+                        ↺ Reset quiz (admin)
+                      </button>
+                    )}
+                    {onResetLevel && (done > 0 || progress.completedLevels[li]) && (
+                      <button onClick={e => { e.stopPropagation(); onResetLevel(li); }}
+                        title="Admin only: clear every challenge, saved code, and the quiz for this level so you can replay it from scratch"
+                        style={{padding:"4px 10px",borderRadius:12,fontSize:11,fontWeight:700,
+                          background:"rgba(220,38,38,0.12)",color:"#f87171",border:"2px solid rgba(248,113,113,0.45)",cursor:"pointer"}}>
+                        ↺ Reset level (admin)
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -913,12 +946,14 @@ function makePythonCompleter(liRef: React.MutableRefObject<number>) {
 
 function ChallengeView({
   li, ci, progress, lockedCis,
-  onSolve, onNext, onFinish, onBack, onJump,
+  onSolve, onNext, onFinish, onBack, onJump, onAdminReset,
 }: {
   li: number; ci: number; progress: Progress; lockedCis?: Set<number>;
   onSolve: (code: string) => void;
   onNext: (code: string) => void; onFinish: (code: string) => void;
   onBack: () => void; onJump: (ci: number, code: string) => void;
+  /** Present only for admins on a completed challenge — renders the review reset button. */
+  onAdminReset?: () => void;
 }) {
   const lv = LEVELS[li];
   const levelLocked = lockedCis?.has(-1) ?? false;
@@ -1148,6 +1183,13 @@ function ChallengeView({
           <span style={{color:"rgba(255,255,255,0.2)"}}>|</span>
           <span style={{fontSize:13,fontWeight:700,color:lv.color}}>Level {lv.id} — {lv.title}</span>
           <span style={{fontSize:13,color:"#64748b"}}>Challenge {ci+1} of {lv.challenges.length}</span>
+          {onAdminReset && (
+            <button onClick={onAdminReset} title="Admin only: clear your completion of this challenge so you can replay it"
+              style={{marginLeft:"auto",padding:"4px 12px",borderRadius:14,fontSize:12,fontWeight:700,
+                background:"rgba(220,38,38,0.12)",color:"#f87171",border:"2px solid rgba(248,113,113,0.45)",cursor:"pointer"}}>
+              ↺ Reset challenge (admin)
+            </button>
+          )}
         </div>
 
         {/* Level tabs — click any to jump to that challenge */}
@@ -1523,10 +1565,55 @@ export default function PythonMazePage() {
 
   const lockedLevels = new Set(lockedChallenges.filter(lc => lc.challenge_idx === -1).map(lc => lc.level_idx));
 
+  // Admin-only review resets: wipe one challenge (or one level quiz) locally
+  // and in the cloud so a changed activity can be replayed from scratch.
+  const admin = isAdmin(session?.user?.role);
+  const [resetNonce, setResetNonce] = useState(0);
+
+  function resetChallenge(li: number, ci: number) {
+    if (!window.confirm(`Reset your progress on Level ${LEVELS[li].id}, Challenge ${ci + 1}? (Admin review only — clears completion and your saved code.)`)) return;
+    const key = chalKey(li, ci);
+    const completedChallenges = { ...progressRef.current.completedChallenges };
+    const savedCode = { ...progressRef.current.savedCode };
+    delete completedChallenges[key];
+    delete savedCode[key];
+    updateProgress({ ...progressRef.current, completedChallenges, savedCode });
+    setResetNonce(n => n + 1);
+    if (userId) deleteCloudProgress(li, ci);
+  }
+
+  function resetQuiz(li: number) {
+    if (!window.confirm(`Reset your quiz result for Level ${LEVELS[li].id}? (Admin review only — later levels re-lock until you pass it again.)`)) return;
+    const completedLevels = { ...progressRef.current.completedLevels };
+    const quizScores = { ...(progressRef.current.quizScores ?? {}) };
+    delete completedLevels[li];
+    delete quizScores[li];
+    updateProgress({ ...progressRef.current, completedLevels, quizScores });
+    if (userId) deleteCloudProgress(li, null);
+  }
+
+  function resetLevel(li: number) {
+    if (!window.confirm(`Reset ALL progress on Level ${LEVELS[li].id} — every challenge, saved code, and the quiz? (Admin review only — the level replays from scratch.)`)) return;
+    const completedChallenges = { ...progressRef.current.completedChallenges };
+    const savedCode = { ...progressRef.current.savedCode };
+    LEVELS[li].challenges.forEach((_, ci) => {
+      delete completedChallenges[chalKey(li, ci)];
+      delete savedCode[chalKey(li, ci)];
+    });
+    const completedLevels = { ...progressRef.current.completedLevels };
+    const quizScores = { ...(progressRef.current.quizScores ?? {}) };
+    delete completedLevels[li];
+    delete quizScores[li];
+    updateProgress({ ...progressRef.current, completedChallenges, savedCode, completedLevels, quizScores });
+    setResetNonce(n => n + 1);
+    if (userId) deleteCloudProgress(li, "all");
+  }
+
   // Route to challenge
   let view: React.ReactNode = null;
   if (phase.tag === "overview") {
-    view = <Overview progress={progress} isTeacher={isTeacher} lockedLevels={lockedLevels} onSelect={li => setPhase({tag:"intro",li})}/>;
+    view = <Overview progress={progress} isTeacher={isTeacher} lockedLevels={lockedLevels} onSelect={li => setPhase({tag:"intro",li})}
+      onResetQuiz={admin ? resetQuiz : undefined} onResetLevel={admin ? resetLevel : undefined}/>;
   } else if (phase.tag === "intro") {
     view = <LevelIntro li={phase.li} onStart={() => {
       const li = phase.li;
@@ -1540,7 +1627,9 @@ export default function PythonMazePage() {
     const lockedCis = new Set(lockedChallenges.filter(lc => lc.level_idx === li).map(lc => lc.challenge_idx));
     view = (
       <ChallengeView
+        key={`cv:${resetNonce}`}
         li={li} ci={ci} progress={progress} lockedCis={lockedCis}
+        onAdminReset={admin && progress.completedChallenges[chalKey(li, ci)] ? () => resetChallenge(li, ci) : undefined}
         onSolve={(code) => markChallengeComplete(li, ci, code)}
         onNext={(code) => {
           markChallengeComplete(li, ci, code);

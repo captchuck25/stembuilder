@@ -92,10 +92,11 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ok: true })
 }
 
-// Admin-only review helper: reset ONE of the caller's own progress rows so a
-// changed challenge/quiz can be replayed from scratch. Soft-delete keeps the
-// row inside the standard 30-day retention flow; a later re-completion upserts
-// over it (POST always writes deleted_at: null).
+// Admin-only review helper: reset the caller's OWN progress rows so a changed
+// challenge/quiz can be replayed from scratch. challenge_idx is a number for a
+// single row (-1 = the level quiz) or 'all' for every row in the level.
+// Soft-delete keeps rows inside the standard 30-day retention flow; a later
+// re-completion upserts over them (POST always writes deleted_at: null).
 export async function DELETE(req: NextRequest) {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -105,20 +106,22 @@ export async function DELETE(req: NextRequest) {
   const levelRaw = req.nextUrl.searchParams.get('level_idx')
   const chalRaw = req.nextUrl.searchParams.get('challenge_idx')
   const level_idx = Number(levelRaw)
+  const wholeLevel = chalRaw === 'all'
   const challenge_idx = Number(chalRaw)
-  if (!tool || levelRaw === null || chalRaw === null || Number.isNaN(level_idx) || Number.isNaN(challenge_idx)) {
+  if (!tool || levelRaw === null || chalRaw === null || Number.isNaN(level_idx) || (!wholeLevel && Number.isNaN(challenge_idx))) {
     return NextResponse.json({ error: 'Missing tool/level_idx/challenge_idx' }, { status: 400 })
   }
 
   const db = adminDb()
-  const { error } = await db
+  let q = db
     .from('user_progress')
     .update({ deleted_at: new Date().toISOString() })
     .eq('user_id', session.user.id)
     .eq('tool', tool)
     .eq('level_idx', level_idx)
-    .eq('challenge_idx', challenge_idx)
     .is('deleted_at', null)
+  if (!wholeLevel) q = q.eq('challenge_idx', challenge_idx)
+  const { error } = await q
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }
