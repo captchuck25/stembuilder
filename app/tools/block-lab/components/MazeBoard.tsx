@@ -161,7 +161,7 @@ const MazeBoard = forwardRef<MazeBoardHandle, Props>(({ level, speed = 1, onWin,
               // On levels that teach functions, the par star also requires a
               // function to have actually RUN — a loop-only solve still wins,
               // it just isn't mastery (the banner explains what's missing).
-              const functionExpected = level.blockIds.includes('define_trick');
+              const functionExpected = (level.blockIds ?? []).includes('define_trick');
               const usedFunction = runtime.usedFunction;
               const parStar = blocksUsed <= level.par && (!functionExpected || usedFunction);
               const stars = 1 + (collectedAll ? 1 : 0) + (parStar ? 1 : 0);
