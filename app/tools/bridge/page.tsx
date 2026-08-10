@@ -140,6 +140,10 @@ function BridgeToolPage() {
   const [collapseActive, setCollapseActive] = useState<boolean>(false);
   const [, setCollapseFrame] = useState<number>(0);
   const shakeRef = useRef<{ start: number } | null>(null);
+  // After the wreck settles the view auto-returns to the upright analysis;
+  // this toggles back to the wreckage on demand.
+  const [wreckVisible, setWreckVisible] = useState<boolean>(true);
+  const wreckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showExportDialog, setShowExportDialog] = useState<boolean>(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [exportPrintIntent, setExportPrintIntent] = useState<"yes" | "no" | null>(null);
@@ -215,9 +219,14 @@ function BridgeToolPage() {
       cancelAnimationFrame(collapseRafRef.current);
       collapseRafRef.current = null;
     }
+    if (wreckTimerRef.current) {
+      clearTimeout(wreckTimerRef.current);
+      wreckTimerRef.current = null;
+    }
     collapseRef.current = null;
     shakeRef.current = null;
     setCollapseActive(false);
+    setWreckVisible(true);
   }
 
   function resetAnalysisState(cancelRunningTest = false) {
@@ -587,7 +596,7 @@ function BridgeToolPage() {
   // their simulated positions instead of the elastic-deflection positions.
   function getDisplayNodePosition(n: Node): { x: number; y: number } {
     const c = collapseRef.current;
-    if (c) {
+    if (c && wreckVisible) {
       const p = c.points.get(n.id);
       if (p) return { x: p.x, y: p.y };
     }
@@ -1831,6 +1840,12 @@ function BridgeToolPage() {
         sim.settled = true;
         setIsTesting(false);
         collapseRafRef.current = null;
+        // Hold the wreck a beat, then return to the upright stress analysis
+        // so the design remains studyable (toggle brings the wreck back).
+        wreckTimerRef.current = setTimeout(() => {
+          setWreckVisible(false);
+          wreckTimerRef.current = null;
+        }, 1600);
         return;
       }
       collapseRafRef.current = requestAnimationFrame(loop);
@@ -1845,6 +1860,7 @@ function BridgeToolPage() {
     setStressTestError("Run and pass the design inspection before stress testing.");
       return;
     }
+    clearCollapse();
     setStressTestResult(null);
     setStressTestError(null);
     setStressTestFrames(null);
@@ -3345,7 +3361,7 @@ function BridgeToolPage() {
           {/* Deck — sampled as a path so it bows with live deflection during
               the stress test (straight line when idle, same as before). */}
           {(() => {
-            const collapseSim = collapseRef.current;
+            const collapseSim = wreckVisible ? collapseRef.current : null;
             const collapsedRoadway = collapseSim
               ? nodes
                   .filter((nn) => Math.abs(nn.y - ROADWAY_Y) < 0.5)
@@ -3587,7 +3603,7 @@ function BridgeToolPage() {
 
               // Severed members during/after collapse: two dangling stubs.
               const collapseSim = collapseRef.current;
-              if (collapseSim && collapseSim.brokenIds.has(m.id)) {
+              if (collapseSim && wreckVisible && collapseSim.brokenIds.has(m.id)) {
                 const tipA = collapseSim.points.get(stubTipKey(m.id, "a"));
                 const tipB = collapseSim.points.get(stubTipKey(m.id, "b"));
                 const stubColor = getStressStroke(
@@ -3725,10 +3741,10 @@ function BridgeToolPage() {
           </g>
 
           {/* Stress test vehicle */}
-          {isTesting || collapseActive ? (
+          {isTesting || (collapseActive && wreckVisible) ? (
             <g pointerEvents="none">
               {(() => {
-                const sim = collapseRef.current;
+                const sim = wreckVisible ? collapseRef.current : null;
                 if (sim) {
                   // During collapse the truck is a simulated two-axle body.
                   const rear = sim.points.get(sim.truckA);
@@ -3768,7 +3784,7 @@ function BridgeToolPage() {
           ) : null}
 
           {/* Collapse splashes */}
-          {collapseRef.current && collapseRef.current.splashes.length > 0 ? (
+          {collapseRef.current && wreckVisible && collapseRef.current.splashes.length > 0 ? (
             <g pointerEvents="none">
               {collapseRef.current.splashes.map((sp, i) => {
                 const waterY = collapseRef.current?.waterY ?? 512;
@@ -4331,6 +4347,23 @@ function BridgeToolPage() {
                         >
                           Clear Stress Test
                         </button>
+                        {collapseActive && !isTesting ? (
+                          <button
+                            onClick={() => setWreckVisible((v) => !v)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #b8b8b8",
+                              background: "#ffffff",
+                              color: "#222",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              fontSize: 12,
+                            }}
+                          >
+                            {wreckVisible ? "Show Stress Analysis" : "Show Collapse"}
+                          </button>
+                        ) : null}
                         {isTesting ? (
                           <button
                             onClick={cancelStressTest}
