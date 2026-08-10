@@ -101,6 +101,21 @@ function fmtWindow(opensAt: string | null, closesAt: string | null): string {
   return "Always open";
 }
 
+interface ResultsData {
+  summary: { studentCount: number; avgBestPct: number; passRate: number; passThreshold: number };
+  students: { student_id: string; name: string; bestPct: number; attempts: number; last_at: string; passed: boolean }[];
+  questionStats: { idx: number; question: string; topic: string; difficulty: 1 | 2 | 3; answerText: string; missPct: number; wrongCount: number; commonWrong: string | null }[];
+}
+
+function downloadCSV(rows: string[][], filename: string) {
+  const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 const STATE_BADGE: Record<"upcoming" | "open" | "closed", { label: string; bg: string; fg: string }> = {
   upcoming: { label: "Upcoming", bg: "#eff6ff", fg: "#1d4ed8" },
   open: { label: "● Open now", bg: "#f0fdf4", fg: "#15803d" },
@@ -157,6 +172,11 @@ export default function QuizzesTab({ classId }: { classId: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftError, setDraftError] = useState("");
+
+  // ── Results (M4) ──
+  const [expandedAssignId, setExpandedAssignId] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, ResultsData>>({});
+  const [loadingResultsId, setLoadingResultsId] = useState<string | null>(null);
 
   // ── Assign modal ──
   const [assignQuiz, setAssignQuiz] = useState<QuizRow | null>(null);
@@ -401,6 +421,31 @@ export default function QuizzesTab({ classId }: { classId: string }) {
     } finally {
       setAssigning(false);
     }
+  }
+
+  async function toggleResults(a: AssignmentRow) {
+    if (expandedAssignId === a.id) { setExpandedAssignId(null); return; }
+    setExpandedAssignId(a.id);
+    if (!results[a.id]) {
+      setLoadingResultsId(a.id);
+      try {
+        const res = await fetch(`/api/teacher/quiz-results?assignmentId=${a.id}`);
+        const data = await res.json();
+        if (res.ok) setResults((prev) => ({ ...prev, [a.id]: data }));
+      } finally {
+        setLoadingResultsId(null);
+      }
+    }
+  }
+
+  function exportResultsCSV(a: AssignmentRow, r: ResultsData) {
+    downloadCSV(
+      [
+        ["Student", "Best %", "Passed", "Attempts", "Last taken"],
+        ...r.students.map((s) => [s.name, String(s.bestPct), s.passed ? "yes" : "no", String(s.attempts), new Date(s.last_at).toLocaleString()]),
+      ],
+      `${(a.quiz?.title ?? "quiz").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-results.csv`,
+    );
   }
 
   async function deleteAssignment(a: AssignmentRow) {
@@ -662,23 +707,124 @@ export default function QuizzesTab({ classId }: { classId: string }) {
               const st = windowState(a.opens_at, a.closes_at);
               const badge = STATE_BADGE[st];
               const labMeta = QUIZ_LABS.find((l) => l.id === a.quiz?.lab);
+              const expanded = expandedAssignId === a.id;
+              const r = results[a.id];
               return (
-                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-                  padding: "12px 16px", borderRadius: 12, border: "2px solid #e5e7eb", background: "#fafafa" }}>
-                  <span style={{ fontSize: 22 }}>{labMeta?.icon ?? "📝"}</span>
-                  <div style={{ flex: 1, minWidth: 180 }}>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
-                      {a.quiz?.title ?? "Quiz"}{a.quiz?.deleted_at && <span style={{ color: "#b91c1c", fontSize: 11 }}> (retired)</span>}
+                <div key={a.id} style={{ borderRadius: 12, border: `2px solid ${expanded ? ACCENT : "#e5e7eb"}`, background: "#fafafa" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px" }}>
+                    <span style={{ fontSize: 22 }}>{labMeta?.icon ?? "📝"}</span>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                        {a.quiz?.title ?? "Quiz"}{a.quiz?.deleted_at && <span style={{ color: "#b91c1c", fontSize: 11 }}> (retired)</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#666" }}>
+                        {a.quiz?.questionCount ?? "?"} questions · {fmtWindow(a.opens_at, a.closes_at)}
+                        {a.config.timerSeconds ? ` · ⏱ ${Math.round(a.config.timerSeconds / 60)} min` : ""}
+                        {` · ${a.config.attemptsAllowed} attempt${a.config.attemptsAllowed === 1 ? "" : "s"}`}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#666" }}>
-                      {a.quiz?.questionCount ?? "?"} questions · {fmtWindow(a.opens_at, a.closes_at)}
-                      {a.config.timerSeconds ? ` · ⏱ ${Math.round(a.config.timerSeconds / 60)} min` : ""}
-                      {` · ${a.config.attemptsAllowed} attempt${a.config.attemptsAllowed === 1 ? "" : "s"}`}
-                    </div>
+                    <span style={{ fontSize: 11.5, fontWeight: 800, color: badge.fg, background: badge.bg, borderRadius: 99, padding: "4px 12px" }}>{badge.label}</span>
+                    <span style={{ fontSize: 12, color: "#666", fontWeight: 700 }}>👤 {a.attemptStudentCount}</span>
+                    <button onClick={() => toggleResults(a)}
+                      style={{ ...BTN, padding: "6px 16px", fontSize: 12, background: expanded ? ACCENT : "#111", color: "#fff" }}>
+                      {expanded ? "Hide results" : "Results"}
+                    </button>
+                    <button onClick={() => deleteAssignment(a)} style={{ ...BTN, padding: "6px 14px", fontSize: 12, background: "#fef2f2", color: "#b91c1c" }}>Remove</button>
                   </div>
-                  <span style={{ fontSize: 11.5, fontWeight: 800, color: badge.fg, background: badge.bg, borderRadius: 99, padding: "4px 12px" }}>{badge.label}</span>
-                  <span style={{ fontSize: 12, color: "#666", fontWeight: 700 }}>👤 {a.attemptStudentCount}</span>
-                  <button onClick={() => deleteAssignment(a)} style={{ ...BTN, padding: "6px 14px", fontSize: 12, background: "#fef2f2", color: "#b91c1c" }}>Remove</button>
+
+                  {/* Results panel */}
+                  {expanded && (
+                    <div style={{ padding: "0 16px 16px", borderTop: "2px solid #eee" }}>
+                      {loadingResultsId === a.id && !r ? (
+                        <div style={{ textAlign: "center", color: "#888", padding: "18px 0", fontWeight: 700, fontSize: 13 }}>Loading results…</div>
+                      ) : !r ? (
+                        <div style={{ textAlign: "center", color: "#aaa", padding: "18px 0", fontSize: 13 }}>Couldn&apos;t load results.</div>
+                      ) : r.students.length === 0 ? (
+                        <div style={{ textAlign: "center", color: "#aaa", padding: "18px 0", fontSize: 13 }}>No attempts yet.</div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 14 }}>
+                          {/* Summary + export */}
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                            {[
+                              { label: "Students", value: String(r.summary.studentCount) },
+                              { label: "Class average", value: `${r.summary.avgBestPct}%` },
+                              { label: `Passed (≥${r.summary.passThreshold}%)`, value: `${r.summary.passRate}%` },
+                            ].map((chip) => (
+                              <div key={chip.label} style={{ background: "#fff", border: "2px solid #e5e7eb", borderRadius: 12, padding: "8px 16px" }}>
+                                <div style={{ fontSize: 10.5, fontWeight: 800, color: "#888", textTransform: "uppercase", letterSpacing: 0.5 }}>{chip.label}</div>
+                                <div style={{ fontSize: 18, fontWeight: 900, color: "#111" }}>{chip.value}</div>
+                              </div>
+                            ))}
+                            <div style={{ flex: 1 }} />
+                            <button onClick={() => exportResultsCSV(a, r)}
+                              style={{ ...BTN, padding: "7px 16px", fontSize: 12, background: "#f3f4f6", color: "#374151" }}>
+                              ⬇ CSV
+                            </button>
+                          </div>
+
+                          {/* Per-student table */}
+                          <div style={{ background: "#fff", borderRadius: 12, border: "2px solid #e5e7eb", overflow: "hidden" }}>
+                            <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+                              <thead>
+                                <tr style={{ background: "#f9fafb", textAlign: "left" }}>
+                                  {["Student", "Best", "Attempts", "Last taken", ""].map((h) => (
+                                    <th key={h} style={{ padding: "8px 14px", fontWeight: 800, fontSize: 11.5, color: "#555" }}>{h}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {r.students.map((s) => (
+                                  <tr key={s.student_id} style={{ borderTop: "1.5px solid #f3f4f6" }}>
+                                    <td style={{ padding: "8px 14px", fontWeight: 700, color: "#111" }}>{s.name}</td>
+                                    <td style={{ padding: "8px 14px", fontWeight: 900, color: s.passed ? "#15803d" : "#b45309" }}>{s.bestPct}%</td>
+                                    <td style={{ padding: "8px 14px", color: "#666" }}>{s.attempts}</td>
+                                    <td style={{ padding: "8px 14px", color: "#666" }}>
+                                      {new Date(s.last_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                                    </td>
+                                    <td style={{ padding: "8px 14px" }}>
+                                      {s.passed
+                                        ? <span style={{ fontSize: 11, fontWeight: 800, color: "#15803d" }}>✓ Passed</span>
+                                        : <span style={{ fontSize: 11, fontWeight: 800, color: "#b45309" }}>Below goal</span>}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+
+                          {/* Per-question miss rates (sorted hardest-first by the API) */}
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 900, color: "#111", marginBottom: 6 }}>
+                              Hardest questions <span style={{ color: "#888", fontWeight: 600 }}>(by each student&apos;s last attempt)</span>
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {r.questionStats.map((qs) => (
+                                <div key={qs.idx} style={{ display: "flex", alignItems: "center", gap: 12, background: "#fff",
+                                  border: `2px solid ${qs.missPct >= 50 ? "#fca5a5" : qs.missPct >= 25 ? "#fcd34d" : "#e5e7eb"}`,
+                                  borderRadius: 10, padding: "8px 14px" }}>
+                                  <div style={{ minWidth: 60, textAlign: "center" }}>
+                                    <div style={{ fontSize: 16, fontWeight: 900, color: qs.missPct >= 50 ? "#dc2626" : qs.missPct >= 25 ? "#b45309" : "#15803d" }}>
+                                      {qs.missPct}%
+                                    </div>
+                                    <div style={{ fontSize: 9.5, fontWeight: 800, color: "#999", textTransform: "uppercase" }}>missed</div>
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#111" }}>{qs.question}</div>
+                                    <div style={{ fontSize: 11.5, color: "#666", marginTop: 2 }}>
+                                      <span style={{ color: "#0369a1", fontWeight: 700 }}>{qs.topic}</span>
+                                      {" · answer: "}<span style={{ color: "#15803d", fontWeight: 700 }}>{qs.answerText}</span>
+                                      {qs.commonWrong && <>{" · most-picked wrong: "}<span style={{ color: "#b91c1c", fontWeight: 700 }}>{qs.commonWrong}</span></>}
+                                    </div>
+                                  </div>
+                                  <DiffChip d={qs.difficulty} />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
