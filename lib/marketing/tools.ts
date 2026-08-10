@@ -192,8 +192,6 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — building a first circuit (90 sec)",
     seoDescription:
       "Electronics Lab is a live circuit simulator for classrooms — students build circuits with batteries, bulbs, and switches, and progress from first circuits to breadboards and Ohm's Law.",
-    lessonPlanPitch:
-      "Teacher Pro and District plans include ready-to-teach lesson plans and projects — bringing circuit-building units and hands-on companion builds to entire classrooms, not just one student at a time.",
   },
   {
     slug: "measurement-lab",
