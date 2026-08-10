@@ -489,16 +489,22 @@ export function getStressStroke(force: number | null, utilization: number): stri
 
 // Live utilization gradient for members that are still holding: neutral gray at
 // 0% utilization ramping toward the sign hue (red = compression, blue = tension).
-// At 100% it lands exactly on getStressStroke(force, 1), so a member that tips
-// into failure keeps the same color it was trending toward.
+// The ramp routes through a brighter mid-stop — a straight gray-to-red lerp
+// muddies into maroon around 60-90%, exactly where the "almost failing" signal
+// matters most. At 100% it lands on getStressStroke(force, 1), so a member that
+// tips into failure keeps the color it was trending toward.
 export function getUtilizationStroke(force: number | null, utilization: number): string {
   if (force === null) return "#666";
   const t = Math.max(0, Math.min(1, utilization));
-  const target: [number, number, number] = force >= 0 ? [220, 52, 52] : [52, 112, 220];
   const gray: [number, number, number] = [102, 102, 102];
-  const r = Math.round(gray[0] + (target[0] - gray[0]) * t);
-  const g = Math.round(gray[1] + (target[1] - gray[1]) * t);
-  const b = Math.round(gray[2] + (target[2] - gray[2]) * t);
+  const mid: [number, number, number] = force >= 0 ? [214, 122, 100] : [116, 152, 214];
+  const full: [number, number, number] = force >= 0 ? [220, 52, 52] : [52, 112, 220];
+  const from = t < 0.5 ? gray : mid;
+  const to = t < 0.5 ? mid : full;
+  const k = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+  const r = Math.round(from[0] + (to[0] - from[0]) * k);
+  const g = Math.round(from[1] + (to[1] - from[1]) * k);
+  const b = Math.round(from[2] + (to[2] - from[2]) * k);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
