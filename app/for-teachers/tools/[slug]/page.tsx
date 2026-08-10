@@ -8,6 +8,7 @@ import {
   FLAGSHIP_CALLOUT,
 } from "@/lib/marketing/tools";
 import { MediaSlot } from "../../components/ui";
+import GalleryImage from "../../components/GalleryImage";
 import styles from "../../marketing.module.css";
 
 // One detail page per tool, generated from the shared tool list —
@@ -137,19 +138,7 @@ export default async function ToolDetailPage(
           <div className={styles.grid3} style={{ marginTop: 24 }}>
             {tool.gallery.map((item) =>
               item.src ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  key={item.label}
-                  src={item.src}
-                  alt={item.label}
-                  style={{
-                    width: "100%",
-                    height: "auto",
-                    borderRadius: 12,
-                    border: "1px solid #e5e7eb",
-                    display: "block",
-                  }}
-                />
+                <GalleryImage key={item.label} src={item.src} alt={item.label} />
               ) : (
                 <MediaSlot key={item.label} label={item.label} />
               )
