@@ -3482,12 +3482,23 @@ function BridgeToolPage() {
             <g pointerEvents="none">
               {(() => {
                 const vehicleX = minX + testProgress * (maxX - minX);
-                const vehicleY =
+                const deckSurfaceYAt = (xx: number) =>
                   deckY -
                   18 +
-                  getGlobalBridgeBowAtX(vehicleX) +
-                  getLiveDeckDeflectionAtX(vehicleX);
-                return renderVehicle(getVehicleType(loadLb), vehicleX, vehicleY);
+                  getGlobalBridgeBowAtX(xx) +
+                  getLiveDeckDeflectionAtX(xx);
+                const vehicleY = deckSurfaceYAt(vehicleX);
+                // Pitch follows the deck: sample under front and rear axles.
+                const axleHalf = 34;
+                const yFront = deckSurfaceYAt(vehicleX + axleHalf);
+                const yRear = deckSurfaceYAt(vehicleX - axleHalf);
+                const pitchRaw =
+                  (Math.atan2(yFront - yRear, axleHalf * 2) * 180) / Math.PI;
+                const pitchDeg = Math.max(-14, Math.min(14, pitchRaw));
+                return renderVehicle(getVehicleType(loadLb), vehicleX, vehicleY, {
+                  pitchDeg,
+                  travel: vehicleX - minX,
+                });
               })()}
             </g>
           ) : null}
