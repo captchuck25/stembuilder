@@ -78,14 +78,14 @@ export const TOOLS: MarketingTool[] = [
     subtitle: "Home Designer",
     flagship: true,
     tagline:
-      "Design homes and floor plans to scale — walls, dimensions, roofs, even a 3D walkthrough — with real architectural thinking and none of the weeks-long CAD ramp-up.",
+      "Floor plan design to full architectural drawing sets — walls, sections, rooflines, elevations, even a 3D walkthrough — real architectural design from day one.",
     toolHref: "/tools/blueprint-lab",
     image: "/ui/blueprint_lab.png",
     gradeBand: "Grades 5–12",
     subjects: ["Engineering", "Math", "Design"],
     description: [
-      "Blueprint Lab is a to-scale home design studio in the browser. Students draw real floor plans — walls, doors, windows, dimensions — then walk through their design in 3D, generate elevation drawings, and see how a roof fits their footprint. It teaches genuine architectural thinking: scale, dimensioning, and spatial reasoning.",
-      "Professional CAD takes weeks of training before a student can confidently draw a wall. Blueprint Lab flips that: drawing is immediate, and precision comes built in — every dimension is measurement-exact, and finished plans can even be exported as CAD files.",
+      "Blueprint Lab is a to-scale home design studio in the browser. Students draw real floor plans — placing interior walls, doors, windows, closets, even furnishings. From there, they're guided through the rest of the process with ease: sections, elevations, rooflines, and a 3D walkthrough, generated from their plan, resulting in a full set of architectural drawings. It teaches genuine architectural thinking: scale, dimensioning, and spatial reasoning.",
+      "Drawing is immediate — true architectural thinking and experience from the start. Precision comes built in: every dimension is measurement-exact.",
     ],
     classroomUse: [
       "The classic: a Design-a-Tiny-Home challenge with a square-footage budget — area, perimeter, and proportional reasoning disguised as fun.",
@@ -100,7 +100,7 @@ export const TOOLS: MarketingTool[] = [
     ],
     demoVideo: "Demo video — drawing a small home to scale (2 min)",
     seoDescription:
-      "Blueprint Lab lets students design homes and floor plans to scale in the browser — walls, dimensions, roofs, and a 3D walkthrough — with none of the CAD learning curve.",
+      "Blueprint Lab takes students from floor plan design to full architectural drawing sets in the browser — walls, sections, rooflines, elevations, and a 3D walkthrough — real architectural design from day one.",
     lessonPlanHook: "to-scale architectural design projects",
   },
   {
