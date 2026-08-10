@@ -51,6 +51,27 @@ interface MeasurementAssignment {
   passed: boolean;
 }
 
+interface QuizAssignmentRow {
+  id: string;
+  class_id: string;
+  title: string;
+  lab: string | null;
+  questionCount: number;
+  opens_at: string | null;
+  closes_at: string | null;
+  state: "upcoming" | "open" | "closed";
+  config: { attemptsAllowed: number; timerSeconds: number | null; passThreshold: number };
+  bestPct: number | null;
+  attemptCount: number;
+  passed: boolean;
+}
+
+const QUIZ_LAB_ICONS: Record<string, string> = {
+  "electronics-lab": "💡",
+  "block-lab": "🧩",
+  "code-lab-python": "🐍",
+};
+
 const MEAS_TOOL_LABELS: Record<string, string> = {
   "ruler": "Ruler",
   "dial-caliper": "Dial Caliper",
@@ -67,6 +88,7 @@ export default function StudentDashboard() {
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [measAssignments, setMeasAssignments] = useState<MeasurementAssignment[]>([]);
+  const [quizAssignments, setQuizAssignments] = useState<QuizAssignmentRow[]>([]);
   const [progressMap, setProgressMap] = useState<ProgressMap>({});
   // challenge_ids the student has a turtle_submissions row for — used to show
   // a "Complete" badge on assigned turtle items.
@@ -91,16 +113,18 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes, measRes, progressRes, turtleRes] = await Promise.all([
+    const [classRes, bridgeRes, measRes, quizRes, progressRes, turtleRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
       fetch("/api/student/measurement-assignments"),
+      fetch("/api/student/quiz-assignments"),
       fetch("/api/student/my-progress"),
       fetch("/api/turtle"),
     ]);
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
     setMeasAssignments(measRes.ok ? await measRes.json() : []);
+    setQuizAssignments(quizRes.ok ? await quizRes.json() : []);
     if (turtleRes.ok) {
       const subs: Array<{ challenge_id: string }> = await turtleRes.json();
       setTurtleCompletedIds(new Set(subs.map(s => s.challenge_id)));
@@ -240,8 +264,9 @@ export default function StudentDashboard() {
               {enrolledClasses.map(({ class: cls, assignments, turtleAssignedIds }) => {
                 const classBridgeAssignments = bridgeAssignments.filter(b => b.class_id === cls.id);
                 const classMeasAssignments = measAssignments.filter(m => m.class_id === cls.id);
+                const classQuizAssignments = quizAssignments.filter(q => q.class_id === cls.id);
                 const turtleIds = turtleAssignedIds ?? [];
-                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + turtleIds.length;
+                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + classQuizAssignments.length + turtleIds.length;
                 return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
@@ -451,6 +476,56 @@ export default function StudentDashboard() {
                                 </div>
                               </Link>
                             ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Quiz Assignments */}
+                      {classQuizAssignments.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#9333ea",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            📝 Quizzes
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {classQuizAssignments.map(q => {
+                              const closed = q.state === "closed";
+                              const upcoming = q.state === "upcoming";
+                              return (
+                                <Link key={q.id} href={`/student/quiz/${q.id}`} style={{ textDecoration: "none" }}>
+                                  <div style={{ padding: "14px 20px", borderRadius: 14,
+                                    background: q.passed ? "linear-gradient(135deg, #dcfce722, #dcfce744)" : "linear-gradient(135deg, #f3e8ff22, #e9d5ff44)",
+                                    border: `2px solid ${q.passed ? "#16a34a" : closed || upcoming ? "#d1d5db" : "#9333ea"}`,
+                                    opacity: upcoming ? 0.75 : 1,
+                                    display: "flex", alignItems: "center", gap: 10 }}>
+                                    <div style={{ fontSize: 22 }}>{QUIZ_LAB_ICONS[q.lab ?? ""] ?? "📝"}</div>
+                                    <div>
+                                      <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>{q.title}</div>
+                                      <div style={{ fontSize: 12, color: "#555" }}>
+                                        {q.questionCount} questions · goal {q.config.passThreshold}%
+                                        {q.config.timerSeconds ? ` · ⏱ ${Math.round(q.config.timerSeconds / 60)} min` : ""}
+                                      </div>
+                                      {q.passed ? (
+                                        <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>
+                                          ✓ Passed ({q.bestPct}%)
+                                        </div>
+                                      ) : q.attemptCount > 0 ? (
+                                        <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 2 }}>
+                                          Best {q.bestPct}% · {q.attemptCount} {q.attemptCount === 1 ? "try" : "tries"}
+                                        </div>
+                                      ) : upcoming ? (
+                                        <div style={{ fontSize: 11, color: "#1d4ed8", fontWeight: 700, marginTop: 2 }}>
+                                          🕐 Opens {q.opens_at ? new Date(q.opens_at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "soon"}
+                                        </div>
+                                      ) : closed ? (
+                                        <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 700, marginTop: 2 }}>Closed</div>
+                                      ) : (
+                                        <div style={{ fontSize: 11, color: "#9333ea", fontWeight: 700, marginTop: 2 }}>● Open now — tap to take it</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </Link>
+                              );
+                            })}
                           </div>
                         </div>
                       )}

@@ -79,6 +79,13 @@ export interface PlanUsage {
    * free Pro TRIAL deliberately excludes it — Pro caps, no curriculum.
    */
   includesCurriculum: boolean;
+  /**
+   * Quiz Builder access: paid Pro, institutional, AND the free Pro trial —
+   * unlike curriculum, the trial deliberately includes it (experiencing the
+   * workflow + accumulating a question bank is the conversion pressure).
+   * Free teachers see no Quizzes tab at all; API routes 403 on this flag.
+   */
+  includesQuizBuilder: boolean;
 }
 
 export function buildUsage(args: {
@@ -103,5 +110,6 @@ export function buildUsage(args: {
     trialEndsAt: args.proTrialEndsAt,
     overageBlocks: args.overageBlocks,
     includesCurriculum: args.institutional || effective === "pro",
+    includesQuizBuilder: args.institutional || effective === "pro" || effective === "pro_trial",
   };
 }

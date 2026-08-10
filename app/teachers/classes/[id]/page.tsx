@@ -14,6 +14,7 @@ import { fetchTurtleSubmissionsForStudents, approveTurtleSubmission, fetchTurtle
 import { renderBotPortrait } from "@/app/tools/arcade-lab/engine/render";
 import { defaultBot, sanitizeBot } from "@/app/tools/arcade-lab/engine/bot";
 import SiteHeader from "@/app/components/SiteHeader";
+import QuizzesTab from "./QuizzesTab";
 import { TOOL_META, LeaderboardBoards, type LeaderboardData as MeasLeaderboardData, type MeasTool } from "@/app/tools/measurement-lab/shared";
 import { type AssignmentConfig as MeasAssignmentConfig } from "@/app/tools/measurement-lab/constants";
 
@@ -143,7 +144,10 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch" | "measurement">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch" | "measurement" | "quizzes">("code-lab");
+  // Quiz Builder is pro/trial/district only: free teachers get NO tab (not a
+  // locked teaser). The API routes independently re-check the plan.
+  const [quizBuilderAllowed, setQuizBuilderAllowed] = useState(false);
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
   const [turtleAssigned, setTurtleAssigned] = useState<Set<string>>(new Set());
   const [turtleAssignSaving, setTurtleAssignSaving] = useState<string | null>(null);
@@ -255,6 +259,14 @@ export default function ClassDetailPage() {
   const [multiAssignModal, setMultiAssignModal] = useState<{ tool: string; levelId: number } | null>(null);
   const [multiAssignSelected, setMultiAssignSelected] = useState<Set<string>>(new Set());
   const [multiAssigning, setMultiAssigning] = useState(false);
+
+  // Plan gate for the Quizzes tab (pro / pro_trial / district).
+  useEffect(() => {
+    fetch("/api/teacher/plan")
+      .then(r => (r.ok ? r.json() : null))
+      .then(usage => { if (usage?.includesQuizBuilder) setQuizBuilderAllowed(true); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -1861,7 +1873,8 @@ export default function ClassDetailPage() {
               { id: "turtle"     as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
               { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
               { id: "measurement" as const, label: "Measurement Lab",  icon: "📏", color: "#0d9488", desc: "Precision measuring games" },
-            ] as const).map(tool => {
+              { id: "quizzes"     as const, label: "Quizzes",          icon: "📝", color: "#9333ea", desc: "Build & assign quizzes" },
+            ] as const).filter(tool => tool.id !== "quizzes" || quizBuilderAllowed).map(tool => {
               const active = selectedTool === tool.id;
               return (
                 <div key={tool.id} onClick={() => setSelectedTool(tool.id)}
@@ -2926,6 +2939,9 @@ export default function ClassDetailPage() {
               )}
             </div>
           )}
+
+          {/* ── Quizzes panel (pro/trial/district only — tab hidden otherwise) ─────── */}
+          {selectedTool === "quizzes" && <QuizzesTab classId={classId} />}
 
           {/* ── STEM Sketch panel ──────────────────────────────────────────────────── */}
           {/* ── Arcade Lab panel ───────────────────────────────────────────────────── */}

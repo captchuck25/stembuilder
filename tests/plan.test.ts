@@ -151,6 +151,47 @@ describe("curriculum access — paid Pro and institutional only", () => {
   });
 });
 
+describe("quiz builder access — Pro, institutional, AND the trial", () => {
+  const base = {
+    plan: "free" as const,
+    proTrialStartedAt: null,
+    proTrialEndsAt: null,
+    overageBlocks: 0,
+    institutional: false,
+    count: 0,
+    now: NOW,
+  };
+
+  it("free has no quiz builder", () => {
+    expect(buildUsage(base).includesQuizBuilder).toBe(false);
+  });
+  it("the free Pro TRIAL includes the quiz builder (unlike curriculum)", () => {
+    const u = buildUsage({
+      ...base,
+      plan: "pro_trial",
+      proTrialStartedAt: "2026-08-01T00:00:00Z",
+      proTrialEndsAt: "2027-06-30T23:59:59Z",
+    });
+    expect(u.includesQuizBuilder).toBe(true);
+    expect(u.includesCurriculum).toBe(false);
+  });
+  it("an EXPIRED trial loses the quiz builder", () => {
+    const u = buildUsage({
+      ...base,
+      plan: "pro_trial",
+      proTrialStartedAt: "2026-01-10T00:00:00Z",
+      proTrialEndsAt: "2026-06-30T23:59:59Z",
+    });
+    expect(u.includesQuizBuilder).toBe(false);
+  });
+  it("paid Pro includes the quiz builder", () => {
+    expect(buildUsage({ ...base, plan: "pro" }).includesQuizBuilder).toBe(true);
+  });
+  it("institutional includes the quiz builder", () => {
+    expect(buildUsage({ ...base, institutional: true }).includesQuizBuilder).toBe(true);
+  });
+});
+
 describe("cap error plumbing", () => {
   it("the student-facing refusal is the spec'd message", () => {
     expect(STUDENT_JOIN_BLOCKED_MESSAGE).toBe("This class is full — ask your teacher.");
