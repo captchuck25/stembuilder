@@ -41,7 +41,7 @@ export default function GalleryImage({ src, alt }: { src: string; alt: string })
 
       <dialog
         ref={dialogRef}
-        className={`${styles.dialog} ${styles.dialogWide}`}
+        className={`${styles.dialog} ${styles.lightbox}`}
         aria-label={alt}
         onClick={(e) => {
           if (e.target === dialogRef.current) dialogRef.current?.close();
@@ -59,7 +59,14 @@ export default function GalleryImage({ src, alt }: { src: string; alt: string })
         <img
           src={src}
           alt={alt}
-          style={{ width: "100%", height: "auto", display: "block", borderRadius: 8 }}
+          style={{
+            width: "100%",
+            height: "auto",
+            maxHeight: "88vh",
+            objectFit: "contain",
+            display: "block",
+            borderRadius: 8,
+          }}
         />
       </dialog>
     </>

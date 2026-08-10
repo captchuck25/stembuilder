@@ -461,6 +461,13 @@
   max-width: min(980px, 94vw);
 }
 
+/* Image lightbox: restore native centering (global reset zeroes dialog
+   margins, pinning it top-left) and let the image use most of the screen. */
+.lightbox {
+  margin: auto;
+  max-width: min(1500px, 96vw);
+}
+
 .dialog::backdrop {
   background: rgba(0, 0, 0, 0.55);
 }
