@@ -3173,34 +3173,52 @@ function BridgeToolPage() {
             </>
           ) : null}
 
-          {/* Deck */}
-          <rect
-            x={supportA.x}
-            y={supportA.y - 5}
-            width={supportB.x - supportA.x}
-            height={10}
-            fill="#e2e5e8"
-            opacity={0.35}
-          />
-          <line
-            x1={supportA.x}
-            y1={supportA.y - 9}
-            x2={supportB.x}
-            y2={supportB.y - 9}
-            stroke="white"
-            strokeWidth={1.5}
-            opacity={0.35}
-          />
-          <line
-            x1={supportA.x}
-            y1={supportA.y}
-            x2={supportB.x}
-            y2={supportB.y}
-            stroke="#f7d36a"
-            strokeWidth={1.4}
-            strokeDasharray="8 10"
-            opacity={0.6}
-          />
+          {/* Deck — sampled as a path so it bows with live deflection during
+              the stress test (straight line when idle, same as before). */}
+          {(() => {
+            const deckPathAt = (yOffset: number): string => {
+              const steps = 48;
+              const x0 = supportA.x;
+              const x1 = supportB.x;
+              const parts: string[] = [];
+              for (let i = 0; i <= steps; i += 1) {
+                const xx = x0 + ((x1 - x0) * i) / steps;
+                const yy =
+                  supportA.y +
+                  yOffset +
+                  getGlobalBridgeBowAtX(xx) +
+                  getLiveDeckDeflectionAtX(xx);
+                parts.push(`${i === 0 ? "M" : "L"} ${xx} ${yy}`);
+              }
+              return parts.join(" ");
+            };
+            return (
+              <>
+                <path
+                  d={deckPathAt(0)}
+                  stroke="#e2e5e8"
+                  strokeWidth={10}
+                  fill="none"
+                  opacity={0.35}
+                />
+                <path
+                  d={deckPathAt(-9)}
+                  stroke="white"
+                  strokeWidth={1.5}
+                  fill="none"
+                  opacity={0.35}
+                />
+                <path
+                  d={deckPathAt(0)}
+                  stroke="#f7d36a"
+                  strokeWidth={1.4}
+                  strokeDasharray="8 10"
+                  fill="none"
+                  opacity={0.6}
+                />
+              </>
+            );
+          })()}
           <line
             x1={minX}
             y1={supportA.y}

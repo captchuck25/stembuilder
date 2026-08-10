@@ -30,7 +30,8 @@ type WheelProps = {
   spin: number;
 };
 
-// Concentric wheel with spokes between hub and rim so rotation is visible.
+// Concentric wheel with bold spokes and an offset lug dot so rotation reads
+// even at the small on-screen scale vehicles render at.
 function Wheel({ cx, cy, rings, spin }: WheelProps) {
   const [tire, rim, hub, cap] = rings;
   return (
@@ -45,19 +46,13 @@ function Wheel({ cx, cy, rings, spin }: WheelProps) {
           x2={rim * 0.95}
           y2={0}
           transform={`rotate(${a})`}
-          stroke="#454545"
-          strokeWidth={tire * 0.14}
+          stroke="#2b2b2b"
+          strokeWidth={tire * 0.24}
         />
       ))}
       <circle r={hub} fill="#b8b8b8" />
-      <line
-        x1={-hub * 0.9}
-        y1={0}
-        x2={hub * 0.9}
-        y2={0}
-        stroke="#8f8f8f"
-        strokeWidth={tire * 0.1}
-      />
+      {/* offset lug dot — the strongest rotation cue */}
+      <circle cx={rim * 0.6} cy={0} r={tire * 0.14} fill="#e9e9e9" />
       <circle r={cap} fill="#e6e6e6" />
     </g>
   );
