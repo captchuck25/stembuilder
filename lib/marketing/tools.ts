@@ -220,8 +220,6 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — a measurement sprint (60 sec)",
     seoDescription:
       "Measurement Lab builds measuring fluency with instant feedback, timed sprints, and class leaderboards — hands-on practice with rulers, scale, and precision.",
-    lessonPlanPitch:
-      "Teacher Pro and District plans include ready-to-teach lesson plans and projects — bringing measurement sprints and precision practice to entire classrooms, not just one student at a time.",
   },
 ];
 
