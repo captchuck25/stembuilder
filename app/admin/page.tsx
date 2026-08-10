@@ -23,7 +23,11 @@ interface Stats {
   recentUsers: { name: string; email: string; role: string; created_at: string }[];
 }
 
-interface TeacherRow { id: string; name: string; email: string; created_at: string; classCount: number }
+type PlanId = "free" | "pro" | "pro_trial";
+interface TeacherRow {
+  id: string; name: string; email: string; created_at: string; classCount: number;
+  plan: PlanId; effectivePlan: PlanId; trialEndsAt: string | null; institutional: boolean;
+}
 interface StudentRow { id: string; name: string; email: string; created_at: string; enrollmentCount: number }
 interface ClassRow { id: string; name: string; join_code: string; teacherName: string; teacherEmail: string; studentCount: number; created_at: string }
 
@@ -50,6 +54,7 @@ export default function AdminPage() {
   const [classes, setClasses] = useState<ClassRow[] | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [planBusyId, setPlanBusyId] = useState<string | null>(null);
 
   async function loadStats() {
     const r = await fetch("/api/admin/stats");
@@ -110,6 +115,32 @@ export default function AdminPage() {
       if (kind === "teacher") setClasses(null);
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function grantTrial(t: TeacherRow) {
+    if (!confirm(`Give ${t.name} (${t.email}) a free Pro trial?\n\nThey get Pro-level access (125-student cap + Quiz Builder) until the end of the school year.`)) return;
+    setPlanBusyId(t.id);
+    try {
+      const r = await fetch(`/api/admin/users/${t.id}/trial`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) { alert(`Could not grant trial: ${d.error ?? r.statusText}`); return; }
+      setTeachers(prev => prev?.map(x => x.id === t.id ? { ...x, ...d } : x) ?? null);
+    } finally {
+      setPlanBusyId(null);
+    }
+  }
+
+  async function endTrial(t: TeacherRow) {
+    if (!confirm(`End ${t.name}'s Pro trial now?\n\nThey go back to the Free plan (50-student cap) immediately.`)) return;
+    setPlanBusyId(t.id);
+    try {
+      const r = await fetch(`/api/admin/users/${t.id}/trial`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) { alert(`Could not end trial: ${d.error ?? r.statusText}`); return; }
+      setTeachers(prev => prev?.map(x => x.id === t.id ? { ...x, ...d } : x) ?? null);
+    } finally {
+      setPlanBusyId(null);
     }
   }
 
@@ -241,6 +272,9 @@ export default function AdminPage() {
                   kind="teacher"
                   deletingId={deletingId}
                   onDelete={(u) => deleteUser(u, "teacher")}
+                  planBusyId={planBusyId}
+                  onGrantTrial={grantTrial}
+                  onEndTrial={endTrial}
                 />
               ) : panel === "students" ? (
                 <UserList
@@ -330,13 +364,27 @@ export default function AdminPage() {
   );
 }
 
+function planBadge(t: TeacherRow): { label: string; bg: string; fg: string } {
+  if (t.institutional) return { label: "District", bg: "#dbeafe", fg: "#1d4ed8" };
+  if (t.effectivePlan === "pro") return { label: "Pro", bg: "#dcfce7", fg: "#16a34a" };
+  if (t.effectivePlan === "pro_trial") {
+    const ends = t.trialEndsAt ? ` · ends ${new Date(t.trialEndsAt).toLocaleDateString()}` : "";
+    return { label: `Pro Trial${ends}`, bg: "#fef3c7", fg: "#b45309" };
+  }
+  if (t.plan === "pro_trial") return { label: "Free · trial ended", bg: "#f3f4f6", fg: "#6b7280" };
+  return { label: "Free", bg: "#f3f4f6", fg: "#6b7280" };
+}
+
 function UserList<T extends { id: string; name: string; email: string; created_at: string }>({
-  rows, kind, deletingId, onDelete,
+  rows, kind, deletingId, onDelete, planBusyId, onGrantTrial, onEndTrial,
 }: {
   rows: T[];
   kind: "teacher" | "student";
   deletingId: string | null;
   onDelete: (u: T) => void;
+  planBusyId?: string | null;
+  onGrantTrial?: (t: TeacherRow) => void;
+  onEndTrial?: (t: TeacherRow) => void;
 }) {
   if (rows.length === 0) {
     return <div style={{ fontSize: 13, color: "#aaa", padding: "16px 0" }}>No {kind}s found.</div>;
@@ -352,6 +400,10 @@ function UserList<T extends { id: string; name: string; email: string; created_a
           ? `${meta.classCount ?? 0} class${(meta.classCount ?? 0) === 1 ? "" : "es"}`
           : `${meta.enrollmentCount ?? 0} enrollment${(meta.enrollmentCount ?? 0) === 1 ? "" : "s"}`;
         const isDeleting = deletingId === u.id;
+        const teacher = kind === "teacher" && (u as unknown as TeacherRow).plan
+          ? (u as unknown as TeacherRow) : null;
+        const badge = teacher ? planBadge(teacher) : null;
+        const planBusy = planBusyId === u.id;
         return (
           <div key={u.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "10px 12px", borderRadius: 10, background: "#f9f9f9", border: "1px solid #eee", gap: 12 }}>
@@ -359,6 +411,12 @@ function UserList<T extends { id: string; name: string; email: string; created_a
               <div style={{ fontSize: 14, fontWeight: 700, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
               <div style={{ fontSize: 11, color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email}</div>
             </div>
+            {badge && (
+              <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                background: badge.bg, color: badge.fg, whiteSpace: "nowrap" }}>
+                {badge.label}
+              </span>
+            )}
             <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
               background: accentBg, color: accent, whiteSpace: "nowrap" }}>
               {right}
@@ -366,6 +424,28 @@ function UserList<T extends { id: string; name: string; email: string; created_a
             <span style={{ fontSize: 11, color: "#aaa", whiteSpace: "nowrap" }}>
               {new Date(u.created_at).toLocaleDateString()}
             </span>
+            {teacher && !teacher.institutional && teacher.effectivePlan === "free" && onGrantTrial && (
+              <button
+                onClick={() => onGrantTrial(teacher)}
+                disabled={planBusy}
+                style={{ background: planBusy ? "#f3f4f6" : "#ede9fe", border: "1px solid #c4b5fd",
+                  color: "#6d28d9", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700,
+                  cursor: planBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}
+              >
+                {planBusy ? "Granting…" : "Give trial"}
+              </button>
+            )}
+            {teacher && teacher.effectivePlan === "pro_trial" && onEndTrial && (
+              <button
+                onClick={() => onEndTrial(teacher)}
+                disabled={planBusy}
+                style={{ background: "#f3f4f6", border: "1px solid #d1d5db",
+                  color: "#374151", borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700,
+                  cursor: planBusy ? "wait" : "pointer", whiteSpace: "nowrap" }}
+              >
+                {planBusy ? "Ending…" : "End trial"}
+              </button>
+            )}
             <button
               onClick={() => onDelete(u)}
               disabled={isDeleting}
