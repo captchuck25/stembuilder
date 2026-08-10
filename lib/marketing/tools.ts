@@ -219,7 +219,7 @@ export const TOOLS: MarketingTool[] = [
     ],
     gallery: [
       {
-        label: "The Measurement Lab — ruler, dial caliper, graduated cylinder, and triple beam balance",
+        label: "Graduated Cylinder — reading the meniscus for volume",
         src: "/marketing/measurement-lab/gallery-1.png",
       },
       {
