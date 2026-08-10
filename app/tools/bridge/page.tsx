@@ -2301,11 +2301,14 @@ function BridgeToolPage() {
   function renderScene() {
     return (
       <defs>
-        <pattern id="stoneBlocks" width="14" height="10" patternUnits="userSpaceOnUse">
-          <rect width="14" height="10" fill="#d8d8d8" />
-          <path d="M0 5 H14" stroke="#b8b8b8" strokeWidth={1} />
-          <path d="M7 0 V10" stroke="#c6c6c6" strokeWidth={1} />
-        </pattern>
+        <linearGradient id="pierConcrete" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#dcdfe1" />
+          <stop offset="1" stopColor="#bcc0c3" />
+        </linearGradient>
+        <linearGradient id="pierConcreteDark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#c2c6c9" />
+          <stop offset="1" stopColor="#a8adb1" />
+        </linearGradient>
       </defs>
     );
   }
@@ -3203,33 +3206,61 @@ function BridgeToolPage() {
             >
           {renderScene()}
 
-        {/* Piers */}
-        <g opacity={0.45}>
-          {[supportA, supportB].map((s) => (
-            <g key={`pier-${s.id}`}>
-              <rect
-                x={s.x - 28}
-                y={deckY - 8}
-                width={56}
-                height={28}
-                fill="url(#stoneBlocks)"
-              />
-              <rect
-                x={s.x - 9}
-                y={s.y + 18}
-                width={18}
-                height={(420 - s.y) * 0.7}
-                fill="#a0a0a0"
-              />
-              <rect
-                x={s.x - 18}
-                y={s.y + 18 + (420 - s.y) * 0.7}
-                width={36}
-                height={14}
-                fill="#7f7f7f"
-              />
-            </g>
-          ))}
+        {/* Piers — concrete bearing cap, tapered column, and footing, seated
+            into the canyon ledge at full opacity. */}
+        <g>
+          {[supportA, supportB].map((s) => {
+            const capTopY = deckY + 5;
+            const stemTopY = capTopY + 11;
+            const footY = s.y + 18 + (420 - s.y) * 0.7;
+            return (
+              <g key={`pier-${s.id}`}>
+                <rect
+                  x={s.x - 30}
+                  y={capTopY}
+                  width={60}
+                  height={11}
+                  rx={2}
+                  fill="url(#pierConcrete)"
+                  stroke="#8f959a"
+                  strokeWidth={1.2}
+                />
+                <path
+                  d={`M ${s.x - 13} ${stemTopY} L ${s.x + 13} ${stemTopY} L ${
+                    s.x + 19
+                  } ${footY} L ${s.x - 19} ${footY} Z`}
+                  fill="url(#pierConcrete)"
+                  stroke="#8f959a"
+                  strokeWidth={1.2}
+                />
+                {[0.33, 0.66].map((t) => {
+                  const yy = stemTopY + (footY - stemTopY) * t;
+                  const halfW = 13 + 6 * t - 2;
+                  return (
+                    <line
+                      key={`joint-${t}`}
+                      x1={s.x - halfW}
+                      y1={yy}
+                      x2={s.x + halfW}
+                      y2={yy}
+                      stroke="#a7adb1"
+                      strokeWidth={1}
+                    />
+                  );
+                })}
+                <rect
+                  x={s.x - 24}
+                  y={footY}
+                  width={48}
+                  height={13}
+                  rx={2}
+                  fill="url(#pierConcreteDark)"
+                  stroke="#868c91"
+                  strokeWidth={1.2}
+                />
+              </g>
+            );
+          })}
         </g>
 
         {/* Grid (optional) */}
