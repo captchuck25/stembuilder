@@ -42,6 +42,7 @@ import {
   formatTons,
   getLoadLevel,
   getStressStroke,
+  getUtilizationStroke,
 } from "./engine/members";
 import { runMovingLoadStressTest, type StressTestResult } from "./engine/solver";
 import { getVehicleType, renderVehicle } from "./components/vehicles";
@@ -3368,8 +3369,10 @@ function BridgeToolPage() {
               const curveCx = cx + px * bow + jitterX;
               const curveCy = cy + py * bow + jitterY;
               const visibleStroke =
-                stressTestHasRun && isFailed && showLiveFailureEffects
-                  ? getStressStroke(displayForce, displayUtilization)
+                stressTestHasRun && showLiveFailureEffects && displayForce !== null
+                  ? isFailed
+                    ? getStressStroke(displayForce, displayUtilization)
+                    : getUtilizationStroke(displayForce, displayUtilization)
                   : "#666";
               const strokeVisualWeight =
                 stressTestFailing && isFailed ? width + 1.5 : width;

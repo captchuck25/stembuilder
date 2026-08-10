@@ -487,6 +487,21 @@ export function getStressStroke(force: number | null, utilization: number): stri
   return `rgb(52, 112, ${intensity})`;
 }
 
+// Live utilization gradient for members that are still holding: neutral gray at
+// 0% utilization ramping toward the sign hue (red = compression, blue = tension).
+// At 100% it lands exactly on getStressStroke(force, 1), so a member that tips
+// into failure keeps the same color it was trending toward.
+export function getUtilizationStroke(force: number | null, utilization: number): string {
+  if (force === null) return "#666";
+  const t = Math.max(0, Math.min(1, utilization));
+  const target: [number, number, number] = force >= 0 ? [220, 52, 52] : [52, 112, 220];
+  const gray: [number, number, number] = [102, 102, 102];
+  const r = Math.round(gray[0] + (target[0] - gray[0]) * t);
+  const g = Math.round(gray[1] + (target[1] - gray[1]) * t);
+  const b = Math.round(gray[2] + (target[2] - gray[2]) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 // Dev-only sanity check: cost must increase monotonically with outer size and wall.
 if (process.env.NODE_ENV !== "production") {
   const byOuter = new Map<number, Array<{ wall: number; cost: number; label: string }>>();
