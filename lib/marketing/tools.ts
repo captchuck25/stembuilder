@@ -144,7 +144,8 @@ export const TOOLS: MarketingTool[] = [
         src: "/marketing/bridge-builder/gallery-3.png",
       },
     ],
-    demoVideo: "Demo video — design, load, and break a bridge (90 sec)",
+    demoVideo: "Demo video — designing and stress-testing a bridge (90 sec)",
+    demoVideoSrc: "/marketing/bridge-builder/demo.mp4",
     seoDescription:
       "Bridge Builder lets students design a bridge and stress-test it under load in the browser — live physics, class leaderboards, and engineering iteration in one tool.",
   },
