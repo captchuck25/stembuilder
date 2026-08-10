@@ -28,11 +28,11 @@ export interface MarketingTool {
   /** SEO meta description for the detail page. */
   seoDescription: string;
   /**
-   * What kind of projects Pro/District lesson plans bring to this tool —
-   * completes the sentence "…bringing ___ to entire classrooms."
-   * Omit to hide the lesson-plans callout on that tool's page.
+   * Full body text of the "Lesson plans & projects" callout on the detail
+   * page — what Pro/District plans include for this tool.
+   * Omit to hide the callout on that tool's page.
    */
-  lessonPlanHook?: string;
+  lessonPlanPitch?: string;
 }
 
 export const FLAGSHIP_CALLOUT =
@@ -71,7 +71,8 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — from blank canvas to printable part (2 min)",
     seoDescription:
       "STEM Sketch is a browser-based 3D design tool for schools. Students design fabrication-ready parts for 3D printing, laser cutting, and CNC — the perfect on-ramp to CAD production.",
-    lessonPlanHook: "3D-printed and CNC-style projects",
+    lessonPlanPitch:
+      "Teacher Pro and District plans include ready-to-teach lesson plans and projects — bringing 3D-printed and CNC-style projects to entire classrooms, not just one student at a time.",
   },
   {
     slug: "blueprint-lab",
@@ -102,7 +103,8 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — drawing a small home to scale (2 min)",
     seoDescription:
       "Blueprint Lab takes students from floor plan design to full architectural drawing sets in the browser — walls, sections, rooflines, elevations, and a 3D walkthrough — real architectural design from day one.",
-    lessonPlanHook: "to-scale architectural design projects",
+    lessonPlanPitch:
+      "Teacher Pro and District plans include ready-to-teach lesson plans and projects — bringing to-scale architectural design projects to entire classrooms, not just one student at a time.",
   },
   {
     slug: "bridge-builder",
@@ -137,19 +139,20 @@ export const TOOLS: MarketingTool[] = [
     name: "Code Lab",
     flagship: false,
     tagline:
-      "Learn to code by doing — guide characters through mazes with blocks, draw with turtle graphics, then graduate to real Python. Everything runs right in the browser.",
+      "Learn to code by doing — guide characters through mazes and design games with blocks, then graduate to real Python: coding logic and drawing with the turtle tool. Everything runs right in the browser.",
     toolHref: "/tools/code-lab",
     image: "/ui/codelab.png",
     gradeBand: "Grades 3–8",
     subjects: ["Computer Science"],
     description: [
-      "Code Lab is a progression, not a single app. Students start with block coding — guiding a character through maze puzzles where every level teaches a real concept: sequences, loops, conditionals, functions. Turtle graphics turn code into art. Then students graduate to typing real Python, with the same visual feedback.",
+      "Code Lab is a progression, not a single app. Students start with block coding — guiding a character through maze puzzles where every level teaches a real concept: sequences, loops, conditions, functions — then put those skills to work designing their own games in blocks. From there, students graduate to typing real Python: working through the same coding logic, then turning code into art with the turtle tool.",
       "Everything runs in the browser with nothing to install, and teacher controls let you unlock levels as your class progresses — so nobody races ahead and nobody gets lost.",
     ],
     classroomUse: [
       "A ready-made block-coding unit: students work through leveled maze challenges at their own pace while you watch progress from the dashboard.",
-      "Turtle graphics assignments — set a drawing challenge and review every student's art in one place.",
+      "The game designer: students put their block skills to work building playable games of their own design — then share them to the class arcade, where classmates can try them out.",
       "The transition unit: the same maze puzzles, now solved in typed Python.",
+      "Turtle graphics assignments — set a Python drawing challenge and review every student's art in one place.",
     ],
     gallery: [
       "Screenshot — a block-coding maze with a student's program",
@@ -158,8 +161,9 @@ export const TOOLS: MarketingTool[] = [
     ],
     demoVideo: "Demo video — from blocks to Python (2 min)",
     seoDescription:
-      "Code Lab teaches students to code in the browser — block-based maze puzzles, turtle graphics, and a graduation path to real Python, with teacher progress tracking.",
-    lessonPlanHook: "block-coding and real Python projects",
+      "Code Lab teaches students to code in the browser — maze puzzles and game design with blocks, then a graduation path to real Python logic and turtle graphics, with teacher progress tracking.",
+    lessonPlanPitch:
+      "Teacher Pro and District plans include answer keys and ready-to-use video tutorials to share with your class.",
   },
   {
     slug: "electronics-lab",
@@ -188,7 +192,8 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — building a first circuit (90 sec)",
     seoDescription:
       "Electronics Lab is a live circuit simulator for classrooms — students build circuits with batteries, bulbs, and switches, and progress from first circuits to breadboards and Ohm's Law.",
-    lessonPlanHook: "circuit-building units and hands-on companion builds",
+    lessonPlanPitch:
+      "Teacher Pro and District plans include ready-to-teach lesson plans and projects — bringing circuit-building units and hands-on companion builds to entire classrooms, not just one student at a time.",
   },
   {
     slug: "measurement-lab",
@@ -217,7 +222,8 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — a measurement sprint (60 sec)",
     seoDescription:
       "Measurement Lab builds measuring fluency with instant feedback, timed sprints, and class leaderboards — hands-on practice with rulers, scale, and precision.",
-    lessonPlanHook: "measurement sprints and precision practice",
+    lessonPlanPitch:
+      "Teacher Pro and District plans include ready-to-teach lesson plans and projects — bringing measurement sprints and precision practice to entire classrooms, not just one student at a time.",
   },
 ];
 
