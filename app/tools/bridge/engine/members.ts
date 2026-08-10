@@ -487,24 +487,28 @@ export function getStressStroke(force: number | null, utilization: number): stri
   return `rgb(52, 112, ${intensity})`;
 }
 
-// Live utilization gradient for members that are still holding: neutral gray at
-// 0% utilization ramping toward the sign hue (red = compression, blue = tension).
-// The ramp routes through a brighter mid-stop — a straight gray-to-red lerp
-// muddies into maroon around 60-90%, exactly where the "almost failing" signal
-// matters most. At 100% it lands on getStressStroke(force, 1), so a member that
-// tips into failure keeps the color it was trending toward.
+// Warning color for members that are still holding: neutral gray until 90% of
+// capacity, then a fast ramp to the sign hue (red = compression, blue =
+// tension) between 90% and 100%. Members comfortably within capacity stay
+// gray so color always means "pay attention". The ramp routes through a
+// brighter mid-stop (straight gray-to-red lerp muddies into maroon), and at
+// 100% it lands on getStressStroke(force, 1), so a member that tips into
+// failure keeps the color it was trending toward.
+const UTILIZATION_COLOR_START = 0.9;
 export function getUtilizationStroke(force: number | null, utilization: number): string {
   if (force === null) return "#666";
   const t = Math.max(0, Math.min(1, utilization));
+  if (t <= UTILIZATION_COLOR_START) return "#666";
+  const k = (t - UTILIZATION_COLOR_START) / (1 - UTILIZATION_COLOR_START);
   const gray: [number, number, number] = [102, 102, 102];
   const mid: [number, number, number] = force >= 0 ? [214, 122, 100] : [116, 152, 214];
   const full: [number, number, number] = force >= 0 ? [220, 52, 52] : [52, 112, 220];
-  const from = t < 0.5 ? gray : mid;
-  const to = t < 0.5 ? mid : full;
-  const k = t < 0.5 ? t * 2 : (t - 0.5) * 2;
-  const r = Math.round(from[0] + (to[0] - from[0]) * k);
-  const g = Math.round(from[1] + (to[1] - from[1]) * k);
-  const b = Math.round(from[2] + (to[2] - from[2]) * k);
+  const from = k < 0.5 ? gray : mid;
+  const to = k < 0.5 ? mid : full;
+  const kk = k < 0.5 ? k * 2 : (k - 0.5) * 2;
+  const r = Math.round(from[0] + (to[0] - from[0]) * kk);
+  const g = Math.round(from[1] + (to[1] - from[1]) * kk);
+  const b = Math.round(from[2] + (to[2] - from[2]) * kk);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
