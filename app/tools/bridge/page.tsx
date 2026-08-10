@@ -4106,6 +4106,23 @@ function BridgeToolPage() {
                               }}
                             >
                               <div style={{ fontWeight: 700 }}>Selected member</div>
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  color:
+                                    selectedMemberStress.utilization > 1
+                                      ? "#dc2626"
+                                      : selectedMemberStress.utilization >= 0.9
+                                      ? "#d97706"
+                                      : "#16a34a",
+                                }}
+                              >
+                                {selectedMemberStress.utilization > 1
+                                  ? "FAILED — over capacity"
+                                  : selectedMemberStress.utilization >= 0.9
+                                  ? "Holding — near capacity"
+                                  : "Holding"}
+                              </div>
                               <div>Mode: {selectedMemberStress.mode}</div>
                               <div>
                                 Force: {selectedMemberStress.force.toFixed(0)} lb
@@ -4114,6 +4131,7 @@ function BridgeToolPage() {
                               <div>
                                 Utilization:{" "}
                                 {(selectedMemberStress.utilization * 100).toFixed(0)}%
+                                {" of capacity"}
                               </div>
                             </div>
                           )}
