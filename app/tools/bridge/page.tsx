@@ -45,6 +45,12 @@ import {
   getUtilizationStroke,
 } from "./engine/members";
 import { runMovingLoadStressTest, type StressTestResult } from "./engine/solver";
+import {
+  initCollapse,
+  stepCollapse,
+  stubTipKey,
+  type CollapseState,
+} from "./engine/collapse";
 import { getVehicleType, renderVehicle } from "./components/vehicles";
 
 type Tool = "select" | "joint" | "member" | "erase";
@@ -127,6 +133,13 @@ function BridgeToolPage() {
   const [testProgress, setTestProgress] = useState<number>(0);
   const testRafRef = useRef<number | null>(null);
   const testStopProgressRef = useRef<number>(1);
+  // Collapse simulation (runs after a failed stress test's truck reaches the
+  // break point). collapseFrame just drives re-renders while the sim steps.
+  const collapseRef = useRef<CollapseState | null>(null);
+  const collapseRafRef = useRef<number | null>(null);
+  const [collapseActive, setCollapseActive] = useState<boolean>(false);
+  const [, setCollapseFrame] = useState<number>(0);
+  const shakeRef = useRef<{ start: number } | null>(null);
   const [showExportDialog, setShowExportDialog] = useState<boolean>(false);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("pdf");
   const [exportPrintIntent, setExportPrintIntent] = useState<"yes" | "no" | null>(null);
@@ -197,11 +210,22 @@ function BridgeToolPage() {
     height: 0,
   });
 
+  function clearCollapse() {
+    if (collapseRafRef.current) {
+      cancelAnimationFrame(collapseRafRef.current);
+      collapseRafRef.current = null;
+    }
+    collapseRef.current = null;
+    shakeRef.current = null;
+    setCollapseActive(false);
+  }
+
   function resetAnalysisState(cancelRunningTest = false) {
     if (cancelRunningTest && testRafRef.current) {
       cancelAnimationFrame(testRafRef.current);
       testRafRef.current = null;
     }
+    clearCollapse();
     setInspectionHasRun(false);
     setStressTestResult(null);
     setStressTestError(null);
@@ -558,6 +582,16 @@ function BridgeToolPage() {
     const y = n.y - (d?.dy ?? 0) * LIVE_DEFLECT_SCALE + getGlobalBridgeBowAtX(x);
 
     return { x, y };
+  }
+  // While a collapse sim is active (or settled awaiting Clear), nodes render at
+  // their simulated positions instead of the elastic-deflection positions.
+  function getDisplayNodePosition(n: Node): { x: number; y: number } {
+    const c = collapseRef.current;
+    if (c) {
+      const p = c.points.get(n.id);
+      if (p) return { x: p.x, y: p.y };
+    }
+    return getRenderedNodePosition(n);
   }
   function getLiveDeckDeflectionAtX(x: number): number {
     if (!isTesting || !liveNodeOffsetById) return 0;
@@ -1682,6 +1716,7 @@ function BridgeToolPage() {
     setStressTestError(null);
   }
   function clearStressTest() {
+    clearCollapse();
     setStressTestResult(null);
     setStressTestError(null);
     setStressTestFrames(null);
@@ -1694,6 +1729,7 @@ function BridgeToolPage() {
       cancelAnimationFrame(testRafRef.current);
       testRafRef.current = null;
     }
+    clearCollapse();
     setIsTesting(false);
     setTestProgress(0);
     setStressTestResult(null);
@@ -1701,6 +1737,105 @@ function BridgeToolPage() {
     setStressTestFrames(null);
     stressTestFramesRef.current = null;
     setLiveStressTestResult(null);
+  }
+
+  // Hand off from the elastic stress test to the collapse simulation at the
+  // moment the truck reaches the first failing load position.
+  function beginCollapse(progressAtBreak: number, frames: StressTestResult[]) {
+    const spanRange = bridgeEndProgress - bridgeStartProgress;
+    const spanProgress = Math.max(
+      0,
+      Math.min(1, spanRange > 0 ? (progressAtBreak - bridgeStartProgress) / spanRange : 0)
+    );
+    const idx = Math.min(
+      frames.length - 1,
+      Math.round(spanProgress * (frames.length - 1))
+    );
+    const frame = frames[idx];
+    const offsets = frame.nodeDisplacements ?? {};
+
+    // Bow at the break moment (mirrors getGlobalBridgeBowAtX, but from local
+    // values — state hasn't flushed mid-tick).
+    const util = frame.maxUtilization ?? 0;
+    const severity = Math.max(
+      0,
+      Math.min(1, (util - GLOBAL_BOW_START_UTIL) / (GLOBAL_BOW_FULL_UTIL - GLOBAL_BOW_START_UTIL))
+    );
+    const span = Math.max(1, Math.abs(supportB.x - supportA.x));
+    const center = (supportA.x + supportB.x) / 2;
+    const onBridgeFactor = Math.sin(Math.PI * spanProgress);
+    const bowAt = (x: number) => {
+      const t = (x - center) / (span / 2);
+      const shape = Math.max(0, 1 - t * t);
+      return GLOBAL_BOW_MAX * severity * Math.max(0, onBridgeFactor) * shape;
+    };
+    const posOf = (id: string) => {
+      const n = nodeById.get(id);
+      if (!n) return { x: 0, y: 0 };
+      const d = offsets[id];
+      const x = n.x + (d?.dx ?? 0) * LIVE_DEFLECT_SCALE;
+      const y = n.y - (d?.dy ?? 0) * LIVE_DEFLECT_SCALE + bowAt(x);
+      return { x, y };
+    };
+
+    const failedIds = new Set(
+      frame.failedMemberIds.length > 0
+        ? frame.failedMemberIds
+        : stressTestResult?.failedMemberIds ?? []
+    );
+    const roadwayIds = nodes
+      .filter((nn) => Math.abs(nn.y - ROADWAY_Y) < 0.5)
+      .sort((a, b) => a.x - b.x)
+      .map((nn) => nn.id);
+
+    const vehicleX = minX + progressAtBreak * (maxX - minX);
+    const roadwayPts = roadwayIds
+      .map((id) => posOf(id))
+      .sort((a, b) => a.x - b.x);
+    let deckYHere = ROADWAY_Y;
+    for (let i = 0; i < roadwayPts.length - 1; i += 1) {
+      const l = roadwayPts[i];
+      const r = roadwayPts[i + 1];
+      if (vehicleX < l.x || vehicleX > r.x || r.x - l.x <= 0) continue;
+      deckYHere = l.y + ((r.y - l.y) * (vehicleX - l.x)) / (r.x - l.x);
+      break;
+    }
+
+    collapseRef.current = initCollapse({
+      nodes,
+      members,
+      failedIds,
+      posOf,
+      pinnedIds: new Set([SUPPORT_A_ID, SUPPORT_B_ID]),
+      roadwayIds,
+      truckX: vehicleX,
+      truckY: deckYHere - 18,
+      axleHalf: 34,
+      truckSpeedPxPerSec: (maxX - minX) / 9,
+      truckTravelAtBreak: vehicleX - minX,
+      waterY: 512,
+      nowMs: performance.now(),
+    });
+    shakeRef.current = { start: performance.now() };
+    setCollapseActive(true);
+
+    const loop = (now: number) => {
+      const sim = collapseRef.current;
+      if (!sim) {
+        collapseRafRef.current = null;
+        return;
+      }
+      stepCollapse(sim, now);
+      setCollapseFrame((v) => v + 1);
+      if (now - sim.startedMs > 3400) {
+        sim.settled = true;
+        setIsTesting(false);
+        collapseRafRef.current = null;
+        return;
+      }
+      collapseRafRef.current = requestAnimationFrame(loop);
+    };
+    collapseRafRef.current = requestAnimationFrame(loop);
   }
 
   function startStressTest(forceStart = false) {
@@ -1745,6 +1880,16 @@ function BridgeToolPage() {
         }
       }
       if (progress >= finalProgress) {
+        const framesNow = stressTestFramesRef.current;
+        const hasFailure =
+          !!framesNow && framesNow.some((f) => f.failedMemberIds.length > 0);
+        if (hasFailure && finalProgress < 1 && !collapseRef.current) {
+          // Truck reached the break point — hand off to the collapse sim
+          // instead of ending the test.
+          beginCollapse(progress, framesNow);
+          testRafRef.current = null;
+          return;
+        }
         setIsTesting(false);
         testRafRef.current = null;
         return;
@@ -2738,7 +2883,19 @@ function BridgeToolPage() {
     }
     if (stressTestResult) {
       const failed = stressTestResult.failedMemberIds.length > 0;
-      testStopProgressRef.current = failed ? Math.max(0, Math.min(1, stopAtSupport)) : 1;
+      // On failure, stop the truck at the first load position whose frame
+      // shows a failed member — that's where the collapse begins.
+      const frames = stressTestFramesRef.current;
+      const failIdx = frames?.findIndex((f) => f.failedMemberIds.length > 0) ?? -1;
+      if (failed && frames && frames.length > 1 && failIdx >= 0) {
+        const failProgress =
+          bridgeStartProgress +
+          (failIdx / (frames.length - 1)) *
+            (bridgeEndProgress - bridgeStartProgress);
+        testStopProgressRef.current = Math.max(0.02, Math.min(1, failProgress));
+      } else {
+        testStopProgressRef.current = failed ? Math.max(0, Math.min(1, stopAtSupport)) : 1;
+      }
     }
   }, [isTesting, stressTestError, stressTestResult, minX, maxX, supportA.x]);
 
@@ -3014,6 +3171,18 @@ function BridgeToolPage() {
                     ? "grabbing"
                     : "default",
                 userSelect: "none",
+                transform: (() => {
+                  // Brief camera shake when the collapse begins.
+                  const s = shakeRef.current;
+                  if (!s) return undefined;
+                  const k = (performance.now() - s.start) / 600;
+                  if (k >= 1) return undefined;
+                  const amp = 6 * (1 - k);
+                  const t = performance.now();
+                  return `translate(${Math.sin(t * 0.09) * amp}px, ${
+                    Math.cos(t * 0.11) * amp
+                  }px)`;
+                })(),
               }}
             >
           {renderScene()}
@@ -3176,6 +3345,14 @@ function BridgeToolPage() {
           {/* Deck — sampled as a path so it bows with live deflection during
               the stress test (straight line when idle, same as before). */}
           {(() => {
+            const collapseSim = collapseRef.current;
+            const collapsedRoadway = collapseSim
+              ? nodes
+                  .filter((nn) => Math.abs(nn.y - ROADWAY_Y) < 0.5)
+                  .map((nn) => collapseSim.points.get(nn.id))
+                  .filter((pt): pt is NonNullable<typeof pt> => Boolean(pt))
+                  .sort((p1, p2) => p1.x - p2.x)
+              : null;
             const deckPathAt = (yOffset: number): string => {
               const steps = 48;
               const x0 = supportA.x;
@@ -3183,11 +3360,24 @@ function BridgeToolPage() {
               const parts: string[] = [];
               for (let i = 0; i <= steps; i += 1) {
                 const xx = x0 + ((x1 - x0) * i) / steps;
-                const yy =
-                  supportA.y +
-                  yOffset +
-                  getGlobalBridgeBowAtX(xx) +
-                  getLiveDeckDeflectionAtX(xx);
+                let yy: number;
+                if (collapsedRoadway && collapsedRoadway.length >= 2) {
+                  // Deck follows the falling roadway joints during collapse.
+                  yy = supportA.y + yOffset;
+                  for (let j = 0; j < collapsedRoadway.length - 1; j += 1) {
+                    const l = collapsedRoadway[j];
+                    const r = collapsedRoadway[j + 1];
+                    if (xx < l.x || xx > r.x || r.x - l.x <= 0) continue;
+                    yy = l.y + ((r.y - l.y) * (xx - l.x)) / (r.x - l.x) + yOffset;
+                    break;
+                  }
+                } else {
+                  yy =
+                    supportA.y +
+                    yOffset +
+                    getGlobalBridgeBowAtX(xx) +
+                    getLiveDeckDeflectionAtX(xx);
+                }
                 parts.push(`${i === 0 ? "M" : "L"} ${xx} ${yy}`);
               }
               return parts.join(" ");
@@ -3344,8 +3534,8 @@ function BridgeToolPage() {
               const a = nodeById.get(m.a);
               const b = nodeById.get(m.b);
               if (!a || !b) return null;
-              const aPos = getRenderedNodePosition(a);
-              const bPos = getRenderedNodePosition(b);
+              const aPos = getDisplayNodePosition(a);
+              const bPos = getDisplayNodePosition(b);
 
               const width = thicknessToStrokeWidth(m.type);
               const stressForce = activeStressTestResult?.memberForces[m.id] ?? null;
@@ -3394,6 +3584,45 @@ function BridgeToolPage() {
                   : "#666";
               const strokeVisualWeight =
                 stressTestFailing && isFailed ? width + 1.5 : width;
+
+              // Severed members during/after collapse: two dangling stubs.
+              const collapseSim = collapseRef.current;
+              if (collapseSim && collapseSim.brokenIds.has(m.id)) {
+                const tipA = collapseSim.points.get(stubTipKey(m.id, "a"));
+                const tipB = collapseSim.points.get(stubTipKey(m.id, "b"));
+                const stubColor = getStressStroke(
+                  displayForce,
+                  Math.max(1, displayUtilization)
+                );
+                return (
+                  <g key={m.id}>
+                    {tipA ? (
+                      <line
+                        x1={aPos.x}
+                        y1={aPos.y}
+                        x2={tipA.x}
+                        y2={tipA.y}
+                        stroke={stubColor}
+                        strokeWidth={width}
+                        strokeLinecap="round"
+                        opacity={0.9}
+                      />
+                    ) : null}
+                    {tipB ? (
+                      <line
+                        x1={bPos.x}
+                        y1={bPos.y}
+                        x2={tipB.x}
+                        y2={tipB.y}
+                        stroke={stubColor}
+                        strokeWidth={width}
+                        strokeLinecap="round"
+                        opacity={0.9}
+                      />
+                    ) : null}
+                  </g>
+                );
+              }
 
               return (
                 <g key={m.id}>
@@ -3496,9 +3725,26 @@ function BridgeToolPage() {
           </g>
 
           {/* Stress test vehicle */}
-          {isTesting ? (
+          {isTesting || collapseActive ? (
             <g pointerEvents="none">
               {(() => {
+                const sim = collapseRef.current;
+                if (sim) {
+                  // During collapse the truck is a simulated two-axle body.
+                  const rear = sim.points.get(sim.truckA);
+                  const front = sim.points.get(sim.truckB);
+                  if (!rear || !front) return null;
+                  const cx = (rear.x + front.x) / 2;
+                  const cy = (rear.y + front.y) / 2;
+                  const pitchRaw =
+                    (Math.atan2(front.y - rear.y, front.x - rear.x) * 180) /
+                    Math.PI;
+                  const pitchDeg = Math.max(-40, Math.min(40, pitchRaw));
+                  return renderVehicle(getVehicleType(loadLb), cx, cy, {
+                    pitchDeg,
+                    travel: sim.truckTravelAtBreak,
+                  });
+                }
                 const vehicleX = minX + testProgress * (maxX - minX);
                 const deckSurfaceYAt = (xx: number) =>
                   deckY -
@@ -3521,11 +3767,57 @@ function BridgeToolPage() {
             </g>
           ) : null}
 
+          {/* Collapse splashes */}
+          {collapseRef.current && collapseRef.current.splashes.length > 0 ? (
+            <g pointerEvents="none">
+              {collapseRef.current.splashes.map((sp, i) => {
+                const waterY = collapseRef.current?.waterY ?? 512;
+                const age = (performance.now() - sp.t0) / 1000;
+                if (age > 1.1) return null;
+                const k = Math.min(1, age / 1.1);
+                return (
+                  <g key={`splash-${i}`} opacity={(1 - k) * 0.8}>
+                    <ellipse
+                      cx={sp.x}
+                      cy={waterY}
+                      rx={10 + k * 46}
+                      ry={3 + k * 7}
+                      fill="none"
+                      stroke="#7fb2d9"
+                      strokeWidth={2.5 - k * 1.5}
+                    />
+                    <ellipse
+                      cx={sp.x}
+                      cy={waterY}
+                      rx={4 + k * 24}
+                      ry={2 + k * 4}
+                      fill="none"
+                      stroke="#a9cfe8"
+                      strokeWidth={2 - k}
+                    />
+                    <circle
+                      cx={sp.x - 8 - k * 10}
+                      cy={waterY - 8 - k * 22 + k * k * 46}
+                      r={2.2}
+                      fill="#8fc0e0"
+                    />
+                    <circle
+                      cx={sp.x + 9 + k * 12}
+                      cy={waterY - 6 - k * 26 + k * k * 50}
+                      r={2}
+                      fill="#8fc0e0"
+                    />
+                  </g>
+                );
+              })}
+            </g>
+          ) : null}
+
           {/* Nodes */}
           {nodes.map((n) => {
             const isSupport = n.id === SUPPORT_A_ID || n.id === SUPPORT_B_ID;
             const isPending = pendingNodeId === n.id && tool === "member";
-            const p = getRenderedNodePosition(n);
+            const p = getDisplayNodePosition(n);
 
               return (
                 <g key={n.id}>
