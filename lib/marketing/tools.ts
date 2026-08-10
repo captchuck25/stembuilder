@@ -131,9 +131,18 @@ export const TOOLS: MarketingTool[] = [
       "Pair with a physical build — design and test digitally first, giving students confidence in their design before investing the time to construct it from classroom materials.",
     ],
     gallery: [
-      { label: "Screenshot — a truss bridge under load with stress colors" },
-      { label: "Screenshot — the class leaderboard" },
-      { label: "Screenshot — a design failing mid-test" },
+      {
+        label: "The design canvas — span, load, materials, and a budget to beat",
+        src: "/marketing/bridge-builder/gallery-1.png",
+      },
+      {
+        label: "A truss under stress test — every member color-coded by load",
+        src: "/marketing/bridge-builder/gallery-2.png",
+      },
+      {
+        label: "Teacher view — bridge assignments with results, designs, and costs",
+        src: "/marketing/bridge-builder/gallery-3.png",
+      },
     ],
     demoVideo: "Demo video — design, load, and break a bridge (90 sec)",
     seoDescription:
