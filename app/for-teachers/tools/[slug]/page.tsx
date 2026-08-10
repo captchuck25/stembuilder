@@ -91,7 +91,18 @@ export default async function ToolDetailPage(
                 className={styles.toolCardImg}
                 style={{ marginBottom: 16 }}
               />
-              <MediaSlot label={tool.demoVideo} kind="video" />
+              {tool.demoVideoSrc ? (
+                <video
+                  src={tool.demoVideoSrc}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  aria-label={tool.demoVideo}
+                  style={{ width: "100%", borderRadius: 12, display: "block" }}
+                />
+              ) : (
+                <MediaSlot label={tool.demoVideo} kind="video" />
+              )}
             </div>
           </div>
         </div>
@@ -124,9 +135,25 @@ export default async function ToolDetailPage(
         <div className={styles.container}>
           <h2 className={styles.h2}>See it in action</h2>
           <div className={styles.grid3} style={{ marginTop: 24 }}>
-            {tool.gallery.map((label) => (
-              <MediaSlot key={label} label={label} />
-            ))}
+            {tool.gallery.map((item) =>
+              item.src ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={item.label}
+                  src={item.src}
+                  alt={item.label}
+                  style={{
+                    width: "100%",
+                    height: "auto",
+                    borderRadius: 12,
+                    border: "1px solid #e5e7eb",
+                    display: "block",
+                  }}
+                />
+              ) : (
+                <MediaSlot key={item.label} label={item.label} />
+              )
+            )}
           </div>
         </div>
       </section>

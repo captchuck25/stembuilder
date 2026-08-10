@@ -21,10 +21,15 @@ export interface MarketingTool {
   description: string[];
   /** "How a class uses it" bullets. */
   classroomUse: string[];
-  /** Labeled media slots for the example gallery (images added later). */
-  gallery: string[];
-  /** Labeled slot for a short demo video (added later). */
+  /**
+   * Example-gallery items. `label` doubles as the alt text; while `src` is
+   * absent the slot renders as a labeled placeholder.
+   */
+  gallery: { label: string; src?: string }[];
+  /** Label (and alt-text contract) for the short demo video. */
   demoVideo: string;
+  /** Path under /public for the demo video; placeholder shown while absent. */
+  demoVideoSrc?: string;
   /** SEO meta description for the detail page. */
   seoDescription: string;
   /**
@@ -64,9 +69,9 @@ export const TOOLS: MarketingTool[] = [
       "Every design saves to the student's account, and you can see the class's work from your dashboard.",
     ],
     gallery: [
-      "Screenshot — modeling a part in STEM Sketch",
-      "Photo — 3D-printed student designs",
-      "Screenshot — SVG export ready for the laser cutter",
+      { label: "Screenshot — modeling a part in STEM Sketch" },
+      { label: "Photo — 3D-printed student designs" },
+      { label: "Screenshot — SVG export ready for the laser cutter" },
     ],
     demoVideo: "Demo video — from blank canvas to printable part (2 min)",
     seoDescription:
@@ -96,9 +101,9 @@ export const TOOLS: MarketingTool[] = [
       "Advanced students go further — multiple floors, roofs, and elevation drawings.",
     ],
     gallery: [
-      "Screenshot — a student floor plan with dimensions",
-      "Screenshot — the same home in the 3D view",
-      "Screenshot — elevation drawings generated from the plan",
+      { label: "Screenshot — a student floor plan with dimensions" },
+      { label: "Screenshot — the same home in the 3D view" },
+      { label: "Screenshot — elevation drawings generated from the plan" },
     ],
     demoVideo: "Demo video — drawing a small home to scale (2 min)",
     seoDescription:
@@ -126,9 +131,9 @@ export const TOOLS: MarketingTool[] = [
       "Pair with a physical build — design and test digitally first, giving students confidence in their design before investing the time to construct it from classroom materials.",
     ],
     gallery: [
-      "Screenshot — a truss bridge under load with stress colors",
-      "Screenshot — the class leaderboard",
-      "Screenshot — a design failing mid-test",
+      { label: "Screenshot — a truss bridge under load with stress colors" },
+      { label: "Screenshot — the class leaderboard" },
+      { label: "Screenshot — a design failing mid-test" },
     ],
     demoVideo: "Demo video — design, load, and break a bridge (90 sec)",
     seoDescription:
@@ -155,9 +160,9 @@ export const TOOLS: MarketingTool[] = [
       "Turtle graphics assignments — set a Python drawing challenge and review every student's art in one place.",
     ],
     gallery: [
-      "Screenshot — a block-coding maze with a student's program",
-      "Screenshot — turtle graphics drawn by students",
-      "Screenshot — the same puzzle solved in real Python",
+      { label: "Screenshot — a block-coding maze with a student's program" },
+      { label: "Screenshot — turtle graphics drawn by students" },
+      { label: "Screenshot — the same puzzle solved in real Python" },
     ],
     demoVideo: "Demo video — from blocks to Python (2 min)",
     seoDescription:
@@ -185,9 +190,9 @@ export const TOOLS: MarketingTool[] = [
       "Extend into the physical world: units include hands-on companion builds, like a cardboard-and-brad switch or a real breadboard circuit.",
     ],
     gallery: [
-      "Screenshot — a parallel circuit glowing in the simulator",
-      "Screenshot — the schematic view of the same circuit",
-      "Screenshot — a unit challenge with its quiz",
+      { label: "Screenshot — a parallel circuit glowing in the simulator" },
+      { label: "Screenshot — the schematic view of the same circuit" },
+      { label: "Screenshot — a unit challenge with its quiz" },
     ],
     demoVideo: "Demo video — building a first circuit (90 sec)",
     seoDescription:
@@ -213,11 +218,21 @@ export const TOOLS: MarketingTool[] = [
       "Pair with real rulers — the on-screen practice transfers directly to physical measuring.",
     ],
     gallery: [
-      "Screenshot — measuring practice with instant feedback",
-      "Screenshot — a timed sprint in progress",
-      "Screenshot — the class leaderboard",
+      {
+        label: "The Measurement Lab — ruler, dial caliper, graduated cylinder, and triple beam balance",
+        src: "/marketing/measurement-lab/gallery-1.png",
+      },
+      {
+        label: "Triple Beam Balance — reading all three beams for total mass",
+        src: "/marketing/measurement-lab/gallery-2.png",
+      },
+      {
+        label: "Dial Caliper — measuring to the thousandth of an inch",
+        src: "/marketing/measurement-lab/gallery-3.png",
+      },
     ],
-    demoVideo: "Demo video — a measurement sprint (60 sec)",
+    demoVideo: "Demo video — the Ruler Game with instant feedback (50 sec)",
+    demoVideoSrc: "/marketing/measurement-lab/demo.mp4",
     seoDescription:
       "Measurement Lab builds measuring fluency with instant feedback, timed sprints, and class leaderboards — hands-on practice with rulers, scale, and precision.",
   },
