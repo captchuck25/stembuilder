@@ -30,8 +30,9 @@ export interface MarketingTool {
   /**
    * What kind of projects Pro/District lesson plans bring to this tool —
    * completes the sentence "…bringing ___ to entire classrooms."
+   * Omit to hide the lesson-plans callout on that tool's page.
    */
-  lessonPlanHook: string;
+  lessonPlanHook?: string;
 }
 
 export const FLAGSHIP_CALLOUT =
@@ -115,12 +116,12 @@ export const TOOLS: MarketingTool[] = [
     subjects: ["Physics", "Engineering"],
     description: [
       "Students design a truss bridge, then put it under load and watch the physics play out — members stretch and compress, color-shift under stress, and fail if the design can't take it. It turns engineering iteration into a game: design, test, learn, redesign.",
-      "Built-in challenges, class leaderboards, and a teacher gradebook make it easy to run as a competition — strongest bridge, cheapest bridge that holds, best strength-to-weight ratio.",
+      "Built-in challenges, class leaderboards, and a teacher gradebook make it easy to run as a competition — designs are ranked on efficiency, rewarding the bridge that holds its load at the lowest cost.",
     ],
     classroomUse: [
-      "Run the Bridge Challenge: everyone gets the same span and budget, and the class leaderboard tracks whose design holds the most.",
+      "Run the Bridge Challenge: everyone gets the same span and load, and the class leaderboard tracks whose design does it most efficiently — and at the lowest cost.",
       "Teach forces by watching them: tension and compression are color-coded live under load.",
-      "Pair with a physical build — design and test digitally first, then build the winning design from craft sticks.",
+      "Pair with a physical build — design and test digitally first, giving students confidence in their design before investing the time to construct it from classroom materials.",
     ],
     gallery: [
       "Screenshot — a truss bridge under load with stress colors",
@@ -130,7 +131,6 @@ export const TOOLS: MarketingTool[] = [
     demoVideo: "Demo video — design, load, and break a bridge (90 sec)",
     seoDescription:
       "Bridge Builder lets students design a bridge and stress-test it under load in the browser — live physics, class leaderboards, and engineering iteration in one tool.",
-    lessonPlanHook: "bridge-design challenges and class competitions",
   },
   {
     slug: "code-lab",

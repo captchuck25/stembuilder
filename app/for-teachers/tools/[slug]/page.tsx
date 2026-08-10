@@ -108,14 +108,16 @@ export default async function ToolDetailPage(
               </li>
             ))}
           </ul>
-          <div className={styles.cardSoft} style={{ marginTop: 24, maxWidth: 820 }}>
-            <span className={styles.kicker}>Lesson plans &amp; projects</span>
-            <p className={styles.body} style={{ margin: "10px 0 0", fontSize: 16 }}>
-              Teacher Pro and District plans include ready-to-teach lesson plans
-              and projects — bringing {tool.lessonPlanHook} to entire
-              classrooms, not just one student at a time.
-            </p>
-          </div>
+          {tool.lessonPlanHook && (
+            <div className={styles.cardSoft} style={{ marginTop: 24, maxWidth: 820 }}>
+              <span className={styles.kicker}>Lesson plans &amp; projects</span>
+              <p className={styles.body} style={{ margin: "10px 0 0", fontSize: 16 }}>
+                Teacher Pro and District plans include ready-to-teach lesson
+                plans and projects — bringing {tool.lessonPlanHook} to entire
+                classrooms, not just one student at a time.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
