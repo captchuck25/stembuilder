@@ -220,11 +220,21 @@ export const TOOLS: MarketingTool[] = [
       "Extend into the physical world: units include hands-on companion builds, like a cardboard-and-brad switch or a real breadboard circuit.",
     ],
     gallery: [
-      { label: "Screenshot — a parallel circuit glowing in the simulator" },
-      { label: "Screenshot — the schematic view of the same circuit" },
-      { label: "Screenshot — a unit challenge with its quiz" },
+      {
+        label: "Breadboard Bootcamp — first light, with the checker passing",
+        src: "/marketing/electronics-lab/gallery-1.png",
+      },
+      {
+        label: "A guided unit — Ohm's Law & Meters, taught in plain language",
+        src: "/marketing/electronics-lab/gallery-2.png",
+      },
+      {
+        label: "Every unit ends with a quick quiz",
+        src: "/marketing/electronics-lab/gallery-3.png",
+      },
     ],
-    demoVideo: "Demo video — building a first circuit (90 sec)",
+    demoVideo: "Demo video — wiring a parallel circuit (20 sec)",
+    demoVideoSrc: "/marketing/electronics-lab/demo.mp4",
     seoDescription:
       "Electronics Lab is a live circuit simulator for classrooms — students build circuits with batteries, bulbs, and switches, and progress from first circuits to breadboards and Ohm's Law.",
   },
