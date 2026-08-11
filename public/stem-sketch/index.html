@@ -9131,6 +9131,11 @@ function extrudeCurrentSketch() {
   const u = unitLabel();
   const defaultH = doc.units === 'in' ? 0.5 : 10;
   const usingRegions = regionJobs.length > 0;
+  // Sketch-on-face extrudes auto-combine with the body they were drawn on
+  // (same as the extrude gizmo) — the tip below tells the user what to expect.
+  const onFace = usingRegions
+    ? regionJobs.some(j => j.sketch.sourceBodyId != null)
+    : !!doc.sketch.sourceBodyId;
   openModal({
     title: usingRegions
       ? `Extrude ${regionJobs.length} region${regionJobs.length === 1 ? '' : 's'}`
@@ -9142,10 +9147,12 @@ function extrudeCurrentSketch() {
            <div class="field"><label>Operation</label>
              <select id="ex-op">
                <option value="add">Positive (add solid)</option>
-               <option value="subtract">Negative (cut — pair with Combine)</option>
+               <option value="subtract">Negative (cut)</option>
              </select>
            </div>
-           <div class="hint">Tip: extrude a sketch-on-face as Negative, then click <b>Combine</b> in the toolbar to cut a hole through the body.</div>`,
+           <div class="hint">${onFace
+             ? 'Tip: a Negative cuts straight into the body this sketch is on.'
+             : 'Tip: a Negative makes a cutting shape — overlap it with a body, Shift-click both, then <b>Group</b> to cut.'}</div>`,
     onConfirm: () => {
       const v = parseFloat(document.getElementById('ex-h').value);
       const op = document.getElementById('ex-op').value;
@@ -9153,7 +9160,28 @@ function extrudeCurrentSketch() {
       pushUndo();
       const h = fromUnit(v);
       let lastBodyId = null;
+      // Auto-combine each new extrude with the body its sketch was drawn on
+      // (mirrors commitExtrudeFromGizmo) — a Negative cuts instantly, a
+      // Positive fuses instantly. Ground-plane sketches have no parent and
+      // stay standalone. Returns the count of bodies combined away.
+      const autoCombineWithParent = (parentId, bodyIds, sketchIds) => {
+        if (parentId == null || typeof CSG === 'undefined') return 0;
+        if (!doc.bodies.find(b => b.id === parentId)) return 0;
+        doc.multiSelectedBodies = [parentId, ...bodyIds];
+        groupSelected(true); // undo already snapshotted above
+        if (doc.selection?.kind === 'body') {
+          // Re-point the sketch(es) at the new group so the next extrude on
+          // them auto-combines with the combined body too.
+          for (const sid of sketchIds) {
+            const sk = doc.sketches.find(s => s.id === sid);
+            if (sk) sk.sourceBodyId = doc.selection.id;
+          }
+          lastBodyId = doc.selection.id;
+        }
+        return bodyIds.length;
+      };
       if (usingRegions) {
+        const made = [];
         for (const job of regionJobs) {
           const synth = regionToSyntheticSketch(job.region, job.sketch);
           const body = {
@@ -9170,14 +9198,36 @@ function extrudeCurrentSketch() {
           };
           doc.bodies.push(body);
           lastBodyId = body.id;
+          made.push({ job, bodyId: body.id });
           // Source entities are NOT consumed any more — keeping them in the
           // sketch lets the user re-enter and edit the shape, with the
           // extrusion auto-rebuilding via setMode('3d').
         }
         doc.selectedRegions = [];
-        setStatus(op === 'subtract'
-          ? `${regionJobs.length} negative extrude(s) (${fmtUL(h)}) — click Combine to cut`
-          : `Extruded ${regionJobs.length} region(s) to ${fmtUL(h)}`);
+        // Group new bodies per parent (regions can come from several sketches).
+        const byParent = new Map();
+        for (const { job, bodyId } of made) {
+          const pid = job.sketch.sourceBodyId;
+          if (pid == null) continue;
+          if (!byParent.has(pid)) byParent.set(pid, { ids: [], sketchIds: new Set() });
+          const slot = byParent.get(pid);
+          slot.ids.push(bodyId);
+          slot.sketchIds.add(job.sketch.id);
+        }
+        let combined = 0;
+        for (const [pid, slot] of byParent) {
+          combined += autoCombineWithParent(pid, slot.ids, slot.sketchIds);
+        }
+        const nR = regionJobs.length;
+        if (combined > 0) {
+          setStatus(op === 'subtract'
+            ? `Cut ${nR} region${nR === 1 ? '' : 's'} into the body (${fmtUL(h)} deep)`
+            : `Added ${nR} region${nR === 1 ? '' : 's'} to the body (${fmtUL(h)} tall)`);
+        } else {
+          setStatus(op === 'subtract'
+            ? `${nR} negative extrude${nR === 1 ? '' : 's'} (${fmtUL(h)}) — Shift-click with a body, then Group to cut`
+            : `Extruded ${nR} region${nR === 1 ? '' : 's'} to ${fmtUL(h)}`);
+        }
       } else {
         const sketchCopy = JSON.parse(JSON.stringify(doc.sketch));
         sketchCopy.entities = sketchCopy.entities.filter(e => !e.construction);
@@ -9194,9 +9244,17 @@ function extrudeCurrentSketch() {
         };
         doc.bodies.push(body);
         lastBodyId = body.id;
-        setStatus(op === 'subtract'
-          ? `Negative extrude (${fmtUL(h)}) — click Combine to cut`
-          : `Extruded sketch to ${fmtUL(h)}`);
+        const combined = autoCombineWithParent(
+          doc.sketch.sourceBodyId, [body.id], [doc.sketch.id]);
+        if (combined > 0) {
+          setStatus(op === 'subtract'
+            ? `Cut the sketch into the body (${fmtUL(h)} deep)`
+            : `Added the sketch to the body (${fmtUL(h)} tall)`);
+        } else {
+          setStatus(op === 'subtract'
+            ? `Negative extrude (${fmtUL(h)}) — Shift-click with a body, then Group to cut`
+            : `Extruded sketch to ${fmtUL(h)}`);
+        }
       }
       if (lastBodyId != null) doc.selection = { kind: 'body', id: lastBodyId };
       setMode('3d');
@@ -10948,7 +11006,7 @@ function createSketchOnPlane(plane, opts = {}) {
   requestAnimationFrame(() => requestAnimationFrame(fitSketchViewToBodies));
   renderTree();
   renderProps();
-  setStatus(`Sketching on ${name} — draw a profile, then switch back to 3D and Extrude or Combine.`);
+  setStatus(`Sketching on ${name} — draw a shape, then Extrude it (a Negative cuts right into the body).`);
 }
 
 // True if the picked face point sits on a smoothly curved surface — sphere
@@ -12797,7 +12855,7 @@ function renderProps() {
           <option value="subtract"${body.op === 'subtract' ? ' selected' : ''}>Negative (cut-out)</option>
         </select>
       </div>
-      ${body.op === 'subtract' ? '<div class="hint">Negative bodies are subtracted when you click <b>Combine</b>.</div>' : ''}`;
+      ${body.op === 'subtract' ? '<div class="hint">Negative bodies cut into a body when you <b>Group</b> them together (Shift-click both, then Group).</div>' : ''}`;
 
     props.innerHTML = dimFields + positionFields + opField + `<button class="action" id="del-body" style="margin-top:14px">Delete body</button>`;
 
