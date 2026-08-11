@@ -70,14 +70,17 @@ export const TOOLS: MarketingTool[] = [
     ],
     gallery: [
       {
-        label: "Designing a bracket in STEM Sketch — real M5 hex bolts included",
+        label: "Sketching the bracket profile — orthographic drawing, on screen",
         src: "/marketing/stem-sketch/gallery-1.png",
       },
       {
-        label: "The same part in the slicer, ready for the 3D printer",
+        label: "The same bracket in 3D — real M5 hex bolts included",
         src: "/marketing/stem-sketch/gallery-2.png",
       },
-      { label: "Photo — 3D-printed student designs" },
+      {
+        label: "Ready for the 3D printer — the exported part in the slicer",
+        src: "/marketing/stem-sketch/gallery-3.png",
+      },
     ],
     demoVideo: "Demo video — from blank canvas to printable part (2 min)",
     demoVideoSrc: "/marketing/stem-sketch/demo.mp4",
