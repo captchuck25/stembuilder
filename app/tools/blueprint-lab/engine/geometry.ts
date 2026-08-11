@@ -1667,6 +1667,83 @@ export function stairHalfExtents(s: Stair): { hx: number; hy: number } {
   return { hx: (s.length + s.width) / 2, hy: (s.length + s.width) / 2 };
 }
 
+// Chair layout for each dining table size: chairs per long side, plus one at
+// each end for the 6- and 8-seaters. 2 + 2 = 4, 2+2+ends = 6, 3+3+ends = 8.
+const DINING_SEAT_PLAN: Partial<Record<string, { perSide: number; ends: boolean }>> = {
+  'dining-table-4': { perSide: 2, ends: false },
+  'dining-table-6': { perSide: 2, ends: true },
+  'dining-table-8': { perSide: 3, ends: true },
+};
+
+// Positions + rotations for the chairs that accompany a dining table, each
+// facing the table (back away from it), following the table's own rotation.
+// Local frame before table rotation: +x along the table's width (long axis),
+// back of a chair is its local -depth side. Returns [] for non-table kinds.
+export function diningChairPlacements(
+  table: { kind: string; position: Vec2; rotation: number; width: number; depth: number },
+  chair: { width: number; depth: number },
+): Array<{ position: Vec2; rotation: number }> {
+  const plan = DINING_SEAT_PLAN[table.kind];
+  if (!plan) return [];
+  const GAP = 2; // inches between table edge and chair front
+  const out: Array<{ local: Vec2; rot: number }> = [];
+  const rowY = table.depth / 2 + GAP + chair.depth / 2;
+  for (let i = 0; i < plan.perSide; i++) {
+    const x = -table.width / 2 + table.width * ((i + 0.5) / plan.perSide);
+    out.push({ local: { x, y: -rowY }, rot: 0 });        // far side, faces +y (table)
+    out.push({ local: { x, y: rowY }, rot: Math.PI });    // near side, faces -y
+  }
+  if (plan.ends) {
+    const endX = table.width / 2 + GAP + chair.depth / 2;
+    out.push({ local: { x: -endX, y: 0 }, rot: -Math.PI / 2 }); // left end, faces +x
+    out.push({ local: { x: endX, y: 0 }, rot: Math.PI / 2 });   // right end, faces -x
+  }
+  const c = Math.cos(table.rotation), s = Math.sin(table.rotation);
+  return out.map(({ local, rot }) => ({
+    position: {
+      x: table.position.x + c * local.x - s * local.y,
+      y: table.position.y + s * local.x + c * local.y,
+    },
+    rotation: table.rotation + rot,
+  }));
+}
+
+// World-inch bounding box of everything drawn on a level — walls (with
+// thickness), lines, furniture, stairs, room labels + boundaries, texts and
+// dimension anchor points. Null when the level is empty. Used to fit the
+// viewport to the student's work when a view opens.
+export function levelContentBBox(level: Level): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const grow = (x: number, y: number, r = 0) => {
+    if (x - r < minX) minX = x - r;
+    if (y - r < minY) minY = y - r;
+    if (x + r > maxX) maxX = x + r;
+    if (y + r > maxY) maxY = y + r;
+  };
+  for (const w of level.walls) {
+    grow(w.start.x, w.start.y, w.thickness / 2);
+    grow(w.end.x, w.end.y, w.thickness / 2);
+  }
+  for (const l of level.lines ?? []) { grow(l.start.x, l.start.y); grow(l.end.x, l.end.y); }
+  for (const f of level.furniture) grow(f.position.x, f.position.y, Math.hypot(f.width, f.depth) / 2);
+  for (const s of level.stairs) {
+    const { hx, hy } = stairHalfExtents(s);
+    grow(s.position.x, s.position.y, Math.hypot(hx, hy));
+  }
+  for (const r of level.roomLabels) {
+    grow(r.position.x, r.position.y);
+    for (const b of r.boundary ?? []) grow(b.x, b.y);
+  }
+  for (const t of level.texts) grow(t.position.x, t.position.y);
+  for (const d of level.dimensions) {
+    const a = resolveDimAnchor(d.start, level);
+    const b = resolveDimAnchor(d.end, level);
+    if (a) grow(a.x, a.y);
+    if (b) grow(b.x, b.y);
+  }
+  return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
+}
+
 export function hitStair(stairs: Stair[], p: Vec2, toleranceIn: number): string | null {
   let best: string | null = null;
   let bestD = Infinity;

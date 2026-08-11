@@ -38,7 +38,7 @@ import {
   Project, RoomLabel, SectionCut, Selection, Stair, StairShape, TextLabel, ToolId, Vec2, Wall, WallStatus, WallType,
   Window, WindowType, WindowTypeSettings, emptyLevel, makeId, newProject,
 } from './engine/types';
-import { autoDetectRoomBoundary, driveDimension, polygonAreaSqFt, wallPolygon } from './engine/geometry';
+import { autoDetectRoomBoundary, diningChairPlacements, driveDimension, polygonAreaSqFt, wallPolygon } from './engine/geometry';
 import { syncLinkedStairs, linkedGeometryPatch } from './engine/stairs';
 import { buildPrimarySectionCut } from './engine/sectionPrimitives';
 import { T } from './engine/theme';
@@ -993,8 +993,20 @@ export default function BlueprintLabClient() {
   }, []);
 
   const handleAddFurniture = useCallback((f: FurnitureItem) => {
-    updateLevel(l => ({ ...l, furniture: [...l.furniture, f] }));
-  }, [updateLevel]);
+    // Dining tables come with their chairs: one per seat, tucked up to the
+    // table and facing it. Added in the same edit so undo removes the set.
+    const chairSize = furnitureSettings['dining-chair'] ?? FURNITURE_CATALOG['dining-chair'];
+    const chairs: FurnitureItem[] = diningChairPlacements(f, chairSize).map(p => ({
+      id: makeId('furn'),
+      levelId: f.levelId,
+      kind: 'dining-chair',
+      position: p.position,
+      rotation: p.rotation,
+      width: chairSize.width,
+      depth: chairSize.depth,
+    }));
+    updateLevel(l => ({ ...l, furniture: [...l.furniture, f, ...chairs] }));
+  }, [updateLevel, furnitureSettings]);
 
   const handleUpdateFurniture = useCallback((ids: string[], patch: Partial<FurnitureItem>) => {
     const idSet = new Set(ids);

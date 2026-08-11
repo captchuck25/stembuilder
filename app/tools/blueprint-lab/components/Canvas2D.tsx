@@ -12,7 +12,7 @@ import {
   HandleHit, StairCornerHit, WallEnd,
   dist, extractWallFace, hitDimension, hitDoor, hitFurniture, hitHandle, hitLine, hitRoomLabel, hitStair, hitText,
   hitSectionCut, hitStairCorner, hitWall, hitWallForOpening, hitWindow,
-  lineFullyInsideBox, lineTouchesBox,
+  levelContentBBox, lineFullyInsideBox, lineTouchesBox,
   normalizeBox, openingRect, pointInsideBox,
   polygonAreaSqFt,
   refineFirstAnchorToSecondsWall, resolveDimAnchor,
@@ -278,6 +278,11 @@ export default function Canvas2D({
   const [vp, setVp] = useState<CanvasState>({
     pan: { x: 0, y: 0 }, pxPerInch: 2, width: 800, height: 600,
   });
+  // Fit-on-mount bookkeeping: `measuredRef` flips when the ResizeObserver
+  // delivers the container's real size (the 800×600 default is a placeholder);
+  // `fittedRef` ensures the content fit happens only once per mount.
+  const measuredRef = useRef(false);
+  const fittedRef = useRef(false);
   const [drawing, setDrawing] = useState<DrawingWall | null>(null);
   const [typedLength, setTypedLength] = useState('');
   const [panning, setPanning] = useState<{ from: Vec2; pan0: Vec2 } | null>(null);
@@ -745,11 +750,34 @@ export default function Canvas2D({
     if (!el) return;
     const ro = new ResizeObserver(() => {
       const r = el.getBoundingClientRect();
+      measuredRef.current = true;
       setVp(s => ({ ...s, width: r.width, height: r.height }));
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // Fit the view to the level's content ONCE, when the canvas first knows its
+  // real size. The view remounts on every tab switch, so without this the
+  // plan comes back origin-centered at the default zoom and can be entirely
+  // off-screen. Runs once per mount — after that, pan/zoom belong to the user.
+  useEffect(() => {
+    if (fittedRef.current || !measuredRef.current) return;
+    fittedRef.current = true;
+    const bb = levelContentBBox(level);
+    if (!bb) return; // empty level — keep the origin-centered default
+    const PAD = 70;  // screen px margin so dimensions/labels at the edge stay visible
+    setVp(s => {
+      const zx = (s.width  - PAD * 2) / Math.max(1, bb.maxX - bb.minX);
+      const zy = (s.height - PAD * 2) / Math.max(1, bb.maxY - bb.minY);
+      // Same floor as the wheel-zoom clamp; cap the top so a tiny sketch
+      // doesn't blow up past a comfortable working zoom.
+      const ppi = Math.min(20, Math.max(0.25, Math.min(zx, zy, 3)));
+      const cx = (bb.minX + bb.maxX) / 2;
+      const cy = (bb.minY + bb.maxY) / 2;
+      return { ...s, pxPerInch: ppi, pan: { x: -cx * ppi, y: -cy * ppi } };
+    });
+  }, [vp.width, vp.height, level]);
 
   // ─── Snap pipeline (wall drawing) ─────────────────────────────────────────
   // Returns the snapped point plus whether it locked onto a real feature (vs a

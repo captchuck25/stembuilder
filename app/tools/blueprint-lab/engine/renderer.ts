@@ -1868,10 +1868,19 @@ function drawFurnitureSymbol(
       break;
     }
     case 'table':
-    case 'chair':
       // Single inset rectangle hints at top surface vs frame.
       ctx.strokeRect(-w / 2 + 3, -d / 2 + 3, w - 6, d - 6);
       break;
+    case 'chair': {
+      // Filled back band along the -d edge (same side as the 3D backrest) so
+      // plan view shows which way the chair faces; seat inset fills the rest.
+      const back = Math.max(2.5, d * 0.18);
+      ctx.fillStyle = selected ? 'rgba(79,124,255,0.20)' : '#e8ebf3';
+      ctx.fillRect(-w / 2, -d / 2, w, back);
+      ctx.strokeRect(-w / 2, -d / 2, w, back);
+      ctx.strokeRect(-w / 2 + 2, -d / 2 + back + 2, w - 4, d - back - 4);
+      break;
+    }
     case 'office-chair': {
       // 5-star caster base + round seat + arc backrest at -d side.
       const seatR = Math.min(w, d) * 0.34;
