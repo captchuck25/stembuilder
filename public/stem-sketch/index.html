@@ -947,6 +947,17 @@
     pointer-events: none;
   }
   .snap-guide { stroke: var(--warm); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+  /* Trim hover preview — the piece a click would remove */
+  .trim-preview {
+    fill: none;
+    stroke: #e5484d;
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    stroke-dasharray: 7 5;
+    opacity: 0.9;
+    pointer-events: none;
+  }
+  .trim-preview-end { fill: #e5484d; pointer-events: none; }
   /* Hidden lines — edges of the body that lie BEHIND the visible face.
      Orthographic convention: dashed and noticeably faded, but still readable. */
   .body-outline {
@@ -1117,7 +1128,7 @@
         <button class="tool" data-action="offset-2d" title="Offset — duplicate the selected shape by a typed distance"><svg class="ico"><use href="#i-offset"/></svg><span class="tool-label">Offset</span></button>
         <button class="tool" data-action="group" title="Group (Ctrl+G) — Shift-click to add shapes to selection first"><svg class="ico"><use href="#i-group"/></svg><span class="tool-label">Group</span></button>
         <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)"><svg class="ico"><use href="#i-ungroup"/></svg><span class="tool-label">Ungroup</span></button>
-        <button class="tool" data-action="trim" title="Trim line — click any polyline segment to remove it"><svg class="ico"><use href="#i-trim"/></svg><span class="tool-label">Trim</span></button>
+        <button class="tool" data-action="trim" title="Trim — hover a shape to preview the piece that will be removed in red, then click to remove it"><svg class="ico"><use href="#i-trim"/></svg><span class="tool-label">Trim</span></button>
         <button class="tool" data-action="explode-2d" title="Explode — break a rectangle or closed polyline into individual line segments so each edge can be selected, offset, or moved on its own"><svg class="ico"><use href="#i-explode"/></svg><span class="tool-label">Explode</span></button>
         <button class="tool" data-tool="extend" title="Extend (X) — click a line near the end you want to extend; it grows along its angle until it hits another line or the workplane edge"><svg class="ico"><use href="#i-extend"/></svg><span class="tool-label">Extend</span></button>
         <span class="tool-sep"></span>
@@ -1444,6 +1455,8 @@ class SketchEngine {
     this.selectedNode = null;
     this.cpDrag = null;
     this.nodeMoveState = null;
+    this.trimPreview = null;
+    this._trimPreviewSig = '';
     if (['cp-drag','node-move','node-move-pending','move-pending'].includes(this.dragMode)) this.dragMode = null;
     this.updateNodeActions();
 
@@ -1460,13 +1473,256 @@ class SketchEngine {
       arc: 'Click a start point, click an end point, then move the mouse to shape the arc and click to finish.',
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
       eraser: 'Click any shape to delete it. Press <b>V</b> to return to Select.',
-      trim: 'Click a polyline segment to remove just that segment. The polyline splits if needed.',
+      trim: 'Hover a shape — the piece that would be removed shows in red. Click to remove it. Crossings with other shapes set the cut points.',
       dimension: 'Click two points to drop a dimension label between them. Snaps to endpoints. Esc cancels.',
     };
     // Tips are surfaced via the status bar instead of a dedicated panel
     if (tips[t]) setStatus(tips[t].replace(/<[^>]+>/g, ''));
     this.updateLengthOverlay();
     this.render();
+  }
+
+  // ── Trim planning ────────────────────────────────────────────────────────
+  // Works out exactly what a trim click at world (wx, wy) would do WITHOUT
+  // mutating anything. Returns:
+  //   null                                    — nothing under the cursor
+  //   { kind:'hint', message }                — hit something, but untrimmable
+  //   { kind:'trim', ent, results, removedPts, status }
+  //     → replace `ent` with `results[]`. removedPts traces the piece that
+  //       goes away (world coords) for the red hover preview.
+  // Shared by onDown (applies the plan) and onMove (previews it).
+  computeTrimPlan(wx, wy) {
+    const tolMm = 5 / this.view.pxPerMm;
+    // 1. Find clicked entity + segment + parameter t. Reverse draw order so
+    //    the visually-topmost entity wins, matching selection's hit-test.
+    let clickedOrig = null, simplePoly = null, clickedSegIdx = -1, clickedT = 0;
+    let bestD = tolMm;
+    for (let ei = doc.sketch.entities.length - 1; ei >= 0; ei--) {
+      const ent = doc.sketch.entities[ei];
+      // Construction lines participate in trim too — both as targets and as
+      // cutters. Trim is about geometric intersections, not about which
+      // lines export.
+      const poly = convertToSimplePolyline(ent);
+      if (!poly || poly.points.length < 2) continue;
+      const n = poly.points.length;
+      const segCount = poly.closed ? n : n - 1;
+      for (let i = 0; i < segCount; i++) {
+        const a = poly.points[i], b = poly.points[(i + 1) % n];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const L2 = dx * dx + dy * dy;
+        if (L2 === 0) continue;
+        const t = Math.max(0, Math.min(1, ((wx - a.x) * dx + (wy - a.y) * dy) / L2));
+        const px = a.x + t * dx, py = a.y + t * dy;
+        const d = Math.hypot(wx - px, wy - py);
+        if (d < bestD) {
+          bestD = d; clickedOrig = ent; simplePoly = poly;
+          clickedSegIdx = i; clickedT = t;
+        }
+      }
+    }
+    if (!clickedOrig) return null;
+
+    // 2. Cumulative arc-length parameters along the simple polyline.
+    const n = simplePoly.points.length;
+    const segCount = simplePoly.closed ? n : n - 1;
+    const segLens = [];
+    for (let i = 0; i < segCount; i++) {
+      const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
+      segLens.push(Math.hypot(b.x - a.x, b.y - a.y));
+    }
+    const cumLens = [0];
+    for (let i = 0; i < segCount; i++) cumLens.push(cumLens[i] + segLens[i]);
+    const totalLen = cumLens[segCount];
+    if (totalLen < 1e-6) return { kind: 'hint', message: 'Shape too small to trim.' };
+    const clickedS = cumLens[clickedSegIdx] + clickedT * segLens[clickedSegIdx];
+
+    // 3. Intersections of the whole polyline with all OTHER entities.
+    //    Construction lines count as cutters — if a line physically crosses
+    //    a dashed reference, that crossing IS a valid trim bracket.
+    let intersections = []; // each: { s, x, y }
+    for (const other of doc.sketch.entities) {
+      if (other.id === clickedOrig.id) continue;
+      const oSegs = entityToSegments(other);
+      if (!oSegs.length) continue;
+      for (let i = 0; i < segCount; i++) {
+        const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
+        for (const os of oSegs) {
+          const hit = segmentIntersection(a, b, os.a, os.b);
+          if (!hit) continue;
+          const s = cumLens[i] + hit.t * segLens[i];
+          // Skip an intersection that sits exactly at the click point
+          if (Math.abs(s - clickedS) < 1e-3) continue;
+          intersections.push({ s, x: hit.x, y: hit.y });
+        }
+      }
+    }
+    // Dedupe crossings that land on a shared vertex of two adjacent segments
+    // (they register once per segment at the same arc-length s).
+    intersections.sort((a, b) => a.s - b.s);
+    intersections = intersections.filter((it, i) =>
+      i === 0 || Math.abs(it.s - intersections[i - 1].s) > 1e-6);
+    if (simplePoly.closed && intersections.length > 1
+        && Math.abs((intersections[0].s + totalLen) - intersections[intersections.length - 1].s) < 1e-6) {
+      intersections.pop();
+    }
+
+    const baseProps = {
+      type: 'polyline',
+      construction: clickedOrig.construction || false,
+      groupId: clickedOrig.groupId,
+    };
+    const cloneWithPoints = (pts, closed) => ({
+      ...baseProps, points: pts, closed, id: doc.sketch.nextId++,
+    });
+    const P = (i) => ({ x: simplePoly.points[i % n].x, y: simplePoly.points[i % n].y });
+
+    // ── No crossings anywhere ──
+    if (intersections.length === 0) {
+      if (clickedOrig.type === 'rect') {
+        // Remove the clicked side, leaving a 3-sided open shape.
+        const i = clickedSegIdx;
+        return {
+          kind: 'trim', ent: clickedOrig,
+          results: [cloneWithPoints([P(i + 1), P(i + 2), P(i + 3), P(i)], false)],
+          removedPts: [P(i), P(i + 1)],
+          status: 'Removed that side of the rectangle — 3 sides left',
+        };
+      }
+      if (clickedOrig.type === 'polyline'
+          && clickedOrig.points.length === simplePoly.points.length) {
+        // Remove just the clicked segment so the tool still does something
+        // useful for cleanup.
+        const deep = (o) => JSON.parse(JSON.stringify(o));
+        let results;
+        if (clickedOrig.closed) {
+          const rotated = deep(clickedOrig.points.slice(clickedSegIdx + 1)
+            .concat(clickedOrig.points.slice(0, clickedSegIdx + 1)));
+          results = [{ ...deep(clickedOrig), id: doc.sketch.nextId++, points: rotated, closed: false }];
+        } else {
+          const clone = (pts) => ({
+            ...deep(clickedOrig), id: doc.sketch.nextId++, points: deep(pts), closed: false,
+          });
+          results = [];
+          const left = clickedOrig.points.slice(0, clickedSegIdx + 1);
+          const right = clickedOrig.points.slice(clickedSegIdx + 1);
+          if (left.length >= 2) results.push(clone(left));
+          if (right.length >= 2) results.push(clone(right));
+        }
+        return {
+          kind: 'trim', ent: clickedOrig, results,
+          removedPts: [P(clickedSegIdx), P(clickedSegIdx + 1)],
+          status: 'Trimmed segment (no crossings found)',
+        };
+      }
+      return { kind: 'hint', message: 'No crossings found — overlap this with another shape, then trim.' };
+    }
+
+    // A closed shape needs at least two crossings to bracket a piece.
+    if (simplePoly.closed && intersections.length < 2) {
+      return { kind: 'hint', message: 'Need two crossings to trim a closed shape — overlap it further, then trim.' };
+    }
+
+    // 4. Bracket the click with the nearest intersections on each side.
+    let leftInt = null, rightInt = null;
+    for (const it of intersections) {
+      if (it.s < clickedS - 1e-6) leftInt = it;
+      else if (it.s > clickedS + 1e-6 && !rightInt) rightInt = it;
+    }
+    if (simplePoly.closed) {
+      // Circular wrap: if no intersection before/after the click in linear
+      // s-space, use the last/first one (cyclic neighbours).
+      if (!leftInt)  leftInt  = intersections[intersections.length - 1];
+      if (!rightInt) rightInt = intersections[0];
+    } else {
+      // Open polyline: missing brackets fall back to the polyline endpoints.
+      if (!leftInt)  leftInt  = { s: 0,        x: simplePoly.points[0].x,     y: simplePoly.points[0].y     };
+      if (!rightInt) rightInt = { s: totalLen, x: simplePoly.points[n - 1].x, y: simplePoly.points[n - 1].y };
+    }
+
+    // 5. Trace the removed piece (leftInt → rightInt in +s direction,
+    //    wrapping on closed shapes) for the hover preview.
+    let removedPts;
+    if (simplePoly.closed) {
+      let span = rightInt.s - leftInt.s;
+      if (span <= 1e-9) span += totalLen;
+      const mids = [];
+      for (let i = 0; i < segCount; i++) {
+        let ds = cumLens[i] - leftInt.s;
+        if (ds <= 1e-9) ds += totalLen;
+        if (ds < span - 1e-9) mids.push({ ds, x: simplePoly.points[i].x, y: simplePoly.points[i].y });
+      }
+      mids.sort((a, b) => a.ds - b.ds);
+      removedPts = [{ x: leftInt.x, y: leftInt.y },
+        ...mids.map(m => ({ x: m.x, y: m.y })),
+        { x: rightInt.x, y: rightInt.y }];
+    } else {
+      const mids = [];
+      for (let i = 0; i < n; i++) {
+        if (cumLens[i] > leftInt.s + 1e-6 && cumLens[i] < rightInt.s - 1e-6) {
+          mids.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
+        }
+      }
+      removedPts = [{ x: leftInt.x, y: leftInt.y }, ...mids, { x: rightInt.x, y: rightInt.y }];
+    }
+
+    // 6. Build the kept piece(s).
+    let results = [];
+    if (clickedOrig.type === 'circle') {
+      // Keep the complementary arc as a SMOOTH Bezier arc on the true
+      // circle — the tessellated 64-gon is only used to locate crossings.
+      const ccx = clickedOrig.cx, ccy = clickedOrig.cy, r = clickedOrig.r;
+      const angOf = (p) => Math.atan2(p.y - ccy, p.x - ccx);
+      const a0 = angOf(rightInt);
+      let sweep = angOf(leftInt) - a0;
+      while (sweep <= 1e-6) sweep += Math.PI * 2;
+      results = [circularArcPolyline(ccx, ccy, r, a0, sweep, {
+        construction: clickedOrig.construction || false,
+        groupId: clickedOrig.groupId,
+      }, doc.sketch)];
+    } else if (simplePoly.closed) {
+      // Closed → open. Kept arc goes from rightInt forward to leftInt.
+      // If leftInt.s < rightInt.s, the kept arc wraps through totalLen → 0.
+      const keptWraps = leftInt.s < rightInt.s;
+      const inKept = (si) => keptWraps
+        ? (si > rightInt.s + 1e-6 || si < leftInt.s - 1e-6)
+        : (si > rightInt.s + 1e-6 && si < leftInt.s - 1e-6);
+      const vertsKept = [];
+      for (let i = 0; i < n; i++) {
+        const si = cumLens[i];
+        if (!inKept(si)) continue;
+        let dist = si - rightInt.s;
+        if (dist < 0) dist += totalLen;
+        vertsKept.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y, dist });
+      }
+      vertsKept.sort((a, b) => a.dist - b.dist);
+      const pts = [{ x: rightInt.x, y: rightInt.y }];
+      for (const v of vertsKept) pts.push({ x: v.x, y: v.y });
+      pts.push({ x: leftInt.x, y: leftInt.y });
+      if (pts.length >= 2) results.push(cloneWithPoints(pts, false));
+    } else {
+      // Open → up to two open polylines flanking the removed arc.
+      const leftPts = [];
+      for (let i = 0; i < n; i++) {
+        if (cumLens[i] < leftInt.s - 1e-6) {
+          leftPts.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
+        }
+      }
+      if (leftInt.s > 1e-6) leftPts.push({ x: leftInt.x, y: leftInt.y });
+      const rightPts = [];
+      if (rightInt.s < totalLen - 1e-6) rightPts.push({ x: rightInt.x, y: rightInt.y });
+      for (let i = 0; i < n; i++) {
+        if (cumLens[i] > rightInt.s + 1e-6) {
+          rightPts.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
+        }
+      }
+      if (leftPts.length >= 2)  results.push(cloneWithPoints(leftPts, false));
+      if (rightPts.length >= 2) results.push(cloneWithPoints(rightPts, false));
+    }
+
+    return {
+      kind: 'trim', ent: clickedOrig, results, removedPts,
+      status: `Trimmed at ${intersections.length === 1 ? '1 crossing' : `${intersections.length} crossings`}`,
+    };
   }
 
   finalizeLine(commit = true) {
@@ -2303,193 +2559,26 @@ class SketchEngine {
     }
 
     if (this.tool === 'trim') {
-      const tolMm = 5 / this.view.pxPerMm;
-      // 1. Find clicked entity + segment + parameter t.
-      //    Iterate in REVERSE draw order so the most recently drawn entity
-      //    (visually on top) wins when two entities are within tolerance of
-      //    the cursor — matches selection's hit-test behavior. Also use <=
-      //    so equal distances favor later entities consistently.
-      let clickedOrig = null, simplePoly = null, clickedSegIdx = -1, clickedT = 0;
-      let bestD = tolMm;
-      for (let ei = doc.sketch.entities.length - 1; ei >= 0; ei--) {
-        const ent = doc.sketch.entities[ei];
-        // Construction lines participate in trim too — both as targets (you
-        // can click one and trim it) and as cutters (handled below). Trim is
-        // about geometric intersections, not about which lines export.
-        const poly = convertToSimplePolyline(ent);
-        if (!poly || poly.points.length < 2) continue;
-        const n = poly.points.length;
-        const segCount = poly.closed ? n : n - 1;
-        for (let i = 0; i < segCount; i++) {
-          const a = poly.points[i], b = poly.points[(i + 1) % n];
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const L2 = dx * dx + dy * dy;
-          if (L2 === 0) continue;
-          const t = Math.max(0, Math.min(1, ((wx - a.x) * dx + (wy - a.y) * dy) / L2));
-          const px = a.x + t * dx, py = a.y + t * dy;
-          const d = Math.hypot(wx - px, wy - py);
-          if (d < bestD) {
-            bestD = d; clickedOrig = ent; simplePoly = poly;
-            clickedSegIdx = i; clickedT = t;
-          }
-        }
-      }
-      if (!clickedOrig) {
+      // All the geometry work lives in computeTrimPlan (shared with the
+      // hover preview) — here we just apply what the preview promised.
+      const plan = this.computeTrimPlan(wx, wy);
+      if (!plan) {
         showHint('Click directly on a line, rect edge, or circle to trim it.');
         return;
       }
-
-      // 2. Compute cumulative arc-length parameters along the simple polyline.
-      const n = simplePoly.points.length;
-      const segCount = simplePoly.closed ? n : n - 1;
-      const segLens = [];
-      for (let i = 0; i < segCount; i++) {
-        const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
-        segLens.push(Math.hypot(b.x - a.x, b.y - a.y));
-      }
-      const cumLens = [0];
-      for (let i = 0; i < segCount; i++) cumLens.push(cumLens[i] + segLens[i]);
-      const totalLen = cumLens[segCount];
-      if (totalLen < 1e-6) {
-        showHint('Entity too small to trim.');
+      if (plan.kind === 'hint') {
+        showHint(plan.message);
         return;
       }
-      const clickedS = cumLens[clickedSegIdx] + clickedT * segLens[clickedSegIdx];
-
-      // 3. Find intersections of the whole polyline with all OTHER entities.
-      //    Construction lines count as cutters — if a line physically crosses
-      //    a dashed reference, that crossing IS a valid trim bracket.
-      const intersections = []; // each: { s, x, y }
-      for (const other of doc.sketch.entities) {
-        if (other.id === clickedOrig.id) continue;
-        const oSegs = entityToSegments(other);
-        if (!oSegs.length) continue;
-        for (let i = 0; i < segCount; i++) {
-          const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
-          for (const os of oSegs) {
-            const hit = segmentIntersection(a, b, os.a, os.b);
-            if (!hit) continue;
-            const s = cumLens[i] + hit.t * segLens[i];
-            // Skip an intersection that sits exactly at the click point
-            if (Math.abs(s - clickedS) < 1e-3) continue;
-            intersections.push({ s, x: hit.x, y: hit.y });
-          }
-        }
-      }
-
       pushUndo();
-
-      if (intersections.length === 0) {
-        // No crossings anywhere. For user-drawn polylines, fall back to the
-        // v1 behavior of removing just the clicked segment so the tool still
-        // does *something* useful for cleanup. For rects/circles, do nothing
-        // — removing a single tessellated micro-segment would just leave a
-        // confusing barely-open shape.
-        if (clickedOrig.type === 'polyline'
-            && clickedOrig.points.length === simplePoly.points.length) {
-          const orig = clickedOrig;
-          const clone = (pts) => ({
-            ...JSON.parse(JSON.stringify(orig)),
-            id: doc.sketch.nextId++, points: pts, closed: false,
-          });
-          if (orig.closed) {
-            orig.points = orig.points.slice(clickedSegIdx + 1)
-              .concat(orig.points.slice(0, clickedSegIdx + 1));
-            orig.closed = false;
-          } else {
-            const left = orig.points.slice(0, clickedSegIdx + 1);
-            const right = orig.points.slice(clickedSegIdx + 1);
-            const idx = doc.sketch.entities.indexOf(orig);
-            doc.sketch.entities.splice(idx, 1);
-            if (left.length >= 2) doc.sketch.entities.push(clone(left));
-            if (right.length >= 2) doc.sketch.entities.push(clone(right));
-          }
-          doc.selection = null; doc.multiSelectedSketch = [];
-          renderTree(); renderProps(); this.render();
-          setStatus('Trimmed segment (no crossings found)');
-        } else {
-          showHint('No crossings found — overlap this with another shape, then trim.');
-        }
-        return;
-      }
-
-      // 4. Bracket the click with the nearest intersections on each side.
-      intersections.sort((a, b) => a.s - b.s);
-      let leftInt = null, rightInt = null;
-      for (const it of intersections) {
-        if (it.s < clickedS - 1e-6) leftInt = it;
-        else if (it.s > clickedS + 1e-6 && !rightInt) rightInt = it;
-      }
-      if (simplePoly.closed) {
-        // Circular wrap: if no intersection before/after the click in linear
-        // s-space, use the last/first one (cyclic neighbours).
-        if (!leftInt)  leftInt  = intersections[intersections.length - 1];
-        if (!rightInt) rightInt = intersections[0];
-      } else {
-        // Open polyline: missing brackets fall back to the polyline endpoints.
-        if (!leftInt)  leftInt  = { s: 0,        x: simplePoly.points[0].x,     y: simplePoly.points[0].y     };
-        if (!rightInt) rightInt = { s: totalLen, x: simplePoly.points[n - 1].x, y: simplePoly.points[n - 1].y };
-      }
-
-      // 5. Build the resulting polyline(s) by removing the bracketed arc.
-      const baseProps = {
-        type: 'polyline',
-        construction: clickedOrig.construction || false,
-        groupId: clickedOrig.groupId,
-      };
-      const cloneWithPoints = (pts, closed) => ({
-        ...baseProps, points: pts, closed, id: doc.sketch.nextId++,
-      });
-      const results = [];
-
-      if (simplePoly.closed) {
-        // Closed → open. Kept arc goes from rightInt forward to leftInt.
-        // If leftInt.s < rightInt.s, the kept arc wraps through totalLen → 0.
-        const keptWraps = leftInt.s < rightInt.s;
-        const inKept = (si) => keptWraps
-          ? (si > rightInt.s + 1e-6 || si < leftInt.s - 1e-6)
-          : (si > rightInt.s + 1e-6 && si < leftInt.s - 1e-6);
-        const vertsKept = [];
-        for (let i = 0; i < n; i++) {
-          const si = cumLens[i];
-          if (!inKept(si)) continue;
-          let dist = si - rightInt.s;
-          if (dist < 0) dist += totalLen;
-          vertsKept.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y, dist });
-        }
-        vertsKept.sort((a, b) => a.dist - b.dist);
-        const pts = [{ x: rightInt.x, y: rightInt.y }];
-        for (const v of vertsKept) pts.push({ x: v.x, y: v.y });
-        pts.push({ x: leftInt.x, y: leftInt.y });
-        if (pts.length >= 2) results.push(cloneWithPoints(pts, false));
-      } else {
-        // Open → up to two open polylines flanking the removed arc.
-        const leftPts = [];
-        for (let i = 0; i < n; i++) {
-          if (cumLens[i] < leftInt.s - 1e-6) {
-            leftPts.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
-          }
-        }
-        if (leftInt.s > 1e-6) leftPts.push({ x: leftInt.x, y: leftInt.y });
-        const rightPts = [];
-        if (rightInt.s < totalLen - 1e-6) rightPts.push({ x: rightInt.x, y: rightInt.y });
-        for (let i = 0; i < n; i++) {
-          if (cumLens[i] > rightInt.s + 1e-6) {
-            rightPts.push({ x: simplePoly.points[i].x, y: simplePoly.points[i].y });
-          }
-        }
-        if (leftPts.length >= 2)  results.push(cloneWithPoints(leftPts, false));
-        if (rightPts.length >= 2) results.push(cloneWithPoints(rightPts, false));
-      }
-
-      // 6. Replace the original entity with the trim result(s).
-      const origIdx = doc.sketch.entities.indexOf(clickedOrig);
-      doc.sketch.entities.splice(origIdx, 1);
-      for (const r of results) doc.sketch.entities.push(r);
-
+      const origIdx = doc.sketch.entities.indexOf(plan.ent);
+      if (origIdx !== -1) doc.sketch.entities.splice(origIdx, 1);
+      for (const r of plan.results) doc.sketch.entities.push(r);
       doc.selection = null; doc.multiSelectedSketch = [];
+      this.trimPreview = null;
+      this._trimPreviewSig = '';
       renderTree(); renderProps(); this.render();
-      setStatus(`Trimmed at ${intersections.length === 1 ? '1 crossing' : `${intersections.length} crossings`}`);
+      setStatus(plan.status);
       return;
     }
 
@@ -2760,6 +2849,19 @@ class SketchEngine {
       }
       this.scheduleRender();
       return;
+    }
+
+    // Trim hover preview — recompute what a click here would remove and
+    // repaint only when the answer changes.
+    if (this.tool === 'trim' && !this.dragMode) {
+      const plan = this.computeTrimPlan(wx, wy);
+      const pts = (plan && plan.kind === 'trim') ? plan.removedPts : null;
+      const sig = pts ? JSON.stringify(pts) : '';
+      if (sig !== this._trimPreviewSig) {
+        this._trimPreviewSig = sig;
+        this.trimPreview = pts;
+        this.scheduleRender();
+      }
     }
 
     // Live preview during arc drawing
@@ -3417,6 +3519,23 @@ class SketchEngine {
       }
     }
 
+    // Trim hover preview — the piece a click would remove, drawn in red with
+    // dot markers at the cut points.
+    if (this.tool === 'trim' && this.trimPreview && this.trimPreview.length >= 2) {
+      let d = '';
+      for (let i = 0; i < this.trimPreview.length; i++) {
+        const [px, py] = this.worldToScreen(this.trimPreview[i].x, this.trimPreview[i].y);
+        d += (i ? ' L ' : 'M ') + px.toFixed(1) + ' ' + py.toFixed(1);
+      }
+      svg += `<path class="trim-preview" d="${d}"/>`;
+      const first = this.trimPreview[0];
+      const last = this.trimPreview[this.trimPreview.length - 1];
+      const [fx, fy] = this.worldToScreen(first.x, first.y);
+      const [lx, ly] = this.worldToScreen(last.x, last.y);
+      svg += `<circle class="trim-preview-end" cx="${fx}" cy="${fy}" r="3.5"/>`;
+      svg += `<circle class="trim-preview-end" cx="${lx}" cy="${ly}" r="3.5"/>`;
+    }
+
     this.svg.innerHTML = svg;
   }
 }
@@ -3476,6 +3595,29 @@ function arcFromThreePoints(p1, p2, p3) {
     points.push({ x: cx + Math.cos(t) * r, y: cy + Math.sin(t) * r });
   }
   return { type: 'polyline', points, closed: false };
+}
+
+// Build an open polyline that traces a circular arc smoothly using cubic
+// Bezier handles (max 90° per cubic span) instead of straight tessellation —
+// a trimmed circle stays a zoom-proof arc with endpoints exactly on the true
+// circle. a0 = start angle (radians), sweep > 0 runs counter-clockwise.
+// `extra` carries construction/groupId; `sketch` assigns the entity id.
+function circularArcPolyline(cx, cy, r, a0, sweep, extra = {}, sketch = null) {
+  const nSeg = Math.max(1, Math.ceil(sweep / (Math.PI / 2)));
+  const step = sweep / nSeg;
+  const k = (4 / 3) * Math.tan(step / 4) * r;
+  const pts = [];
+  for (let i = 0; i <= nSeg; i++) {
+    const a = a0 + i * step;
+    const tx = -Math.sin(a), ty = Math.cos(a); // CCW tangent direction
+    const p = { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
+    if (i < nSeg) p.cpOut = { dx: tx * k, dy: ty * k };
+    if (i > 0)    p.cpIn  = { dx: -tx * k, dy: -ty * k };
+    pts.push(p);
+  }
+  const ent = { type: 'polyline', ...extra, points: pts, closed: false };
+  if (sketch) ent.id = sketch.nextId++;
+  return ent;
 }
 
 // ─── Bezier curve helpers ────────────────────────────────────────────────────
