@@ -1007,6 +1007,7 @@
   <symbol id="i-select" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M5 3l4 16 3-7 7-3z"/></symbol>
   <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-ellipse" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="9" ry="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-line" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 20L20 4"/><circle cx="4" cy="20" r="1.6" fill="currentColor"/><circle cx="20" cy="4" r="1.6" fill="currentColor"/></symbol>
   <symbol id="i-arc" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 19C 7 5, 17 5, 21 19"/></symbol>
   <symbol id="i-construction" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3" d="M3 12L21 12"/></symbol>
@@ -1098,6 +1099,7 @@
         <span class="tool-sep"></span>
         <button class="tool" data-tool="rect" title="Rectangle (R)"><svg class="ico"><use href="#i-rect"/></svg><span class="tool-label">Rect</span></button>
         <button class="tool" data-tool="circle" title="Circle (C)"><svg class="ico"><use href="#i-circle"/></svg><span class="tool-label">Circle</span></button>
+        <button class="tool" data-tool="ellipse" title="Ellipse — click and drag to draw an oval. Hold Shift for a circle."><svg class="ico"><use href="#i-ellipse"/></svg><span class="tool-label">Ellipse</span></button>
         <button class="tool" data-tool="line" title="Line / Polyline (L)"><svg class="ico"><use href="#i-line"/></svg><span class="tool-label">Line</span></button>
         <button class="tool" data-tool="arc" title="Arc (A) — 3-point arc"><svg class="ico"><use href="#i-arc"/></svg><span class="tool-label">Arc</span></button>
         <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
@@ -1461,7 +1463,7 @@ class SketchEngine {
     this.updateNodeActions();
 
     this.tool = t;
-    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark');
+    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-ellipse', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark');
     this.svg.classList.add('tool-' + t);
     document.querySelectorAll('#tools-2d .tool').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === t));
@@ -1469,6 +1471,7 @@ class SketchEngine {
       select: 'Click a shape to select. Drag to move. Edit dimensions on the right.',
       rect: 'Click and drag to draw a rectangle. Hold <b>Shift</b> for a square.',
       circle: 'Click the center, drag to set radius.',
+      ellipse: 'Click and drag to draw an oval. Hold <b>Shift</b> for a circle. Type W (Tab H) + <b>Enter</b> for an exact size.',
       line: 'Click to drop points. Auto-snaps to <b>horizontal</b> / <b>vertical</b>. <b>Shift</b> forces ortho. Type a length and press <b>Enter</b> for an exact distance. <b>Enter</b> finishes, <b>Esc</b> cancels.',
       arc: 'Click a start point, click an end point, then move the mouse to shape the arc and click to finish.',
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
@@ -2711,7 +2714,7 @@ class SketchEngine {
     //   2nd click  → commit at current cursor position (place mode)
     //   OR release after dragging → commit (drag-and-release also works)
     //   Type + Enter → commit at typed value(s)
-    if (this.tool === 'rect' || this.tool === 'circle') {
+    if (this.tool === 'rect' || this.tool === 'circle' || this.tool === 'ellipse') {
       // Second click while a placement is pending → commit now.
       if (this.draft && this.dragMode === 'shape-place') {
         this._commitShapeDraft();
@@ -2722,16 +2725,24 @@ class SketchEngine {
       this.typedDim2 = null;
       if (this.tool === 'rect') {
         this.draft = { id: doc.sketch.nextId++, type: 'rect', x: px, y: py, w: 0, h: 0 };
+      } else if (this.tool === 'ellipse') {
+        // Ellipse = closed 4-point Bezier polyline (same representation as
+        // the dropdown shapes) sized by a bounding box, so every downstream
+        // tool — extrude, trim, scale, mirror, dimension pills — just works.
+        this.draft = {
+          id: doc.sketch.nextId++, type: 'polyline', closed: true, points: [],
+          _ellipseBox: { x: px, y: py, w: 0, h: 0 },
+        };
       } else {
         this.draft = { id: doc.sketch.nextId++, type: 'circle', cx: px, cy: py, r: 0 };
       }
       this.dragMode = 'draw';
       this.dragStart = { wx: px, wy: py, sx: e.clientX, sy: e.clientY };
-      showShapeTooltip(this.draft.type);
+      showShapeTooltip(this.tool);
       updateShapeTooltip(this.draft, e.clientX, e.clientY);
-      setStatus(this.draft.type === 'rect'
-        ? 'Move to size, click to place. Type W (Tab H) + Enter to lock dimensions. Esc to cancel.'
-        : 'Move to size, click to place. Type R + Enter to lock radius. Esc to cancel.');
+      setStatus(this.tool === 'circle'
+        ? 'Move to size, click to place. Type R + Enter to lock radius. Esc to cancel.'
+        : 'Move to size, click to place. Type W (Tab H) + Enter to lock dimensions. Esc to cancel.');
     }
   }
 
@@ -2741,18 +2752,23 @@ class SketchEngine {
     if (!this.draft) return;
     const d = this.draft;
     const ok = (d.type === 'rect' && Math.abs(d.w) > 0.05 && Math.abs(d.h) > 0.05) ||
-               (d.type === 'circle' && d.r > 0.05);
+               (d.type === 'circle' && d.r > 0.05) ||
+               (d._ellipseBox && d._ellipseBox.w > 0.05 && d._ellipseBox.h > 0.05);
     if (ok) {
       // Rect with negative w/h was drawn up/left — normalise.
       if (d.type === 'rect') {
         if (d.w < 0) { d.x += d.w; d.w = -d.w; }
         if (d.h < 0) { d.y += d.h; d.h = -d.h; }
       }
+      const label = d._ellipseBox ? 'ellipse' : d.type;
+      // The bbox was only draw-time scaffolding — the committed entity is a
+      // plain closed Bezier polyline.
+      delete d._ellipseBox;
       pushUndo();
       doc.sketch.entities.push(d);
       doc.selection = { kind: 'sketch', id: d.id };
       doc.multiSelectedSketch = [d.id];
-      setStatus(`Added ${d.type}`);
+      setStatus(`Added ${label}`);
       renderTree(); renderProps();
     }
     this.draft = null;
@@ -2959,6 +2975,24 @@ class SketchEngine {
         let r = Math.hypot(px - start.wx, py - start.wy);
         if (this.typedDim1 != null && this.typedDim1 > 0) r = this.typedDim1;
         this.draft.r = r;
+      } else if (this.draft._ellipseBox) {
+        let w = px - start.wx, h = py - start.wy;
+        if (e.shiftKey) { // perfect circle
+          const m = Math.max(Math.abs(w), Math.abs(h));
+          w = Math.sign(w || 1) * m; h = Math.sign(h || 1) * m;
+        }
+        if (this.typedDim1 != null && this.typedDim1 > 0) {
+          w = (Math.sign(w) || 1) * this.typedDim1;
+        }
+        if (this.typedDim2 != null && this.typedDim2 > 0) {
+          h = (Math.sign(h) || 1) * this.typedDim2;
+        }
+        const bb = this.draft._ellipseBox;
+        bb.x = w >= 0 ? start.wx : start.wx + w;
+        bb.y = h >= 0 ? start.wy : start.wy + h;
+        bb.w = Math.abs(w);
+        bb.h = Math.abs(h);
+        applyEllipseDraftBox(this.draft);
       }
       updateShapeTooltip(this.draft, e.clientX, e.clientY);
       this.scheduleRender();
@@ -3037,7 +3071,7 @@ class SketchEngine {
     // so the user sees endpoint/midpoint/intersection/edge feedback before
     // they click — same as during active drawing.
     const HOVER_SNAP_TOOLS = new Set([
-      'rect', 'circle', 'line', 'construction', 'arc',
+      'rect', 'circle', 'ellipse', 'line', 'construction', 'arc',
       'dimension', 'eraser', 'trim', 'extend',
     ]);
     if (HOVER_SNAP_TOOLS.has(this.tool)) {
@@ -3618,6 +3652,29 @@ function circularArcPolyline(cx, cy, r, a0, sweep, extra = {}, sketch = null) {
   const ent = { type: 'polyline', ...extra, points: pts, closed: false };
   if (sketch) ent.id = sketch.nextId++;
   return ent;
+}
+
+// Closed 4-point Bezier polyline approximating an ellipse (k = 0.5523…, the
+// standard 4-arc constant). Same representation as the dropdown shapes, so
+// every downstream tool (extrude, trim, scale, mirror, dimension pills)
+// works on it unchanged. CCW starting at the right-hand vertex.
+function ellipsePolylinePoints(cx, cy, rx, ry) {
+  const k = 0.5522847498;
+  const kx = k * rx, ky = k * ry;
+  return [
+    { x: cx + rx, y: cy,      cpOut: { dx: 0,   dy: ky }, cpIn: { dx: 0,   dy: -ky } },
+    { x: cx,      y: cy + ry, cpOut: { dx: -kx, dy: 0 },  cpIn: { dx: kx,  dy: 0   } },
+    { x: cx - rx, y: cy,      cpOut: { dx: 0,   dy: -ky }, cpIn: { dx: 0,  dy: ky  } },
+    { x: cx,      y: cy - ry, cpOut: { dx: kx,  dy: 0 },  cpIn: { dx: -kx, dy: 0   } },
+  ];
+}
+
+// Regenerate an ellipse draft's polyline points from its draw-time bbox.
+function applyEllipseDraftBox(draft) {
+  const bb = draft._ellipseBox;
+  if (!bb) return;
+  const rx = bb.w / 2, ry = bb.h / 2;
+  draft.points = ellipsePolylinePoints(bb.x + rx, bb.y + ry, rx, ry);
 }
 
 // ─── Bezier curve helpers ────────────────────────────────────────────────────
@@ -9219,6 +9276,16 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
           sketchEng.draft.r = sketchEng.typedDim1 != null
             ? sketchEng.typedDim1
             : Math.hypot(dx, dy);
+        } else if (sketchEng.draft._ellipseBox) {
+          let w = dx, h = dy;
+          if (sketchEng.typedDim1 != null) w = (Math.sign(w) || 1) * sketchEng.typedDim1;
+          if (sketchEng.typedDim2 != null) h = (Math.sign(h) || 1) * sketchEng.typedDim2;
+          const bb = sketchEng.draft._ellipseBox;
+          bb.x = w >= 0 ? start.wx : start.wx + w;
+          bb.y = h >= 0 ? start.wy : start.wy + h;
+          bb.w = Math.abs(w);
+          bb.h = Math.abs(h);
+          applyEllipseDraftBox(sketchEng.draft);
         }
       }
       sketchEng.render();
@@ -14541,8 +14608,8 @@ function showShapeTooltip(type) {
   const inp2 = document.getElementById('shape-tooltip-input-2');
   const u2   = document.getElementById('shape-tooltip-unit-2');
   // Each tool gets its own label set.
-  const twoDims = (type === 'rect');
-  if (type === 'rect')   lab1.textContent = 'W';
+  const twoDims = (type === 'rect' || type === 'ellipse');
+  if (twoDims)           lab1.textContent = 'W';
   if (type === 'circle') lab1.textContent = 'R';
   lab2.style.display = twoDims ? '' : 'none';
   inp2.style.display = twoDims ? '' : 'none';
@@ -14566,11 +14633,12 @@ function updateShapeTooltip(draft, screenX, screenY) {
   if (!t || !t.classList.contains('show') || !draft) return;
   const inp1 = document.getElementById('shape-tooltip-input-1');
   const inp2 = document.getElementById('shape-tooltip-input-2');
-  if (draft.type === 'rect') {
+  const box = draft._ellipseBox || (draft.type === 'rect' ? draft : null);
+  if (box) {
     if (inp1 && document.activeElement !== inp1 && (sketchEng?.typedDim1 == null))
-      inp1.value = toUnit(Math.abs(draft.w || 0)).toFixed(3);
+      inp1.value = toUnit(Math.abs(box.w || 0)).toFixed(3);
     if (inp2 && document.activeElement !== inp2 && (sketchEng?.typedDim2 == null))
-      inp2.value = toUnit(Math.abs(draft.h || 0)).toFixed(3);
+      inp2.value = toUnit(Math.abs(box.h || 0)).toFixed(3);
   } else if (draft.type === 'circle') {
     if (inp1 && document.activeElement !== inp1 && (sketchEng?.typedDim1 == null))
       inp1.value = toUnit(draft.r || 0).toFixed(3);
@@ -14618,8 +14686,10 @@ function scaleSketchEntity(ent, pivot, sx, sy) {
     ent.points = ent.points.map(p => {
       const np = sp(p.x, p.y);
       const r = { x: np.x, y: np.y };
-      if (p.cpIn)  r.cpIn  = { x: p.cpIn.x  * sx, y: p.cpIn.y  * sy };
-      if (p.cpOut) r.cpOut = { x: p.cpOut.x * sx, y: p.cpOut.y * sy };
+      // Handles are stored as relative {dx, dy} offsets — scaling the old
+      // {x, y} keys silently corrupted every curved shape to NaN handles.
+      if (p.cpIn)  r.cpIn  = { dx: p.cpIn.dx  * sx, dy: p.cpIn.dy  * sy };
+      if (p.cpOut) r.cpOut = { dx: p.cpOut.dx * sx, dy: p.cpOut.dy * sy };
       return r;
     });
   } else if (ent.type === 'dimension') {
