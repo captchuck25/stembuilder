@@ -111,11 +111,21 @@ export const TOOLS: MarketingTool[] = [
       "Advanced students go further — multiple floors, roofs, and elevation drawings.",
     ],
     gallery: [
-      { label: "Screenshot — a student floor plan with dimensions" },
-      { label: "Screenshot — the same home in the 3D view" },
-      { label: "Screenshot — elevation drawings generated from the plan" },
+      {
+        label: "A student floor plan — dimensioned, furnished, and to scale",
+        src: "/marketing/blueprint-lab/gallery-1.png",
+      },
+      {
+        label: "The section drawing — foundation, joists, and roof, generated from the plan",
+        src: "/marketing/blueprint-lab/gallery-2.png",
+      },
+      {
+        label: "The same home in 3D — auto-generated from the 2D plan",
+        src: "/marketing/blueprint-lab/gallery-3.png",
+      },
     ],
-    demoVideo: "Demo video — drawing a small home to scale (2 min)",
+    demoVideo: "Demo video — drawing a home to scale (60 sec)",
+    demoVideoSrc: "/marketing/blueprint-lab/demo.mp4",
     seoDescription:
       "Blueprint Lab takes students from floor plan design to full architectural drawing sets in the browser — walls, sections, rooflines, elevations, and a 3D walkthrough — real architectural design from day one.",
     lessonPlanPitch:
