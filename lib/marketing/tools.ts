@@ -170,11 +170,21 @@ export const TOOLS: MarketingTool[] = [
       "Turtle graphics assignments — set a Python drawing challenge and review every student's art in one place.",
     ],
     gallery: [
-      { label: "Screenshot — a block-coding maze with a student's program" },
-      { label: "Screenshot — turtle graphics drawn by students" },
-      { label: "Screenshot — the same puzzle solved in real Python" },
+      {
+        label: "Block coding — a nested-loops maze challenge, solved",
+        src: "/marketing/code-lab/gallery-1.png",
+      },
+      {
+        label: "The game designer — building a playable level in Free Build",
+        src: "/marketing/code-lab/gallery-2.png",
+      },
+      {
+        label: "Teacher view — assigning levels and tracking every student's progress",
+        src: "/marketing/code-lab/gallery-3.png",
+      },
     ],
-    demoVideo: "Demo video — from blocks to Python (2 min)",
+    demoVideo: "Demo video — solving a maze in typed Python (60 sec)",
+    demoVideoSrc: "/marketing/code-lab/demo.mp4",
     seoDescription:
       "Code Lab teaches students to code in the browser — maze puzzles and game design with blocks, then a graduation path to real Python logic and turtle graphics, with teacher progress tracking.",
     lessonPlanPitch:
