@@ -69,11 +69,18 @@ export const TOOLS: MarketingTool[] = [
       "Every design saves to the student's account, and you can see the class's work from your dashboard.",
     ],
     gallery: [
-      { label: "Screenshot — modeling a part in STEM Sketch" },
+      {
+        label: "Designing a bracket in STEM Sketch — real M5 hex bolts included",
+        src: "/marketing/stem-sketch/gallery-1.png",
+      },
+      {
+        label: "The same part in the slicer, ready for the 3D printer",
+        src: "/marketing/stem-sketch/gallery-2.png",
+      },
       { label: "Photo — 3D-printed student designs" },
-      { label: "Screenshot — SVG export ready for the laser cutter" },
     ],
     demoVideo: "Demo video — from blank canvas to printable part (2 min)",
+    demoVideoSrc: "/marketing/stem-sketch/demo.mp4",
     seoDescription:
       "STEM Sketch is a browser-based 3D design tool for schools. Students design fabrication-ready parts for 3D printing, laser cutting, and CNC — the perfect on-ramp to CAD production.",
     lessonPlanPitch:
