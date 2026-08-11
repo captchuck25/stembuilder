@@ -1,7 +1,7 @@
 import {
   Dimension, Level, LineEntity, SectionCut, Selection, Vec2, Wall,
   Door, Window as WindowObj, RoomLabel, Stair, FurnitureItem, TextLabel,
-  FURNITURE_DEFAULTS, LINE_COLOR_HEX, LINE_DASH_INCHES, LINE_WEIGHT_PX, STAIR_DEFAULTS, formatImperial,
+  LINE_COLOR_HEX, LINE_DASH_INCHES, LINE_WEIGHT_PX, STAIR_DEFAULTS, formatImperial,
 } from './types';
 import { doorOpeningCut, resolveDimAnchor, stairHalfExtents, wallPolygon, wallSegmentsWithCuts, windowOpeningCuts } from './geometry';
 import { DEFAULT_SIDE_PANEL_WIDTH } from './types';
@@ -1824,12 +1824,6 @@ export function drawFurniture(ctx: CanvasRenderingContext2D, f: FurnitureItem, v
   ctx.fillRect(-w / 2, -d / 2, w, d);
   ctx.strokeRect(-w / 2, -d / 2, w, d);
   drawFurnitureSymbol(ctx, f, w, d, selected);
-  ctx.fillStyle = selected ? SELECTED_STROKE : '#5a607a';
-  ctx.font = '500 9px ui-sans-serif, system-ui';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const label = FURNITURE_DEFAULTS[f.kind]?.label ?? f.kind;
-  ctx.fillText(label, 0, d / 2 + 8);
   ctx.restore();
 }
 

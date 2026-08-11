@@ -801,10 +801,12 @@ function BifoldDoorSlab({ door, wall, elevation, angle }: {
   );
 }
 
-// Sliding door — rendered as a closed glass patio door: full-opening glass
-// pane in the wall plane, a thin top + bottom rail, and a center mullion
-// where the two panels meet. We don't try to depict the door "open" — sliders
-// are visually identified by being glass, not by being half-open.
+// Sliding door — exterior style renders as a closed glass patio door:
+// full-opening glass pane in the wall plane, a thin top + bottom rail, and a
+// center mullion where the two panels meet. Interior style renders as two
+// solid painted bypass panels offset to opposite sides of the wall centerline,
+// matching the 2D symbol. We don't try to depict the door "open" — sliders
+// are identified by their panel arrangement, not by being half-open.
 function SlidingDoorSlab({ door, wall, elevation, angle }: {
   door: import('../engine/types').Door;
   wall: Wall;
@@ -821,6 +823,30 @@ function SlidingDoorSlab({ door, wall, elevation, angle }: {
   const yMid = elevation + door.height / 2;
   const w = door.width;
   const h = door.height;
+
+  if (door.slideStyle !== 'exterior') {
+    // Interior bypass slider: two solid panels, each half the opening width,
+    // offset to opposite sides of the wall centerline so the bypass reads.
+    const PANEL_T = 1.75;
+    const zOff = PANEL_T / 2 + 0.35;
+    return (
+      <group position={[cx, yMid, cy]} rotation={[0, -angle, 0]}>
+        <mesh position={[-w / 4, 0, zOff]} castShadow>
+          <boxGeometry args={[w / 2, h, PANEL_T]} />
+          <meshStandardMaterial color={DOOR_SLAB_INTERIOR} roughness={0.6} />
+        </mesh>
+        <mesh position={[w / 4, 0, -zOff]} castShadow>
+          <boxGeometry args={[w / 2, h, PANEL_T]} />
+          <meshStandardMaterial color={DOOR_SLAB_INTERIOR} roughness={0.6} />
+        </mesh>
+        {/* Head track spanning the opening */}
+        <mesh position={[0, h / 2 - RAIL / 2, 0]} castShadow>
+          <boxGeometry args={[w, RAIL, PANEL_T * 2 + 1]} />
+          <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
+        </mesh>
+      </group>
+    );
+  }
 
   return (
     <group position={[cx, yMid, cy]} rotation={[0, -angle, 0]}>
