@@ -958,6 +958,8 @@
     pointer-events: none;
   }
   .trim-preview-end { fill: #e5484d; pointer-events: none; }
+  /* Drivable dimension numbers — click to type an exact value */
+  .dim-value:hover { fill: #2c64ff; text-decoration: underline; }
   /* Hidden lines — edges of the body that lie BEHIND the visible face.
      Orthographic convention: dashed and noticeably faded, but still readable. */
   .body-outline {
@@ -1104,7 +1106,7 @@
         <button class="tool" data-tool="arc" title="Arc (A) — 3-point arc"><svg class="ico"><use href="#i-arc"/></svg><span class="tool-label">Arc</span></button>
         <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
         <button class="tool" data-action="toggle-construction-vis" id="toggle-construction-vis" title="Show/hide all construction lines (visibility only — they stay in the sketch)"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Show</span></button>
-        <button class="tool" data-tool="dimension" title="Dimension (D) — click two points to label the distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
+        <button class="tool" data-tool="dimension" title="Dimension (D) — click two points to measure. Snapped dimensions follow their shapes; click the number to type an exact distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
         <button class="tool" data-tool="thread-mark" title="Thread mark — drops a hole-center marker. In 3D, &quot;Threaded holes&quot; turns every mark into a real threaded hole at a chosen size + depth."><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thread</span></button>
         <button class="tool" data-action="auto-dim" title="Auto-dimension — add engineering dimensions to all shapes"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
         <div class="dropdown" id="shape2d-dropdown">
@@ -1477,7 +1479,7 @@ class SketchEngine {
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
       eraser: 'Click any shape to delete it. Press <b>V</b> to return to Select.',
       trim: 'Hover a shape — the piece that would be removed shows in red. Click to remove it. Crossings with other shapes set the cut points.',
-      dimension: 'Click two points to drop a dimension label between them. Snaps to endpoints. Esc cancels.',
+      dimension: 'Click two points to measure. Snap to corners/centers and the dimension sticks to the shapes — click its number to type the exact distance. Esc cancels.',
     };
     // Tips are surfaced via the status bar instead of a dedicated panel
     if (tips[t]) setStatus(tips[t].replace(/<[^>]+>/g, ''));
@@ -2199,7 +2201,7 @@ class SketchEngine {
     // raw selection clicks and pan.
     const sketchLocked = !!(doc.sketch && doc.sketch.locked);
     if (sketchLocked && e.button === 0 && e.target && typeof e.target.closest === 'function') {
-      if (e.target.closest('.dim-edit') || e.target.closest('.bbox-handle')) {
+      if (e.target.closest('.dim-edit') || e.target.closest('.bbox-handle') || e.target.closest('.dim-value')) {
         showHint('Sketch is locked. Unlock it in the tree to edit.');
         e.preventDefault(); e.stopPropagation();
         return;
@@ -2218,6 +2220,18 @@ class SketchEngine {
           e.preventDefault();
           e.stopPropagation();
           openInlineDimEdit(entId, dim, pill);
+          return;
+        }
+      }
+      // Dimension-entity number click — type a value to DRIVE the geometry
+      // (resize the measured shape / move the spaced shape).
+      const dimVal = e.target.closest('.dim-value');
+      if (dimVal) {
+        const entId = parseInt(dimVal.dataset.entId, 10);
+        if (Number.isFinite(entId)) {
+          e.preventDefault();
+          e.stopPropagation();
+          openInlineDimEdit(entId, 'dim-drive', dimVal);
           return;
         }
       }
@@ -2684,23 +2698,31 @@ class SketchEngine {
 
     if (this.tool === 'dimension') {
       if (!this.activeDim) {
-        this.activeDim = { p1: { x: px, y: py } };
+        // Remember which entity feature (corner/center/vertex/midpoint) the
+        // snapped point landed on, so the dimension can FOLLOW that feature.
+        this.activeDim = { p1: { x: px, y: py }, a1: findDimAnchorAt(px, py) };
         setStatus('Dimension — click the second point');
       } else {
         pushUndo();
         const p1 = this.activeDim.p1;
         const p2 = { x: px, y: py };
+        const a1 = this.activeDim.a1 || null;
+        const a2 = findDimAnchorAt(px, py);
         const dim = {
           id: doc.sketch.nextId++,
           type: 'dimension',
           p1, p2,
+          a1, a2,
           // Default offset: 8 mm perpendicular off the dimension line.
           // Stored as a signed distance so the label can sit on either side.
           off: 8,
         };
         doc.sketch.entities.push(dim);
         this.activeDim = null;
-        setStatus(`Added dimension: ${fmtUL(Math.hypot(p2.x - p1.x, p2.y - p1.y))}`);
+        const attached = (a1 || a2)
+          ? ' (attached — click its number to set the exact distance)'
+          : '';
+        setStatus(`Added dimension: ${fmtUL(Math.hypot(p2.x - p1.x, p2.y - p1.y))}${attached}`);
         this.render();
         renderTree();
       }
@@ -3945,6 +3967,168 @@ function moveEntity(ent, start, dx, dy) {
   }
 }
 
+// ─── Associative + driving dimensions ────────────────────────────────────────
+// A dimension can carry anchors (a1/a2) tying its endpoints to features of
+// the entities it measures: {entId, kind:'pt'|'mid'|'corner'|'edge-mid'|
+// 'center', idx}. Auto-dims use whole-entity anchors on a1 only: kind
+// 'span-x'|'span-y' (rect width/height span) or 'radius' (circle leader).
+// Anchored endpoints re-resolve on every render, so dimensions FOLLOW the
+// geometry they measure, and typing a new value on a dimension label DRIVES
+// the geometry (driveDimension). Unanchored endpoints stay where they were
+// placed — old saves keep today's plain-label behavior.
+
+function rectCorners(ent) {
+  return [
+    { x: ent.x,         y: ent.y },
+    { x: ent.x + ent.w, y: ent.y },
+    { x: ent.x + ent.w, y: ent.y + ent.h },
+    { x: ent.x,         y: ent.y + ent.h },
+  ];
+}
+
+// Which entity feature sits exactly at (x, y)? Called at dimension-creation
+// time with a snapped point, so an exact-match tolerance is enough.
+function findDimAnchorAt(x, y) {
+  const tol = 1e-3;
+  const near = (px, py) => Math.abs(px - x) < tol && Math.abs(py - y) < tol;
+  for (let i = doc.sketch.entities.length - 1; i >= 0; i--) {
+    const ent = doc.sketch.entities[i];
+    if (ent.type === 'dimension' || ent.type === 'threadMark') continue;
+    if (ent.type === 'circle') {
+      if (near(ent.cx, ent.cy)) return { entId: ent.id, kind: 'center' };
+    } else if (ent.type === 'rect') {
+      const cs = rectCorners(ent);
+      for (let k = 0; k < 4; k++) {
+        if (near(cs[k].x, cs[k].y)) return { entId: ent.id, kind: 'corner', idx: k };
+      }
+      for (let k = 0; k < 4; k++) {
+        const a = cs[k], b = cs[(k + 1) % 4];
+        if (near((a.x + b.x) / 2, (a.y + b.y) / 2)) return { entId: ent.id, kind: 'edge-mid', idx: k };
+      }
+    } else if (ent.type === 'polyline' && ent.points && ent.points.length) {
+      const n = ent.points.length;
+      for (let k = 0; k < n; k++) {
+        if (near(ent.points[k].x, ent.points[k].y)) return { entId: ent.id, kind: 'pt', idx: k };
+      }
+      const segCount = ent.closed ? n : n - 1;
+      for (let k = 0; k < segCount; k++) {
+        const a = ent.points[k], b = ent.points[(k + 1) % n];
+        if (near((a.x + b.x) / 2, (a.y + b.y) / 2)) return { entId: ent.id, kind: 'mid', idx: k };
+      }
+    }
+  }
+  return null;
+}
+
+// Current world position of an anchor, or null if its entity/feature is gone
+// (deleted, trimmed away, vertex removed) — the dimension then freezes at its
+// last stored position instead of breaking.
+function resolveDimAnchor(a) {
+  if (!a) return null;
+  const ent = doc.sketch.entities.find(e => e.id === a.entId);
+  if (!ent) return null;
+  if (a.kind === 'center' && ent.type === 'circle') return { x: ent.cx, y: ent.cy };
+  if (ent.type === 'rect' && (a.kind === 'corner' || a.kind === 'edge-mid')) {
+    const cs = rectCorners(ent);
+    if (a.kind === 'corner') return cs[a.idx] ? { x: cs[a.idx].x, y: cs[a.idx].y } : null;
+    const p = cs[a.idx], q = cs[(a.idx + 1) % 4];
+    return (p && q) ? { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } : null;
+  }
+  if (ent.type === 'polyline' && ent.points && ent.points.length) {
+    if (a.kind === 'pt') {
+      const p = ent.points[a.idx];
+      return p ? { x: p.x, y: p.y } : null;
+    }
+    if (a.kind === 'mid') {
+      const n = ent.points.length;
+      const p = ent.points[a.idx], q = ent.points[(a.idx + 1) % n];
+      return (p && q) ? { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 } : null;
+    }
+  }
+  return null;
+}
+
+// Re-derive an anchored dimension's endpoints (and radius labels) from the
+// live geometry. Safe to call on any entity — non-dims are ignored.
+function refreshDimension(d) {
+  if (!d || d.type !== 'dimension') return;
+  const a1 = d.a1;
+  if (a1 && (a1.kind === 'span-x' || a1.kind === 'span-y' || a1.kind === 'radius')) {
+    const ent = doc.sketch.entities.find(e => e.id === a1.entId);
+    if (!ent) return;
+    if (a1.kind === 'span-x' && ent.type === 'rect') {
+      d.p1.x = ent.x; d.p2.x = ent.x + ent.w;
+    } else if (a1.kind === 'span-y' && ent.type === 'rect') {
+      d.p1.y = ent.y; d.p2.y = ent.y + ent.h;
+    } else if (a1.kind === 'radius' && ent.type === 'circle') {
+      const dirX = Math.SQRT1_2, dirY = Math.SQRT1_2;
+      const leaderLen = Math.max(8, ent.r * 0.6);
+      d.p1 = { x: ent.cx + dirX * ent.r, y: ent.cy + dirY * ent.r };
+      d.p2 = { x: ent.cx + dirX * (ent.r + leaderLen), y: ent.cy + dirY * (ent.r + leaderLen) };
+      d.label = `R ${fmtUL(ent.r)}`;
+    }
+    return;
+  }
+  const r1 = resolveDimAnchor(d.a1);
+  const r2 = resolveDimAnchor(d.a2);
+  if (r1) d.p1 = r1;
+  if (r2) d.p2 = r2;
+}
+
+// Make the geometry satisfy a typed dimension value (target in mm).
+// Returns a status string on success, null when nothing can move.
+function driveDimension(d, target) {
+  if (!(target > 0)) return null;
+  refreshDimension(d);
+  const entOf = (a) => a ? doc.sketch.entities.find(e => e.id === a.entId) : null;
+  const a1 = d.a1, a2 = d.a2;
+  // Whole-entity auto-dim anchors — direct property edits.
+  if (a1 && a1.kind === 'span-x') {
+    const ent = entOf(a1);
+    if (!ent || ent.type !== 'rect') return null;
+    ent.w = target;
+    return `Set width to ${fmtUL(target)}`;
+  }
+  if (a1 && a1.kind === 'span-y') {
+    const ent = entOf(a1);
+    if (!ent || ent.type !== 'rect') return null;
+    ent.h = target;
+    return `Set height to ${fmtUL(target)}`;
+  }
+  if (a1 && a1.kind === 'radius') {
+    const ent = entOf(a1);
+    if (!ent || ent.type !== 'circle') return null;
+    ent.r = target;
+    return `Set radius to ${fmtUL(target)}`;
+  }
+  const cur = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+  if (cur < 1e-6) return null;
+  const e1 = entOf(a1), e2 = entOf(a2);
+  if (e1 && e2 && e1 === e2) {
+    // Both ends on the SAME shape → stretch it about p1 until the measured
+    // distance hits target. Axis-aligned dims stretch one axis only; slanted
+    // dims scale uniformly.
+    if (e1.type === 'circle') return null; // only the center is anchorable
+    const f = target / cur;
+    const adx = Math.abs(d.p2.x - d.p1.x), ady = Math.abs(d.p2.y - d.p1.y);
+    const alongX = adx > 1e-6 && ady <= 1e-6;
+    const alongY = ady > 1e-6 && adx <= 1e-6;
+    const fx = alongY ? 1 : f;
+    const fy = alongX ? 1 : f;
+    scaleEntityAround(e1, { x: d.p1.x, y: d.p1.y }, fx, fy);
+    return `Resized shape to ${fmtUL(target)}`;
+  }
+  // Ends on different shapes (or one loose end) → rigidly move one shape
+  // along the dimension direction so the spacing hits target.
+  const mover = e2 || e1;
+  if (!mover) return null;
+  const ux = (d.p2.x - d.p1.x) / cur, uy = (d.p2.y - d.p1.y) / cur;
+  const delta = (target - cur) * (mover === e2 ? 1 : -1);
+  const start = JSON.parse(JSON.stringify(mover));
+  moveEntity(mover, start, ux * delta, uy * delta);
+  return `Moved shape — spacing ${fmtUL(target)}`;
+}
+
 // Bounding box of any 2D entity. For curved polylines, samples the tessellated
 // form so the bbox reflects the actual rendered curve, not just the control pts.
 function entityBBox(ent) {
@@ -4033,7 +4217,17 @@ function openInlineDimEdit(entId, dim, pillElement) {
   const ent = doc.sketch.entities.find(e => e.id === entId);
   if (!ent) return;
   let current;
-  if (dim === 'len' && ent.type === 'polyline' && ent.points.length === 2) {
+  if (dim === 'dim-drive') {
+    // Editing a dimension entity's number — current value is the live
+    // measurement (or the radius, for circle leaders).
+    if (ent.type !== 'dimension') return;
+    refreshDimension(ent);
+    const rEnt = (ent.a1?.kind === 'radius')
+      ? doc.sketch.entities.find(e => e.id === ent.a1.entId)
+      : null;
+    current = toUnit(rEnt ? rEnt.r
+      : Math.hypot(ent.p2.x - ent.p1.x, ent.p2.y - ent.p1.y));
+  } else if (dim === 'len' && ent.type === 'polyline' && ent.points.length === 2) {
     const p1 = ent.points[0], p2 = ent.points[1];
     current = toUnit(Math.hypot(p2.x - p1.x, p2.y - p1.y));
   } else {
@@ -4088,6 +4282,23 @@ function commitInlineDimEdit() {
     if (sketchEng) sketchEng.render();
     renderProps();
     setStatus(`Scaled selection — ${dim === 'group-w' ? 'width' : 'height'} = ${fmtUL(newVal)}`);
+    return;
+  }
+  // Dimension entity — drive the measured geometry to the typed value.
+  if (dim === 'dim-drive') {
+    const d = doc.sketch.entities.find(e => e.id === entId);
+    if (!d || d.type !== 'dimension') return;
+    pushUndo();
+    const msg = driveDimension(d, fromUnit(v));
+    if (msg) {
+      // Every other dimension watching the same shapes updates too.
+      for (const e2 of doc.sketch.entities) refreshDimension(e2);
+      if (sketchEng) sketchEng.render();
+      renderProps(); renderTree();
+      setStatus(msg);
+    } else {
+      setStatus("This dimension isn't attached to a shape it can move — redraw it snapping to corners, endpoints, or centers.");
+    }
     return;
   }
   const ent = doc.sketch.entities.find(e => e.id === entId);
@@ -4417,6 +4628,15 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
     return s;
   }
   if (ent.type === 'dimension') {
+    // Anchored dims re-derive their endpoints from the live geometry every
+    // render, so they follow the shapes they measure.
+    refreshDimension(ent);
+    // A drivable dim gets a clickable number (see .dim-value handling in
+    // onDown → openInlineDimEdit('dim-drive')).
+    const drivable = !!(ent.a1 || ent.a2);
+    const valAttrs = drivable
+      ? ` class="dim-value" data-ent-id="${ent.id}" style="cursor:pointer"`
+      : '';
     // Leader-style annotation (e.g. circle radius): single line from outside
     // (p2, label end) to a feature point (p1, arrow head), with the label
     // sitting just past p2. No extension lines, no second arrow.
@@ -4431,7 +4651,7 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
       const llen = Math.hypot(ldx, ldy) || 1;
       const offX = (ldx / llen) * 4, offY = (ldy / llen) * 4;
       const anchor = ldx > 1 ? 'start' : (ldx < -1 ? 'end' : 'middle');
-      s += `<text x="${tx + offX}" y="${ty + offY + 4}" text-anchor="${anchor}" font-size="13" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? ''}</text>`;
+      s += `<text${valAttrs} x="${tx + offX}" y="${ty + offY + 4}" text-anchor="${anchor}" font-size="13" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? ''}</text>`;
       return s;
     }
     // Engineering dimension: extension lines at each picked point, a parallel
@@ -4465,7 +4685,7 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
     s += `<line stroke="${stroke}" stroke-width="${sw}" x1="${e2ax}" y1="${e2ay}" x2="${e2bx}" y2="${e2by}"/>`;
     s += `<line stroke="${stroke}" stroke-width="${sw}" x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>`;
     const mx = (ax + bx) / 2, my = (ay + by) / 2;
-    s += `<text x="${mx}" y="${my - 4}" text-anchor="middle" font-size="13" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? fmtUL(len)}</text>`;
+    s += `<text${valAttrs} x="${mx}" y="${my - 4}" text-anchor="middle" font-size="13" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? fmtUL(len)}</text>`;
     return s;
   }
   return '';
@@ -15230,19 +15450,21 @@ function autoAddDimensions() {
   // off = -(gap + level * step):
   //   H perpendicular is (0,1), so dim line y = bMinY + off  → negative off = below sketch
   //   V perpendicular is (-1,0), so dim line x = bMaxX - off → negative off = right of sketch
-  const hSpans = new Map(); // key -> [x1, x2]
-  const vSpans = new Map(); // key -> [y1, y2]
+  const hSpans = new Map(); // key -> [x1, x2, srcEnt|null]
+  const vSpans = new Map(); // key -> [y1, y2, srcEnt|null]
   const hk = (x1, x2) => `${Math.round(x1 * 100)},${Math.round(x2 * 100)}`;
   const vk = (y1, y2) => `${Math.round(y1 * 100)},${Math.round(y2 * 100)}`;
-  const addH = (x1, x2) => { const k = hk(x1, x2); if (!hSpans.has(k)) hSpans.set(k, [x1, x2]); };
-  const addV = (y1, y2) => { const k = vk(y1, y2); if (!vSpans.has(k)) vSpans.set(k, [y1, y2]); };
+  // srcEnt (rects only) lets the dim anchor to the entity so it follows and
+  // drives the rect's width/height.
+  const addH = (x1, x2, srcEnt) => { const k = hk(x1, x2); if (!hSpans.has(k)) hSpans.set(k, [x1, x2, srcEnt || null]); };
+  const addV = (y1, y2, srcEnt) => { const k = vk(y1, y2); if (!vSpans.has(k)) vSpans.set(k, [y1, y2, srcEnt || null]); };
 
   const singleCircle = shapes.length === 1 && shapes[0].type === 'circle';
 
   for (const ent of shapes) {
     if (ent.type === 'rect') {
-      addH(ent.x, ent.x + ent.w);
-      addV(ent.y, ent.y + ent.h);
+      addH(ent.x, ent.x + ent.w, ent);
+      addV(ent.y, ent.y + ent.h, ent);
     } else if (ent.type === 'circle') {
       // Radius leader — short slanted arrow from outside the circle pointing
       // to the edge, with "R XX" label on the outside end. Picks the upper-
@@ -15257,6 +15479,7 @@ function autoAddDimensions() {
         id: doc.sketch.nextId++, type: 'dimension', autoDim: true, leader: true,
         p1: { x: edgeX, y: edgeY }, p2: { x: outX, y: outY },
         label: `R ${fmtUL(ent.r)}`,
+        a1: { entId: ent.id, kind: 'radius' },
       });
     } else if (ent.type === 'polyline' && ent.points.length >= 2) {
       const pts = ent.points, n = pts.length;
@@ -15275,7 +15498,7 @@ function autoAddDimensions() {
   // visually collide. Two spans overlap if their ranges intersect (with a
   // small label-width padding).
   function assignLevels(spans) {
-    const arr = Array.from(spans.values()).map(([a, b]) => ({ a, b, level: 0 }));
+    const arr = Array.from(spans.values()).map(([a, b, srcEnt]) => ({ a, b, srcEnt, level: 0 }));
     arr.sort((x, y) => (x.a - y.a) || (x.b - y.b));
     const levels = []; // levels[i] = array of placed spans at level i
     const PAD = 6; // mm of label space — keeps adjacent labels from kissing
@@ -15295,12 +15518,14 @@ function autoAddDimensions() {
   for (const sp of hArr) {
     newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
       p1: { x: sp.a, y: bMinY }, p2: { x: sp.b, y: bMinY },
-      off: -(gap + sp.level * step) });
+      off: -(gap + sp.level * step),
+      a1: sp.srcEnt ? { entId: sp.srcEnt.id, kind: 'span-x' } : null });
   }
   for (const sp of vArr) {
     newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
       p1: { x: bMaxX, y: sp.a }, p2: { x: bMaxX, y: sp.b },
-      off: -(gap + sp.level * step) });
+      off: -(gap + sp.level * step),
+      a1: sp.srcEnt ? { entId: sp.srcEnt.id, kind: 'span-y' } : null });
   }
 
   // Overall bbox dims — placed beyond the highest per-entity level
