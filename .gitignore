@@ -24,6 +24,10 @@
 .DS_Store
 *.pem
 
+# Claude Code worktrees — full repo copies; Tailwind v4 scans anything not
+# gitignored, and crawling these breaks/slows next dev (esp. under OneDrive)
+/.claude/worktrees/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

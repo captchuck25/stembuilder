@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Never scan Claude Code worktrees (full repo copies) for class names —
+   crawling them breaks/slows next dev, especially under OneDrive. */
+@source not "../.claude";
 
 :root {
   --background: #ffffff;
