@@ -10779,7 +10779,12 @@ function buildFastenerCSGMesh(body) {
   // Manifold treats overlapping merged shells as holes (even-odd winding).
   const merged = _unionGeometriesForCSG(parts);
   // Sink the whole cutter so the head lands flush below the surface.
-  if (part !== 'nut' && body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
+  // sinkExtra compensates frames that overshoot the surface (thread-mark
+  // cutters sit CUT_OVERSHOOT above it) so the recess floor still matches
+  // the seated bolt exactly.
+  if (part !== 'nut' && body.sinkHead && headH > 0) {
+    merged.translate(0, -(headH + 0.2 + (body.sinkExtra || 0)), 0);
+  }
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial());
@@ -11305,12 +11310,25 @@ function openThreadedHoleForMark(sketchId, markId) {
     ['loose',  'Loose — +0.4 mm (easy)'],
   ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
 
+  const curType = prev.holeType || 'threaded';
+  const curSeat = prev.headSeat || 'rest';
   openModal({
-    title: isEdit ? 'Adjust threaded hole' : 'Threaded hole at this mark',
+    title: isEdit ? 'Adjust bolt hole' : 'Bolt hole at this mark',
     body: `<p>${isEdit
               ? 'Change any setting and Save to rebuild this hole. The old hole + bolt are removed first so the body returns to its previous state, then re-cut with the new settings.'
-              : `Configure thread size and depth for this mark. Other marks in <b>${sketch.name || 'this sketch'}</b> stay untouched.`}</p>
+              : `Configure this mark's hole. Other marks in <b>${sketch.name || 'this sketch'}</b> stay untouched.`}</p>
            <div class="field" style="margin-top:8px">
+             <label>Hole type</label>
+             <select id="th1-type">
+               <option value="threaded"${curType === 'threaded' ? ' selected' : ''}>Threaded — printable plastic threads</option>
+               <option value="clearance"${curType === 'clearance' ? ' selected' : ''}>Clearance — smooth hole for a REAL bolt</option>
+             </select>
+           </div>
+           <div class="field" id="th1-nutpocket-row" style="display:none;align-items:center;gap:8px">
+             <input type="checkbox" id="th1-nutpocket" style="width:auto;margin:0"${prev.nutPocket ? ' checked' : ''}/>
+             <label for="th1-nutpocket" style="margin:0;cursor:pointer">Hex nut pocket at the far end</label>
+           </div>
+           <div class="field">
              <label>Thread size</label>
              <select id="th1-size">${sizeOpts}</select>
            </div>
@@ -11329,7 +11347,14 @@ function openThreadedHoleForMark(sketchId, markId) {
            <div class="field" id="th1-head-row">
              <label>Bolt head type</label>
              <select id="th1-head">${headOpts}</select>
-             <p style="color:var(--ink-soft);font-size:11px;margin:4px 0 0">Only affects the visualizer bolt — the hole itself stays headless.</p>
+           </div>
+           <div class="field">
+             <label>Head seat</label>
+             <select id="th1-seat">
+               <option value="rest"${curSeat === 'rest' ? ' selected' : ''}>Resting on the surface</option>
+               <option value="recess"${curSeat === 'recess' ? ' selected' : ''}>Recessed flush (counterbore cut into the hole)</option>
+             </select>
+             <p id="th1-seat-note" style="color:var(--ink-soft);font-size:11px;margin:4px 0 0;display:none">Machine screws (tapered head) always sit flush.</p>
            </div>`,
     confirmText: isEdit ? 'Save changes' : undefined,
     onConfirm: () => {
@@ -11339,21 +11364,45 @@ function openThreadedHoleForMark(sketchId, markId) {
       const fit = $('th1-fit').value || 'loose';
       const placeBolt = $('th1-bolt').checked;
       const boltHead = $('th1-head').value || 'hex';
+      const holeType = $('th1-type')?.value || 'threaded';
+      const nutPocket = holeType === 'clearance' && !!$('th1-nutpocket')?.checked;
+      const headSeat = $('th1-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
       // Edit path: peel the previous hole/bolt before re-running so we don't
       // stack another CSG cut on the body (that was the "deterioration" bug).
       if (mark._materialised) deleteMaterialisedThreadMark(mark);
-      processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt, boltHead });
+      processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, headSeat });
     },
   });
-  // Wire the visualizer-bolt checkbox to grey out the head-type row when off,
-  // so the UI makes clear that head only matters when the bolt is visible.
   setTimeout(() => {
     const cb = $('th1-bolt'); const headRow = $('th1-head-row');
-    if (!cb || !headRow) return;
-    const sync = () => { headRow.style.opacity = cb.checked ? '1' : '0.4'; $('th1-head').disabled = !cb.checked; };
-    cb.addEventListener('change', sync);
-    sync();
+    const headSel = $('th1-head'), seatSel = $('th1-seat'), seatNote = $('th1-seat-note');
+    const typeSel = $('th1-type');
+    const syncType = () => {
+      const row = $('th1-nutpocket-row');
+      if (row) row.style.display = typeSel?.value === 'clearance' ? 'flex' : 'none';
+    };
+    const syncSeat = () => {
+      // Tapered machine-screw heads can only sit flush — force recess.
+      const isFlat = headSel?.value === 'flat';
+      if (seatSel) {
+        if (isFlat) seatSel.value = 'recess';
+        seatSel.disabled = isFlat;
+      }
+      if (seatNote) seatNote.style.display = isFlat ? '' : 'none';
+    };
+    const syncBolt = () => {
+      // Head shape still shapes the counterbore when recessed, even with the
+      // visualizer bolt hidden.
+      const headNeeded = cb?.checked || seatSel?.value === 'recess';
+      if (headRow) headRow.style.opacity = headNeeded ? '1' : '0.4';
+      if (headSel) headSel.disabled = !headNeeded;
+    };
+    cb?.addEventListener('change', syncBolt);
+    seatSel?.addEventListener('change', syncBolt);
+    headSel?.addEventListener('change', syncSeat);
+    typeSel?.addEventListener('change', syncType);
+    syncType(); syncSeat(); syncBolt();
   }, 0);
 }
 
@@ -11687,9 +11736,16 @@ function openThreadedHolesDialog() {
            <div class="field" id="th-head-row">
              <label>Bolt head type</label>
              <select id="th-head">${headOpts}</select>
-             <p style="color:var(--ink-soft);font-size:11px;margin:4px 0 0">Only affects the visualizer bolts — the holes themselves are always headless.</p>
            </div>
-           <div class="hint">The hole's axis is the sketch plane's normal. Each bolt sits with head flush on the sketch plane, shaft pointing into the body.</div>`,
+           <div class="field">
+             <label>Head seat</label>
+             <select id="th-seat">
+               <option value="rest"${(seed.headSeat || 'rest') === 'rest' ? ' selected' : ''}>Resting on the surface</option>
+               <option value="recess"${seed.headSeat === 'recess' ? ' selected' : ''}>Recessed flush (counterbore cut into the hole)</option>
+             </select>
+             <p id="th-seat-note" style="color:var(--ink-soft);font-size:11px;margin:4px 0 0;display:none">Machine screws (tapered head) always sit flush.</p>
+           </div>
+           <div class="hint">The hole's axis is the sketch plane's normal. Each bolt seats at its mark, shaft pointing into the body.</div>`,
     confirmText: `Cut ${titleCount} hole${titleCount === 1 ? '' : 's'}`,
     onConfirm: () => {
       const size = $('th-size').value;
@@ -11700,17 +11756,37 @@ function openThreadedHolesDialog() {
       const boltHead = $('th-head').value || 'hex';
       const holeType = $('th-type')?.value || 'threaded';
       const nutPocket = holeType === 'clearance' && !!$('th-nutpocket')?.checked;
+      const headSeat = $('th-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead, holeType, nutPocket });
+      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, headSeat });
     },
   });
   setTimeout(() => {
     const cb = $('th-bolt'); const headRow = $('th-head-row');
+    const headSel = $('th-head'), seatSel = $('th-seat'), seatNote = $('th-seat-note');
+    const syncSeat = () => {
+      // Tapered machine-screw heads can only sit flush — force recess.
+      const isFlat = headSel?.value === 'flat';
+      if (seatSel) {
+        if (isFlat) seatSel.value = 'recess';
+        seatSel.disabled = isFlat;
+      }
+      if (seatNote) seatNote.style.display = isFlat ? '' : 'none';
+    };
     if (cb && headRow) {
-      const sync = () => { headRow.style.opacity = cb.checked ? '1' : '0.4'; $('th-head').disabled = !cb.checked; };
+      const sync = () => {
+        // The head shape still matters when the seat is recessed (it shapes
+        // the counterbore) even if the visualizer bolt is hidden.
+        const headNeeded = cb.checked || seatSel?.value === 'recess';
+        headRow.style.opacity = headNeeded ? '1' : '0.4';
+        if (headSel) headSel.disabled = !headNeeded;
+      };
       cb.addEventListener('change', sync);
+      seatSel?.addEventListener('change', sync);
       sync();
     }
+    headSel?.addEventListener('change', syncSeat);
+    syncSeat();
     const typeSel = $('th-type');
     if (typeSel) {
       const syncType = () => {
@@ -11793,10 +11869,15 @@ function processThreadMarks(sketch, marks, opts) {
     // no shell overlays needed. Without it, csg.js gets the smooth envelope
     // and the shells provide the visual as before.
     const realThreads = !isClearance && !!window.__manifold;
+    // Recessed head seat: the cutter includes the head-shaped counterbore
+    // and sinks so the seated bolt's head lands flush below the surface.
+    const recess = opts.headSeat === 'recess';
     const hole = {
       id: doc.nextBodyId++,
       type: 'fastener',
-      headType: 'none',
+      headType: recess ? (opts.boltHead || 'hex') : 'none',
+      sinkHead: recess,
+      sinkExtra: recess ? CUT_OVERSHOOT : 0,
       size: opts.size,
       length: opts.depth + 2 * CUT_OVERSHOOT,
       fit: opts.fit,
@@ -11926,6 +12007,7 @@ function processThreadMarks(sketch, marks, opts) {
         // Clearance holes get a smooth "real bolt" ghost, not fake threads.
         thread: isClearance ? 'smooth' : 'threaded',
         part: 'bolt',
+        sinkHead: recess,
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
         op: 'add',
@@ -11948,6 +12030,7 @@ function processThreadMarks(sketch, marks, opts) {
       boltHead: opts.boltHead || 'hex',
       holeType: opts.holeType || 'threaded',
       nutPocket: !!opts.nutPocket,
+      headSeat: opts.headSeat || 'rest',
     };
   }
   // After the loop, the active group (if any) IS the new parent. Select
@@ -12024,8 +12107,9 @@ function renderFastenerPreviewInto(canvas, bodySpec) {
     const bb = new THREE.Box3().setFromObject(mesh);
     if (bb.isEmpty()) return;
     const c = bb.getCenter(new THREE.Vector3());
-    const span = bb.getSize(new THREE.Vector3()).length();
-    const dist = span * 1.05 + 4;
+    // Frame by bounding sphere so long bolts never clip the canvas edges.
+    const radius = bb.getSize(new THREE.Vector3()).length() / 2;
+    const dist = radius / Math.tan(THREE.MathUtils.degToRad(35 / 2)) * 1.18 + 2;
     _fastPreview.camera.position.set(c.x + dist * 0.72, c.y + dist * 0.5, c.z + dist * 0.72);
     _fastPreview.camera.aspect = W / H;
     _fastPreview.camera.lookAt(c);
@@ -12097,14 +12181,6 @@ function openFastenerDialog() {
                <option value="loose">Loose — +0.4 mm (easy)</option>
              </select>
            </div>
-           <div class="field" id="fastener-sink-row" style="align-items:center;gap:8px">
-             <input type="checkbox" id="fastener-sink" style="width:auto;margin:0"/>
-             <label for="fastener-sink" style="margin:0;cursor:pointer">Sink head flush when cutting (counterbore)</label>
-           </div>
-           <div class="field" id="fastener-washer-row" style="align-items:center;gap:8px">
-             <input type="checkbox" id="fastener-washer" style="width:auto;margin:0"/>
-             <label for="fastener-washer" style="margin:0;cursor:pointer">Washer pocket under the head when cutting</label>
-           </div>
            <div class="hint">The part drops in as a solid — 📌 Place it on a face, then position it. To cut it OUT of a body instead: set its <b>Operation</b> to Negative and <b>Group</b> them. A threaded part cuts real threads; smooth cuts a plain hole; a nut cuts a hex pocket.</div>`,
     custom: () => {
       const updatePreview = () => {
@@ -12127,7 +12203,6 @@ function openFastenerDialog() {
         for (const [id, show] of [
           ['fastener-head-grid', !isNut], ['fastener-head-title', !isNut],
           ['fastener-length-row', !isNut],
-          ['fastener-sink-row', !isNut], ['fastener-washer-row', !isNut],
         ]) {
           const el = document.getElementById(id);
           if (el) el.style.display = show ? '' : 'none';
@@ -12135,7 +12210,10 @@ function openFastenerDialog() {
       };
       for (const id of ['fastener-part', 'fastener-thread', 'fastener-size', 'fastener-length', 'fastener-fit']) {
         const el = document.getElementById(id);
-        if (el) { el.addEventListener('change', updatePreview); el.addEventListener('input', updatePreview); }
+        if (el) {
+          el.addEventListener('change', updatePreview);
+          el.addEventListener('input', updatePreview);
+        }
       }
       document.getElementById('fastener-part')?.addEventListener('change', syncPart);
       document.querySelectorAll('input[name="fastener-head"]').forEach(r =>
@@ -12151,10 +12229,7 @@ function openFastenerDialog() {
       const fit = $('fastener-fit').value || 'tight';
       addFastener(head, size, len, fit,
         document.getElementById('fastener-part')?.value || 'bolt',
-        document.getElementById('fastener-thread')?.value || 'threaded', {
-        sinkHead: !!document.getElementById('fastener-sink')?.checked,
-        washerPocket: !!document.getElementById('fastener-washer')?.checked,
-      });
+        document.getElementById('fastener-thread')?.value || 'threaded');
     },
   });
 }
