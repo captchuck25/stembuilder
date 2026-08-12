@@ -960,6 +960,12 @@
   .trim-preview-end { fill: #e5484d; pointer-events: none; }
   /* Drivable dimension numbers — click to type an exact value */
   .dim-value:hover { fill: #2c64ff; text-decoration: underline; }
+  /* Eraser hover — the shape a click would delete, redrawn in red */
+  .eraser-target { pointer-events: none; opacity: 0.9; }
+  .eraser-target line, .eraser-target path, .eraser-target rect,
+  .eraser-target circle, .eraser-target ellipse, .eraser-target polygon,
+  .eraser-target polyline { stroke: #e5484d !important; }
+  .eraser-target text { fill: #e5484d !important; }
   /* Hidden lines — edges of the body that lie BEHIND the visible face.
      Orthographic convention: dashed and noticeably faded, but still readable. */
   .body-outline {
@@ -1461,6 +1467,7 @@ class SketchEngine {
     this.nodeMoveState = null;
     this.trimPreview = null;
     this._trimPreviewSig = '';
+    this.eraserHover = null;
     if (['cp-drag','node-move','node-move-pending','move-pending'].includes(this.dragMode)) this.dragMode = null;
     this.updateNodeActions();
 
@@ -1477,7 +1484,7 @@ class SketchEngine {
       line: 'Click to drop points. Auto-snaps to <b>horizontal</b> / <b>vertical</b>. <b>Shift</b> forces ortho. Type a length and press <b>Enter</b> for an exact distance. <b>Enter</b> finishes, <b>Esc</b> cancels.',
       arc: 'Click a start point, click an end point, then move the mouse to shape the arc and click to finish.',
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
-      eraser: 'Click any shape to delete it. Press <b>V</b> to return to Select.',
+      eraser: 'The shape under your cursor turns red — click to delete it (works on dimensions too). Press <b>V</b> to return to Select.',
       trim: 'Hover a shape — the piece that would be removed shows in red. Click to remove it. Crossings with other shapes set the cut points.',
       dimension: 'Click two points, then move to place the dimension and click to drop it. Snap to corners/centers and it sticks to the shapes — click its number to type the exact distance. Esc cancels.',
     };
@@ -2949,6 +2956,19 @@ class SketchEngine {
       }
     }
 
+    // Eraser hover — highlight whatever a click would delete in red. No
+    // snapping: the eraser acts on the shape under the raw cursor.
+    if (this.tool === 'eraser' && !this.dragMode) {
+      const hit = this.hitTest(wx, wy);
+      const id = hit ? hit.id : null;
+      if (id !== this.eraserHover || this.snap) {
+        this.eraserHover = id;
+        this.snap = null;
+        this.scheduleRender();
+      }
+      return;
+    }
+
     // Dimension tool live preview — stage 1 rubber-bands from the first
     // point; stage 2 shows the finished dimension following the cursor so
     // the user chooses its side/direction before the final click.
@@ -3145,12 +3165,14 @@ class SketchEngine {
       return;
     }
 
-    // hover: show snap markers on every creation / measurement / modify tool
-    // so the user sees endpoint/midpoint/intersection/edge feedback before
-    // they click — same as during active drawing.
+    // hover: show snap markers on every creation / measurement tool so the
+    // user sees endpoint/midpoint/intersection/edge feedback before they
+    // click — same as during active drawing. Eraser and trim are NOT here:
+    // they act on the shape under the raw cursor (snapping — especially grid
+    // snap — would point at the wrong spot) and have their own red previews.
     const HOVER_SNAP_TOOLS = new Set([
       'rect', 'circle', 'ellipse', 'line', 'construction', 'arc',
-      'dimension', 'eraser', 'trim', 'extend',
+      'dimension', 'extend',
     ]);
     if (HOVER_SNAP_TOOLS.has(this.tool)) {
       this.snap = this.computeSnap(wx, wy);
@@ -3628,6 +3650,14 @@ class SketchEngine {
       }
       if (label) {
         svg += `<text class="snap-marker-label" x="${sx + 10}" y="${sy - 8}">${label}</text>`;
+      }
+    }
+
+    // Eraser hover target — redraw the doomed entity in red on top
+    if (this.tool === 'eraser' && this.eraserHover != null) {
+      const target = doc.sketch.entities.find(e => e.id === this.eraserHover);
+      if (target) {
+        svg += `<g class="eraser-target">${renderEntitySVG(target, this, false, true)}</g>`;
       }
     }
 
