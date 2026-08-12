@@ -5068,6 +5068,9 @@ function _ensureEdgeRenderer(W, H) {
 
 function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
   if (!body.mesh?.geometry || !viewer?.renderer) return;
+  // A lost GL context renders nothing and reads back all zeros — bail (and
+  // never cache) so the caller's CPU fallback can draw something instead.
+  try { if (viewer.renderer.getContext().isContextLost()) return; } catch (_) {}
 
   // Per-body cache: if the plane signature + mesh identity haven't changed,
   // reuse the previously-computed segments instead of re-rendering.
@@ -5258,8 +5261,10 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
     }
   }
 
-  // Cache and emit.
-  _edgeRender.meshCache.set(body.mesh, { planeSig, segments: out });
+  // Cache and emit — but NEVER cache an empty result: a degraded GPU read
+  // (context evicted mid-session) would otherwise poison this mesh+plane
+  // with a permanent blank projection.
+  if (out.length) _edgeRender.meshCache.set(body.mesh, { planeSig, segments: out });
   for (const s of out) segments.push(s);
 }
 
@@ -5661,8 +5666,32 @@ function projectBodiesOntoPlane(plane) {
     // vertices that defeat EdgesGeometry on CSG output).
     const isCSG = body.type === 'group' || body.type === 'combined';
     if (isCSG) {
+      const before = segments.length;
       projectBodyEdgesViaCanvas(body, plane, planeMInv, segments);
       usedEdges = true;
+      // Pixel extraction produced nothing (lost GL context, readback failure)
+      // → fall back to CPU EdgesGeometry on the CSG mesh. Noisier lines than
+      // the image-space result, but infinitely better than a blank view.
+      if (segments.length === before) {
+        try {
+          const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
+          const pos = edges.attributes?.position;
+          if (pos && pos.count >= 2) {
+            const mw = body.mesh.matrixWorld;
+            const va = new THREE.Vector3(), vb = new THREE.Vector3();
+            const MIN_LEN = 0.25;
+            for (let i = 0; i < pos.count; i += 2) {
+              va.fromBufferAttribute(pos, i);
+              vb.fromBufferAttribute(pos, i + 1);
+              const p1 = projPoint(va, mw);
+              const p2 = projPoint(vb, mw);
+              if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < MIN_LEN) continue;
+              segments.push({ p1, p2, dz1: p1.z, dz2: p2.z });
+            }
+          }
+          edges.dispose();
+        } catch (_) {}
+      }
     } else if (!skipEdges) try {
       const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
       const pos = edges.attributes?.position;
@@ -5781,6 +5810,14 @@ class Viewer3D {
     canvas.addEventListener('webglcontextrestored', () => {
       this._contextLost = false;
       try { this.renderer.shadowMap.needsUpdate = true; } catch (_) {}
+      // The offscreen edge-projection resources died with the old context —
+      // reset them so face-sketch technical views recompute cleanly.
+      try {
+        if (typeof _edgeRender !== 'undefined') {
+          if (_edgeRender.target) { _edgeRender.target.dispose(); _edgeRender.target = null; }
+          _edgeRender.meshCache = new WeakMap();
+        }
+      } catch (_) {}
       this.rebuildBodies();
       setStatus('3D view recovered');
     }, false);
