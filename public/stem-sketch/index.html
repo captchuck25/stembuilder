@@ -11364,6 +11364,9 @@ function openThreadedHoleForMark(sketchId, markId) {
            ${allMarkCount > 1 ? `<div class="field" style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--panel-2, #f3f5fa);border-radius:8px">
              <input type="checkbox" id="th1-all" style="width:auto;margin:0"/>
              <label for="th1-all" style="margin:0;cursor:pointer"><b>Make all ${allMarkCount} bolt locations in this sketch the same</b></label>
+           </div>` : ''}
+           ${isEdit ? `<div class="field" style="margin-top:8px">
+             <button class="action" id="th1-remove" style="color:#c0392b;border-color:#c0392b">🗑 Remove this hole — restore the body here</button>
            </div>` : ''}`,
     confirmText: isEdit ? 'Save changes' : undefined,
     onConfirm: () => {
@@ -11426,6 +11429,15 @@ function openThreadedHoleForMark(sketchId, markId) {
     headSel?.addEventListener('change', syncSeat);
     typeSel?.addEventListener('change', syncType);
     syncType(); syncSeat(); syncBolt();
+    // Remove-this-hole: truly un-cuts (strip + rebuild) and keeps the mark
+    // in the sketch for re-use.
+    const rmBtn = $('th1-remove');
+    if (rmBtn) rmBtn.onclick = () => {
+      pushUndo();
+      deleteMaterialisedThreadMark(mark);
+      $('modal-bg')?.classList.remove('show');
+      setStatus('Hole removed — the body is restored. The mark stays in the sketch; click it to cut again.');
+    };
   }, 0);
 }
 
@@ -11489,6 +11501,7 @@ function _stripStaleThreadCuttersRecursive(group) {
 // re-initializes without shifting (the geometry itself didn't move).
 // Rotation tracking is not yet supported — translation covers the move
 // tools (drag, gizmo, typed XYZ, nudge, align, snap-to-plane).
+let _sketchAnchorsMoved = false;
 function syncSketchAnchorsToBodies() {
   for (const sk of (doc.sketches || [])) {
     if (sk.sourceBodyId == null || !sk.plane || !Array.isArray(sk.plane.origin)) continue;
@@ -11506,7 +11519,25 @@ function syncSketchAnchorsToBodies() {
       sk.plane.origin[1] += dy;
       sk.plane.origin[2] += dz;
       sk._anchor = { x: px, y: py, z: pz };
+      // The sketch's companion bodies ride along too: visualizer bolts and
+      // standalone thread shells are separate world-positioned bodies tagged
+      // with _threadMarkRef back to this sketch's marks.
+      for (const cb of doc.bodies) {
+        if (cb._threadMarkRef && cb._threadMarkRef.sketchId === sk.id) {
+          cb.x = (cb.x || 0) + dx;
+          cb.y = (cb.y || 0) + dy;
+          cb.z = (cb.z || 0) + dz;
+        }
+      }
+      _sketchAnchorsMoved = true;
     }
+  }
+  // Refresh the 3D sketch overlay (mark rings, sketch lines) after the
+  // current rebuild pass settles — the overlay is built from the planes we
+  // just shifted.
+  if (_sketchAnchorsMoved) {
+    _sketchAnchorsMoved = false;
+    Promise.resolve().then(() => { try { viewer?.updateSketchOverlay(); } catch (_) {} });
   }
 }
 
