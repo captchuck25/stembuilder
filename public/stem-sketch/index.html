@@ -415,6 +415,11 @@
   }
   .tree-node .tree-lock:hover { background: rgba(31,37,64,0.08); opacity: 0.85; }
   .tree-node .tree-lock.locked { opacity: 1; filter: none; }
+  .tree-node .tree-pencil {
+    border: 0; background: none; cursor: pointer; padding: 0 2px;
+    font-size: 11px; line-height: 1; opacity: 0.4; border-radius: 4px;
+  }
+  .tree-node .tree-pencil:hover { background: rgba(31,37,64,0.08); opacity: 1; }
   .tree-node.locked .tree-label { color: var(--ink-muted); font-style: italic; }
   .tree-node.locked .tree-del { display: none !important; }
   /* Inline rename — replaces the .tree-label span on dblclick */
@@ -13918,6 +13923,7 @@ function renderTree() {
     html += `<div class="tree-node ${cls}${lockedCls}" data-kind="sketch" data-id="${sketch.id}">
       <button class="tree-eye" data-action="toggle-sketch" data-id="${sketch.id}" title="${eyeTitle}">${eye}</button>
       <button class="tree-lock${sketch.locked ? ' locked' : ''}" data-action="toggle-lock-sketch" data-id="${sketch.id}" title="${lockTitle}">${lock}</button>
+      <button class="tree-pencil" data-kind="sketch" data-id="${sketch.id}" title="Rename sketch">✏️</button>
       <span class="ico">📐</span> <span class="tree-label" style="${sketch.hidden ? 'opacity:0.45' : ''}">${sketch.name}</span>
       <span class="tree-count">${sketch.entities.length}</span>
       <button class="tree-del" data-action="del-sketch" data-id="${sketch.id}" title="Delete sketch">×</button></div>`;
@@ -13984,10 +13990,19 @@ function renderTree() {
     html += `<div class="tree-node ${active ? 'active' : ''}${lockedCls}" data-kind="body" data-id="${body.id}">
       <button class="tree-eye" data-action="toggle-body" data-id="${body.id}" title="${eyeTitle}">${eye}</button>
       <button class="tree-lock${body.locked ? ' locked' : ''}" data-action="toggle-lock-body" data-id="${body.id}" title="${lockTitle}">${lock}</button>
+      <button class="tree-pencil" data-kind="body" data-id="${body.id}" title="Rename">✏️</button>
       <span class="ico">${ico}</span> <span class="tree-label" style="${body.hidden ? 'opacity:0.45' : ''}">${label}${negTag}</span>
       <button class="tree-del" data-action="del-body" data-id="${body.id}" title="Delete body">×</button></div>`;
   }
   tree.innerHTML = html;
+  // Rename pencils — start an inline rename without selecting/opening the row
+  tree.querySelectorAll('.tree-pencil').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const node = btn.closest('.tree-node');
+      if (node) startTreeRename(node, btn.dataset.kind, parseInt(btn.dataset.id, 10));
+    });
+  });
   // Per-node visibility toggles (eyeball)
   tree.querySelectorAll('.tree-eye').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -14120,7 +14135,7 @@ function attachTreeRenameHandler() {
   // a rename regardless of DOM rebuilds.
   const DBL_MS = 400;
   tree.addEventListener('click', (ev) => {
-    if (ev.target.closest('.tree-eye, .tree-lock, .tree-del')) return; // ignore button clicks
+    if (ev.target.closest('.tree-eye, .tree-lock, .tree-del, .tree-pencil')) return; // ignore button clicks
     const span = ev.target.closest('.tree-node .tree-label');
     if (!span) return;
     const node = span.closest('.tree-node');
