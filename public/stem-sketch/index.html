@@ -5759,10 +5759,31 @@ class Viewer3D {
     this.spherical = new THREE.Spherical(220, 1.05, 0.85);
     this.updateCamera();
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    // No preserveDrawingBuffer — the thumbnail capture re-renders a fresh
+    // frame before reading the canvas, and dropping it saves a full-canvas
+    // buffer copy every frame (real money on Chromebook GPUs). Pixel ratio
+    // capped at 1.5: on 2x displays this renders ~half the pixels for a
+    // barely-visible sharpness cost.
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // Auto-recover when the browser evicts our GPU context (common on
+    // low-memory Chromebooks). preventDefault signals we can handle a
+    // restore; three.js re-uploads all GPU resources on the next render.
+    this._contextLost = false;
+    canvas.addEventListener('webglcontextlost', (ev) => {
+      ev.preventDefault();
+      this._contextLost = true;
+      setStatus('3D graphics paused by the browser — recovering…');
+    }, false);
+    canvas.addEventListener('webglcontextrestored', () => {
+      this._contextLost = false;
+      try { this.renderer.shadowMap.needsUpdate = true; } catch (_) {}
+      this.rebuildBodies();
+      setStatus('3D view recovered');
+    }, false);
 
     // Release the WebGL context on iframe unload / page hide. Without this,
     // Chrome caps active contexts per process (~16) and dev-mode HMR refreshes
@@ -6866,11 +6887,19 @@ class Viewer3D {
   }
 
   loop() {
+    // Skip GPU work while the context is lost or the 3D canvas is hidden
+    // (2D sketch mode) — rendering an invisible canvas every frame burns
+    // Chromebook GPU/battery for nothing. The rAF chain stays alive so
+    // rendering resumes the moment 3D is visible again.
+    if (this._contextLost || doc.mode !== '3d') {
+      requestAnimationFrame(() => this.loop());
+      return;
+    }
     this.resize();
     this.renderer.render(this.scene, this.camera);
     // Live-update engineering dimension labels for the selected body so they
     // follow camera orbit / zoom / pan continuously.
-    if (doc.mode === '3d' && doc.selection?.kind === 'body') {
+    if (doc.selection?.kind === 'body') {
       const body = doc.bodies.find(b => b.id === doc.selection.id);
       if (body) showDimLabels(body);
     }
@@ -15864,22 +15893,44 @@ function init() {
 
   // 3D init — non-fatal if Three.js didn't load
   if (typeof THREE !== 'undefined') {
-    try {
-      viewer = new Viewer3D($('three-canvas'));
-    } catch (err) {
-      console.error('Viewer3D init failed:', err);
-      setStatus('3D init error: ' + err.message + ' (2D still works)');
-      // Surface the failure inside the 3D canvas slot so the user knows
-      // WHY the 3D view is blank — not just see a blank panel. The most
-      // common cause is the browser hitting its per-process WebGL-context
-      // cap (close other 3D tabs and refresh).
+    // Contexts free up when other 3D tabs close or the GPU recovers, so a
+    // failed start is NOT permanent: keep retrying automatically (and offer
+    // a button) instead of demanding a refresh. The Viewer3D constructor
+    // attaches nothing before the renderer succeeds, so retrying is safe.
+    const tryInitViewer = () => {
+      try {
+        viewer = new Viewer3D($('three-canvas'));
+        return true;
+      } catch (err) {
+        console.error('Viewer3D init failed:', err);
+        return false;
+      }
+    };
+    if (!tryInitViewer()) {
+      setStatus('3D graphics unavailable right now — retrying… (2D still works)');
       const c = $('three-canvas');
+      let overlay = null;
       if (c && c.parentNode) {
-        const overlay = document.createElement('div');
+        overlay = document.createElement('div');
         overlay.style.cssText = 'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;background:#f4f6fa;color:#1a2a4a;font:14px/1.5 system-ui,sans-serif;z-index:5;';
-        overlay.innerHTML = `<div style="max-width:380px"><div style="font-size:16px;font-weight:700;margin-bottom:6px">3D view unavailable</div><div style="color:#475569">The browser couldn't create a WebGL context. Usually this means too many 3D tabs are open — close other STEM Sketch / Blueprint Lab tabs and refresh. If it persists, restart your browser.</div></div>`;
+        overlay.innerHTML = `<div style="max-width:380px"><div style="font-size:16px;font-weight:700;margin-bottom:6px">3D view is waking up…</div><div style="color:#475569">The browser couldn't start 3D graphics — this usually clears up on its own in a few seconds. Closing other STEM Sketch or Blueprint Lab tabs helps. Your drawing is safe.</div><button id="webgl-retry-btn" style="margin-top:12px;padding:8px 18px;border:0;border-radius:8px;background:#2c64ff;color:#fff;font:600 13px system-ui,sans-serif;cursor:pointer">Try again now</button></div>`;
         c.parentNode.appendChild(overlay);
       }
+      let retryTimer = null;
+      const attempt = () => {
+        if (!tryInitViewer()) return;
+        if (retryTimer) clearInterval(retryTimer);
+        if (overlay) overlay.remove();
+        // The doc may already be loaded (localStorage draft restore) — catch
+        // the fresh viewer up with whatever is in it.
+        try {
+          viewer.rebuildBodies();
+          viewer.updateSketchOverlay();
+        } catch (_) {}
+        setStatus('3D view ready');
+      };
+      retryTimer = setInterval(attempt, 4000);
+      document.getElementById('webgl-retry-btn')?.addEventListener('click', attempt);
     }
   } else {
     console.warn('Three.js did not load. 3D mode disabled.');
