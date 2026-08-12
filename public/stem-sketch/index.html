@@ -10481,6 +10481,9 @@ function buildFastenerGeometry(body) {
   const length  = body.length || (spec.d * 4);
   const headType = body.headType || 'hex';
   const fit = body.fit || 'tight';
+  // Head height by type — hoisted so the sink-head logic below the branches
+  // can use it too.
+  const headH = ({ hex: spec.d * 0.65, phillips: spec.d * 0.65, cap: spec.d, flat: spec.d * 0.55 })[headType] || 0;
   // Phase 1 — true-size bolts: fit/clearance is a HOLE property only. A real
   // bolt renders at its exact catalog size regardless of fit; only a fastener
   // acting as a cut tool (op === 'subtract') carries the tolerance, so its
@@ -10524,12 +10527,10 @@ function buildFastenerGeometry(body) {
   // without affecting the threads).
   let headGeo = null;
   if (headType === 'hex') {
-    const headH = spec.d * 0.65;
     headGeo = new THREE.CylinderGeometry(rHex, rHex, headH, 6);
     headGeo.rotateY(Math.PI / 6);
     headGeo.translate(0, length + headH / 2, 0);
   } else if (headType === 'phillips') {
-    const headH = spec.d * 0.65;
     headGeo = new THREE.CylinderGeometry(rRound, rRound, headH, 32);
     headGeo.translate(0, length + headH / 2, 0);
     // Cross slot via CSG.subtract — two crossed boxes recessed into top
@@ -10540,7 +10541,6 @@ function buildFastenerGeometry(body) {
     const s2 = new THREE.BoxGeometry(slotT, slotD, slotW); s2.translate(0, slotY, 0);
     headGeo = _csgSubtractGeo(headGeo, [s1, s2]);
   } else if (headType === 'cap') {
-    const headH = spec.d;
     headGeo = new THREE.CylinderGeometry(rCap, rCap, headH, 32);
     headGeo.translate(0, length + headH / 2, 0);
     // Hex socket via CSG.subtract — recessed hexagonal hole on top
@@ -10551,7 +10551,6 @@ function buildFastenerGeometry(body) {
     socket.translate(0, length + headH - socketH / 2 + 0.02, 0);
     headGeo = _csgSubtractGeo(headGeo, [socket]);
   } else if (headType === 'flat') {
-    const headH = spec.d * 0.55;
     headGeo = new THREE.CylinderGeometry(rFlat, rShaft, headH, 32);
     headGeo.translate(0, length + headH / 2, 0);
     // Phillips cross via CSG.subtract — flat heads are typically Phillips
@@ -10564,7 +10563,18 @@ function buildFastenerGeometry(body) {
   }
   if (headGeo) parts.push(headGeo);
 
+  // Washer pocket ghost — where a real flat washer sits under the head.
+  if (body.washerPocket) {
+    const wT = spec.d * 0.25;
+    const wGeo = new THREE.CylinderGeometry(spec.d, spec.d, wT, 32);
+    wGeo.translate(0, length - wT / 2, 0);
+    parts.push(wGeo);
+  }
+
   const merged = _mergeBufferGeometries(parts);
+  // Sink-head: the whole bolt sits one head-height lower so the head ends
+  // up flush below the surface (counterbored).
+  if (body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
   // Required for raycaster picking — without these the bolt mesh's bounding
   // sphere is undefined and click events miss.
   merged.computeBoundingBox();
@@ -10613,6 +10623,9 @@ function buildFastenerCSGMesh(body) {
   const length  = body.length || (spec.d * 4);
   const headType = body.headType || 'hex';
   const fit = body.fit || 'tight';
+  // Head height by type — hoisted so the sink-head logic below the branches
+  // can use it too.
+  const headH = ({ hex: spec.d * 0.65, phillips: spec.d * 0.65, cap: spec.d, flat: spec.d * 0.55 })[headType] || 0;
   // True-size bolts: clearance applies only when this fastener is a cut tool
   // (op === 'subtract'), which is what sizes the hole. A bolt unioned as a
   // positive stays at its exact catalog size.
@@ -10652,27 +10665,59 @@ function buildFastenerCSGMesh(body) {
   }
   let headGeo = null;
   if (headType === 'hex') {
-    const headH = spec.d * 0.65;
     headGeo = new THREE.CylinderGeometry(rHex, rHex, headH, 6);
     headGeo.rotateY(Math.PI / 6);
     headGeo.translate(0, length + headH / 2, 0);
   } else if (headType === 'phillips') {
-    const headH = spec.d * 0.65;
     headGeo = new THREE.CylinderGeometry(rRound, rRound, headH, 32);
     headGeo.translate(0, length + headH / 2, 0);
   } else if (headType === 'cap') {
-    const headH = spec.d;
     headGeo = new THREE.CylinderGeometry(rCap, rCap, headH, 32);
     headGeo.translate(0, length + headH / 2, 0);
   } else if (headType === 'flat') {
-    const headH = spec.d * 0.55;
     headGeo = new THREE.CylinderGeometry(rFlat, spec.d / 2 + clearance, headH, 32);
     headGeo.translate(0, length + headH / 2, 0);
   }
   if (headGeo) parts.push(headGeo);
+  // Washer pocket — shallow disk recess under the head sized for a real
+  // flat washer (OD ≈ 2×d, thickness ≈ 0.25×d), opening past the surface.
+  if (body.washerPocket) {
+    const wT = spec.d * 0.25 + 0.3;
+    const wR = spec.d + Math.max(clearance, 0.25);
+    const H = wT + 2;
+    const wGeo = new THREE.CylinderGeometry(wR, wR, H, 32);
+    wGeo.translate(0, length - wT + H / 2, 0);
+    parts.push(wGeo);
+  }
+  // Sink-head: a chimney shaped like the head (or like the washer when one
+  // has to drop in past it) keeps the counterbore open to the surface after
+  // the whole cutter shifts down by the head height.
+  if (body.sinkHead && headH > 0) {
+    const ext = 2.4;
+    let chim = null;
+    if (body.washerPocket) {
+      const wR = spec.d + Math.max(clearance, 0.25);
+      chim = new THREE.CylinderGeometry(wR, wR, headH + ext, 32);
+    } else if (headType === 'hex') {
+      chim = new THREE.CylinderGeometry(rHex, rHex, headH + ext, 6);
+      chim.rotateY(Math.PI / 6);
+    } else if (headType === 'cap') {
+      chim = new THREE.CylinderGeometry(rCap, rCap, headH + ext, 32);
+    } else if (headType === 'phillips') {
+      chim = new THREE.CylinderGeometry(rRound, rRound, headH + ext, 32);
+    } else if (headType === 'flat') {
+      chim = new THREE.CylinderGeometry(rFlat, rFlat, headH + ext, 32);
+    }
+    if (chim) {
+      chim.translate(0, length + (headH + ext) / 2, 0);
+      parts.push(chim);
+    }
+  }
   // True union (not raw merge) — the nut pocket overlaps the shaft, and
   // Manifold treats overlapping merged shells as holes (even-odd winding).
   const merged = _unionGeometriesForCSG(parts);
+  // Sink the whole cutter so the head lands flush below the surface.
+  if (body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial());
@@ -11117,12 +11162,14 @@ function addPrimitive(kind) {
 // fit ∈ 'tight' (= matched bolt, no clearance), 'normal' (+0.1mm radial),
 // 'loose' (+0.25mm radial) — used when the fastener is grouped as a negative
 // to subtract a printable threaded hole.
-function addFastener(headType, size, length, fit, style, nutPocket) {
+function addFastener(headType, size, length, fit, style, nutPocket, extras) {
   pushUndo();
   const spec = getFastenerSpec(size);
   const len = (typeof length === 'number' && length > 0) ? length : (spec.d * 4);
   const isClearance = style === 'clearance';
   const body = {
+    sinkHead: !!(isClearance && extras?.sinkHead),
+    washerPocket: !!(isClearance && extras?.washerPocket),
     id: doc.nextBodyId++,
     type: 'fastener',
     headType: headType || 'hex',
@@ -11827,6 +11874,14 @@ function openFastenerDialog() {
              <input type="checkbox" id="fastener-nutpocket" style="width:auto;margin:0"/>
              <label for="fastener-nutpocket" style="margin:0;cursor:pointer">Hex nut pocket at the far end — drop a real nut in after printing</label>
            </div>
+           <div class="field" id="fastener-sink-row" style="display:none;align-items:center;gap:8px">
+             <input type="checkbox" id="fastener-sink" style="width:auto;margin:0"/>
+             <label for="fastener-sink" style="margin:0;cursor:pointer">Sink the head flush (counterbore into the surface)</label>
+           </div>
+           <div class="field" id="fastener-washer-row" style="display:none;align-items:center;gap:8px">
+             <input type="checkbox" id="fastener-washer" style="width:auto;margin:0"/>
+             <label for="fastener-washer" style="margin:0;cursor:pointer">Washer pocket under the head (real flat washer)</label>
+           </div>
            <h4 style="margin-top:12px" id="fastener-head-title">Head type</h4>
            <div id="fastener-head-grid">${headOpts}</div>
            <div class="field" style="margin-top:10px">
@@ -11852,8 +11907,10 @@ function openFastenerDialog() {
       const styleSel = document.getElementById('fastener-style');
       const sync = () => {
         const clearance = styleSel.value === 'clearance';
-        const row = document.getElementById('fastener-nutpocket-row');
-        if (row) row.style.display = clearance ? 'flex' : 'none';
+        for (const id of ['fastener-nutpocket-row', 'fastener-sink-row', 'fastener-washer-row']) {
+          const row = document.getElementById(id);
+          if (row) row.style.display = clearance ? 'flex' : 'none';
+        }
         const title = document.getElementById('fastener-head-title');
         if (title) title.textContent = clearance ? 'Head recess shape (cut into the surface)' : 'Head type';
         const hint = document.getElementById('fastener-style-hint');
@@ -11871,8 +11928,12 @@ function openFastenerDialog() {
       const len = lenVal > 0 ? fromUnit(lenVal) : null;
       const fit = $('fastener-fit').value || 'tight';
       const style = document.getElementById('fastener-style')?.value || 'threaded';
-      const nutPocket = style === 'clearance' && !!document.getElementById('fastener-nutpocket')?.checked;
-      addFastener(head, size, len, fit, style, nutPocket);
+      const clearanceOn = style === 'clearance';
+      const nutPocket = clearanceOn && !!document.getElementById('fastener-nutpocket')?.checked;
+      addFastener(head, size, len, fit, style, nutPocket, {
+        sinkHead: clearanceOn && !!document.getElementById('fastener-sink')?.checked,
+        washerPocket: clearanceOn && !!document.getElementById('fastener-washer')?.checked,
+      });
     },
   });
 }
@@ -13917,6 +13978,14 @@ function renderProps() {
         ${fStyle === 'clearance' ? `<div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="fastener-nutpocket-prop" style="width:auto;margin:0"${body.nutPocket ? ' checked' : ''}/>
           <label for="fastener-nutpocket-prop" style="margin:0;cursor:pointer">Hex nut pocket at the far end</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="fastener-sink-prop" style="width:auto;margin:0"${body.sinkHead ? ' checked' : ''}/>
+          <label for="fastener-sink-prop" style="margin:0;cursor:pointer">Sink head flush (counterbore)</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="fastener-washer-prop" style="width:auto;margin:0"${body.washerPocket ? ' checked' : ''}/>
+          <label for="fastener-washer-prop" style="margin:0;cursor:pointer">Washer pocket under the head</label>
         </div>` : ''}
         <div class="field"><label></label>
           <button class="action" id="fastener-place-btn" title="Click any body face — the bolt seats with the bottom of its head flush on that face, perpendicular to it">📌 Place on face</button>
@@ -13980,13 +14049,19 @@ function renderProps() {
       setStatus('Place fastener: click any body face. Esc to cancel.');
       if (viewer) viewer.canvas.style.cursor = 'crosshair';
     };
-    // Nut-pocket toggle (clearance-style fasteners)
-    const nutCb = document.getElementById('fastener-nutpocket-prop');
-    if (nutCb) nutCb.onchange = () => {
-      body.nutPocket = nutCb.checked;
-      viewer?.rebuildBodies();
-      renderProps();
-    };
+    // Clearance-fastener option toggles
+    for (const [elId, key] of [
+      ['fastener-nutpocket-prop', 'nutPocket'],
+      ['fastener-sink-prop', 'sinkHead'],
+      ['fastener-washer-prop', 'washerPocket'],
+    ]) {
+      const cb = document.getElementById(elId);
+      if (cb) cb.onchange = () => {
+        body[key] = cb.checked;
+        viewer?.rebuildBodies();
+        renderProps();
+      };
+    }
     // Snap-to-plane: drop the body so its lowest point sits at internal Y=0
     // (the workplane). Use the current world-space bbox so any rotation /
     // existing offset is accounted for.
