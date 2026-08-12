@@ -1106,7 +1106,7 @@
         <button class="tool" data-tool="arc" title="Arc (A) — 3-point arc"><svg class="ico"><use href="#i-arc"/></svg><span class="tool-label">Arc</span></button>
         <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
         <button class="tool" data-action="toggle-construction-vis" id="toggle-construction-vis" title="Show/hide all construction lines (visibility only — they stay in the sketch)"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Show</span></button>
-        <button class="tool" data-tool="dimension" title="Dimension (D) — click two points to measure. Snapped dimensions follow their shapes; click the number to type an exact distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
+        <button class="tool" data-tool="dimension" title="Dimension (D) — click two points, then move and click to place it where you want. Snapped dimensions follow their shapes; click the number to type an exact distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
         <button class="tool" data-tool="thread-mark" title="Thread mark — drops a hole-center marker. In 3D, &quot;Threaded holes&quot; turns every mark into a real threaded hole at a chosen size + depth."><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thread</span></button>
         <button class="tool" data-action="auto-dim" title="Auto-dimension — add engineering dimensions to all shapes"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
         <div class="dropdown" id="shape2d-dropdown">
@@ -1479,7 +1479,7 @@ class SketchEngine {
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
       eraser: 'Click any shape to delete it. Press <b>V</b> to return to Select.',
       trim: 'Hover a shape — the piece that would be removed shows in red. Click to remove it. Crossings with other shapes set the cut points.',
-      dimension: 'Click two points to measure. Snap to corners/centers and the dimension sticks to the shapes — click its number to type the exact distance. Esc cancels.',
+      dimension: 'Click two points, then move to place the dimension and click to drop it. Snap to corners/centers and it sticks to the shapes — click its number to type the exact distance. Esc cancels.',
     };
     // Tips are surfaced via the status bar instead of a dedicated panel
     if (tips[t]) setStatus(tips[t].replace(/<[^>]+>/g, ''));
@@ -1730,6 +1730,30 @@ class SketchEngine {
       kind: 'trim', ent: clickedOrig, results, removedPts,
       status: `Trimmed at ${intersections.length === 1 ? '1 crossing' : `${intersections.length} crossings`}`,
     };
+  }
+
+  // Where should an in-progress dimension land, given the cursor? Returns
+  // {orient, off}. For slanted point pairs the cursor picks the measurement
+  // type: above/below the pair → 'h' (horizontal distance), beside it → 'v'
+  // (vertical distance), near the line → 'aligned' (true distance).
+  // Axis-aligned pairs are always 'aligned' (equivalent to h/v anyway).
+  _dimPlacement(ad, cx, cy) {
+    const p1 = ad.p1, p2 = ad.p2;
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy) || 1e-9;
+    const slanted = Math.abs(dx) > 0.01 && Math.abs(dy) > 0.01;
+    if (slanted) {
+      const minX = Math.min(p1.x, p2.x), maxX = Math.max(p1.x, p2.x);
+      const minY = Math.min(p1.y, p2.y), maxY = Math.max(p1.y, p2.y);
+      const inX = cx >= minX && cx <= maxX;
+      const inY = cy >= minY && cy <= maxY;
+      if (inX && !inY) return { orient: 'h', off: cy - (p1.y + p2.y) / 2 };
+      if (inY && !inX) return { orient: 'v', off: cx - (p1.x + p2.x) / 2 };
+    }
+    const nx = -dy / len, ny = dx / len;
+    let off = (cx - p1.x) * nx + (cy - p1.y) * ny;
+    if (Math.abs(off) < 2) off = off < 0 ? -2 : 2; // keep it just off the line
+    return { orient: 'aligned', off };
   }
 
   finalizeLine(commit = true) {
@@ -2156,6 +2180,12 @@ class SketchEngine {
       // Hidden construction lines aren't visible, so they shouldn't be
       // clickable either — keep the selection feel consistent with the view.
       if (doc.hideConstruction && ent.construction) continue;
+      // Dimensions are only pickable by the eraser (delete), so they never
+      // steal selection clicks from real geometry.
+      if (ent.type === 'dimension') {
+        if (this.tool === 'eraser' && dimensionHit(ent, wx, wy, tolMm)) return ent;
+        continue;
+      }
       if (entityHit(ent, wx, wy, tolMm)) return ent;
     }
     return null;
@@ -2227,8 +2257,10 @@ class SketchEngine {
       }
       // Dimension-entity number click — type a value to DRIVE the geometry
       // (resize the measured shape / move the spaced shape). Only under the
-      // Select/Dimension tools, so it can't shadow eraser/trim/draw clicks.
-      const dimVal = (this.tool === 'select' || this.tool === 'dimension')
+      // Select/Dimension tools, so it can't shadow eraser/trim/draw clicks —
+      // and never mid-flow, so placing a new dimension can't be hijacked by
+      // an existing label under the cursor.
+      const dimVal = (this.tool === 'select' || (this.tool === 'dimension' && !this.activeDim))
         ? e.target.closest('.dim-value') : null;
       if (dimVal) {
         const entId = parseInt(dimVal.dataset.entId, 10);
@@ -2613,7 +2645,7 @@ class SketchEngine {
         pushUndo();
         doc.sketch.entities = doc.sketch.entities.filter(e => e.id !== hit.id);
         if (doc.selection?.id === hit.id) doc.selection = null;
-        setStatus('Deleted shape');
+        setStatus(hit.type === 'dimension' ? 'Deleted dimension' : 'Deleted shape');
         renderTree(); renderProps(); this.render();
       }
       return;
@@ -2708,29 +2740,37 @@ class SketchEngine {
         // Remember which entity feature (corner/center/vertex/midpoint) the
         // snapped point landed on, so the dimension can FOLLOW that feature.
         this.activeDim = { p1: { x: px, y: py }, a1: findDimAnchorAt(px, py) };
-        setStatus('Dimension — click the second point');
+        setStatus('Dimension — click the second point (Esc cancels)');
+      } else if (!this.activeDim.p2) {
+        if (Math.hypot(px - this.activeDim.p1.x, py - this.activeDim.p1.y) < 0.05) {
+          setStatus('Pick a different second point');
+          this.render();
+          return;
+        }
+        this.activeDim.p2 = { x: px, y: py };
+        this.activeDim.a2 = findDimAnchorAt(px, py);
+        setStatus('Dimension — move to choose where it sits, then click to drop it');
       } else {
+        // Third click commits exactly what the preview shows. Placement uses
+        // the RAW cursor (wx, wy) — snapping would yank the label around.
+        const ad = this.activeDim;
+        const plc = this._dimPlacement(ad, wx, wy);
         pushUndo();
-        const p1 = this.activeDim.p1;
-        const p2 = { x: px, y: py };
-        const a1 = this.activeDim.a1 || null;
-        const a2 = findDimAnchorAt(px, py);
         const dim = {
           id: doc.sketch.nextId++,
           type: 'dimension',
-          p1, p2,
-          a1, a2,
-          // Default offset: 8 mm perpendicular off the dimension line.
-          // Stored as a signed distance so the label can sit on either side.
-          off: 8,
+          p1: ad.p1, p2: ad.p2,
+          a1: ad.a1 || null, a2: ad.a2 || null,
+          orient: plc.orient,
+          off: plc.off,
         };
         doc.sketch.entities.push(dim);
         this.activeDim = null;
-        const attached = (a1 || a2)
+        const g = dimGeometry(dim);
+        const attached = (dim.a1 || dim.a2)
           ? ' (attached — click its number to set the exact distance)'
           : '';
-        setStatus(`Added dimension: ${fmtUL(Math.hypot(p2.x - p1.x, p2.y - p1.y))}${attached}`);
-        this.render();
+        setStatus(`Added dimension: ${fmtUL(g ? g.len : 0)}${attached}`);
         renderTree();
       }
       this.render();
@@ -2907,6 +2947,15 @@ class SketchEngine {
         this.trimPreview = pts;
         this.scheduleRender();
       }
+    }
+
+    // Dimension tool live preview — stage 1 rubber-bands from the first
+    // point; stage 2 shows the finished dimension following the cursor so
+    // the user chooses its side/direction before the final click.
+    if (this.tool === 'dimension' && this.activeDim && !this.dragMode) {
+      this.snap = this.activeDim.p2 ? null : this.computeSnap(wx, wy);
+      this.scheduleRender();
+      return;
     }
 
     // Live preview during arc drawing
@@ -3582,6 +3631,27 @@ class SketchEngine {
       }
     }
 
+    // Dimension tool in-progress preview
+    if (this.tool === 'dimension' && this.activeDim && this.cursorWorld) {
+      const ad = this.activeDim;
+      const cur = (!ad.p2 && this.snap) ? this.snap : this.cursorWorld;
+      const [p1x, p1y] = this.worldToScreen(ad.p1.x, ad.p1.y);
+      svg += `<rect class="snap-marker" x="${p1x - 4}" y="${p1y - 4}" width="8" height="8"/>`;
+      if (!ad.p2) {
+        // Stage 1 → 2: rubber band + live distance so a pending first point
+        // is always visible (no more surprise dimensions).
+        const [cx2, cy2] = this.worldToScreen(cur.x, cur.y);
+        svg += `<line class="entity preview" x1="${p1x}" y1="${p1y}" x2="${cx2}" y2="${cy2}" stroke-dasharray="5 4"/>`;
+        const dLen = Math.hypot(cur.x - ad.p1.x, cur.y - ad.p1.y);
+        svg += `<text class="dim-label" x="${(p1x + cx2) / 2}" y="${(p1y + cy2) / 2 - 8}" text-anchor="middle">${fmtUL(dLen)}</text>`;
+      } else {
+        // Stage 2 → 3: ghost of the exact dimension a click would drop.
+        const plc = this._dimPlacement(ad, cur.x, cur.y);
+        const ghost = { type: 'dimension', p1: ad.p1, p2: ad.p2, off: plc.off, orient: plc.orient };
+        svg += renderEntitySVG(ghost, this, false, true);
+      }
+    }
+
     // Trim hover preview — the piece a click would remove, drawn in red with
     // dot markers at the cut points.
     if (this.tool === 'trim' && this.trimPreview && this.trimPreview.length >= 2) {
@@ -4082,6 +4152,72 @@ function refreshDimension(d) {
   if (r2) d.p2 = r2;
 }
 
+// Geometry of a rendered (non-leader) dimension: dimension-line endpoints,
+// extension-line segments, and the measured value — honoring `orient`:
+//   'aligned' (default) — true point-to-point distance, dim line parallel
+//   'h' / 'v'           — horizontal / vertical distance between the points
+// World coords throughout. Returns null when degenerate.
+function dimGeometry(d) {
+  const p1 = d.p1, p2 = d.p2;
+  const orient = d.orient || 'aligned';
+  const off = d.off ?? 8;
+  const sgn = (v) => (v >= 0 ? 1 : -1);
+  if (orient === 'h') {
+    const len = Math.abs(p2.x - p1.x);
+    if (len < 1e-3) return null;
+    const lineY = (p1.y + p2.y) / 2 + off;
+    const ext = (p) => {
+      const s = sgn(lineY - p.y);
+      return [{ x: p.x, y: p.y + s * 1 }, { x: p.x, y: lineY + s * 2 }];
+    };
+    const [e1a, e1b] = ext(p1), [e2a, e2b] = ext(p2);
+    return { orient, len, a: { x: p1.x, y: lineY }, b: { x: p2.x, y: lineY }, e1a, e1b, e2a, e2b };
+  }
+  if (orient === 'v') {
+    const len = Math.abs(p2.y - p1.y);
+    if (len < 1e-3) return null;
+    const lineX = (p1.x + p2.x) / 2 + off;
+    const ext = (p) => {
+      const s = sgn(lineX - p.x);
+      return [{ x: p.x + s * 1, y: p.y }, { x: lineX + s * 2, y: p.y }];
+    };
+    const [e1a, e1b] = ext(p1), [e2a, e2b] = ext(p2);
+    return { orient, len, a: { x: lineX, y: p1.y }, b: { x: lineX, y: p2.y }, e1a, e1b, e2a, e2b };
+  }
+  const dx = p2.x - p1.x, dy = p2.y - p1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-3) return null;
+  const ux = dx / len, uy = dy / len;
+  const nx = -uy, ny = ux;
+  const s = sgn(off);
+  return {
+    orient: 'aligned', len,
+    a: { x: p1.x + nx * off, y: p1.y + ny * off },
+    b: { x: p2.x + nx * off, y: p2.y + ny * off },
+    e1a: { x: p1.x + nx * s, y: p1.y + ny * s },
+    e1b: { x: p1.x + nx * (off + s * 2), y: p1.y + ny * (off + s * 2) },
+    e2a: { x: p2.x + nx * s, y: p2.y + ny * s },
+    e2b: { x: p2.x + nx * (off + s * 2), y: p2.y + ny * (off + s * 2) },
+  };
+}
+
+// Hit-test a dimension (for the eraser): near its dimension line, either
+// extension line, or (leaders) the leader line itself.
+function dimensionHit(d, wx, wy, tol) {
+  if (d.leader) return _ptSegDist(wx, wy, d.p1, d.p2) < tol;
+  const g = dimGeometry(d);
+  if (!g) return false;
+  return [[g.a, g.b], [g.e1a, g.e1b], [g.e2a, g.e2b]]
+    .some(([p, q]) => _ptSegDist(wx, wy, p, q) < tol);
+}
+function _ptSegDist(x, y, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const L2 = dx * dx + dy * dy;
+  if (L2 === 0) return Math.hypot(x - a.x, y - a.y);
+  const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / L2));
+  return Math.hypot(x - (a.x + t * dx), y - (a.y + t * dy));
+}
+
 // Make the geometry satisfy a typed dimension value (target in mm).
 // Returns a status string on success, null when nothing can move.
 function driveDimension(d, target) {
@@ -4108,28 +4244,38 @@ function driveDimension(d, target) {
     ent.r = target;
     return `Set radius to ${fmtUL(target)}`;
   }
-  const cur = Math.hypot(d.p2.x - d.p1.x, d.p2.y - d.p1.y);
+  // Current measured value + drive direction, honoring orient: an 'h'/'v'
+  // dimension measures (and drives) one axis only.
+  const orient = d.orient || 'aligned';
+  const ddx = d.p2.x - d.p1.x, ddy = d.p2.y - d.p1.y;
+  let cur, ux, uy;
+  if (orient === 'h') { cur = Math.abs(ddx); ux = ddx >= 0 ? 1 : -1; uy = 0; }
+  else if (orient === 'v') { cur = Math.abs(ddy); ux = 0; uy = ddy >= 0 ? 1 : -1; }
+  else { cur = Math.hypot(ddx, ddy); ux = ddx / (cur || 1); uy = ddy / (cur || 1); }
   if (cur < 1e-6) return null;
   const e1 = entOf(a1), e2 = entOf(a2);
   if (e1 && e2 && e1 === e2) {
     // Both ends on the SAME shape → stretch it about p1 until the measured
-    // distance hits target. Axis-aligned dims stretch one axis only; slanted
-    // dims scale uniformly.
+    // distance hits target. h/v (and axis-aligned) dims stretch one axis
+    // only; slanted aligned dims scale uniformly.
     if (e1.type === 'circle') return null; // only the center is anchorable
     const f = target / cur;
-    const adx = Math.abs(d.p2.x - d.p1.x), ady = Math.abs(d.p2.y - d.p1.y);
-    const alongX = adx > 1e-6 && ady <= 1e-6;
-    const alongY = ady > 1e-6 && adx <= 1e-6;
-    const fx = alongY ? 1 : f;
-    const fy = alongX ? 1 : f;
+    let fx, fy;
+    if (orient === 'h') { fx = f; fy = 1; }
+    else if (orient === 'v') { fx = 1; fy = f; }
+    else {
+      const alongX = Math.abs(ddx) > 1e-6 && Math.abs(ddy) <= 1e-6;
+      const alongY = Math.abs(ddy) > 1e-6 && Math.abs(ddx) <= 1e-6;
+      fx = alongY ? 1 : f;
+      fy = alongX ? 1 : f;
+    }
     scaleEntityAround(e1, { x: d.p1.x, y: d.p1.y }, fx, fy);
     return `Resized shape to ${fmtUL(target)}`;
   }
   // Ends on different shapes (or one loose end) → rigidly move one shape
-  // along the dimension direction so the spacing hits target.
+  // along the dimension's measured direction so the spacing hits target.
   const mover = e2 || e1;
   if (!mover) return null;
-  const ux = (d.p2.x - d.p1.x) / cur, uy = (d.p2.y - d.p1.y) / cur;
   const delta = (target - cur) * (mover === e2 ? 1 : -1);
   const start = JSON.parse(JSON.stringify(mover));
   moveEntity(mover, start, ux * delta, uy * delta);
@@ -4248,7 +4394,7 @@ function openInlineDimEdit(entId, dim, pillElement) {
       ? doc.sketch.entities.find(e => e.id === ent.a1.entId)
       : null;
     current = toUnit(rEnt ? rEnt.r
-      : Math.hypot(ent.p2.x - ent.p1.x, ent.p2.y - ent.p1.y));
+      : (dimGeometry(ent)?.len ?? Math.hypot(ent.p2.x - ent.p1.x, ent.p2.y - ent.p1.y)));
   } else if (dim === 'len' && ent.type === 'polyline' && ent.points.length === 2) {
     const p1 = ent.points[0], p2 = ent.points[1];
     current = toUnit(Math.hypot(p2.x - p1.x, p2.y - p1.y));
@@ -4676,38 +4822,31 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
       s += `<text${valAttrs} x="${tx + offX}" y="${ty + offY + 4}" text-anchor="${anchor}" font-size="13" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? ''}</text>`;
       return s;
     }
-    // Engineering dimension: extension lines at each picked point, a parallel
-    // dimension line offset perpendicular by ent.off mm, and the measurement
-    // text on the dimension line.
-    const dx = ent.p2.x - ent.p1.x, dy = ent.p2.y - ent.p1.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-3) return '';
-    const ux = dx / len, uy = dy / len;          // unit along p1→p2
-    const nx = -uy, ny = ux;                      // perpendicular
-    const off = ent.off ?? 8;
-    // Dimension line endpoints (offset perpendicular)
-    const a = { x: ent.p1.x + nx * off, y: ent.p1.y + ny * off };
-    const b = { x: ent.p2.x + nx * off, y: ent.p2.y + ny * off };
-    const [ax, ay] = eng.worldToScreen(a.x, a.y);
-    const [bx, by] = eng.worldToScreen(b.x, b.y);
-    // Extension lines from picked points OUT to slightly past the dim line
-    const ext = off + 2;
-    const e1a = { x: ent.p1.x + nx * 1, y: ent.p1.y + ny * 1 };
-    const e1b = { x: ent.p1.x + nx * ext, y: ent.p1.y + ny * ext };
-    const e2a = { x: ent.p2.x + nx * 1, y: ent.p2.y + ny * 1 };
-    const e2b = { x: ent.p2.x + nx * ext, y: ent.p2.y + ny * ext };
-    const [e1ax, e1ay] = eng.worldToScreen(e1a.x, e1a.y);
-    const [e1bx, e1by] = eng.worldToScreen(e1b.x, e1b.y);
-    const [e2ax, e2ay] = eng.worldToScreen(e2a.x, e2a.y);
-    const [e2bx, e2by] = eng.worldToScreen(e2b.x, e2b.y);
+    // Engineering dimension: extension lines at each picked point, a
+    // dimension line offset by ent.off, and the measurement written PARALLEL
+    // to the dimension line. orient 'h'/'v' measures the horizontal/vertical
+    // distance between the points; 'aligned' (default) the true distance.
+    const g = dimGeometry(ent);
+    if (!g) return '';
     const stroke = selected ? '#2c64ff' : '#5d6376';
     const sw = selected ? 1.6 : 1.1;
+    const seg = (p, q) => {
+      const [x1, y1] = eng.worldToScreen(p.x, p.y);
+      const [x2, y2] = eng.worldToScreen(q.x, q.y);
+      return `<line stroke="${stroke}" stroke-width="${sw}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+    };
+    const [ax, ay] = eng.worldToScreen(g.a.x, g.a.y);
+    const [bx, by] = eng.worldToScreen(g.b.x, g.b.y);
     let s = '';
-    s += `<line stroke="${stroke}" stroke-width="${sw}" x1="${e1ax}" y1="${e1ay}" x2="${e1bx}" y2="${e1by}"/>`;
-    s += `<line stroke="${stroke}" stroke-width="${sw}" x1="${e2ax}" y1="${e2ay}" x2="${e2bx}" y2="${e2by}"/>`;
+    s += seg(g.e1a, g.e1b);
+    s += seg(g.e2a, g.e2b);
     s += `<line stroke="${stroke}" stroke-width="${sw}" x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>`;
+    // Label parallel to the dimension line, flipped so it's never upside-down
+    let angle = Math.atan2(by - ay, bx - ax) * 180 / Math.PI;
+    if (angle > 90) angle -= 180;
+    else if (angle <= -90) angle += 180;
     const mx = (ax + bx) / 2, my = (ay + by) / 2;
-    s += `<text${valAttrs} x="${mx}" y="${my - 4}" text-anchor="middle" font-size="13" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? fmtUL(len)}</text>`;
+    s += `<text${valAttrs} x="${mx}" y="${my - 4}" transform="rotate(${angle.toFixed(1)} ${mx} ${my})" text-anchor="middle" font-size="12" font-weight="600" fill="${stroke}" stroke="white" stroke-width="3" paint-order="stroke">${ent.label ?? fmtUL(g.len)}</text>`;
     return s;
   }
   return '';
@@ -15474,10 +15613,13 @@ function autoAddDimensions() {
   const shapes = doc.sketch.entities.filter(e => e.type !== 'dimension' && !e.construction);
   if (!shapes.length) { setStatus('No shapes to dimension'); return; }
 
-  const gap = 10, step = 10;
+  // Dims HUG the shape they measure — placed a small gap outside the feature
+  // itself — instead of being projected out to the sketch's outer edges
+  // (which put them far from, or straight through, the geometry).
+  const gap = 5;
   const newDims = [];
 
-  // Overall bounding box
+  // Overall bounding box (for the total-size dims at the end)
   let bMinX = Infinity, bMaxX = -Infinity, bMinY = Infinity, bMaxY = -Infinity;
   function expandBbox(x, y) {
     if (x < bMinX) bMinX = x; if (x > bMaxX) bMaxX = x;
@@ -15493,25 +15635,15 @@ function autoAddDimensions() {
     }
   }
 
-  // Deduplicated span collectors (all H dims project to bMinY, all V dims to bMaxX)
-  // off = -(gap + level * step):
-  //   H perpendicular is (0,1), so dim line y = bMinY + off  → negative off = below sketch
-  //   V perpendicular is (-1,0), so dim line x = bMaxX - off → negative off = right of sketch
-  const hSpans = new Map(); // key -> [x1, x2, srcEnt|null]
-  const vSpans = new Map(); // key -> [y1, y2, srcEnt|null]
-  const hk = (x1, x2) => `${Math.round(x1 * 100)},${Math.round(x2 * 100)}`;
-  const vk = (y1, y2) => `${Math.round(y1 * 100)},${Math.round(y2 * 100)}`;
-  // srcEnt (rects only) lets the dim anchor to the entity so it follows and
-  // drives the rect's width/height.
-  const addH = (x1, x2, srcEnt) => { const k = hk(x1, x2); if (!hSpans.has(k)) hSpans.set(k, [x1, x2, srcEnt || null]); };
-  const addV = (y1, y2, srcEnt) => { const k = vk(y1, y2); if (!vSpans.has(k)) vSpans.set(k, [y1, y2, srcEnt || null]); };
-
-  const singleCircle = shapes.length === 1 && shapes[0].type === 'circle';
-
   for (const ent of shapes) {
     if (ent.type === 'rect') {
-      addH(ent.x, ent.x + ent.w, ent);
-      addV(ent.y, ent.y + ent.h, ent);
+      // Width just below the bottom edge, height just left of the left edge.
+      newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+        p1: { x: ent.x, y: ent.y }, p2: { x: ent.x + ent.w, y: ent.y },
+        off: -gap, a1: { entId: ent.id, kind: 'span-x' } });
+      newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+        p1: { x: ent.x, y: ent.y }, p2: { x: ent.x, y: ent.y + ent.h },
+        off: gap, a1: { entId: ent.id, kind: 'span-y' } });
     } else if (ent.type === 'circle') {
       // Radius leader — short slanted arrow from outside the circle pointing
       // to the edge, with "R XX" label on the outside end. Picks the upper-
@@ -15529,68 +15661,54 @@ function autoAddDimensions() {
         a1: { entId: ent.id, kind: 'radius' },
       });
     } else if (ent.type === 'polyline' && ent.points.length >= 2) {
+      // Dimension each straight horizontal/vertical edge alongside itself,
+      // offset AWAY from the shape's middle. Equal spans (e.g. a box's top
+      // and bottom edges) are dimmed once per shape. Anchoring both ends to
+      // the segment's vertices makes the dim follow AND drive that edge.
+      const bb = entityBBox(ent);
+      const ccx = bb ? (bb.minX + bb.maxX) / 2 : 0;
+      const ccy = bb ? (bb.minY + bb.maxY) / 2 : 0;
+      const seen = new Set();
       const pts = ent.points, n = pts.length;
       const limit = ent.closed ? n : n - 1;
       for (let i = 0; i < limit; i++) {
         const a = pts[i], b = pts[(i + 1) % n];
+        if (a.cpOut || b.cpIn) continue; // curved edge — no straight span
         const segLen = Math.hypot(b.x - a.x, b.y - a.y);
-        if (segLen < 1) continue;
-        if (Math.abs(b.y - a.y) / segLen < 0.1)       addH(Math.min(a.x, b.x), Math.max(a.x, b.x));
-        else if (Math.abs(b.x - a.x) / segLen < 0.1)  addV(Math.min(a.y, b.y), Math.max(a.y, b.y));
+        if (segLen < 3) continue;
+        const horizontal = Math.abs(b.y - a.y) / segLen < 0.1;
+        const vertical   = Math.abs(b.x - a.x) / segLen < 0.1;
+        if (!horizontal && !vertical) continue;
+        const key = horizontal
+          ? `h:${Math.round(Math.min(a.x, b.x) * 10)},${Math.round(Math.max(a.x, b.x) * 10)}`
+          : `v:${Math.round(Math.min(a.y, b.y) * 10)},${Math.round(Math.max(a.y, b.y) * 10)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const nxs = -(b.y - a.y) / segLen, nys = (b.x - a.x) / segLen;
+        const midx = (a.x + b.x) / 2, midy = (a.y + b.y) / 2;
+        const side = ((midx - ccx) * nxs + (midy - ccy) * nys) >= 0 ? 1 : -1;
+        newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+          p1: { x: a.x, y: a.y }, p2: { x: b.x, y: b.y },
+          off: side * gap,
+          a1: { entId: ent.id, kind: 'pt', idx: i },
+          a2: { entId: ent.id, kind: 'pt', idx: (i + 1) % n } });
       }
     }
   }
 
-  // Stack overlapping spans at successive levels so their dim lines don't
-  // visually collide. Two spans overlap if their ranges intersect (with a
-  // small label-width padding).
-  function assignLevels(spans) {
-    const arr = Array.from(spans.values()).map(([a, b, srcEnt]) => ({ a, b, srcEnt, level: 0 }));
-    arr.sort((x, y) => (x.a - y.a) || (x.b - y.b));
-    const levels = []; // levels[i] = array of placed spans at level i
-    const PAD = 6; // mm of label space — keeps adjacent labels from kissing
-    for (const sp of arr) {
-      let placed = false;
-      for (let lvl = 0; lvl < levels.length; lvl++) {
-        const overlaps = levels[lvl].some(ex => !(sp.b < ex.a - PAD || sp.a > ex.b + PAD));
-        if (!overlaps) { levels[lvl].push(sp); sp.level = lvl; placed = true; break; }
-      }
-      if (!placed) { levels.push([sp]); sp.level = levels.length - 1; }
-    }
-    return arr;
-  }
-  const hArr = assignLevels(hSpans);
-  const vArr = assignLevels(vSpans);
-
-  for (const sp of hArr) {
-    newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
-      p1: { x: sp.a, y: bMinY }, p2: { x: sp.b, y: bMinY },
-      off: -(gap + sp.level * step),
-      a1: sp.srcEnt ? { entId: sp.srcEnt.id, kind: 'span-x' } : null });
-  }
-  for (const sp of vArr) {
-    newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
-      p1: { x: bMaxX, y: sp.a }, p2: { x: bMaxX, y: sp.b },
-      off: -(gap + sp.level * step),
-      a1: sp.srcEnt ? { entId: sp.srcEnt.id, kind: 'span-y' } : null });
-  }
-
-  // Overall bbox dims — placed beyond the highest per-entity level
-  if (!singleCircle) {
+  // Overall size dims — only when several shapes combine into something
+  // bigger, placed just outside the sketch's total bounds.
+  if (shapes.length > 1) {
     const bW = bMaxX - bMinX, bH = bMaxY - bMinY;
-    const maxHLvl = hArr.length ? Math.max(...hArr.map(s => s.level)) : -1;
-    const maxVLvl = vArr.length ? Math.max(...vArr.map(s => s.level)) : -1;
-    const overallHCovered = hSpans.has(hk(bMinX, bMaxX));
-    const overallVCovered = vSpans.has(vk(bMinY, bMaxY));
-    if (bW > 1 && !overallHCovered) {
+    if (bW > 1) {
       newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
         p1: { x: bMinX, y: bMinY }, p2: { x: bMaxX, y: bMinY },
-        off: -(gap + (maxHLvl + 1) * step) });
+        off: -(gap * 2.5) });
     }
-    if (bH > 1 && !overallVCovered) {
+    if (bH > 1) {
       newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
         p1: { x: bMaxX, y: bMinY }, p2: { x: bMaxX, y: bMaxY },
-        off: -(gap + (maxVLvl + 1) * step) });
+        off: -(gap * 2.5) });
     }
   }
 
