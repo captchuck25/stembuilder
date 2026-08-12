@@ -1186,7 +1186,7 @@
           </div>
         </div>
         <button class="tool" data-action="add-fastener" title="Add a threaded fastener (hex bolt, Phillips screw, socket cap, flat head)"><svg class="ico"><use href="#i-fastener"/></svg><span class="tool-label">Fastener</span></button>
-        <button class="tool" data-action="threaded-holes" title="Threaded holes — turn every Thread mark from the active sketch into a real threaded hole + visualizer bolt at the chosen size and depth"><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thd Holes</span></button>
+        <button class="tool" data-action="threaded-holes" title="Bolt holes — turn every Thread mark from the active sketch into a threaded hole (printable threads) or a clearance hole for real hardware, + visualizer bolt"><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Bolt Holes</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)"><svg class="ico"><use href="#i-copy"/></svg><span class="tool-label">Copy</span></button>
         <button class="tool" data-action="paste" title="Paste (Ctrl+V)"><svg class="ico"><use href="#i-paste"/></svg><span class="tool-label">Paste</span></button>
@@ -10655,7 +10655,10 @@ function buildFastenerCSGMesh(body) {
   // printing. Cut 2mm past the tip so it always opens out through the far
   // face when the bolt spans the material.
   if (body.nutPocket) {
-    const nutH = spec.d * 0.8 + 0.4; // real nut height + drop-in slack
+    // Real nut height + generous slack: the pocket may start up to ~1mm
+    // outside the material (cut overshoot / drop-through placement), and a
+    // slightly recessed captive nut is better than one standing proud.
+    const nutH = spec.d * 0.8 + 1.2;
     const rNut = spec.af / Math.sqrt(3) + Math.max(clearance, 0.25);
     const H = nutH + 2;
     const nutGeo = new THREE.CylinderGeometry(rNut, rNut, H, 6);
@@ -11589,11 +11592,23 @@ function openThreadedHolesDialog() {
   const doneNote = doneMarks.length
     ? `<p style="color:var(--ink-soft);font-size:12px;margin-top:0">Skipping ${doneMarks.length} already-threaded mark${doneMarks.length === 1 ? '' : 's'} (click an existing mark in 3D to adjust it individually).</p>`
     : '';
+  const curType = seed.holeType || 'threaded';
   openModal({
-    title: `Threaded holes (${titleCount} new mark${titleCount === 1 ? '' : 's'})`,
-    body: `<p>For each fresh mark in <b>${sketch.name || 'this sketch'}</b>, cut a threaded hole and place a matching visualizer bolt. All ${titleCount} get the same settings — adjust individual marks later by clicking each one in 3D.</p>
+    title: `Bolt holes (${titleCount} new mark${titleCount === 1 ? '' : 's'})`,
+    body: `<p>For each fresh mark in <b>${sketch.name || 'this sketch'}</b>, cut a hole and place a matching visualizer bolt. All ${titleCount} get the same settings — adjust individual marks later by clicking each one in 3D.</p>
            ${doneNote}
            <div class="field" style="margin-top:8px">
+             <label>Hole type</label>
+             <select id="th-type">
+               <option value="threaded"${curType === 'threaded' ? ' selected' : ''}>Threaded — printable plastic threads</option>
+               <option value="clearance"${curType === 'clearance' ? ' selected' : ''}>Clearance — smooth hole for a REAL bolt</option>
+             </select>
+           </div>
+           <div class="field" id="th-nutpocket-row" style="display:none;align-items:center;gap:8px">
+             <input type="checkbox" id="th-nutpocket" style="width:auto;margin:0"${seed.nutPocket ? ' checked' : ''}/>
+             <label for="th-nutpocket" style="margin:0;cursor:pointer">Hex nut pocket at the far end of each hole</label>
+           </div>
+           <div class="field">
              <label>Thread size</label>
              <select id="th-size">${sizeOpts}</select>
            </div>
@@ -11623,16 +11638,28 @@ function openThreadedHolesDialog() {
       const fit = $('th-fit').value || 'loose';
       const placeBolt = $('th-bolt').checked;
       const boltHead = $('th-head').value || 'hex';
+      const holeType = $('th-type')?.value || 'threaded';
+      const nutPocket = holeType === 'clearance' && !!$('th-nutpocket')?.checked;
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead });
+      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead, holeType, nutPocket });
     },
   });
   setTimeout(() => {
     const cb = $('th-bolt'); const headRow = $('th-head-row');
-    if (!cb || !headRow) return;
-    const sync = () => { headRow.style.opacity = cb.checked ? '1' : '0.4'; $('th-head').disabled = !cb.checked; };
-    cb.addEventListener('change', sync);
-    sync();
+    if (cb && headRow) {
+      const sync = () => { headRow.style.opacity = cb.checked ? '1' : '0.4'; $('th-head').disabled = !cb.checked; };
+      cb.addEventListener('change', sync);
+      sync();
+    }
+    const typeSel = $('th-type');
+    if (typeSel) {
+      const syncType = () => {
+        const row = $('th-nutpocket-row');
+        if (row) row.style.display = typeSel.value === 'clearance' ? 'flex' : 'none';
+      };
+      typeSel.addEventListener('change', syncType);
+      syncType();
+    }
   }, 0);
 }
 
@@ -11678,6 +11705,7 @@ function processThreadMarks(sketch, marks, opts) {
     // crosses — air above the entry, clearance below a blind bottom.
     const CUT_OVERSHOOT = 1; // mm
     const cutBottom = shaftBottom.clone().add(holeAxis.clone().multiplyScalar(CUT_OVERSHOOT));
+    const isClearance = opts.holeType === 'clearance';
     const hole = {
       id: doc.nextBodyId++,
       type: 'fastener',
@@ -11685,6 +11713,10 @@ function processThreadMarks(sketch, marks, opts) {
       size: opts.size,
       length: opts.depth + 2 * CUT_OVERSHOOT,
       fit: opts.fit,
+      // Clearance = smooth hole for REAL hardware (no thread shells), with
+      // an optional hex nut pocket at the deep/exit end.
+      style: isClearance ? 'clearance' : 'threaded',
+      nutPocket: !!(isClearance && opts.nutPocket),
       x: cutBottom.x, y: cutBottom.y, z: cutBottom.z,
       rotation: { ...rotDeg },
       op: 'subtract',
@@ -11730,7 +11762,9 @@ function processThreadMarks(sketch, marks, opts) {
     const parentAfterCut = sketch.sourceBodyId
       ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
       : null;
-    if (parentAfterCut && parentAfterCut.geometry) {
+    if (isClearance) {
+      // Clearance holes have no threads — no shell metadata, no shell body.
+    } else if (parentAfterCut && parentAfterCut.geometry) {
       // Store the shell spec in the PARENT's LOCAL frame (the same frame as its
       // baked geometry), not world coords. The overlay + STL export then place
       // the thread via the parent's CURRENT world matrix, so threads follow the
@@ -11803,6 +11837,8 @@ function processThreadMarks(sketch, marks, opts) {
         size: opts.size,
         length: shaftLen,
         fit: 'tight',
+        // Clearance holes get a smooth "real bolt" ghost, not fake threads.
+        style: isClearance ? 'clearance' : 'threaded',
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
         op: 'add',
@@ -11823,6 +11859,8 @@ function processThreadMarks(sketch, marks, opts) {
       fit: opts.fit,
       placeBolt: !!opts.placeBolt,
       boltHead: opts.boltHead || 'hex',
+      holeType: opts.holeType || 'threaded',
+      nutPocket: !!opts.nutPocket,
     };
   }
   // After the loop, the active group (if any) IS the new parent. Select
@@ -11837,10 +11875,13 @@ function processThreadMarks(sketch, marks, opts) {
   viewer.rebuildBodies();
   renderTree(); renderProps();
   let summary;
+  const holeWord = opts.holeType === 'clearance'
+    ? `clearance hole${marks.length === 1 ? '' : 's'}${opts.nutPocket ? ' + nut pockets' : ''}`
+    : `threaded hole${marks.length === 1 ? '' : 's'}`;
   if (!hasParent) {
-    summary = `Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''} — drop them as Negative inside a body and group to cut`;
+    summary = `Built ${marks.length} ${holeWord}${opts.placeBolt ? ' + visualizer bolts' : ''} — drop them as Negative inside a body and group to cut`;
   } else if (groupedFail === 0) {
-    summary = `Built ${marks.length} threaded hole${marks.length === 1 ? '' : 's'}${opts.placeBolt ? ' + visualizer bolts' : ''} (auto-grouped)`;
+    summary = `Built ${marks.length} ${holeWord}${opts.placeBolt ? ' + visualizer bolts' : ''} (auto-grouped)`;
   } else {
     summary = `Built ${marks.length} marks — ${groupedOk} auto-grouped, ${groupedFail} couldn't (CSG failed; orphan negatives left in tree, see console). Try smaller depth/fit or simpler body.`;
     console.warn(`Thread-mark batch: ${groupedFail} of ${marks.length} cuts did not auto-group. The body's existing CSG output is likely too noisy for another subtract — undo, simplify (fewer prior bevels / cuts), and retry.`);
