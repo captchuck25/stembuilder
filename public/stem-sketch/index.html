@@ -15776,6 +15776,23 @@ function autoAddDimensions() {
         label: `R ${fmtUL(ent.r)}`,
         a1: { entId: ent.id, kind: 'radius' },
       });
+      // Hole LOCATION dims — distance from the part's left and bottom edges
+      // to the circle's center, the dims that actually place a hole. The
+      // center end is anchored, so typing a value MOVES the hole.
+      if (shapes.length > 1) {
+        if (ent.cx - bMinX > 1) {
+          newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+            p1: { x: bMinX, y: ent.cy }, p2: { x: ent.cx, y: ent.cy },
+            off: gap,
+            a2: { entId: ent.id, kind: 'center' } });
+        }
+        if (ent.cy - bMinY > 1) {
+          newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+            p1: { x: ent.cx, y: bMinY }, p2: { x: ent.cx, y: ent.cy },
+            off: -gap,
+            a2: { entId: ent.id, kind: 'center' } });
+        }
+      }
     } else if (ent.type === 'polyline' && ent.points.length >= 2) {
       // Dimension each straight horizontal/vertical edge alongside itself,
       // offset AWAY from the shape's middle. Equal spans (e.g. a box's top
@@ -15809,19 +15826,121 @@ function autoAddDimensions() {
           a1: { entId: ent.id, kind: 'pt', idx: i },
           a2: { entId: ent.id, kind: 'pt', idx: (i + 1) % n } });
       }
+
+      // Curved runs (Bezier arcs — rounded tops, fillets, trimmed circles):
+      // (1) a span dim across each run's chord when it's axis-aligned
+      //     ("how wide is the arch"), anchored to the run's end vertices;
+      // (2) an "R x" leader when the run is genuinely circular.
+      const segCurved = [];
+      for (let i = 0; i < limit; i++) {
+        segCurved.push(!!(pts[i].cpOut || pts[(i + 1) % n].cpIn));
+      }
+      const runs = [];
+      if (segCurved.some(Boolean)) {
+        if (ent.closed && segCurved.every(Boolean)) {
+          runs.push({ start: 0, count: limit }); // fully curved loop (ellipse)
+        } else {
+          // On closed loops start scanning at a straight segment so a run
+          // wrapping past the end isn't split in two.
+          const scanStart = ent.closed ? Math.max(0, segCurved.indexOf(false)) : 0;
+          let cur = null;
+          for (let o = 0; o < limit; o++) {
+            const idx = (scanStart + o) % limit;
+            if (segCurved[idx]) {
+              if (!cur) { cur = { start: idx, count: 0 }; runs.push(cur); }
+              cur.count++;
+            } else cur = null;
+          }
+        }
+      }
+      const sampleSeg = (i) => {
+        const p0 = pts[i], p3 = pts[(i + 1) % n];
+        const c1 = p0.cpOut ? { x: p0.x + p0.cpOut.dx, y: p0.y + p0.cpOut.dy } : p0;
+        const c2 = p3.cpIn ? { x: p3.x + p3.cpIn.dx, y: p3.y + p3.cpIn.dy } : p3;
+        return cubicBezierPoints(p0, c1, c2, p3, 8);
+      };
+      for (const run of runs) {
+        const vStartIdx = run.start;
+        const vEndIdx = (run.start + run.count) % n;
+        const A = pts[vStartIdx], B = pts[vEndIdx];
+        const samples = [];
+        for (let s = 0; s < run.count; s++) samples.push(...sampleSeg((run.start + s) % limit));
+        const fullLoop = ent.closed && run.count === limit;
+        // (1) chord span — axis-aligned only, offset PAST the arc's bulge
+        if (!fullLoop) {
+          const chordDx = B.x - A.x, chordDy = B.y - A.y;
+          const chordLen = Math.hypot(chordDx, chordDy) || 1;
+          const horizontal = Math.abs(chordDy) < 0.5 && Math.abs(chordDx) >= 3;
+          const vertical   = Math.abs(chordDx) < 0.5 && Math.abs(chordDy) >= 3;
+          if (horizontal || vertical) {
+            let nx2 = -chordDy / chordLen, ny2 = chordDx / chordLen;
+            const midx = (A.x + B.x) / 2, midy = (A.y + B.y) / 2;
+            if ((midx - ccx) * nx2 + (midy - ccy) * ny2 < 0) { nx2 = -nx2; ny2 = -ny2; }
+            let reach = 0;
+            for (const p of samples) {
+              reach = Math.max(reach, (p.x - A.x) * nx2 + (p.y - A.y) * ny2);
+            }
+            const sgn2 = (nx2 * (-chordDy / chordLen) + ny2 * (chordDx / chordLen)) >= 0 ? 1 : -1;
+            newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+              p1: { x: A.x, y: A.y }, p2: { x: B.x, y: B.y },
+              off: sgn2 * (reach + gap),
+              a1: { entId: ent.id, kind: 'pt', idx: vStartIdx },
+              a2: { entId: ent.id, kind: 'pt', idx: vEndIdx } });
+          }
+        }
+        // (2) radius leader when the run is a true circular arc
+        if (samples.length >= 6) {
+          const q1 = samples[0];
+          const q2 = samples[Math.floor(samples.length / (fullLoop ? 3 : 2))];
+          const q3 = fullLoop ? samples[Math.floor(2 * samples.length / 3)] : samples[samples.length - 1];
+          const dq = 2 * (q1.x * (q2.y - q3.y) + q2.x * (q3.y - q1.y) + q3.x * (q1.y - q2.y));
+          if (Math.abs(dq) > 1e-9) {
+            const s1 = q1.x * q1.x + q1.y * q1.y;
+            const s2 = q2.x * q2.x + q2.y * q2.y;
+            const s3 = q3.x * q3.x + q3.y * q3.y;
+            const cxr = (s1 * (q2.y - q3.y) + s2 * (q3.y - q1.y) + s3 * (q1.y - q2.y)) / dq;
+            const cyr = (s1 * (q3.x - q2.x) + s2 * (q1.x - q3.x) + s3 * (q2.x - q1.x)) / dq;
+            const rr = Math.hypot(q1.x - cxr, q1.y - cyr);
+            const circular = rr > 1 && samples.every(p =>
+              Math.abs(Math.hypot(p.x - cxr, p.y - cyr) - rr) < Math.max(0.15, rr * 0.03));
+            if (circular) {
+              const mid = samples[Math.floor(samples.length / 2)];
+              let dx3 = mid.x - cxr, dy3 = mid.y - cyr;
+              const dl = Math.hypot(dx3, dy3) || 1;
+              dx3 /= dl; dy3 /= dl;
+              const leadLen = Math.max(8, rr * 0.4);
+              newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true, leader: true,
+                p1: { x: cxr + dx3 * rr, y: cyr + dy3 * rr },
+                p2: { x: cxr + dx3 * (rr + leadLen), y: cyr + dy3 * (rr + leadLen) },
+                label: `R ${fmtUL(rr)}` });
+            }
+          }
+        }
+      }
     }
   }
 
   // Overall size dims — only when several shapes combine into something
-  // bigger, placed just outside the sketch's total bounds.
+  // bigger, placed just outside the sketch's total bounds. Skipped when an
+  // already-emitted span covers the full extent (a base plate as wide as
+  // the part shouldn't produce the same number twice).
   if (shapes.length > 1) {
     const bW = bMaxX - bMinX, bH = bMaxY - bMinY;
-    if (bW > 1) {
+    const TOL = 0.5;
+    const coveredW = newDims.some(d => !d.leader
+      && Math.abs(d.p1.y - d.p2.y) < TOL
+      && Math.abs(Math.min(d.p1.x, d.p2.x) - bMinX) < TOL
+      && Math.abs(Math.max(d.p1.x, d.p2.x) - bMaxX) < TOL);
+    const coveredH = newDims.some(d => !d.leader
+      && Math.abs(d.p1.x - d.p2.x) < TOL
+      && Math.abs(Math.min(d.p1.y, d.p2.y) - bMinY) < TOL
+      && Math.abs(Math.max(d.p1.y, d.p2.y) - bMaxY) < TOL);
+    if (bW > 1 && !coveredW) {
       newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
         p1: { x: bMinX, y: bMinY }, p2: { x: bMaxX, y: bMinY },
         off: -(gap * 2.5) });
     }
-    if (bH > 1) {
+    if (bH > 1 && !coveredH) {
       newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
         p1: { x: bMaxX, y: bMinY }, p2: { x: bMaxX, y: bMaxY },
         off: -(gap * 2.5) });
