@@ -5686,11 +5686,12 @@ function projectBodiesOntoPlane(plane) {
       projectBodyEdgesViaCanvas(body, plane, planeMInv, segments);
       usedEdges = true;
       // Pixel extraction produced nothing (lost GL context, readback failure)
-      // → fall back to CPU EdgesGeometry on the CSG mesh. Noisier lines than
-      // the image-space result, but infinitely better than a blank view.
+      // → fall back to CPU EdgesGeometry on the CSG mesh. Weld first: legacy
+      // csg.js-baked geometry is unindexed near-coincident soup where
+      // EdgesGeometry can't pair triangles and finds no edges at all.
       if (segments.length === before) {
         try {
-          const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
+          const edges = new THREE.EdgesGeometry(weldGeometryForEdges(body.mesh.geometry, 0.005), 25);
           const pos = edges.attributes?.position;
           if (pos && pos.count >= 2) {
             const mw = body.mesh.matrixWorld;
