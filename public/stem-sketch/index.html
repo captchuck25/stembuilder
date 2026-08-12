@@ -6367,6 +6367,17 @@ class Viewer3D {
                 snapAxis = (best.dot >= 0 ? best.cyl.axis.clone() : best.cyl.axis.clone().negate()).normalize();
                 snappedToHole = true;
               }
+              // Grid snap on the face (same rule as 2D drawing): snap the
+              // world axes that lie IN the face plane, leave the normal
+              // direction alone so the bolt stays flush. Skipped when the
+              // click snapped to an existing hole — that's more precise.
+              if (!snappedToHole && doc.grid?.snap) {
+                const sp = doc.grid.spacing || 1;
+                const snapC = (v) => Math.round(v / sp) * sp;
+                if (Math.abs(snapAxis.x) < 0.9) seatPoint.x = snapC(seatPoint.x);
+                if (Math.abs(snapAxis.y) < 0.9) seatPoint.y = snapC(seatPoint.y);
+                if (Math.abs(snapAxis.z) < 0.9) seatPoint.z = snapC(seatPoint.z);
+              }
               // Fastener is modeled with shaft bottom at y=0, head sitting on
               // top; head BOTTOM face is at y = shaft length. We want that
               // point flush against seatPoint with the head sticking out
@@ -6384,7 +6395,9 @@ class Viewer3D {
               fb.x = origin.x; fb.y = origin.y; fb.z = origin.z;
               this.rebuildBodies();
               renderProps();
-              setStatus(snappedToHole ? 'Fastener seated — centered on hole' : 'Fastener seated on face');
+              setStatus(snappedToHole
+                ? 'Fastener seated — centered on hole'
+                : (doc.grid?.snap ? 'Fastener seated on face (snapped to grid)' : 'Fastener seated on face'));
             }
             return;
           }
@@ -11597,6 +11610,7 @@ function openThreadedHolesDialog() {
     title: `Bolt holes (${titleCount} new mark${titleCount === 1 ? '' : 's'})`,
     body: `<p>For each fresh mark in <b>${sketch.name || 'this sketch'}</b>, cut a hole and place a matching visualizer bolt. All ${titleCount} get the same settings — adjust individual marks later by clicking each one in 3D.</p>
            ${doneNote}
+           <canvas id="th-preview" width="230" height="150" style="display:block;margin:0 auto 8px;border-radius:8px;border:1px solid var(--line, #dfe3ec)"></canvas>
            <div class="field" style="margin-top:8px">
              <label>Hole type</label>
              <select id="th-type">
@@ -11660,6 +11674,28 @@ function openThreadedHolesDialog() {
       typeSel.addEventListener('change', syncType);
       syncType();
     }
+    // Live 3D preview of the hole cutter (red void shape, incl. nut pocket)
+    const updateHolePreview = () => {
+      const cv = $('th-preview');
+      if (!cv) return;
+      const depthVal = parseFloat($('th-depth')?.value);
+      const holeType = $('th-type')?.value || 'threaded';
+      renderFastenerPreviewInto(cv, {
+        headType: 'none',
+        size: $('th-size')?.value || 'M5',
+        length: depthVal > 0 ? fromUnit(depthVal) : null,
+        fit: $('th-fit')?.value || 'normal',
+        // Threaded → the threaded form the hole will have; clearance → the
+        // red smooth void (incl. nut pocket).
+        style: holeType === 'clearance' ? 'clearance' : 'threaded',
+        nutPocket: holeType === 'clearance' && !!$('th-nutpocket')?.checked,
+      });
+    };
+    for (const id of ['th-type', 'th-size', 'th-depth', 'th-fit', 'th-nutpocket']) {
+      const el = $(id);
+      if (el) { el.addEventListener('change', updateHolePreview); el.addEventListener('input', updateHolePreview); }
+    }
+    updateHolePreview();
   }, 0);
 }
 
@@ -11890,6 +11926,78 @@ function processThreadMarks(sketch, marks, opts) {
   flushAutosave();
 }
 
+// ── Fastener 3D preview (dialog thumbnails) ─────────────────────────────────
+// Renders the configured bolt (or, for clearance style, the RED void shape
+// the cutter removes — pockets, counterbores and all) into a 2D canvas via
+// the main renderer + an offscreen target. No extra WebGL contexts.
+const _fastPreview = { scene: null, camera: null, target: null };
+function renderFastenerPreviewInto(canvas, bodySpec) {
+  if (!viewer?.renderer || !canvas) return;
+  try {
+    const W = canvas.width, H = canvas.height;
+    if (!_fastPreview.scene) {
+      _fastPreview.scene = new THREE.Scene();
+      _fastPreview.scene.background = new THREE.Color(0xf4f6fa);
+      const amb = new THREE.AmbientLight(0xffffff, 0.6);
+      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+      dir.position.set(60, 100, 80);
+      _fastPreview.scene.add(amb);
+      _fastPreview.scene.add(dir);
+      _fastPreview.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 2000);
+    }
+    if (!_fastPreview.target || _fastPreview.target.width !== W || _fastPreview.target.height !== H) {
+      if (_fastPreview.target) _fastPreview.target.dispose();
+      _fastPreview.target = new THREE.WebGLRenderTarget(W, H);
+    }
+    for (const c of [..._fastPreview.scene.children]) {
+      if (c.userData && c.userData._preview) {
+        _fastPreview.scene.remove(c);
+        try { c.geometry?.dispose(); c.material?.dispose(); } catch (_) {}
+      }
+    }
+    const isCutter = bodySpec.style === 'clearance';
+    let geo = null;
+    if (isCutter) {
+      const m = buildFastenerCSGMesh({ ...bodySpec, op: 'subtract' });
+      geo = m ? m.geometry : null;
+    } else {
+      geo = buildFastenerGeometry({ ...bodySpec, op: 'add' });
+    }
+    if (!geo) return;
+    const mat = new THREE.MeshStandardMaterial(isCutter
+      ? { color: 0xd9534f, transparent: true, opacity: 0.88, roughness: 0.6, metalness: 0.05 }
+      : { color: 0x9aa8c7, metalness: 0.55, roughness: 0.38 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.userData._preview = true;
+    _fastPreview.scene.add(mesh);
+    const bb = new THREE.Box3().setFromObject(mesh);
+    if (bb.isEmpty()) return;
+    const c = bb.getCenter(new THREE.Vector3());
+    const span = bb.getSize(new THREE.Vector3()).length();
+    const dist = span * 1.05 + 4;
+    _fastPreview.camera.position.set(c.x + dist * 0.72, c.y + dist * 0.5, c.z + dist * 0.72);
+    _fastPreview.camera.aspect = W / H;
+    _fastPreview.camera.lookAt(c);
+    _fastPreview.camera.updateProjectionMatrix();
+    const r = viewer.renderer;
+    const oldT = r.getRenderTarget();
+    r.setRenderTarget(_fastPreview.target);
+    r.render(_fastPreview.scene, _fastPreview.camera);
+    const px = new Uint8Array(W * H * 4);
+    r.readRenderTargetPixels(_fastPreview.target, 0, 0, W, H, px);
+    r.setRenderTarget(oldT);
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      const src = (H - 1 - y) * W * 4;
+      img.data.set(px.subarray(src, src + W * 4), y * W * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (err) {
+    console.warn('Fastener preview render failed:', err?.message || err);
+  }
+}
+
 function openFastenerDialog() {
   const u = unitLabel();
   const sizeOpts = FASTENER_SPECS.map(s =>
@@ -11904,7 +12012,8 @@ function openFastenerDialog() {
   const defLen = doc.units === 'in' ? 1 : 25;
   openModal({
     title: 'Add a bolt',
-    body: `<div class="field">
+    body: `<canvas id="fastener-preview" width="230" height="170" style="display:block;margin:0 auto 10px;border-radius:8px;border:1px solid var(--line, #dfe3ec)"></canvas>
+           <div class="field">
              <label>How will it be used?</label>
              <select id="fastener-style">
                <option value="threaded" selected>Printed bolt — plastic threads, printed as part of the design</option>
@@ -11943,6 +12052,30 @@ function openFastenerDialog() {
            </div>
            <div class="hint" id="fastener-style-hint">Tip: drop a Loose fastener inside a body, set its <b>Operation</b> to Negative, then Group → printable threaded hole.</div>`,
     custom: () => {
+      // Live 3D preview of the configured bolt (or the red void it cuts).
+      const updatePreview = () => {
+        const cv = document.getElementById('fastener-preview');
+        if (!cv) return;
+        const style = document.getElementById('fastener-style')?.value || 'threaded';
+        const lenVal = parseFloat(document.getElementById('fastener-length')?.value);
+        renderFastenerPreviewInto(cv, {
+          headType: document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex',
+          size: document.getElementById('fastener-size')?.value || 'M5',
+          length: lenVal > 0 ? fromUnit(lenVal) : null,
+          fit: document.getElementById('fastener-fit')?.value || 'normal',
+          style,
+          nutPocket: style === 'clearance' && !!document.getElementById('fastener-nutpocket')?.checked,
+          sinkHead: style === 'clearance' && !!document.getElementById('fastener-sink')?.checked,
+          washerPocket: style === 'clearance' && !!document.getElementById('fastener-washer')?.checked,
+        });
+      };
+      for (const id of ['fastener-style', 'fastener-size', 'fastener-length', 'fastener-fit',
+                        'fastener-nutpocket', 'fastener-sink', 'fastener-washer']) {
+        const el = document.getElementById(id);
+        if (el) { el.addEventListener('change', updatePreview); el.addEventListener('input', updatePreview); }
+      }
+      document.querySelectorAll('input[name="fastener-head"]').forEach(r =>
+        r.addEventListener('change', updatePreview));
       // Clearance style reveals the nut-pocket option and re-labels the head
       // grid as the RECESS shape that gets cut for the real bolt's head.
       const styleSel = document.getElementById('fastener-style');
@@ -11961,6 +12094,7 @@ function openFastenerDialog() {
       };
       styleSel?.addEventListener('change', sync);
       sync();
+      updatePreview();
     },
     onConfirm: () => {
       const head = document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex';
