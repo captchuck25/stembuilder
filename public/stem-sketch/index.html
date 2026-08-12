@@ -976,6 +976,13 @@
     fill: none;
     pointer-events: none;
   }
+  /* Classified-visible lines — real edges the viewer can actually see from
+     this side (hidden-line analysis ran). Solid, medium weight. */
+  .body-outline.visible-line {
+    stroke-dasharray: none;
+    opacity: 0.85;
+    stroke-width: 1.5;
+  }
   /* Visible (in-plane) lines — edges that lie ON the sketch face. Drawn
      solid blue so the user clearly sees what's on the surface they're
      drawing on. */
@@ -999,6 +1006,13 @@
     stroke-dasharray: none;
     opacity: 0.95;
     stroke-width: 1.8;
+  }
+  /* Hidden lines — real edges that sit BEHIND the visible surface (hole
+     tunnels, internal steps). Dashed and faded, engineering-drawing style. */
+  .body-outline.hidden-line {
+    stroke-dasharray: 5 4 !important;
+    opacity: 0.5 !important;
+    stroke-width: 1.2 !important;
   }
 </style>
 </head>
@@ -3439,6 +3453,8 @@ class SketchEngine {
         const cls = ['body-outline'];
         if (inPlane) cls.push('in-plane');
         if (seg._cut) cls.push('cut'); // dashed — shows interior holes/cuts
+        if (seg._hidden) cls.push('hidden-line'); // dashed — edges behind the surface
+        else if (seg._vis) cls.push('visible-line'); // classified visible → solid
         svg += `<line class="${cls.join(' ')}" x1="${sx1}" y1="${sy1}" x2="${sx2}" y2="${sy2}"/>`;
       }
     }
@@ -5082,6 +5098,140 @@ function _ensureEdgeRenderer(W, H) {
   return _edgeRender;
 }
 
+// Analytic technical-view projection with HIDDEN-LINE classification — the
+// primary generator for CSG bodies. Works on welded topology in world space:
+//   - boundary edges (single-triangle)
+//   - creases (dihedral > 25°)
+//   - view silhouettes (adjacent faces straddle the view direction)
+// Each edge is classified visible or HIDDEN by casting a ray from the viewer
+// side toward its midpoint — blocked means it's inside/behind the part and
+// renders dashed, like the hidden lines of a real engineering drawing.
+// Returns the number of segments emitted (0 → caller falls back to the
+// pixel-space extractor).
+const _analyticEdgeCache = new WeakMap(); // body.mesh → { planeSig, segments }
+function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
+  if (!body.mesh?.geometry) return 0;
+  // Renders run per frame while sketching — reuse the last result as long as
+  // the mesh identity and plane haven't changed.
+  const planeSig = plane.origin.join(',') + '|' + plane.n.join(',') + '|' + plane.u.join(',');
+  const cached = _analyticEdgeCache.get(body.mesh);
+  if (cached && cached.planeSig === planeSig) {
+    for (const s of cached.segments) segments.push(s);
+    return cached.segments.length;
+  }
+  body.mesh.updateMatrixWorld(true);
+  let geo = body.mesh.geometry.clone();
+  geo.applyMatrix4(body.mesh.matrixWorld);
+  geo = weldGeometryForEdges(geo, 0.005);
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  if (!pos || !idx) return 0;
+  const v = pos.array, ia = idx.array;
+  const triCount = ia.length / 3;
+  if (triCount === 0 || triCount > 60000) return 0;
+  // Per-triangle normals
+  const nrm = new Float32Array(triCount * 3);
+  {
+    const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
+    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), tn = new THREE.Vector3();
+    for (let t = 0; t < triCount; t++) {
+      const a = ia[t * 3] * 3, b = ia[t * 3 + 1] * 3, c = ia[t * 3 + 2] * 3;
+      pA.set(v[a], v[a + 1], v[a + 2]);
+      pB.set(v[b], v[b + 1], v[b + 2]);
+      pC.set(v[c], v[c + 1], v[c + 2]);
+      e1.subVectors(pB, pA); e2.subVectors(pC, pA); tn.crossVectors(e1, e2);
+      if (tn.lengthSq() < 1e-12) { nrm[t * 3] = 0; nrm[t * 3 + 1] = 0; nrm[t * 3 + 2] = 0; continue; }
+      tn.normalize();
+      nrm[t * 3] = tn.x; nrm[t * 3 + 1] = tn.y; nrm[t * 3 + 2] = tn.z;
+    }
+  }
+  // Edge → adjacent triangle pair
+  const edges = new Map();
+  const addE = (i, j, t) => {
+    const key = i < j ? i * 1048576 + j : j * 1048576 + i;
+    const e = edges.get(key);
+    if (e) { if (e.t2 === -1) e.t2 = t; }
+    else edges.set(key, { i: Math.min(i, j), j: Math.max(i, j), t1: t, t2: -1 });
+  };
+  for (let t = 0; t < triCount; t++) {
+    addE(ia[t * 3], ia[t * 3 + 1], t);
+    addE(ia[t * 3 + 1], ia[t * 3 + 2], t);
+    addE(ia[t * 3 + 2], ia[t * 3], t);
+  }
+  const viewN = new THREE.Vector3(...plane.n).normalize();
+  const COS25 = Math.cos(25 * Math.PI / 180);
+  const picked = [];
+  const n1 = new THREE.Vector3(), n2v = new THREE.Vector3();
+  for (const e of edges.values()) {
+    let keep = false;
+    if (e.t2 === -1) keep = true; // boundary
+    else {
+      n1.set(nrm[e.t1 * 3], nrm[e.t1 * 3 + 1], nrm[e.t1 * 3 + 2]);
+      n2v.set(nrm[e.t2 * 3], nrm[e.t2 * 3 + 1], nrm[e.t2 * 3 + 2]);
+      if (n1.dot(n2v) < COS25) keep = true; // crease
+      else {
+        const d1 = n1.dot(viewN), d2 = n2v.dot(viewN);
+        if ((d1 > 1e-6 && d2 < -1e-6) || (d1 < -1e-6 && d2 > 1e-6)) keep = true; // silhouette
+      }
+    }
+    if (keep) picked.push(e);
+  }
+  if (!picked.length) return 0;
+  // Visibility classification (skipped above a perf guard — then everything
+  // renders solid, which is still correct-ish and never blank). Each edge is
+  // sampled at two points, each lifted slightly toward the viewer so rays
+  // don't self-intersect or graze along coplanar surfaces; an edge is HIDDEN
+  // only when both samples are blocked by material clearly in front.
+  const doVis = picked.length <= 1500;
+  const rc = new THREE.Raycaster();
+  const FAR = 10000;
+  const LIFT = 0.2;    // mm toward the viewer
+  const MARGIN = 0.5;  // mm of real material required to count as blocking
+  const dirNeg = viewN.clone().negate();
+  const origin = new THREE.Vector3(), sample = new THREE.Vector3();
+  const wp = new THREE.Vector3();
+  const MIN_LEN = 0.25;
+  let emitted = 0;
+  const blocked = (x, y, z) => {
+    sample.set(x, y, z).addScaledVector(viewN, LIFT);
+    origin.copy(sample).addScaledVector(viewN, FAR);
+    rc.set(origin, dirNeg);
+    rc.far = FAR + 1;
+    const hits = rc.intersectObject(body.mesh, false);
+    return hits.length > 0 && hits[0].distance < FAR - MARGIN;
+  };
+  for (const e of picked) {
+    const ax = e.i * 3, bx = e.j * 3;
+    wp.set(v[ax], v[ax + 1], v[ax + 2]).applyMatrix4(planeMInv);
+    const p1 = { x: wp.x, y: wp.y, z: wp.z };
+    wp.set(v[bx], v[bx + 1], v[bx + 2]).applyMatrix4(planeMInv);
+    const p2 = { x: wp.x, y: wp.y, z: wp.z };
+    if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < MIN_LEN) continue;
+    const seg = { p1, p2, dz1: p1.z, dz2: p2.z };
+    // _vis marks "this segment carries real visibility info" — the renderer
+    // then draws it solid unless _hidden, instead of the legacy convention
+    // of dashing everything that isn't on the sketch plane.
+    seg._vis = true;
+    if (doVis) {
+      const qx = (t) => v[ax] + (v[bx] - v[ax]) * t;
+      const qy = (t) => v[ax + 1] + (v[bx + 1] - v[ax + 1]) * t;
+      const qz = (t) => v[ax + 2] + (v[bx + 2] - v[ax + 2]) * t;
+      if (blocked(qx(0.25), qy(0.25), qz(0.25)) && blocked(qx(0.75), qy(0.75), qz(0.75))) {
+        seg._hidden = true;
+      }
+    }
+    segments.push(seg);
+    emitted++;
+  }
+  if (emitted) {
+    _analyticEdgeCache.set(body.mesh, {
+      planeSig,
+      segments: segments.slice(segments.length - emitted),
+    });
+  }
+  return emitted;
+}
+
 function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
   if (!body.mesh?.geometry || !viewer?.renderer) return;
   // A lost GL context renders nothing and reads back all zeros — bail (and
@@ -5683,7 +5833,10 @@ function projectBodiesOntoPlane(plane) {
     const isCSG = body.type === 'group' || body.type === 'combined';
     if (isCSG) {
       const before = segments.length;
-      projectBodyEdgesViaCanvas(body, plane, planeMInv, segments);
+      // Primary: analytic edges with hidden-line classification (GPU-free).
+      let analytic = 0;
+      try { analytic = projectBodyEdgesAnalytic(body, plane, planeMInv, segments); } catch (_) {}
+      if (!analytic) projectBodyEdgesViaCanvas(body, plane, planeMInv, segments);
       usedEdges = true;
       // Pixel extraction produced nothing (lost GL context, readback failure)
       // → fall back to CPU EdgesGeometry on the CSG mesh. Weld first: legacy
@@ -5709,7 +5862,17 @@ function projectBodiesOntoPlane(plane) {
           edges.dispose();
         } catch (_) {}
       }
-    } else if (!skipEdges) try {
+    } else if (!skipEdges) {
+      // Primitives / extrudes get the same analytic hidden-line treatment as
+      // CSG bodies so every technical view speaks one visual language.
+      // Fasteners keep the legacy path (their helical visual mesh is heavy
+      // and non-manifold).
+      if (body.type !== 'fastener') {
+        try {
+          if (projectBodyEdgesAnalytic(body, plane, planeMInv, segments) > 0) usedEdges = true;
+        } catch (_) {}
+      }
+      if (!usedEdges) try {
       const edges = new THREE.EdgesGeometry(body.mesh.geometry, 25);
       const pos = edges.attributes?.position;
       if (pos && pos.count >= 2) {
@@ -5728,7 +5891,8 @@ function projectBodiesOntoPlane(plane) {
         }
       }
       edges.dispose();
-    } catch(_) {}
+      } catch(_) {}
+    }
 
     // For smooth-surface bodies (sphere, torus) the orthogonal silhouette is
     // a circle (or annulus) — always render this so the silhouette stays
@@ -8593,6 +8757,33 @@ function entityFullyInside(inner, outer) {
 }
 
 // Convert a closed entity into a THREE.Path (used as a hole on a Shape).
+// Closed polyline → THREE.Path/Shape honoring Bezier handles (Smooth nodes,
+// the Ellipse tool, trimmed arcs). Straight runs stay lineTo; curved spans
+// become real bezierCurveTo segments that ExtrudeGeometry tessellates finely.
+// Without this, smoothed shapes extruded as coarse facets (an ellipse became
+// a diamond).
+function _closedPolylineToPath(p, pts) {
+  p.moveTo(pts[0].x, pts[0].y);
+  const n = pts.length;
+  for (let i = 1; i <= n; i++) {
+    const prev = pts[i - 1];
+    const cur = pts[i % n];
+    const curved = prev.cpOut || cur.cpIn;
+    if (i === n && !curved) break; // plain closing edge → closePath below
+    if (curved) {
+      const c1x = prev.cpOut ? prev.x + prev.cpOut.dx : prev.x;
+      const c1y = prev.cpOut ? prev.y + prev.cpOut.dy : prev.y;
+      const c2x = cur.cpIn ? cur.x + cur.cpIn.dx : cur.x;
+      const c2y = cur.cpIn ? cur.y + cur.cpIn.dy : cur.y;
+      p.bezierCurveTo(c1x, c1y, c2x, c2y, cur.x, cur.y);
+    } else {
+      p.lineTo(cur.x, cur.y);
+    }
+  }
+  p.closePath();
+  return p;
+}
+
 function entityToHolePath(ent) {
   if (ent.type === 'rect') {
     const p = new THREE.Path();
@@ -8609,11 +8800,7 @@ function entityToHolePath(ent) {
     return p;
   }
   if (ent.type === 'polyline' && ent.closed && ent.points.length >= 3) {
-    const p = new THREE.Path();
-    p.moveTo(ent.points[0].x, ent.points[0].y);
-    for (let i = 1; i < ent.points.length; i++) p.lineTo(ent.points[i].x, ent.points[i].y);
-    p.closePath();
-    return p;
+    return _closedPolylineToPath(new THREE.Path(), ent.points);
   }
   return null;
 }
@@ -8654,10 +8841,7 @@ function sketchToShape(sketch) {
       s = new THREE.Shape();
       s.absarc(best.cx, best.cy, best.r, 0, Math.PI * 2, false);
     } else if (best.type === 'polyline' && best.closed && best.points.length >= 3) {
-      s = new THREE.Shape();
-      s.moveTo(best.points[0].x, best.points[0].y);
-      for (let i = 1; i < best.points.length; i++) s.lineTo(best.points[i].x, best.points[i].y);
-      s.closePath();
+      s = _closedPolylineToPath(new THREE.Shape(), best.points);
     }
     if (s) { addHolesTo(s, best); return s; }
   }
