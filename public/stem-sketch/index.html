@@ -7138,6 +7138,10 @@ class Viewer3D {
   }
 
   rebuildBodies() {
+    // Face sketches ride their source body — reconcile before rebuilding so
+    // every path that moved a body (drag, gizmo, typed position, nudge,
+    // align, snap-to-plane) carries the attached sketches along.
+    if (typeof syncSketchAnchorsToBodies === 'function') syncSketchAnchorsToBodies();
     while (this.bodyGroup.children.length) {
       const c = this.bodyGroup.children.pop();
       // Deep dispose so edge-overlay child geometries/materials don't leak
@@ -11381,6 +11385,9 @@ function openThreadedHoleForMark(sketchId, markId) {
         for (const m2 of all) {
           if (m2._materialised) deleteMaterialisedThreadMark(m2, { skipRender: true });
         }
+        // Refresh meshes so the re-cut CSG sees the restored geometry, not
+        // the stale pre-peel meshes.
+        if (viewer) viewer.rebuildBodies();
         processThreadMarks(sketch, all, opts);
         return;
       }
@@ -11474,6 +11481,35 @@ function _stripStaleThreadCuttersRecursive(group) {
   return touched;
 }
 
+// Face sketches are ANCHORED to their source body: when the body moves, the
+// sketch plane (and every mark/shape drawn in it) must ride along, visible
+// or not. Each sketch lazily records the body position its plane was
+// captured at (_anchor); genuine position changes shift plane.origin by the
+// same delta. When grouping re-points sourceBodyId at a new body the anchor
+// re-initializes without shifting (the geometry itself didn't move).
+// Rotation tracking is not yet supported — translation covers the move
+// tools (drag, gizmo, typed XYZ, nudge, align, snap-to-plane).
+function syncSketchAnchorsToBodies() {
+  for (const sk of (doc.sketches || [])) {
+    if (sk.sourceBodyId == null || !sk.plane || !Array.isArray(sk.plane.origin)) continue;
+    const b = doc.bodies.find(bb => bb.id === sk.sourceBodyId);
+    if (!b) continue;
+    const px = b.x || 0, py = b.y || 0, pz = b.z || 0;
+    if (sk._anchorBodyId !== sk.sourceBodyId || !sk._anchor) {
+      sk._anchorBodyId = sk.sourceBodyId;
+      sk._anchor = { x: px, y: py, z: pz };
+      continue;
+    }
+    const dx = px - sk._anchor.x, dy = py - sk._anchor.y, dz = pz - sk._anchor.z;
+    if (dx || dy || dz) {
+      sk.plane.origin[0] += dx;
+      sk.plane.origin[1] += dy;
+      sk.plane.origin[2] += dz;
+      sk._anchor = { x: px, y: py, z: pz };
+    }
+  }
+}
+
 function _stripMarkHoleFromTree(mark) {
   if (mark._holeBodyId == null) return null;
   const visit = (group) => {
@@ -11523,15 +11559,16 @@ function deleteMaterialisedThreadMark(mark, opts = {}) {
       parent._mergedShells = parent._mergedShells.filter(s => s.markId !== mark.id);
     }
   }
-  // The actual hole CUT on the parent's geometry is NOT peeled here.
-  // The previous design called undo() to pop the CSG cut off, but undo
-  // pops whatever's on top of the stack — if the user did ANY edit
-  // between threading and rebuild (move, autosave, anything), undo
-  // restores unrelated state and the bracket disappears. Re-threading
-  // a mark at the same settings is idempotent (CSG-subtracting the same
-  // cylinder leaves the same hole); going LARGER envelops the old cut;
-  // going SMALLER leaves the old hole visible. Documented trade-off,
-  // not a vanishing-body bug.
+  // Peel the actual cut off the body tree and re-derive the geometry chain
+  // so deleting or re-configuring a hole truly restores the body. (This
+  // used to be skipped — re-cutting relied on the new cutter enveloping
+  // the old hole, which broke once recessed heads and different hole
+  // shapes arrived: stale voids and half-recesses were left behind.)
+  const strippedRoot = _stripMarkHoleFromTree(mark);
+  if (strippedRoot) {
+    try { _ensureGroupGeometry(strippedRoot); }
+    catch (err) { console.error('Un-cut rebuild failed for mark', mark.id, err); }
+  }
   delete mark._materialised;
   delete mark._boltBodyId;
   delete mark._holeBodyId;
