@@ -10512,34 +10512,49 @@ function buildFastenerGeometry(body) {
   const rFlat = spec.d * 0.95;
   const rShaft = spec.d / 2;
 
+  // Part model: 'bolt' | 'nut' | 'both' (bolt with a nut at the tip), with
+  // 'threaded' or 'smooth' shafts. Old saves map: style 'clearance' →
+  // smooth, nutPocket → 'both'.
+  const part = body.part || (body.nutPocket ? 'both' : 'bolt');
+  const thread = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
+
   const parts = [];
-  if (body.style === 'clearance') {
-    // Clearance style — a smooth tube for REAL hardware, so the visual is an
-    // honest smooth rod (no fake threads).
-    const shaft = new THREE.CylinderGeometry(rMajor, rMajor, length, 32);
-    shaft.translate(0, length / 2, 0);
-    parts.push(shaft);
-  } else {
-    // Threaded shaft — single closed-manifold mesh built by hand so CSG can
-    // subtract it cleanly to produce a real threaded hole.
-    const threadedGeo = buildThreadedShaftGeo(rMinor, rMajor, pitch, length);
-    parts.push(threadedGeo);
+  if (part !== 'nut') {
+    if (thread === 'smooth') {
+      // Smooth rod — an honest stand-in for real hardware (no fake threads).
+      const shaft = new THREE.CylinderGeometry(rMajor, rMajor, length, 32);
+      shaft.translate(0, length / 2, 0);
+      parts.push(shaft);
+    } else {
+      // Threaded shaft — single closed-manifold mesh built by hand.
+      const threadedGeo = buildThreadedShaftGeo(rMinor, rMajor, pitch, length);
+      parts.push(threadedGeo);
+    }
   }
-  // Hex nut pocket ghost at the far (tip) end — where a real nut drops in
-  // after printing.
-  if (body.nutPocket) {
+  // Hex nut — standalone part, or riding the shaft tip for 'bolt + nut'.
+  if (part !== 'bolt') {
     const nutH = spec.d * 0.8;
     const rNut = spec.af / Math.sqrt(3) + clearance;
-    const nutGeo = new THREE.CylinderGeometry(rNut, rNut, nutH, 6);
+    let nutGeo = new THREE.CylinderGeometry(rNut, rNut, nutH, 6);
     nutGeo.rotateY(Math.PI / 6);
     nutGeo.translate(0, nutH / 2, 0);
+    if (part === 'nut' && body.op !== 'subtract') {
+      // A standalone solid nut shows its bore (threaded bores at the minor
+      // radius, smooth at the major).
+      const boreR = (thread === 'smooth' ? rMajor : Math.max(0.4, rMinor)) + 0.02;
+      const bore = new THREE.CylinderGeometry(boreR, boreR, nutH + 2, 24);
+      bore.translate(0, nutH / 2, 0);
+      nutGeo = _csgSubtractGeo(nutGeo, [bore]);
+    }
     parts.push(nutGeo);
   }
 
   // Build the head as its own geometry (so we can CSG-subtract recesses
   // without affecting the threads).
   let headGeo = null;
-  if (headType === 'hex') {
+  if (part === 'nut') {
+    // nuts have no head
+  } else if (headType === 'hex') {
     headGeo = new THREE.CylinderGeometry(rHex, rHex, headH, 6);
     headGeo.rotateY(Math.PI / 6);
     headGeo.translate(0, length + headH / 2, 0);
@@ -10577,7 +10592,7 @@ function buildFastenerGeometry(body) {
   if (headGeo) parts.push(headGeo);
 
   // Washer pocket ghost — where a real flat washer sits under the head.
-  if (body.washerPocket) {
+  if (part !== 'nut' && body.washerPocket) {
     const wT = spec.d * 0.25;
     const wGeo = new THREE.CylinderGeometry(spec.d, spec.d, wT, 32);
     wGeo.translate(0, length - wT / 2, 0);
@@ -10587,7 +10602,7 @@ function buildFastenerGeometry(body) {
   const merged = _mergeBufferGeometries(parts);
   // Sink-head: the whole bolt sits one head-height lower so the head ends
   // up flush below the surface (counterbored).
-  if (body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
+  if (part !== 'nut' && body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
   // Required for raycaster picking — without these the bolt mesh's bounding
   // sphere is undefined and click events miss.
   merged.computeBoundingBox();
@@ -10660,27 +10675,58 @@ function buildFastenerCSGMesh(body) {
   // separately via a non-CSG thread-shell body inserted by
   // processThreadMarks; the CSG engine itself only ever sees plain
   // cylinders, so compound cuts on the same body stay reliable.
+  // Part model (same mapping as the visual builder).
+  const part = body.part || (body.nutPocket ? 'both' : 'bolt');
+  const thread = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
+
   const SHAFT_SEG = 32;
-  const threadedGeo = new THREE.CylinderGeometry(rMajor, rMajor, length, SHAFT_SEG);
-  threadedGeo.translate(0, length / 2, 0);
-  parts.push(threadedGeo);
-  // Hex nut pocket at the far (tip) end — cavity a REAL nut drops into after
-  // printing. Cut 2mm past the tip so it always opens out through the far
-  // face when the bolt spans the material.
-  if (body.nutPocket) {
-    // Real nut height + generous slack: the pocket may start up to ~1mm
-    // outside the material (cut overshoot / drop-through placement), and a
-    // slightly recessed captive nut is better than one standing proud.
-    const nutH = spec.d * 0.8 + 1.2;
-    const rNut = spec.af / Math.sqrt(3) + Math.max(clearance, 0.25);
-    const H = nutH + 2;
-    const nutGeo = new THREE.CylinderGeometry(rNut, rNut, H, 6);
-    nutGeo.rotateY(Math.PI / 6);
-    nutGeo.translate(0, H / 2 - 2, 0);
-    parts.push(nutGeo);
+  if (part !== 'nut') {
+    if (body.op === 'subtract' && thread === 'threaded' && window.__manifold) {
+      // REAL helical threads in the cut — Manifold handles the helix that
+      // used to blow up csg.js. Hole thread = bolt profile offset outward
+      // by the fit clearance (mating printed threads).
+      const rMinorCut = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance);
+      parts.push(buildThreadedShaftGeo(rMinorCut, rMajor, pitch, length));
+    } else {
+      // Smooth-cylinder envelope — for smooth/clearance holes, for positive
+      // unions, and as the csg.js-safe fallback (its BSP can't survive the
+      // helix; thread visuals then come from the shell overlay system).
+      const shaft = new THREE.CylinderGeometry(rMajor, rMajor, length, SHAFT_SEG);
+      shaft.translate(0, length / 2, 0);
+      parts.push(shaft);
+    }
+  }
+  // Hex nut at the shaft tip: as a NEGATIVE it's the captive-nut pocket
+  // (solid hex cavity, generous slack, cut 2mm past the tip so it opens
+  // through the far face); as a positive it's the printed nut body.
+  if (part !== 'bolt') {
+    if (body.op === 'subtract') {
+      const nutH = spec.d * 0.8 + 1.2;
+      const rNut = spec.af / Math.sqrt(3) + Math.max(clearance, 0.25);
+      const H = nutH + 2;
+      const nutGeo = new THREE.CylinderGeometry(rNut, rNut, H, 6);
+      nutGeo.rotateY(Math.PI / 6);
+      nutGeo.translate(0, H / 2 - 2, 0);
+      parts.push(nutGeo);
+    } else {
+      const nutH = spec.d * 0.8;
+      const rNut = spec.af / Math.sqrt(3);
+      let nutGeo = new THREE.CylinderGeometry(rNut, rNut, nutH, 6);
+      nutGeo.rotateY(Math.PI / 6);
+      nutGeo.translate(0, nutH / 2, 0);
+      if (part === 'nut') {
+        const boreR = (thread === 'smooth' ? rMajor : Math.max(0.4, rMinor)) + 0.02;
+        const bore = new THREE.CylinderGeometry(boreR, boreR, nutH + 2, 24);
+        bore.translate(0, nutH / 2, 0);
+        nutGeo = _csgSubtractGeo(nutGeo, [bore]);
+      }
+      parts.push(nutGeo);
+    }
   }
   let headGeo = null;
-  if (headType === 'hex') {
+  if (part === 'nut') {
+    // nuts have no head
+  } else if (headType === 'hex') {
     headGeo = new THREE.CylinderGeometry(rHex, rHex, headH, 6);
     headGeo.rotateY(Math.PI / 6);
     headGeo.translate(0, length + headH / 2, 0);
@@ -10697,7 +10743,7 @@ function buildFastenerCSGMesh(body) {
   if (headGeo) parts.push(headGeo);
   // Washer pocket — shallow disk recess under the head sized for a real
   // flat washer (OD ≈ 2×d, thickness ≈ 0.25×d), opening past the surface.
-  if (body.washerPocket) {
+  if (part !== 'nut' && body.washerPocket) {
     const wT = spec.d * 0.25 + 0.3;
     const wR = spec.d + Math.max(clearance, 0.25);
     const H = wT + 2;
@@ -10708,7 +10754,7 @@ function buildFastenerCSGMesh(body) {
   // Sink-head: a chimney shaped like the head (or like the washer when one
   // has to drop in past it) keeps the counterbore open to the surface after
   // the whole cutter shifts down by the head height.
-  if (body.sinkHead && headH > 0) {
+  if (part !== 'nut' && body.sinkHead && headH > 0) {
     const ext = 2.4;
     let chim = null;
     if (body.washerPocket) {
@@ -10733,7 +10779,7 @@ function buildFastenerCSGMesh(body) {
   // Manifold treats overlapping merged shells as holes (even-odd winding).
   const merged = _unionGeometriesForCSG(parts);
   // Sink the whole cutter so the head lands flush below the surface.
-  if (body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
+  if (part !== 'nut' && body.sinkHead && headH > 0) merged.translate(0, -(headH + 0.2), 0);
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial());
@@ -11178,37 +11224,37 @@ function addPrimitive(kind) {
 // fit ∈ 'tight' (= matched bolt, no clearance), 'normal' (+0.1mm radial),
 // 'loose' (+0.25mm radial) — used when the fastener is grouped as a negative
 // to subtract a printable threaded hole.
-function addFastener(headType, size, length, fit, style, nutPocket, extras) {
+function addFastener(headType, size, length, fit, part, thread, extras) {
   pushUndo();
   const spec = getFastenerSpec(size);
   const len = (typeof length === 'number' && length > 0) ? length : (spec.d * 4);
-  const isClearance = style === 'clearance';
+  const p = (part === 'nut' || part === 'both') ? part : 'bolt';
+  const th = thread === 'smooth' ? 'smooth' : 'threaded';
+  // Parts always drop in as SOLIDS. Making one a Negative (props panel) and
+  // grouping it is what turns it into a cutout — a threaded bolt cuts a
+  // threaded hole, a smooth one a tube, a nut a hex pocket.
   const body = {
-    sinkHead: !!(isClearance && extras?.sinkHead),
-    washerPocket: !!(isClearance && extras?.washerPocket),
     id: doc.nextBodyId++,
     type: 'fastener',
+    part: p,
+    thread: th,
     headType: headType || 'hex',
     size: spec.key,
     length: len,
     fit: fit || 'tight',
-    // 'threaded' (default) = printed plastic bolt / threaded hole.
-    // 'clearance' = smooth tube + head recess + optional nut pocket, so the
-    // student drops REAL hardware into the print. Clearance fasteners exist
-    // to cut, so they start life as a Negative.
-    style: isClearance ? 'clearance' : 'threaded',
-    nutPocket: !!nutPocket,
+    sinkHead: !!(p !== 'nut' && extras?.sinkHead),
+    washerPocket: !!(p !== 'nut' && extras?.washerPocket),
     x: 0, y: 0, z: 0,
-    op: isClearance ? 'subtract' : 'add',
+    op: 'add',
   };
   doc.bodies.push(body);
   doc.selection = { kind: 'body', id: body.id };
   viewer.rebuildBodies();
   renderTree();
   renderProps();
-  setStatus(isClearance
-    ? `Added ${spec.label} clearance ${body.nutPocket ? 'hole + nut pocket' : 'hole'} — 📌 Place on face, then Shift-click it with the body and Group to cut`
-    : `Added ${spec.label} ${FASTENER_HEAD_LABELS[body.headType]} (${fmtUL(len)})`);
+  const partLabel = p === 'nut' ? 'nut'
+    : `${FASTENER_HEAD_LABELS[body.headType]}${p === 'both' ? ' + nut' : ''}`;
+  setStatus(`Added ${spec.label} ${th === 'smooth' ? 'smooth ' : ''}${partLabel}${p === 'nut' ? '' : ` (${fmtUL(len)})`} — 📌 Place on face to position it. Set Operation to Negative + Group to cut it out.`);
 }
 
 // Open the fastener picker dialog — head type, size, length, fit all at once.
@@ -11685,10 +11731,11 @@ function openThreadedHolesDialog() {
         size: $('th-size')?.value || 'M5',
         length: depthVal > 0 ? fromUnit(depthVal) : null,
         fit: $('th-fit')?.value || 'normal',
-        // Threaded → the threaded form the hole will have; clearance → the
-        // red smooth void (incl. nut pocket).
-        style: holeType === 'clearance' ? 'clearance' : 'threaded',
-        nutPocket: holeType === 'clearance' && !!$('th-nutpocket')?.checked,
+        // Red void preview: threaded shows the real helix form the hole
+        // will have; clearance shows the smooth tube (+ nut pocket).
+        op: 'subtract',
+        thread: holeType === 'clearance' ? 'smooth' : 'threaded',
+        part: (holeType === 'clearance' && !!$('th-nutpocket')?.checked) ? 'both' : 'bolt',
       });
     };
     for (const id of ['th-type', 'th-size', 'th-depth', 'th-fit', 'th-nutpocket']) {
@@ -11742,6 +11789,10 @@ function processThreadMarks(sketch, marks, opts) {
     const CUT_OVERSHOOT = 1; // mm
     const cutBottom = shaftBottom.clone().add(holeAxis.clone().multiplyScalar(CUT_OVERSHOOT));
     const isClearance = opts.holeType === 'clearance';
+    // With Manifold available, threaded holes cut REAL helical threads —
+    // no shell overlays needed. Without it, csg.js gets the smooth envelope
+    // and the shells provide the visual as before.
+    const realThreads = !isClearance && !!window.__manifold;
     const hole = {
       id: doc.nextBodyId++,
       type: 'fastener',
@@ -11749,10 +11800,8 @@ function processThreadMarks(sketch, marks, opts) {
       size: opts.size,
       length: opts.depth + 2 * CUT_OVERSHOOT,
       fit: opts.fit,
-      // Clearance = smooth hole for REAL hardware (no thread shells), with
-      // an optional hex nut pocket at the deep/exit end.
-      style: isClearance ? 'clearance' : 'threaded',
-      nutPocket: !!(isClearance && opts.nutPocket),
+      thread: isClearance ? 'smooth' : 'threaded',
+      part: (isClearance && opts.nutPocket) ? 'both' : 'bolt',
       x: cutBottom.x, y: cutBottom.y, z: cutBottom.z,
       rotation: { ...rotDeg },
       op: 'subtract',
@@ -11798,8 +11847,9 @@ function processThreadMarks(sketch, marks, opts) {
     const parentAfterCut = sketch.sourceBodyId
       ? doc.bodies.find(b => b.id === sketch.sourceBodyId)
       : null;
-    if (isClearance) {
-      // Clearance holes have no threads — no shell metadata, no shell body.
+    if (isClearance || realThreads) {
+      // No shell overlays: clearance holes have no threads, and real-thread
+      // cuts already carved the helix into the geometry itself.
     } else if (parentAfterCut && parentAfterCut.geometry) {
       // Store the shell spec in the PARENT's LOCAL frame (the same frame as its
       // baked geometry), not world coords. The overlay + STL export then place
@@ -11874,7 +11924,8 @@ function processThreadMarks(sketch, marks, opts) {
         length: shaftLen,
         fit: 'tight',
         // Clearance holes get a smooth "real bolt" ghost, not fake threads.
-        style: isClearance ? 'clearance' : 'threaded',
+        thread: isClearance ? 'smooth' : 'threaded',
+        part: 'bolt',
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
         op: 'add',
@@ -11955,7 +12006,7 @@ function renderFastenerPreviewInto(canvas, bodySpec) {
         try { c.geometry?.dispose(); c.material?.dispose(); } catch (_) {}
       }
     }
-    const isCutter = bodySpec.style === 'clearance';
+    const isCutter = bodySpec.op === 'subtract';
     let geo = null;
     if (isCutter) {
       const m = buildFastenerCSGMesh({ ...bodySpec, op: 'subtract' });
@@ -12011,89 +12062,85 @@ function openFastenerDialog() {
   ).join('');
   const defLen = doc.units === 'in' ? 1 : 25;
   openModal({
-    title: 'Add a bolt',
+    title: 'Bolt library',
     body: `<canvas id="fastener-preview" width="230" height="170" style="display:block;margin:0 auto 10px;border-radius:8px;border:1px solid var(--line, #dfe3ec)"></canvas>
            <div class="field">
-             <label>How will it be used?</label>
-             <select id="fastener-style">
-               <option value="threaded" selected>Printed bolt — plastic threads, printed as part of the design</option>
-               <option value="clearance">Real hardware — smooth hole a real bolt slides through</option>
+             <label>Part</label>
+             <select id="fastener-part">
+               <option value="bolt" selected>Bolt</option>
+               <option value="nut">Nut</option>
+               <option value="both">Bolt + nut</option>
              </select>
            </div>
-           <div class="field" id="fastener-nutpocket-row" style="display:none;align-items:center;gap:8px">
-             <input type="checkbox" id="fastener-nutpocket" style="width:auto;margin:0"/>
-             <label for="fastener-nutpocket" style="margin:0;cursor:pointer">Hex nut pocket at the far end — drop a real nut in after printing</label>
-           </div>
-           <div class="field" id="fastener-sink-row" style="display:none;align-items:center;gap:8px">
-             <input type="checkbox" id="fastener-sink" style="width:auto;margin:0"/>
-             <label for="fastener-sink" style="margin:0;cursor:pointer">Sink the head flush (counterbore into the surface)</label>
-           </div>
-           <div class="field" id="fastener-washer-row" style="display:none;align-items:center;gap:8px">
-             <input type="checkbox" id="fastener-washer" style="width:auto;margin:0"/>
-             <label for="fastener-washer" style="margin:0;cursor:pointer">Washer pocket under the head (real flat washer)</label>
+           <div class="field">
+             <label>Shaft</label>
+             <select id="fastener-thread">
+               <option value="threaded" selected>Threaded — printable plastic threads</option>
+               <option value="smooth">Smooth — plain cylinder (stand-in for real hardware)</option>
+             </select>
            </div>
            <h4 style="margin-top:12px" id="fastener-head-title">Head type</h4>
            <div id="fastener-head-grid">${headOpts}</div>
            <div class="field" style="margin-top:10px">
-             <label>Thread size</label>
+             <label>Size</label>
              <select id="fastener-size">${sizeOpts}</select>
            </div>
-           <div class="field">
+           <div class="field" id="fastener-length-row">
              <label>Length (${u})</label>
              <input id="fastener-length" type="number" value="${defLen}" min="0.1" step="0.5"/>
            </div>
            <div class="field">
-             <label>Fit</label>
+             <label>Fit (when cutting)</label>
              <select id="fastener-fit">
                <option value="tight">Tight — +0.3 mm (firm)</option>
                <option value="normal" selected>Normal — +0.35 mm (recommended)</option>
                <option value="loose">Loose — +0.4 mm (easy)</option>
              </select>
            </div>
-           <div class="hint" id="fastener-style-hint">Tip: drop a Loose fastener inside a body, set its <b>Operation</b> to Negative, then Group → printable threaded hole.</div>`,
+           <div class="field" id="fastener-sink-row" style="align-items:center;gap:8px">
+             <input type="checkbox" id="fastener-sink" style="width:auto;margin:0"/>
+             <label for="fastener-sink" style="margin:0;cursor:pointer">Sink head flush when cutting (counterbore)</label>
+           </div>
+           <div class="field" id="fastener-washer-row" style="align-items:center;gap:8px">
+             <input type="checkbox" id="fastener-washer" style="width:auto;margin:0"/>
+             <label for="fastener-washer" style="margin:0;cursor:pointer">Washer pocket under the head when cutting</label>
+           </div>
+           <div class="hint">The part drops in as a solid — 📌 Place it on a face, then position it. To cut it OUT of a body instead: set its <b>Operation</b> to Negative and <b>Group</b> them. A threaded part cuts real threads; smooth cuts a plain hole; a nut cuts a hex pocket.</div>`,
     custom: () => {
-      // Live 3D preview of the configured bolt (or the red void it cuts).
       const updatePreview = () => {
         const cv = document.getElementById('fastener-preview');
         if (!cv) return;
-        const style = document.getElementById('fastener-style')?.value || 'threaded';
         const lenVal = parseFloat(document.getElementById('fastener-length')?.value);
         renderFastenerPreviewInto(cv, {
           headType: document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex',
           size: document.getElementById('fastener-size')?.value || 'M5',
           length: lenVal > 0 ? fromUnit(lenVal) : null,
           fit: document.getElementById('fastener-fit')?.value || 'normal',
-          style,
-          nutPocket: style === 'clearance' && !!document.getElementById('fastener-nutpocket')?.checked,
-          sinkHead: style === 'clearance' && !!document.getElementById('fastener-sink')?.checked,
-          washerPocket: style === 'clearance' && !!document.getElementById('fastener-washer')?.checked,
+          part: document.getElementById('fastener-part')?.value || 'bolt',
+          thread: document.getElementById('fastener-thread')?.value || 'threaded',
+          op: 'add',
         });
       };
-      for (const id of ['fastener-style', 'fastener-size', 'fastener-length', 'fastener-fit',
-                        'fastener-nutpocket', 'fastener-sink', 'fastener-washer']) {
+      const syncPart = () => {
+        const part = document.getElementById('fastener-part')?.value || 'bolt';
+        const isNut = part === 'nut';
+        for (const [id, show] of [
+          ['fastener-head-grid', !isNut], ['fastener-head-title', !isNut],
+          ['fastener-length-row', !isNut],
+          ['fastener-sink-row', !isNut], ['fastener-washer-row', !isNut],
+        ]) {
+          const el = document.getElementById(id);
+          if (el) el.style.display = show ? '' : 'none';
+        }
+      };
+      for (const id of ['fastener-part', 'fastener-thread', 'fastener-size', 'fastener-length', 'fastener-fit']) {
         const el = document.getElementById(id);
         if (el) { el.addEventListener('change', updatePreview); el.addEventListener('input', updatePreview); }
       }
+      document.getElementById('fastener-part')?.addEventListener('change', syncPart);
       document.querySelectorAll('input[name="fastener-head"]').forEach(r =>
         r.addEventListener('change', updatePreview));
-      // Clearance style reveals the nut-pocket option and re-labels the head
-      // grid as the RECESS shape that gets cut for the real bolt's head.
-      const styleSel = document.getElementById('fastener-style');
-      const sync = () => {
-        const clearance = styleSel.value === 'clearance';
-        for (const id of ['fastener-nutpocket-row', 'fastener-sink-row', 'fastener-washer-row']) {
-          const row = document.getElementById(id);
-          if (row) row.style.display = clearance ? 'flex' : 'none';
-        }
-        const title = document.getElementById('fastener-head-title');
-        if (title) title.textContent = clearance ? 'Head recess shape (cut into the surface)' : 'Head type';
-        const hint = document.getElementById('fastener-style-hint');
-        if (hint) hint.innerHTML = clearance
-          ? 'Cuts a smooth hole shaped like the bolt — tube + head recess (+ nut pocket). 📌 Place it on a face, then Shift-click it with the body and <b>Group</b>. After printing, push the real bolt through.'
-          : 'Tip: drop a Loose fastener inside a body, set its <b>Operation</b> to Negative, then Group → printable threaded hole.';
-      };
-      styleSel?.addEventListener('change', sync);
-      sync();
+      syncPart();
       updatePreview();
     },
     onConfirm: () => {
@@ -12102,12 +12149,11 @@ function openFastenerDialog() {
       const lenVal = parseFloat($('fastener-length').value);
       const len = lenVal > 0 ? fromUnit(lenVal) : null;
       const fit = $('fastener-fit').value || 'tight';
-      const style = document.getElementById('fastener-style')?.value || 'threaded';
-      const clearanceOn = style === 'clearance';
-      const nutPocket = clearanceOn && !!document.getElementById('fastener-nutpocket')?.checked;
-      addFastener(head, size, len, fit, style, nutPocket, {
-        sinkHead: clearanceOn && !!document.getElementById('fastener-sink')?.checked,
-        washerPocket: clearanceOn && !!document.getElementById('fastener-washer')?.checked,
+      addFastener(head, size, len, fit,
+        document.getElementById('fastener-part')?.value || 'bolt',
+        document.getElementById('fastener-thread')?.value || 'threaded', {
+        sinkHead: !!document.getElementById('fastener-sink')?.checked,
+        washerPocket: !!document.getElementById('fastener-washer')?.checked,
       });
     },
   });
@@ -13730,9 +13776,11 @@ function renderTree() {
     else if (body.type === 'revolve') label = 'Revolved';
     else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
-      label = body.style === 'clearance'
-        ? `${spec.label} clearance${body.nutPocket ? ' + nut pocket' : ''} (${fmtUL(body.length)})`
-        : `${spec.label} ${FASTENER_HEAD_LABELS[body.headType] || body.headType} (${fmtUL(body.length)})`;
+      const lp = body.part || (body.nutPocket ? 'both' : 'bolt');
+      const lt = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
+      label = lp === 'nut'
+        ? `${spec.label} nut`
+        : `${spec.label}${lt === 'smooth' ? ' smooth' : ''} ${FASTENER_HEAD_LABELS[body.headType] || body.headType}${lp === 'both' ? ' + nut' : ''} (${fmtUL(body.length)})`;
     }
     else if (body.type === 'threadShell') {
       const spec = getFastenerSpec(body.size);
@@ -14140,34 +14188,35 @@ function renderProps() {
         <option value="tight"${fit === 'tight' ? ' selected' : ''}>Tight — +0.3 mm (firm)</option>
         <option value="normal"${fit === 'normal' ? ' selected' : ''}>Normal — +0.35 mm (recommended)</option>
         <option value="loose"${fit === 'loose' ? ' selected' : ''}>Loose — +0.4 mm (easy)</option>`;
-      const fStyle = body.style === 'clearance' ? 'clearance' : 'threaded';
+      const fPart = body.part || (body.nutPocket ? 'both' : 'bolt');
+      const fThread = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
+      const isNutOnly = fPart === 'nut';
       dimFields = `<h4>Fastener</h4>
-        <div class="field"><label>Use as</label><select data-k="style">
-          <option value="threaded"${fStyle === 'threaded' ? ' selected' : ''}>Printed bolt (plastic threads)</option>
-          <option value="clearance"${fStyle === 'clearance' ? ' selected' : ''}>Real hardware (smooth clearance hole)</option>
+        <div class="field"><label>Part</label><select data-k="part">
+          <option value="bolt"${fPart === 'bolt' ? ' selected' : ''}>Bolt</option>
+          <option value="nut"${fPart === 'nut' ? ' selected' : ''}>Nut</option>
+          <option value="both"${fPart === 'both' ? ' selected' : ''}>Bolt + nut</option>
         </select></div>
-        <div class="field"><label>${fStyle === 'clearance' ? 'Head recess' : 'Head'}</label><select data-k="headType">${headOpts}</select></div>
-        <div class="field"><label>Thread size</label><select data-k="size">${sizeOpts}</select></div>
-        <div class="field"><label>Length (${u})</label><input type="number" data-k="length" value="${fmtU(body.length)}" min="0.1" step="0.5"/></div>
+        <div class="field"><label>Shaft</label><select data-k="thread">
+          <option value="threaded"${fThread === 'threaded' ? ' selected' : ''}>Threaded (printable)</option>
+          <option value="smooth"${fThread === 'smooth' ? ' selected' : ''}>Smooth (real hardware)</option>
+        </select></div>
+        ${isNutOnly ? '' : `<div class="field"><label>Head</label><select data-k="headType">${headOpts}</select></div>`}
+        <div class="field"><label>Size</label><select data-k="size">${sizeOpts}</select></div>
+        ${isNutOnly ? '' : `<div class="field"><label>Length (${u})</label><input type="number" data-k="length" value="${fmtU(body.length)}" min="0.1" step="0.5"/></div>`}
         <div class="field"><label>Fit</label><select data-k="fit">${fitOpts}</select></div>
-        ${fStyle === 'clearance' ? `<div class="field" style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="fastener-nutpocket-prop" style="width:auto;margin:0"${body.nutPocket ? ' checked' : ''}/>
-          <label for="fastener-nutpocket-prop" style="margin:0;cursor:pointer">Hex nut pocket at the far end</label>
-        </div>
-        <div class="field" style="display:flex;align-items:center;gap:8px">
+        ${isNutOnly ? '' : `<div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="fastener-sink-prop" style="width:auto;margin:0"${body.sinkHead ? ' checked' : ''}/>
-          <label for="fastener-sink-prop" style="margin:0;cursor:pointer">Sink head flush (counterbore)</label>
+          <label for="fastener-sink-prop" style="margin:0;cursor:pointer">Sink head flush when cutting (counterbore)</label>
         </div>
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="fastener-washer-prop" style="width:auto;margin:0"${body.washerPocket ? ' checked' : ''}/>
-          <label for="fastener-washer-prop" style="margin:0;cursor:pointer">Washer pocket under the head</label>
-        </div>` : ''}
+          <label for="fastener-washer-prop" style="margin:0;cursor:pointer">Washer pocket under the head when cutting</label>
+        </div>`}
         <div class="field"><label></label>
-          <button class="action" id="fastener-place-btn" title="Click any body face — the bolt seats with the bottom of its head flush on that face, perpendicular to it">📌 Place on face</button>
+          <button class="action" id="fastener-place-btn" title="Click any body face — the part seats flush on that face, perpendicular to it">📌 Place on face</button>
         </div>
-        ${fStyle === 'clearance'
-          ? '<div class="hint">Cuts a smooth bolt-shaped hole (tube + head recess' + (body.nutPocket ? ' + nut pocket' : '') + ') for REAL hardware. Shift-click it with the body, then <b>Group</b> to cut.</div>'
-          : '<div class="hint">Use <b>Tight</b> for bolts that print as a solid, or <b>Loose</b> when grouping as a Negative to cut a threaded hole that fits a real bolt.</div>'}`;
+        <div class="hint">As a solid it prints as part of the design. Set <b>Operation</b> to Negative + <b>Group</b> to cut it out instead: threaded cuts real threads, smooth cuts a plain hole, a nut cuts a hex pocket.</div>`;
     } else if (body.type === 'group') {
       const childList = (body.children || []).map(c => `${c.type}${c.op === 'subtract' ? ' (neg)' : ''}`).join(', ');
       // Compute the merged bbox so the user can see the group's overall
@@ -14224,9 +14273,8 @@ function renderProps() {
       setStatus('Place fastener: click any body face. Esc to cancel.');
       if (viewer) viewer.canvas.style.cursor = 'crosshair';
     };
-    // Clearance-fastener option toggles
+    // Fastener option toggles
     for (const [elId, key] of [
-      ['fastener-nutpocket-prop', 'nutPocket'],
       ['fastener-sink-prop', 'sinkHead'],
       ['fastener-washer-prop', 'washerPocket'],
     ]) {
