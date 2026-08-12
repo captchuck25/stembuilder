@@ -1576,8 +1576,10 @@ class SketchEngine {
       construction: clickedOrig.construction || false,
       groupId: clickedOrig.groupId,
     };
+    // Result entities get NO id here — the planner runs on every hover, so
+    // ids are assigned only when the click actually applies the plan.
     const cloneWithPoints = (pts, closed) => ({
-      ...baseProps, points: pts, closed, id: doc.sketch.nextId++,
+      ...baseProps, points: pts, closed,
     });
     const P = (i) => ({ x: simplePoly.points[i % n].x, y: simplePoly.points[i % n].y });
 
@@ -1602,10 +1604,10 @@ class SketchEngine {
         if (clickedOrig.closed) {
           const rotated = deep(clickedOrig.points.slice(clickedSegIdx + 1)
             .concat(clickedOrig.points.slice(0, clickedSegIdx + 1)));
-          results = [{ ...deep(clickedOrig), id: doc.sketch.nextId++, points: rotated, closed: false }];
+          results = [{ ...deep(clickedOrig), id: undefined, points: rotated, closed: false }];
         } else {
           const clone = (pts) => ({
-            ...deep(clickedOrig), id: doc.sketch.nextId++, points: deep(pts), closed: false,
+            ...deep(clickedOrig), id: undefined, points: deep(pts), closed: false,
           });
           results = [];
           const left = clickedOrig.points.slice(0, clickedSegIdx + 1);
@@ -1683,7 +1685,7 @@ class SketchEngine {
       results = [circularArcPolyline(ccx, ccy, r, a0, sweep, {
         construction: clickedOrig.construction || false,
         groupId: clickedOrig.groupId,
-      }, doc.sketch)];
+      }, null)];
     } else if (simplePoly.closed) {
       // Closed → open. Kept arc goes from rightInt forward to leftInt.
       // If leftInt.s < rightInt.s, the kept arc wraps through totalLen → 0.
@@ -2224,8 +2226,10 @@ class SketchEngine {
         }
       }
       // Dimension-entity number click — type a value to DRIVE the geometry
-      // (resize the measured shape / move the spaced shape).
-      const dimVal = e.target.closest('.dim-value');
+      // (resize the measured shape / move the spaced shape). Only under the
+      // Select/Dimension tools, so it can't shadow eraser/trim/draw clicks.
+      const dimVal = (this.tool === 'select' || this.tool === 'dimension')
+        ? e.target.closest('.dim-value') : null;
       if (dimVal) {
         const entId = parseInt(dimVal.dataset.entId, 10);
         if (Number.isFinite(entId)) {
@@ -2590,7 +2594,10 @@ class SketchEngine {
       pushUndo();
       const origIdx = doc.sketch.entities.indexOf(plan.ent);
       if (origIdx !== -1) doc.sketch.entities.splice(origIdx, 1);
-      for (const r of plan.results) doc.sketch.entities.push(r);
+      for (const r of plan.results) {
+        r.id = doc.sketch.nextId++; // ids assigned on apply, never on hover
+        doc.sketch.entities.push(r);
+      }
       doc.selection = null; doc.multiSelectedSketch = [];
       this.trimPreview = null;
       this._trimPreviewSig = '';
@@ -4127,6 +4134,21 @@ function driveDimension(d, target) {
   const start = JSON.parse(JSON.stringify(mover));
   moveEntity(mover, start, ux * delta, uy * delta);
   return `Moved shape — spacing ${fmtUL(target)}`;
+}
+
+// After duplicating/pasting a batch of entities, fix up dimension anchors:
+// if the measured entity was copied in the same batch, the new dim follows
+// the COPY (idMap: old id → new id); otherwise the anchor is dropped so the
+// copied dim doesn't grab — and drive — the original shape.
+function remapDimAnchors(entities, idMap) {
+  for (const e of entities) {
+    if (!e || e.type !== 'dimension') continue;
+    for (const key of ['a1', 'a2']) {
+      const a = e[key];
+      if (!a) continue;
+      e[key] = idMap.has(a.entId) ? { ...a, entId: idMap.get(a.entId) } : null;
+    }
+  }
 }
 
 // Bounding box of any 2D entity. For curved polylines, samples the tessellated
@@ -9596,9 +9618,18 @@ function extrudeCurrentSketch() {
       const autoCombineWithParent = (parentId, bodyIds, sketchIds) => {
         if (parentId == null || typeof CSG === 'undefined') return 0;
         if (!doc.bodies.find(b => b.id === parentId)) return 0;
+        // The freshly-pushed extrude bodies have no .mesh yet in this flow
+        // (rebuildBodies hasn't run) and CSG needs meshes — build them first,
+        // same order as the gizmo path.
+        if (viewer) viewer.rebuildBodies();
         doc.multiSelectedBodies = [parentId, ...bodyIds];
         groupSelected(true); // undo already snapshotted above
-        if (doc.selection?.kind === 'body') {
+        // Success = the new bodies were consumed into a group. On a CSG
+        // failure they're still in doc.bodies — report 0 and leave the
+        // sketch's parent pointer untouched.
+        if (doc.bodies.some(b => bodyIds.includes(b.id))) return 0;
+        if (doc.selection?.kind === 'body'
+            && doc.bodies.find(b => b.id === doc.selection.id)) {
           // Re-point the sketch(es) at the new group so the next extrude on
           // them auto-combines with the combined body too.
           for (const sid of sketchIds) {
@@ -12513,12 +12544,17 @@ function duplicateSelection() {
     if (!sources.length) { showHint('Nothing selected to duplicate.'); return; }
     pushUndo();
     const newIds = [];
+    const newEnts = [];
+    const idMap = new Map();
     for (const src of sources) {
       const ent = JSON.parse(JSON.stringify(src));
       ent.id = doc.sketch.nextId++;
+      idMap.set(src.id, ent.id);
       doc.sketch.entities.push(ent);
       newIds.push(ent.id);
+      newEnts.push(ent);
     }
+    remapDimAnchors(newEnts, idMap);
     doc.multiSelectedSketch = newIds;
     doc.selection = { kind: 'sketch', id: newIds[newIds.length - 1] };
     sketchEng.render(); renderTree(); renderProps();
@@ -12566,15 +12602,26 @@ function pasteSelection() {
   pushUndo();
   const newIds = [];
   if (doc.clipboard.kind === 'sketch') {
+    const newEnts = [];
+    const idMap = new Map();
     for (const item of doc.clipboard.items) {
       const ent = JSON.parse(JSON.stringify(item));
       ent.id = doc.sketch.nextId++;
+      idMap.set(item.id, ent.id);
       if (ent.type === 'rect') { ent.x += 5; ent.y += 5; }
       else if (ent.type === 'circle') { ent.cx += 5; ent.cy += 5; }
-      else if (ent.type === 'polyline') ent.points = ent.points.map(p => ({ x: p.x + 5, y: p.y + 5 }));
+      // Spread keeps Bezier handles (cpIn/cpOut are relative offsets) — the
+      // old bare {x, y} rebuild flattened every curved shape on paste.
+      else if (ent.type === 'polyline') ent.points = ent.points.map(p => ({ ...p, x: p.x + 5, y: p.y + 5 }));
+      else if (ent.type === 'dimension') {
+        ent.p1 = { x: ent.p1.x + 5, y: ent.p1.y + 5 };
+        ent.p2 = { x: ent.p2.x + 5, y: ent.p2.y + 5 };
+      }
       doc.sketch.entities.push(ent);
       newIds.push(ent.id);
+      newEnts.push(ent);
     }
+    remapDimAnchors(newEnts, idMap);
     doc.multiSelectedSketch = newIds;
     doc.selection = { kind: 'sketch', id: newIds[newIds.length - 1] };
     sketchEng.render();
