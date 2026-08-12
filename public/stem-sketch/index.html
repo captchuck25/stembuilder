@@ -1285,6 +1285,22 @@
 
 <script src="three.min.js"></script>
 <script src="csg.bundle.js"></script>
+<script type="module">
+  // Manifold — modern watertight boolean engine (WASM). Loads async and
+  // publishes on window; the app upgrades from csg.js the moment it's ready
+  // (csgOp() falls back to csg.js until then, and for any op Manifold
+  // rejects). csg.js reliably collapses existing holes when a later cut
+  // passes through them — Manifold is immune by construction.
+  try {
+    const Module = (await import('./manifold.js')).default;
+    const wasm = await Module();
+    if (typeof wasm.setup === 'function') wasm.setup();
+    window.__manifold = wasm;
+    console.log('Manifold boolean engine ready');
+  } catch (e) {
+    console.warn('Manifold unavailable — using csg.js only:', e);
+  }
+</script>
 <script>
 /* =====================================================================
    Mini CAD — single-file prototype for the STEM Builder platform.
@@ -8463,10 +8479,10 @@ function rebuildGroupGeometry(group) {
   try {
     let result = firstPosMesh;
     for (let i = 1; i < positives.length; i++) {
-      const m = meshOf(positives[i]); if (m) result = CSG.union(result, m);
+      const m = meshOf(positives[i]); if (m) result = csgOp('union', result, m);
     }
     for (const n of negatives) {
-      const m = meshOf(n); if (m) result = CSG.subtract(result, m);
+      const m = meshOf(n); if (m) result = csgOp('subtract', result, m);
     }
     result.updateMatrixWorld(true);
     const baked = result.geometry.clone();
@@ -10261,7 +10277,7 @@ function _csgSubtractGeo(baseGeo, subGeos) {
     for (const sg of subGeos) {
       const sm = new THREE.Mesh(sg, matTmp);
       sm.updateMatrixWorld(true);
-      result = CSG.subtract(result, sm);
+      result = csgOp('subtract', result, sm);
       result.updateMatrixWorld(true);
     }
     const out = result.geometry.clone();
@@ -10579,11 +10595,11 @@ function _ensureGroupGeometry(body) {
     let result = positives[0]; positives[0].updateMatrixWorld(true);
     for (let i = 1; i < positives.length; i++) {
       positives[i].updateMatrixWorld(true);
-      result = CSG.union(result, positives[i]);
+      result = csgOp('union', result, positives[i]);
     }
     for (const n of negatives) {
       n.updateMatrixWorld(true);
-      result = CSG.subtract(result, n);
+      result = csgOp('subtract', result, n);
     }
     result.updateMatrixWorld(true);
     const geo = result.geometry.clone();
@@ -10600,6 +10616,71 @@ function _ensureGroupGeometry(body) {
     console.warn('_ensureGroupGeometry CSG rebuild failed:', err);
     return false;
   }
+}
+
+// ── Boolean engine: Manifold (watertight, WASM) with csg.js fallback ────────
+// Manifold loads asynchronously (module script in <head>). Until it's ready —
+// or when a legacy input defeats it — every boolean falls back to csg.js.
+
+// World-baked, welded copy of a mesh as a Manifold solid.
+function _geoToManifold(mesh) {
+  const M = window.__manifold;
+  mesh.updateMatrixWorld(true);
+  let geo = mesh.geometry.clone();
+  geo.applyMatrix4(mesh.matrixWorld);
+  // Weld near-coincident verts so Manifold sees closed topology; its own
+  // Mesh.merge() then stitches the remaining exact-duplicate seams.
+  geo = weldGeometryForEdges(geo, 0.005);
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  const vertProperties = new Float32Array(pos.array.length);
+  vertProperties.set(pos.array);
+  let triVerts;
+  if (idx) {
+    triVerts = new Uint32Array(idx.array.length);
+    triVerts.set(idx.array);
+  } else {
+    triVerts = new Uint32Array(pos.count);
+    for (let i = 0; i < pos.count; i++) triVerts[i] = i;
+  }
+  const m = new M.Mesh({ numProp: 3, vertProperties, triVerts });
+  m.merge();
+  return new M.Manifold(m); // throws if the input isn't a closed solid
+}
+
+// Manifold solid → world-space THREE.Mesh (identity transform), flat-shaded
+// to match the csg.js facet look.
+function _manifoldToMesh(man) {
+  const mg = man.getMesh();
+  let geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mg.vertProperties), 3));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(mg.triVerts), 1));
+  geo = geo.toNonIndexed();
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+  mesh.updateMatrixWorld(true);
+  return mesh;
+}
+
+// One boolean: op ∈ 'union' | 'subtract'. All boolean call sites route
+// through here.
+function csgOp(op, meshA, meshB) {
+  if (window.__manifold) {
+    let a = null, b = null, r = null;
+    try {
+      a = _geoToManifold(meshA);
+      b = _geoToManifold(meshB);
+      r = (op === 'union') ? a.add(b) : a.subtract(b);
+      return _manifoldToMesh(r);
+    } catch (err) {
+      console.warn('Manifold boolean failed — csg.js fallback:', err?.message || err);
+    } finally {
+      try { if (a) a.delete(); } catch (_) {}
+      try { if (b) b.delete(); } catch (_) {}
+      try { if (r) r.delete(); } catch (_) {}
+    }
+  }
+  return (op === 'union') ? CSG.union(meshA, meshB) : CSG.subtract(meshA, meshB);
 }
 
 function getCSGMesh(body) {
@@ -12180,8 +12261,8 @@ function groupSelected(skipUndo) {
       // visual mesh has the threaded helix which is non-manifold and confuses
       // the boolean engine). Other body types use their real mesh directly.
       let result = getCSGMesh(positives[0]);
-      for (let i = 1; i < positives.length; i++) result = CSG.union(result, getCSGMesh(positives[i]));
-      for (const n of negatives) result = CSG.subtract(result, getCSGMesh(n));
+      for (let i = 1; i < positives.length; i++) result = csgOp('union', result, getCSGMesh(positives[i]));
+      for (const n of negatives) result = csgOp('subtract', result, getCSGMesh(n));
       result.updateMatrixWorld(true);
       geometry = result.geometry.clone();
       geometry.applyMatrix4(result.matrixWorld);
@@ -12523,8 +12604,8 @@ function combineBodies() {
   try {
     viewer.scene.updateMatrixWorld(true);
     let result = getCSGMesh(positives[0]);
-    for (let i = 1; i < positives.length; i++) result = CSG.union(result, getCSGMesh(positives[i]));
-    for (const n of negatives) result = CSG.subtract(result, getCSGMesh(n));
+    for (let i = 1; i < positives.length; i++) result = csgOp('union', result, getCSGMesh(positives[i]));
+    for (const n of negatives) result = csgOp('subtract', result, getCSGMesh(n));
     // Bake world transform into geometry so position/rotation are absorbed
     result.updateMatrixWorld(true);
     const baked = result.geometry.clone();
@@ -12573,7 +12654,7 @@ function performBooleanCut(targetId, toolId) {
   setStatus('Computing cut…');
   try {
     viewer.scene.updateMatrixWorld(true);
-    const result = CSG.subtract(getCSGMesh(target), getCSGMesh(tool));
+    const result = csgOp('subtract', getCSGMesh(target), getCSGMesh(tool));
     result.updateMatrixWorld(true);
     const baked = result.geometry.clone();
     baked.applyMatrix4(result.matrixWorld);
@@ -14847,8 +14928,8 @@ function _bevelOnce(body, edge, kind, style, size) {
   let result;
   try {
     result = (kind === 'concave')
-      ? CSG.union(targetMesh, tool)
-      : CSG.subtract(targetMesh, tool);
+      ? csgOp('union', targetMesh, tool)
+      : csgOp('subtract', targetMesh, tool);
   } catch (err) {
     console.error(`_bevelOnce: CSG ${kind === 'concave' ? 'union' : 'subtract'} threw on body id=${body.id}:`, err);
     return null;
