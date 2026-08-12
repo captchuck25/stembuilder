@@ -11287,6 +11287,7 @@ function openThreadedHoleForMark(sketchId, markId) {
   // Pre-fill from the mark's existing settings if it's already materialised,
   // otherwise use sensible defaults. One dialog handles both create + edit.
   const isEdit = !!mark._materialised;
+  const allMarkCount = (sketch.entities || []).filter(e => e.type === 'threadMark').length;
   const prev = mark._settings || {};
   const defDepthUnits = doc.units === 'in' ? 0.5 : 12;
   const curSize     = prev.size     || 'M5';
@@ -11355,7 +11356,11 @@ function openThreadedHoleForMark(sketchId, markId) {
                <option value="recess"${curSeat === 'recess' ? ' selected' : ''}>Recessed flush (counterbore cut into the hole)</option>
              </select>
              <p id="th1-seat-note" style="color:var(--ink-soft);font-size:11px;margin:4px 0 0;display:none">Machine screws (tapered head) always sit flush.</p>
-           </div>`,
+           </div>
+           ${allMarkCount > 1 ? `<div class="field" style="display:flex;align-items:center;gap:8px;margin-top:8px;padding:8px;background:var(--panel-2, #f3f5fa);border-radius:8px">
+             <input type="checkbox" id="th1-all" style="width:auto;margin:0"/>
+             <label for="th1-all" style="margin:0;cursor:pointer"><b>Make all ${allMarkCount} bolt locations in this sketch the same</b></label>
+           </div>` : ''}`,
     confirmText: isEdit ? 'Save changes' : undefined,
     onConfirm: () => {
       const size = $('th1-size').value;
@@ -11368,10 +11373,21 @@ function openThreadedHoleForMark(sketchId, markId) {
       const nutPocket = holeType === 'clearance' && !!$('th1-nutpocket')?.checked;
       const headSeat = $('th1-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
+      const opts = { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, headSeat };
+      if ($('th1-all')?.checked) {
+        // Apply to every bolt location in this sketch: peel any existing
+        // holes/bolts first, then cut them all fresh with these settings.
+        const all = (sketch.entities || []).filter(e => e.type === 'threadMark');
+        for (const m2 of all) {
+          if (m2._materialised) deleteMaterialisedThreadMark(m2, { skipRender: true });
+        }
+        processThreadMarks(sketch, all, opts);
+        return;
+      }
       // Edit path: peel the previous hole/bolt before re-running so we don't
       // stack another CSG cut on the body (that was the "deterioration" bug).
       if (mark._materialised) deleteMaterialisedThreadMark(mark);
-      processThreadMarks(sketch, [mark], { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, headSeat });
+      processThreadMarks(sketch, [mark], opts);
     },
   });
   setTimeout(() => {
