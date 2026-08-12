@@ -1380,11 +1380,9 @@ const doc = {
     return this.sketches.find(s => s.id === this.activeSketchId) || this.sketches[0];
   },
 };
-// Seed the default ground-plane sketch
-doc.sketches.push({
-  id: doc.nextSketchId++, plane: { ...GROUND_PLANE }, entities: [], nextId: 1, name: 'Sketch 1',
-});
-doc.activeSketchId = 1;
+// Projects start BLANK — no preloaded sketch. "+ Sketch" (or entering 2D)
+// creates the first one on demand.
+doc.activeSketchId = null;
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -3384,6 +3382,11 @@ class SketchEngine {
   }
 
   render(skipDimsForDraft = false) {
+    // Blank project — no sketches exist yet, nothing to draw.
+    if (!doc.sketch) {
+      this.svg.innerHTML = '';
+      return;
+    }
     const r = this.rect();
     const w = r.width, h = r.height;
     let svg = '';
@@ -9485,6 +9488,16 @@ function updateUndoRedoButtons() {
 }
 
 function setMode(mode) {
+  // Blank projects have no sketches — entering 2D creates the first one on
+  // demand so every drawing tool has a surface to land on.
+  if (mode === '2d' && !doc.sketches.length) {
+    doc.sketches.push({
+      id: doc.nextSketchId++, plane: { ...GROUND_PLANE }, entities: [], nextId: 1,
+      name: `Sketch ${doc.nextSketchId - 1}`,
+    });
+    doc.activeSketchId = doc.sketches[doc.sketches.length - 1].id;
+    renderTree();
+  }
   // Leaving 2D for 3D? Rebuild any extrusions whose source was the active
   // sketch — picks up edits the user just made to that sketch's shapes.
   // (Idempotent — if nothing changed, it builds the same geometry.)
@@ -10033,7 +10046,7 @@ function extrudeCurrentSketch() {
     .map(id => allRegions.find(x => x.region.id === id))
     .filter(Boolean);
 
-  if (!regionJobs.length && !doc.sketch.entities.length) {
+  if (!regionJobs.length && !doc.sketch?.entities?.length) {
     showHint('Draw something in 2D first, then extrude it.');
     return;
   }
@@ -14031,16 +14044,15 @@ function renderTree() {
       e.stopPropagation();
       const id = parseInt(btn.dataset.id);
       if (btn.dataset.action === 'del-sketch') {
-        if (doc.sketches.length <= 1) {
-          showHint('At least one sketch is required — clear its shapes instead.');
-          return;
-        }
         const s = doc.sketches.find(x => x.id === id);
         if (!s) return;
         if (s.entities.length > 0 && !confirm(`Delete "${s.name}" and its ${s.entities.length} shape${s.entities.length === 1 ? '' : 's'}?`)) return;
         pushUndo();
         doc.sketches = doc.sketches.filter(x => x.id !== id);
-        if (doc.activeSketchId === id) doc.activeSketchId = doc.sketches[0].id;
+        if (doc.activeSketchId === id) doc.activeSketchId = doc.sketches[0]?.id ?? null;
+        // Deleting the last sketch while in 2D mode → nothing left to draw
+        // on; drop back to 3D.
+        if (!doc.sketches.length && doc.mode === '2d') setMode('3d');
         // Drop any bodies that depended on this sketch (extrudes / revolves)
         doc.bodies = doc.bodies.filter(b => !((b.type === 'extrude' || b.type === 'revolve') && b.sketch && b.sketch.id === id));
         renderTree(); renderProps();
@@ -16386,12 +16398,10 @@ function startNewDesign() {
     if (!window.confirm('Discard the current design and start blank?\nUnsaved changes will be lost (but Ctrl+Z will undo this).')) return;
   }
   pushUndo();
-  // Reset doc to the same shape as initial seed
-  doc.sketches = [{
-    id: 1, plane: { ...GROUND_PLANE }, entities: [], nextId: 1, name: 'Sketch 1',
-  }];
-  doc.activeSketchId = 1;
-  doc.nextSketchId = 2;
+  // Reset doc to the same shape as the initial seed — blank, no sketches.
+  doc.sketches = [];
+  doc.activeSketchId = null;
+  doc.nextSketchId = 1;
   doc.bodies = [];
   doc.nextBodyId = 1;
   doc.selection = null;
