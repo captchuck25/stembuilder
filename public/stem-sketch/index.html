@@ -1114,7 +1114,7 @@
         <button class="tool" data-action="toggle-construction-vis" id="toggle-construction-vis" title="Show/hide all construction lines (visibility only — they stay in the sketch)"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Show</span></button>
         <button class="tool" data-tool="dimension" title="Dimension (D) — click two points, then move and click to place it where you want. Snapped dimensions follow their shapes; click the number to type an exact distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
         <button class="tool" data-tool="thread-mark" title="Thread mark — drops a hole-center marker. In 3D, &quot;Threaded holes&quot; turns every mark into a real threaded hole at a chosen size + depth."><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thread</span></button>
-        <button class="tool" data-action="auto-dim" title="Auto-dimension — add engineering dimensions to all shapes"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
+        <button class="tool" id="tb-auto-dim" data-action="auto-dim" title="Auto Dim — click to show dimensions on every shape, click again to hide them"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
         <div class="dropdown" id="shape2d-dropdown">
           <button class="tool has-dropdown" data-action="shape2d-menu" title="Insert a pre-made shape into the sketch"><svg class="ico"><use href="#i-hexagon"/></svg><span class="tool-label">Shape</span></button>
           <div class="dropdown-menu">
@@ -3698,6 +3698,11 @@ class SketchEngine {
       svg += `<circle class="trim-preview-end" cx="${fx}" cy="${fy}" r="3.5"/>`;
       svg += `<circle class="trim-preview-end" cx="${lx}" cy="${ly}" r="3.5"/>`;
     }
+
+    // Auto Dim button lights up while auto-dims exist — stays in sync
+    // through undo/redo, erasing, and sketch switches.
+    const adBtn = document.getElementById('tb-auto-dim');
+    if (adBtn) adBtn.classList.toggle('active', doc.sketch.entities.some(e => e.autoDim));
 
     this.svg.innerHTML = svg;
   }
@@ -15634,6 +15639,21 @@ function initUserMenu() {
 }
 
 // ---------- Auto-dimension ----------
+// Auto Dim is a TOGGLE: first click shows dimensions on everything (a quick
+// dimension check), second click clears them again.
+function toggleAutoDimensions() {
+  if (!doc.sketch) return;
+  if (doc.sketch.entities.some(e => e.autoDim)) {
+    pushUndo();
+    doc.sketch.entities = doc.sketch.entities.filter(e => !e.autoDim);
+    renderTree();
+    sketchEng.render();
+    setStatus('Auto dimensions off');
+    return;
+  }
+  autoAddDimensions();
+}
+
 function autoAddDimensions() {
   if (!doc.sketch) return;
   pushUndo();
@@ -15915,7 +15935,7 @@ function init() {
       case 'array-2d': openArrayDialog(); break;
       case 'scale-2d': openScaleDialog(); break;
       case 'offset-2d': startOffsetMode(); break;
-      case 'auto-dim': autoAddDimensions(); break;
+      case 'auto-dim': toggleAutoDimensions(); break;
       case 'group': groupSelected(); break;
       case 'ungroup': ungroupSelected(); break;
       case 'trim':
