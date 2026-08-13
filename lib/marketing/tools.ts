@@ -217,7 +217,7 @@ export const TOOLS: MarketingTool[] = [
     tagline:
       "Snap together batteries, bulbs, and switches in a live circuit simulator — bulbs really glow, shorts really trip — and work up from first circuits to breadboards and Ohm's Law.",
     toolHref: "/tools/electronics-lab",
-    image: "/ui/electronics-lab.png",
+    image: "/ui/electronics-lab-v2.png",
     gradeBand: "Grades 3–8",
     subjects: ["Physical Science", "Electronics"],
     description: [

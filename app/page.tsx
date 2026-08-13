@@ -35,7 +35,7 @@ const tiles = [
   {
     label: "Electronics Lab",
     href: "/tools/electronics-lab",
-    src: "/ui/electronics-lab.png",
+    src: "/ui/electronics-lab-v2.png",
   },
 ];
 
