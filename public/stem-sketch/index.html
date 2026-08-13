@@ -435,6 +435,29 @@
     outline: none;
   }
   .tree-node .tree-label { user-select: none; }
+  /* Category folders — Sketches / Bodies / Hardware */
+  .tree-cat {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 6px; margin-top: 6px;
+    border-radius: 6px; cursor: pointer;
+    color: var(--ink); font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    user-select: none;
+  }
+  .tree-cat:hover { background: white; }
+  .tree-cat .tree-caret { width: 13px; text-align: center; font-size: 10px; color: var(--ink-soft); flex-shrink: 0; }
+  .tree-cat .ico { width: 16px; opacity: 0.8; }
+  .tree-cat .tree-count { margin-left: auto; color: var(--ink-muted); font-size: 11px; font-weight: 400; }
+  .tree-cat .tree-eye, .tree-cat .tree-lock {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-soft); font-size: 12px; line-height: 1;
+    padding: 2px 4px; border-radius: 4px; width: 22px; flex-shrink: 0;
+  }
+  .tree-cat .tree-lock { opacity: 0.45; filter: grayscale(100%); }
+  .tree-cat .tree-eye:hover, .tree-cat .tree-lock:hover { background: rgba(31,37,64,0.08); }
+  .tree-cat .tree-lock.locked { opacity: 1; filter: none; }
+  .tree-cat-kids { margin-left: 11px; border-left: 1px solid rgba(31,37,64,0.1); padding-left: 3px; }
+  .tree-cat-empty { padding: 4px 8px 6px; color: var(--ink-muted); font-size: 11px; font-style: italic; }
 
   .props { padding: 4px 14px 14px; }
   .props .empty { color: var(--ink-muted); font-style: italic; padding: 8px 0; }
@@ -6154,8 +6177,19 @@ class Viewer3D {
           const markHits = this.raycaster.intersectObjects(markTargets, false);
           if (markHits.length > 0) {
             const ud = markHits[0].object.userData;
-            openThreadedHoleForMark(ud.sketchId, ud.markId);
-            return;
+            // Only auto-open the dialog for marks that haven't been cut yet
+            // (that IS the placement flow), or cut marks with no visible
+            // bolt (no other clickable affordance exists there). When a
+            // visualizer bolt is sitting on the mark, the click must fall
+            // through to NORMAL selection so the bolt can be picked/moved —
+            // adjusting the hole moves to an explicit Properties button.
+            const mSk = doc.sketches.find(s => s.id === ud.sketchId);
+            const mMk = mSk?.entities?.find(en => en.id === ud.markId);
+            const mBolt = mMk?._materialised ? doc.bodies.find(b => b.id === mMk._boltBodyId) : null;
+            if (!mMk?._materialised || !mBolt || mBolt.hidden) {
+              openThreadedHoleForMark(ud.sketchId, ud.markId);
+              return;
+            }
           }
         }
       }
@@ -11401,8 +11435,8 @@ function openThreadedHoleForMark(sketchId, markId) {
              <input type="checkbox" id="th1-all" style="width:auto;margin:0"/>
              <label for="th1-all" style="margin:0;cursor:pointer"><b>Make all ${allMarkCount} bolt locations in this sketch the same</b></label>
            </div>` : ''}
-           ${isEdit ? `<div class="field" style="margin-top:8px">
-             <button class="action" id="th1-remove" style="color:#c0392b;border-color:#c0392b">🗑 Remove this hole — restore the body here</button>
+           ${isEdit ? `<div style="margin-top:10px">
+             <button class="action" id="th1-remove" style="display:block;width:100%;padding:8px 12px;white-space:normal;color:#c0392b;border-color:#c0392b">🗑 Remove this hole — restore the body here</button>
            </div>` : ''}`,
     confirmText: isEdit ? 'Save changes' : undefined,
     onConfirm: () => {
@@ -13925,9 +13959,15 @@ function renderGridPanel() {
   });
 }
 
+// Which category folders are open (collapsed state survives re-renders,
+// resets on reload — deliberately NOT part of doc/undo).
+const treeCatOpen = { sketches: true, bodies: true, hardware: true };
+// Hardware = fasteners + thread shells; everything else is a Body.
+function _isHardwareBody(b) { return b.type === 'fastener' || b.type === 'threadShell'; }
+
 function renderTree() {
   const tree = $('tree');
-  let html = '';
+  let sketchHtml = '', bodyHtml = '', hwHtml = '';
   // List all sketches — every sketch is deletable
   for (const sketch of doc.sketches) {
     const isActiveSketch = sketch.id === doc.activeSketchId;
@@ -13938,7 +13978,7 @@ function renderTree() {
     const lock = sketch.locked ? '🔒' : '🔓';
     const lockTitle = sketch.locked ? 'Unlock sketch (currently read-only)' : 'Lock sketch (prevent edits)';
     const lockedCls = sketch.locked ? ' locked' : '';
-    html += `<div class="tree-node ${cls}${lockedCls}" data-kind="sketch" data-id="${sketch.id}">
+    sketchHtml += `<div class="tree-node ${cls}${lockedCls}" data-kind="sketch" data-id="${sketch.id}">
       <button class="tree-eye" data-action="toggle-sketch" data-id="${sketch.id}" title="${eyeTitle}">${eye}</button>
       <button class="tree-lock${sketch.locked ? ' locked' : ''}" data-action="toggle-lock-sketch" data-id="${sketch.id}" title="${lockTitle}">${lock}</button>
       <button class="tree-pencil" data-kind="sketch" data-id="${sketch.id}" title="Rename sketch">✏️</button>
@@ -14005,14 +14045,88 @@ function renderTree() {
     const lock = body.locked ? '🔒' : '🔓';
     const lockTitle = body.locked ? 'Unlock body (currently read-only)' : 'Lock body (prevent moves / resize / delete)';
     const lockedCls = body.locked ? ' locked' : '';
-    html += `<div class="tree-node ${active ? 'active' : ''}${lockedCls}" data-kind="body" data-id="${body.id}">
+    const row = `<div class="tree-node ${active ? 'active' : ''}${lockedCls}" data-kind="body" data-id="${body.id}">
       <button class="tree-eye" data-action="toggle-body" data-id="${body.id}" title="${eyeTitle}">${eye}</button>
       <button class="tree-lock${body.locked ? ' locked' : ''}" data-action="toggle-lock-body" data-id="${body.id}" title="${lockTitle}">${lock}</button>
       <button class="tree-pencil" data-kind="body" data-id="${body.id}" title="Rename">✏️</button>
       <span class="ico">${ico}</span> <span class="tree-label" style="${body.hidden ? 'opacity:0.45' : ''}">${label}${negTag}</span>
       <button class="tree-del" data-action="del-body" data-id="${body.id}" title="Delete body">×</button></div>`;
+    if (_isHardwareBody(body)) hwHtml += row; else bodyHtml += row;
   }
-  tree.innerHTML = html;
+  // Compose the three collapsible category folders. Each header carries its
+  // own eye (hide/show every member) + lock (lock/unlock every member).
+  const catBlock = (key, icon, title, items, kidsHtml) => {
+    const open = treeCatOpen[key] !== false;
+    const allHidden = items.length > 0 && items.every(i => i.hidden);
+    const allLocked = items.length > 0 && items.every(i => i.locked);
+    let out = `<div class="tree-cat" data-cat="${key}" title="Click to ${open ? 'collapse' : 'expand'}">
+      <span class="tree-caret">${open ? '▾' : '▸'}</span>
+      <button class="tree-eye" data-cat-eye="${key}" title="${allHidden ? 'Show' : 'Hide'} all ${title.toLowerCase()}">${allHidden ? '◌' : '◉'}</button>
+      <button class="tree-lock${allLocked ? ' locked' : ''}" data-cat-lock="${key}" title="${allLocked ? 'Unlock' : 'Lock'} all ${title.toLowerCase()}">${allLocked ? '🔒' : '🔓'}</button>
+      <span class="ico">${icon}</span> <span class="tree-cat-label">${title}</span>
+      <span class="tree-count">${items.length}</span>
+    </div>`;
+    if (open) out += `<div class="tree-cat-kids">${kidsHtml || '<div class="tree-cat-empty">empty</div>'}</div>`;
+    return out;
+  };
+  const bodyItems = doc.bodies.filter(b => !_isHardwareBody(b));
+  const hwItems = doc.bodies.filter(_isHardwareBody);
+  tree.innerHTML =
+    catBlock('sketches', '📐', 'Sketches', doc.sketches, sketchHtml) +
+    catBlock('bodies', '🧊', 'Bodies', bodyItems, bodyHtml) +
+    catBlock('hardware', '🔩', 'Hardware', hwItems, hwHtml);
+  // Category headers — click to collapse/expand
+  tree.querySelectorAll('.tree-cat').forEach(h => {
+    h.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cat-eye], [data-cat-lock]')) return;
+      treeCatOpen[h.dataset.cat] = treeCatOpen[h.dataset.cat] === false;
+      renderTree();
+    });
+  });
+  const catItems = (key) =>
+    key === 'sketches' ? doc.sketches :
+    key === 'hardware' ? doc.bodies.filter(_isHardwareBody) :
+                         doc.bodies.filter(b => !_isHardwareBody(b));
+  const catLabel = { sketches: 'sketches', bodies: 'bodies', hardware: 'hardware' };
+  // Category eye — hide all members if any is visible, else show all
+  tree.querySelectorAll('[data-cat-eye]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.catEye;
+      const items = catItems(key);
+      if (!items.length) return;
+      const hide = items.some(i => !i.hidden);
+      for (const it of items) {
+        it.hidden = hide;
+        // Keep mark-bolt settings in sync (same rule as the per-row eye)
+        if (key !== 'sketches' && it._threadMarkRef) {
+          const sk = doc.sketches.find(s => s.id === it._threadMarkRef.sketchId);
+          const mk = sk?.entities?.find(en => en.id === it._threadMarkRef.markId);
+          if (mk?._settings) mk._settings.placeBolt = !it.hidden;
+        }
+      }
+      renderTree();
+      if (key === 'sketches') {
+        if (sketchEng) sketchEng.render();
+        if (viewer) { viewer.updateSketchOverlay(); viewer.updateRegions(); viewer.updateExtrudeGizmo(); }
+      } else if (viewer) viewer.rebuildBodies();
+      setStatus(hide ? `Hid all ${catLabel[key]}` : `Showing all ${catLabel[key]}`);
+    });
+  });
+  // Category lock — lock all members if any is unlocked, else unlock all
+  tree.querySelectorAll('[data-cat-lock]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.catLock;
+      const items = catItems(key);
+      if (!items.length) return;
+      const lock = items.some(i => !i.locked);
+      for (const it of items) it.locked = lock;
+      renderTree();
+      if (key !== 'sketches' && viewer) viewer.updateGizmo();
+      setStatus(lock ? `Locked all ${catLabel[key]}` : `Unlocked all ${catLabel[key]}`);
+    });
+  });
   // Rename pencils — start an inline rename without selecting/opening the row
   tree.querySelectorAll('.tree-pencil').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -14395,7 +14509,15 @@ function renderProps() {
       const fPart = body.part || (body.nutPocket ? 'both' : 'bolt');
       const fThread = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
       const isNutOnly = fPart === 'nut';
-      dimFields = `<h4>Fastener</h4>
+      // Bolts that visualize a bolt-hole mark carry a link back to the mark;
+      // the hole itself is adjusted through the mark dialog, so surface it
+      // here as an explicit button (a plain click in 3D just selects/moves).
+      const markBtn = body._threadMarkRef
+        ? `<div class="field"><label></label>
+            <button class="action" id="fastener-adjust-hole" title="Open the bolt-hole settings for the hole this bolt sits in">🔧 Adjust bolt hole…</button>
+          </div>`
+        : '';
+      dimFields = `<h4>Fastener</h4>${markBtn}
         <div class="field"><label>Part</label><select data-k="part">
           <option value="bolt"${fPart === 'bolt' ? ' selected' : ''}>Bolt</option>
           <option value="nut"${fPart === 'nut' ? ' selected' : ''}>Nut</option>
@@ -14470,6 +14592,11 @@ function renderProps() {
     // Place-on-face: enter a pick mode where the next 3D face click seats
     // the bolt with its head-bottom face flush against that face,
     // perpendicular to it (shaft pointing INTO the body).
+    const adjustHoleBtn = $('fastener-adjust-hole');
+    if (adjustHoleBtn) adjustHoleBtn.onclick = () => {
+      const ref = body._threadMarkRef;
+      if (ref) openThreadedHoleForMark(ref.sketchId, ref.markId);
+    };
     const placeBtn = $('fastener-place-btn');
     if (placeBtn) placeBtn.onclick = () => {
       doc.fastenerPlaceTarget = body.id;
