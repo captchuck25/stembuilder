@@ -10644,7 +10644,7 @@ function _unionGeometriesForCSG(parts) {
     for (const g of parts) {
       const tmp = new THREE.Mesh(g, new THREE.MeshBasicMaterial());
       tmp.updateMatrixWorld(true);
-      const man = _geoToManifold(tmp);
+      const man = _geoToManifoldRepaired(tmp);
       if (!acc) acc = man;
       else {
         const next = acc.add(man);
@@ -11005,14 +11005,14 @@ function _ensureGroupGeometry(body) {
 // or when a legacy input defeats it — every boolean falls back to csg.js.
 
 // World-baked, welded copy of a mesh as a Manifold solid.
-function _geoToManifold(mesh) {
+function _geoToManifold(mesh, weldEps = 0.005) {
   const M = window.__manifold;
   mesh.updateMatrixWorld(true);
   let geo = mesh.geometry.clone();
   geo.applyMatrix4(mesh.matrixWorld);
   // Weld near-coincident verts so Manifold sees closed topology; its own
   // Mesh.merge() then stitches the remaining exact-duplicate seams.
-  geo = weldGeometryForEdges(geo, 0.005);
+  geo = weldGeometryForEdges(geo, weldEps);
   const pos = geo.attributes.position;
   const idx = geo.index;
   const vertProperties = new Float32Array(pos.array.length);
@@ -11044,18 +11044,36 @@ function _manifoldToMesh(man) {
   return mesh;
 }
 
+// Convert with a REPAIR LADDER: legacy csg.js-era geometry (or heavily
+// re-cut bodies) can fail Manifold's strict solid check at the default
+// weld — progressively stronger welding repairs almost all of them before
+// we'd ever have to fall back to csg.js (which mangles existing tunnels).
+function _geoToManifoldRepaired(mesh) {
+  let lastErr = null;
+  for (const eps of [0.005, 0.02, 0.08]) {
+    try { return _geoToManifold(mesh, eps); }
+    catch (err) { lastErr = err; }
+  }
+  throw lastErr;
+}
+
 // One boolean: op ∈ 'union' | 'subtract'. All boolean call sites route
 // through here.
 function csgOp(op, meshA, meshB) {
   if (window.__manifold) {
     let a = null, b = null, r = null;
     try {
-      a = _geoToManifold(meshA);
-      b = _geoToManifold(meshB);
+      a = _geoToManifoldRepaired(meshA);
+      b = _geoToManifoldRepaired(meshB);
       r = (op === 'union') ? a.add(b) : a.subtract(b);
       return _manifoldToMesh(r);
     } catch (err) {
       console.warn('Manifold boolean failed — csg.js fallback:', err?.message || err);
+      // The fallback engine can damage existing holes — never do this
+      // silently. Give the student a visible heads-up + escape hatch.
+      try {
+        showHint('⚠ Very complex shape — used the backup engine for that cut. If something looks wrong, press Ctrl+Z.');
+      } catch (_) {}
     } finally {
       try { if (a) a.delete(); } catch (_) {}
       try { if (b) b.delete(); } catch (_) {}
