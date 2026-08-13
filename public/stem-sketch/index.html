@@ -3569,13 +3569,31 @@ class SketchEngine {
       if (doc.hideConstruction && ent.construction) continue;
       const isSelected = doc.multiSelectedSketch?.includes(ent.id) ||
                          (doc.selection?.kind === 'sketch' && doc.selection.id === ent.id);
-      // Single-selected (no multi-select) gets clickable dim pills
-      const isSingle = isSelected && multiCount <= 1;
+      // Single-selected (no multi-select) gets clickable dim pills.
+      // Text-group members never do — the word is one piece; per-letter
+      // pills/nodes just add noise (edit it via the Properties panel).
+      const inTextGroup = ent.groupId && doc.sketch.textMeta && doc.sketch.textMeta[ent.groupId];
+      const isSingle = isSelected && multiCount <= 1 && !inTextGroup;
       svg += renderEntitySVG(ent, this, isSelected, false, isSingle);
     }
     // Multi-selection: no group bbox — the per-entity 'selected' stroke
     // alone signals which shapes are in the selection.
     void multiCount;
+    // EXCEPT text groups: one dashed box around the whole word so it clearly
+    // reads as a single piece.
+    if (doc.selection?.kind === 'sketch') {
+      const selTextEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
+      if (selTextEnt?.groupId && doc.sketch.textMeta && doc.sketch.textMeta[selTextEnt.groupId]) {
+        const bb = selectionGroupBBox();
+        if (bb) {
+          const [ax, ay] = this.worldToScreen(bb.minX, bb.maxY);
+          const [bx, by] = this.worldToScreen(bb.maxX, bb.minY);
+          const x = Math.min(ax, bx) - 6, y = Math.min(ay, by) - 6;
+          const w = Math.abs(bx - ax) + 12, h = Math.abs(by - ay) + 12;
+          svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6 4" rx="4"/>`;
+        }
+      }
+    }
     if (this.draft) {
       svg += renderEntitySVG(this.draft, this, false, true);
     }
@@ -3665,10 +3683,12 @@ class SketchEngine {
       }
     }
 
-    // Bezier handles for the currently selected polyline
+    // Bezier handles for the currently selected polyline — but NOT for
+    // text-group letters, which are edited as one word via Properties.
     if (doc.selection?.kind === 'sketch') {
       const selEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
-      if (selEnt && selEnt.type === 'polyline') {
+      const selIsText = selEnt?.groupId && doc.sketch.textMeta && doc.sketch.textMeta[selEnt.groupId];
+      if (selEnt && selEnt.type === 'polyline' && !selIsText) {
         for (const p of selEnt.points) {
           const [px, py] = this.worldToScreen(p.x, p.y);
           if (p.cpOut) {
