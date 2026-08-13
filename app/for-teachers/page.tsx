@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ToolsDirectory from "./components/ToolsDirectory";
 import DemoDashboardLink from "./components/DemoDashboard";
+import PromoVideo from "./components/PromoVideo";
 import styles from "./marketing.module.css";
 
 export const metadata: Metadata = {
@@ -94,6 +95,10 @@ export default function ForTeachersPage() {
               so students spend their time creating, not learning to navigate the
               software.
             </p>
+            <PromoVideo
+              src="/marketing/stembuilder-promo.mp4"
+              label="STEM Builder in 30 seconds"
+            />
           </div>
         </div>
       </section>
