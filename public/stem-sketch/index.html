@@ -5466,7 +5466,7 @@ function projectBodyEdgesViaCanvas(body, plane, planeMInv, segments) {
   for (const s of out) segments.push(s);
 }
 
-function projectBodiesOntoPlane(plane) {
+function projectBodiesOntoPlane(plane, onlyBodyId) {
   const segments = [];
   if (typeof viewer === 'undefined' || !viewer) return segments;
   const planeMInv = makePlaneMatrix(plane).clone().invert();
@@ -5777,6 +5777,9 @@ function projectBodiesOntoPlane(plane) {
 
   for (const body of doc.bodies) {
     if (!body.mesh) continue;
+    // Focused mode (Auto Dim): only the requested body's silhouette — keeps
+    // loose hardware and neighbours out of the measured outline.
+    if (onlyBodyId != null && body.id !== onlyBodyId) continue;
     // Group bodies — same path as primitives. EdgesGeometry on the merged
     // CSG mesh. The user's insight: primitive face-sketches work cleanly
     // with the EdgesGeometry path, so groups should use it too instead of
@@ -17095,6 +17098,83 @@ function autoAddDimensions() {
         p1: { x: bMaxX, y: bMinY }, p2: { x: bMaxX, y: bMaxY },
         off: -(gap * 2.5) });
     }
+  }
+
+  // BODY-OUTLINE DIMS — the technical view also draws the source body's
+  // projected silhouette (base plate, bosses below the sketched face).
+  // Those aren't sketch entities, so the passes above never measure them.
+  // Cluster the silhouette's horizontal edges into levels, then add:
+  //   (1) the bottom width, under the lowest level (a base plate's span)
+  //   (2) a left-side ladder dimming each band between adjacent levels
+  //       (e.g. the plate's side-wall height under the bolts)
+  // Everything dedupes against sketch dims so no value prints twice.
+  try {
+    const srcId = doc.sketch.sourceBodyId;
+    if (srcId != null && doc.bodies.some(b => b.id === srcId)) {
+      const EPS = 0.35;
+      const segs = projectBodiesOntoPlane(doc.sketch.plane, srcId).filter(s => !s._hidden && !s._cut);
+      let pMinX = Infinity;
+      const levels = []; // clustered horizontal outline lines: { y, minX, maxX, len }
+      for (const s of segs) {
+        pMinX = Math.min(pMinX, s.p1.x, s.p2.x);
+        // Strictly horizontal AND long enough to be a real feature edge —
+        // tessellation chords near a curve's apex are short and slightly
+        // tilted, and must NOT become dimension levels (a ladder dim ending
+        // on an arbitrary chord mid-curve is a wrong measurement).
+        if (Math.abs(s.p1.y - s.p2.y) > 0.1) continue;
+        const y = (s.p1.y + s.p2.y) / 2;
+        const lo = Math.min(s.p1.x, s.p2.x), hi = Math.max(s.p1.x, s.p2.x);
+        if (hi - lo < 3) continue;
+        let lv = levels.find(l => Math.abs(l.y - y) < EPS);
+        if (!lv) { lv = { y, minX: lo, maxX: hi, len: 0 }; levels.push(lv); }
+        lv.minX = Math.min(lv.minX, lo); lv.maxX = Math.max(lv.maxX, hi);
+        lv.len += hi - lo;
+      }
+      const strong = levels.filter(l => l.len > 2).sort((a, b) => a.y - b.y);
+      const allDims = () => [...newDims, ...doc.sketch.entities.filter(e => e.type === 'dimension' && !e.leader)];
+      // Same endpoints (either order) → identical dim already exists
+      const dupSpan = (p1, p2) => allDims().some(d => d.p1 && d.p2 &&
+        ((Math.hypot(d.p1.x - p1.x, d.p1.y - p1.y) < 1 && Math.hypot(d.p2.x - p2.x, d.p2.y - p2.y) < 1) ||
+         (Math.hypot(d.p1.x - p2.x, d.p1.y - p2.y) < 1 && Math.hypot(d.p2.x - p1.x, d.p2.y - p1.y) < 1)));
+      // Same interval on an axis (any position) → same number already shown
+      const dupInterval = (axis, a, b) => allDims().some(d => {
+        if (!d.p1 || !d.p2) return false;
+        if (axis === 'y' && Math.abs(d.p1.x - d.p2.x) < EPS) {
+          const lo = Math.min(d.p1.y, d.p2.y), hi = Math.max(d.p1.y, d.p2.y);
+          return Math.abs(lo - a) < 1 && Math.abs(hi - b) < 1;
+        }
+        if (axis === 'x' && Math.abs(d.p1.y - d.p2.y) < EPS) {
+          const lo = Math.min(d.p1.x, d.p2.x), hi = Math.max(d.p1.x, d.p2.x);
+          return Math.abs(lo - a) < 1 && Math.abs(hi - b) < 1;
+        }
+        return false;
+      });
+      if (strong.length) {
+        // (1) bottom width at the lowest silhouette level. Same-value dims
+        // higher up don't block it (drafting-wise the plate carries its own
+        // width) — only an identical dim at this exact level does.
+        const bottom = strong[0];
+        if (bottom.maxX - bottom.minX > 2 &&
+            !dupSpan({ x: bottom.minX, y: bottom.y }, { x: bottom.maxX, y: bottom.y })) {
+          newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+            p1: { x: bottom.minX, y: bottom.y }, p2: { x: bottom.maxX, y: bottom.y },
+            off: -(gap * 1.5) });
+        }
+        // (2) level ladder on the far left — one dim per band
+        let ladder = 0;
+        for (let i = 0; i + 1 < strong.length && ladder < 4; i++) {
+          const lo = strong[i].y, hi = strong[i + 1].y;
+          if (hi - lo < 1) continue;
+          if (dupInterval('y', lo, hi)) continue;
+          newDims.push({ id: doc.sketch.nextId++, type: 'dimension', autoDim: true,
+            p1: { x: pMinX, y: lo }, p2: { x: pMinX, y: hi },
+            off: gap * 1.5 });
+          ladder++;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Auto Dim: body-outline pass failed:', err?.message || err);
   }
 
   if (!newDims.length) { setStatus('Nothing to dimension'); return; }
