@@ -1058,6 +1058,7 @@
   <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-ellipse" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="9" ry="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+  <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
   <symbol id="i-line" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 20L20 4"/><circle cx="4" cy="20" r="1.6" fill="currentColor"/><circle cx="20" cy="4" r="1.6" fill="currentColor"/></symbol>
   <symbol id="i-arc" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 19C 7 5, 17 5, 21 19"/></symbol>
   <symbol id="i-construction" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3" d="M3 12L21 12"/></symbol>
@@ -1150,6 +1151,7 @@
         <button class="tool" data-tool="rect" title="Rectangle (R)"><svg class="ico"><use href="#i-rect"/></svg><span class="tool-label">Rect</span></button>
         <button class="tool" data-tool="circle" title="Circle (C)"><svg class="ico"><use href="#i-circle"/></svg><span class="tool-label">Circle</span></button>
         <button class="tool" data-tool="ellipse" title="Ellipse — click and drag to draw an oval. Hold Shift for a circle."><svg class="ico"><use href="#i-ellipse"/></svg><span class="tool-label">Ellipse</span></button>
+        <button class="tool" data-tool="text" title="Text — click where the text should start, then type it. Letters become real shapes you can extrude or engrave."><svg class="ico"><use href="#i-text"/></svg><span class="tool-label">Text</span></button>
         <button class="tool" data-tool="line" title="Line / Polyline (L)"><svg class="ico"><use href="#i-line"/></svg><span class="tool-label">Line</span></button>
         <button class="tool" data-tool="arc" title="Arc (A) — 3-point arc"><svg class="ico"><use href="#i-arc"/></svg><span class="tool-label">Arc</span></button>
         <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
@@ -1529,7 +1531,7 @@ class SketchEngine {
     this.updateNodeActions();
 
     this.tool = t;
-    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-ellipse', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark');
+    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-ellipse', 'tool-text', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark');
     this.svg.classList.add('tool-' + t);
     document.querySelectorAll('#tools-2d .tool').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === t));
@@ -1538,6 +1540,7 @@ class SketchEngine {
       rect: 'Click and drag to draw a rectangle. Hold <b>Shift</b> for a square.',
       circle: 'Click the center, drag to set radius.',
       ellipse: 'Click and drag to draw an oval. Hold <b>Shift</b> for a circle. Type W (Tab H) + <b>Enter</b> for an exact size.',
+      text: 'Click where the text should start. Letters become real shapes — extrude them for raised text, or set them Negative and extrude to engrave.',
       line: 'Click to drop points. Auto-snaps to <b>horizontal</b> / <b>vertical</b>. <b>Shift</b> forces ortho. Type a length and press <b>Enter</b> for an exact distance. <b>Enter</b> finishes, <b>Esc</b> cancels.',
       arc: 'Click a start point, click an end point, then move the mouse to shape the arc and click to finish.',
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
@@ -2715,6 +2718,12 @@ class SketchEngine {
       return;
     }
 
+    // Text tool — click a baseline start point, then type in the dialog
+    if (this.tool === 'text') {
+      this.openTextDialogAt({ x: px, y: py });
+      return;
+    }
+
     // Arc tool — click start, click end, then move to shape the bulge, click to commit
     if (this.tool === 'arc') {
       if (!this.activeArc) {
@@ -3238,6 +3247,26 @@ class SketchEngine {
       this.snap = null;
       this.scheduleRender();
     }
+  }
+
+  // Text tool dialog — the click point is the text's baseline start.
+  openTextDialogAt(start) {
+    const u = unitLabel();
+    const defH = doc.units === 'in' ? 0.5 : 12;
+    openModal({
+      title: 'Add text',
+      body: `<p>Letters become real shapes: <b>extrude</b> them for raised text, or set them <b>Negative</b> and extrude to engrave into a face.</p>
+             <div class="field"><label>Text</label><input id="tx-str" type="text" maxlength="40" placeholder="MY NAME"/></div>
+             <div class="field"><label>Letter height (${u})</label><input id="tx-h" type="number" value="${defH}" min="0.05" step="0.25"/></div>`,
+      onConfirm: () => {
+        const str = ($('tx-str').value || '').replace(/\s+$/, '');
+        const h = fromUnit(parseFloat($('tx-h').value));
+        if (!str.trim()) { showHint('Type some text first.'); return; }
+        if (!(h > 0)) { showHint('Letter height must be positive.'); return; }
+        insertTextEntities(str, h, start);
+      },
+    });
+    setTimeout(() => $('tx-str')?.focus(), 60);
   }
 
   // Rect/circle dialogs — typed-dimension workflow when user clicks without dragging
@@ -3770,6 +3799,120 @@ class SketchEngine {
 
     this.svg.innerHTML = svg;
   }
+}
+
+// ---------- Text tool: font glyphs → extrudable sketch shapes ----------
+// Letters are converted into ordinary closed Bezier polylines, so every
+// existing tool works on them: move/scale/mirror, extrude for raised text,
+// Negative + extrude to engrave. Counters (the hole in an O) come through
+// as separate closed contours — the region engine already treats nested
+// closed shapes as holes. Font: vendored helvetiker_bold typeface.json
+// (three.js format), lazy-loaded on first use.
+let _sketchFont = null;
+let _sketchFontCapH = 1000;
+function loadSketchFont() {
+  if (_sketchFont) return Promise.resolve(_sketchFont);
+  return fetch('helvetiker_bold.typeface.json')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(font => {
+      _sketchFont = font;
+      // Cap height from 'H' so "letter height" means what a kid expects.
+      try {
+        let maxY = 0;
+        for (const c of _glyphContours(font.glyphs['H'], 1, 0, 0)) {
+          for (const p of c) maxY = Math.max(maxY, p.y);
+        }
+        if (maxY > 100) _sketchFontCapH = maxY;
+      } catch (_) {}
+      return font;
+    });
+}
+// Parse one glyph's typeface.js outline string ("m x y l x y q ex ey cx cy
+// b ex ey c1x c1y c2x c2y ...") into closed contours of polyline points.
+// Quadratics are promoted to the sketch's cubic cpIn/cpOut handles.
+function _glyphContours(glyph, scale, penX, baseY) {
+  const out = [];
+  if (!glyph || !glyph.o) return out;
+  const tok = glyph.o.split(/\s+/).filter(Boolean);
+  const X = (v) => penX + v * scale;
+  const Y = (v) => baseY + v * scale;
+  let cur = null, i = 0;
+  const closeCur = () => {
+    if (!cur) return;
+    if (cur.length >= 2) {
+      const f = cur[0], l = cur[cur.length - 1];
+      if (Math.abs(f.x - l.x) < 1e-6 && Math.abs(f.y - l.y) < 1e-6) {
+        if (l.cpIn) f.cpIn = l.cpIn;
+        cur.pop();
+      }
+    }
+    if (cur.length >= 3) out.push(cur);
+    cur = null;
+  };
+  while (i < tok.length) {
+    const cmd = tok[i++];
+    if (cmd === 'm') {
+      closeCur();
+      cur = [{ x: X(+tok[i++]), y: Y(+tok[i++]) }];
+    } else if (cmd === 'l') {
+      if (cur) cur.push({ x: X(+tok[i++]), y: Y(+tok[i++]) }); else i += 2;
+    } else if (cmd === 'q') {
+      const ex = X(+tok[i++]), ey = Y(+tok[i++]);
+      const cx = X(+tok[i++]), cy = Y(+tok[i++]);
+      if (cur && cur.length) {
+        const p0 = cur[cur.length - 1];
+        p0.cpOut = { dx: (2 / 3) * (cx - p0.x), dy: (2 / 3) * (cy - p0.y) };
+        cur.push({ x: ex, y: ey, cpIn: { dx: (2 / 3) * (cx - ex), dy: (2 / 3) * (cy - ey) } });
+      }
+    } else if (cmd === 'b') {
+      const ex = X(+tok[i++]), ey = Y(+tok[i++]);
+      const c1x = X(+tok[i++]), c1y = Y(+tok[i++]);
+      const c2x = X(+tok[i++]), c2y = Y(+tok[i++]);
+      if (cur && cur.length) {
+        const p0 = cur[cur.length - 1];
+        p0.cpOut = { dx: c1x - p0.x, dy: c1y - p0.y };
+        cur.push({ x: ex, y: ey, cpIn: { dx: c2x - ex, dy: c2y - ey } });
+      }
+    } else if (cmd === 'z') {
+      closeCur();
+    }
+  }
+  closeCur();
+  return out;
+}
+function insertTextEntities(str, height, start) {
+  const build = (font) => {
+    if (!doc.sketch) return;
+    const scale = height / (_sketchFontCapH || 1000);
+    let penX = start.x;
+    const created = [];
+    pushUndo();
+    for (const ch of str) {
+      const glyph = font.glyphs[ch];
+      if (!glyph) {
+        penX += ((font.glyphs[' ']?.ha || 500)) * scale;
+        continue;
+      }
+      for (const contour of _glyphContours(glyph, scale, penX, start.y)) {
+        const ent = { id: doc.sketch.nextId++, type: 'polyline', closed: true, points: contour };
+        doc.sketch.entities.push(ent);
+        created.push(ent.id);
+      }
+      penX += (glyph.ha || 600) * scale;
+    }
+    if (!created.length) { setStatus('No letters could be built from that text.'); return; }
+    doc.multiSelectedSketch = created;
+    doc.selection = { kind: 'sketch', id: created[0] };
+    if (sketchEng) { sketchEng.setTool('select'); sketchEng.render(); }
+    renderTree(); renderProps();
+    setStatus(`Added "${str}" as ${created.length} shape${created.length === 1 ? '' : 's'} — extrude to raise it, or set Negative + extrude to engrave.`);
+  };
+  if (_sketchFont) { build(_sketchFont); return; }
+  setStatus('Loading letter shapes…');
+  loadSketchFont().then(build).catch(err => {
+    console.error('Text tool font load failed:', err);
+    setStatus('⚠ Could not load the letter font — check the connection and try again.');
+  });
 }
 
 function entityKeyPoints(ent) {
@@ -17567,6 +17710,7 @@ function init() {
       if (e.key === 'a' || e.key === 'A') sketchEng.setTool('arc');
       if (e.key === 'e' || e.key === 'E') sketchEng.setTool('eraser');
       if (e.key === 'x' || e.key === 'X') sketchEng.setTool('extend');
+      if (e.key === 't' || e.key === 'T') sketchEng.setTool('text');
       if (e.key === 'g' || e.key === 'G') sketchEng.setTool('construction');
       if (e.key === 'd' || e.key === 'D') sketchEng.setTool('dimension');
       if (e.key === 'f' || e.key === 'F') fitSketchViewToBodies();
