@@ -1340,6 +1340,7 @@
     window.__manifold = wasm;
     console.log('Manifold boolean engine ready');
   } catch (e) {
+    window.__manifoldFailed = true;
     console.warn('Manifold unavailable — using csg.js only:', e);
   }
 </script>
@@ -9142,7 +9143,7 @@ function snapshotDoc() {
     nextJointId: doc.nextJointId || 1,
   };
 }
-function applySnapshot(s) {
+function applySnapshot(s, opts = {}) {
   const restore = (b) => {
     const c = JSON.parse(JSON.stringify(b));
     if (c.geometry && !(c.geometry instanceof THREE.BufferGeometry)) {
@@ -9220,6 +9221,46 @@ function applySnapshot(s) {
   doc.multiSelectedBodies = [];
   doc.multiSelectedSketch = [];
   doc.selectedRegions = [];
+  // LOAD-TIME SANITATION (opts.sanitize — design loads only, never undo):
+  // a design saved while the csg.js fallback was active carries baked
+  // membranes/slivers that persist through every autosave and refresh, and
+  // that Manifold then rejects — pushing later cuts back to csg.js (freeze).
+  // Verify each top-level group's baked geometry converts to a Manifold
+  // solid; if not, discard it (recursively) and rebuild clean from the
+  // children tree, which now cuts through Manifold.
+  if (opts.sanitize && window.__manifold && typeof _ensureGroupGeometry === 'function') {
+    let repaired = 0;
+    const dropGeo = (b) => {
+      if (b.geometry instanceof THREE.BufferGeometry) { try { b.geometry.dispose(); } catch (_) {} }
+      b.geometry = null;
+      if (Array.isArray(b.children)) b.children.forEach(dropGeo);
+    };
+    for (const b of doc.bodies) {
+      if (b.type !== 'group' && b.type !== 'combined') continue;
+      if (!(b.geometry instanceof THREE.BufferGeometry)) continue;
+      if (!Array.isArray(b.children) || !b.children.length) continue;
+      let healthy = true;
+      try {
+        const probe = new THREE.Mesh(b.geometry, new THREE.MeshBasicMaterial());
+        probe.position.set(b.x || 0, b.y || 0, b.z || 0);
+        probe.updateMatrixWorld(true);
+        const man = _geoToManifoldRepaired(probe);
+        man.delete();
+      } catch (err) {
+        healthy = false;
+      }
+      if (!healthy) {
+        console.warn(`applySnapshot: body id=${b.id} carries damaged geometry (old boolean engine) — rebuilding from its ${b.children.length} children.`);
+        try {
+          dropGeo(b);
+          if (_ensureGroupGeometry(b)) repaired++;
+        } catch (err) {
+          console.error(`applySnapshot: rebuild of body id=${b.id} failed:`, err);
+        }
+      }
+    }
+    if (repaired > 0) setStatus(`🔧 Repaired ${repaired} damaged bod${repaired === 1 ? 'y' : 'ies'} from an earlier session — rebuilt with the new engine.`);
+  }
   // Hide the extrude tooltip + drag preview if anything was active when undo
   // ran — otherwise the gizmo lingers and the user thinks undo didn't work.
   if (viewer) {
@@ -9471,7 +9512,7 @@ function restoreLocalDraft() {
     const inp = document.getElementById('project-filename');
     if (inp && draft.name) inp.value = draft.name;
     if (draft.units && draft.units !== doc.units) setUnits(draft.units);
-    applySnapshot(draft.docJson);
+    applySnapshot(draft.docJson, { sanitize: true });
     setStatus('Restored unsaved work from last session');
     return true;
   } catch (err) {
@@ -10740,6 +10781,7 @@ function buildFastenerCSGMesh(body) {
   const thread = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
 
   const SHAFT_SEG = 32;
+  let usedHelix = false;
   if (part !== 'nut') {
     if (body.op === 'subtract' && thread === 'threaded' && window.__manifold) {
       // REAL helical threads in the cut — Manifold handles the helix that
@@ -10747,6 +10789,7 @@ function buildFastenerCSGMesh(body) {
       // by the fit clearance (mating printed threads).
       const rMinorCut = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance);
       parts.push(buildThreadedShaftGeo(rMinorCut, rMajor, pitch, length));
+      usedHelix = true;
     } else {
       // Smooth-cylinder envelope — for smooth/clearance holes, for positive
       // unions, and as the csg.js-safe fallback (its BSP can't survive the
@@ -10848,6 +10891,9 @@ function buildFastenerCSGMesh(body) {
   merged.computeBoundingBox();
   merged.computeBoundingSphere();
   const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial());
+  // Flag helical cutters so csgOp's freeze guard never hands one to the
+  // csg.js fallback (its BSP explodes on the helix).
+  if (usedHelix) mesh.userData.__hasHelix = true;
   // Source of truth = body fields, not body.mesh — the mesh may not exist yet
   // for a body freshly pushed into doc.bodies (e.g. a thread-mark hole being
   // CSG-subtracted before the render pass has had a chance to instantiate it).
@@ -11082,6 +11128,26 @@ function _manifoldToMesh(man) {
   return mesh;
 }
 
+// Run `cb` once the boolean engine question is settled: Manifold ready OR
+// its load failed OR the wait times out. Restoring a saved design before
+// Manifold is up would rebuild every group boolean on csg.js — silently
+// baking membranes/slivers into the design that then persist through every
+// autosave. Loading is cheap to delay a few hundred ms; corruption is not.
+function whenBooleanEngineReady(cb, timeoutMs = 8000) {
+  if (window.__manifold || window.__manifoldFailed || typeof window.__manifold_wait_deadline_passed !== 'undefined') { cb(); return; }
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    if (window.__manifold || window.__manifoldFailed || (Date.now() - t0) > timeoutMs) {
+      clearInterval(timer);
+      if (!window.__manifold && !window.__manifoldFailed) {
+        window.__manifold_wait_deadline_passed = true;
+        console.warn('Boolean engine still loading after wait — proceeding with csg.js');
+      }
+      cb();
+    }
+  }, 50);
+}
+
 // Convert with a REPAIR LADDER: legacy csg.js-era geometry (or heavily
 // re-cut bodies) can fail Manifold's strict solid check at the default
 // weld — progressively stronger welding repairs almost all of them before
@@ -11117,6 +11183,18 @@ function csgOp(op, meshA, meshB) {
       try { if (b) b.delete(); } catch (_) {}
       try { if (r) r.delete(); } catch (_) {}
     }
+  }
+  // FREEZE GUARD for the csg.js fallback: its BSP explodes on helical
+  // thread meshes (a 4-hole rebuild once went 215k → 4.7M verts and hung
+  // the tab for minutes) and on already-exploded geometry. Skipping the cut
+  // and saying so beats freezing the page — the user can retry once the
+  // engine is up, or undo.
+  const vertsOf = (m) => m?.geometry?.attributes?.position?.count || 0;
+  const hasHelix = !!(meshA?.userData?.__hasHelix || meshB?.userData?.__hasHelix);
+  if (hasHelix || vertsOf(meshA) + vertsOf(meshB) > 150000) {
+    console.error(`csgOp: refusing csg.js fallback (${op}) — ${hasHelix ? 'helical thread mesh' : 'oversized geometry'} (${vertsOf(meshA)}+${vertsOf(meshB)} verts) would hang the page.`);
+    try { showHint('⚠ That cut could not be completed safely — nothing was changed. Try again in a moment (the 3D engine may still be loading), or press Ctrl+Z.'); } catch (_) {}
+    return meshA;
   }
   return (op === 'union') ? CSG.union(meshA, meshB) : CSG.subtract(meshA, meshB);
 }
@@ -16610,7 +16688,7 @@ function loadDesignFromJson(name, docJson, units) {
   const inp = document.getElementById('project-filename');
   if (inp) inp.value = name;
   if (units && units !== doc.units) setUnits(units);
-  applySnapshot(docJson);
+  applySnapshot(docJson, { sanitize: true });
   setStatus('Loaded: ' + name);
 }
 
@@ -16676,9 +16754,12 @@ window.addEventListener('message', (e) => {
     }
     // Loading a cloud design replaces the local autosave draft so refresh
     // restores the cloud content, not the previous in-progress draft.
-    loadDesignFromJson(data.name, data.docJson, data.units);
-    clearLocalDraft();
-    scheduleAutosave();
+    // Wait for the Manifold engine so any rebuild/sanitation runs clean.
+    whenBooleanEngineReady(() => {
+      loadDesignFromJson(data.name, data.docJson, data.units);
+      clearLocalDraft();
+      scheduleAutosave();
+    });
   } else if (data.type === 'STEMSKETCH_LOAD_LIST') {
     showCloudLoadDialog(data.designs);
   } else if (data.type === 'STEMSKETCH_SAVE_OK') {
@@ -17577,9 +17658,13 @@ function init() {
   // Restore any unsaved work from the previous session (localStorage draft).
   // Survives page refresh — same pattern as blueprint-lab. If the parent
   // immediately sends a STEMSKETCH_LOAD afterward, that overrides.
-  try {
-    if (restoreLocalDraft()) setDirty(true);
-  } catch (err) { console.warn('Local draft restore failed:', err); }
+  // WAIT for the Manifold engine first: restoring earlier would run any
+  // geometry rebuilds on csg.js and bake membranes/slivers into the design.
+  whenBooleanEngineReady(() => {
+    try {
+      if (restoreLocalDraft()) setDirty(true);
+    } catch (err) { console.warn('Local draft restore failed:', err); }
+  });
 
   // Re-render the 2D sketch whenever the canvas changes size (handles iframe resize
   // and the initial case where the iframe viewport isn't known at DOMContentLoaded).
