@@ -8200,10 +8200,14 @@ function buildBodyMesh(body) {
   if (body.type === 'fastener') {
     const fgeo = buildFastenerGeometry(body);
     if (!fgeo) return null;
-    // Use a steel-grey material for fasteners so they read as hardware
+    // Use a steel-grey material for fasteners so they read as hardware.
+    // Keep metalness LOW: with no environment map, high metalness renders
+    // washed-out and pale — a recessed head sitting flush with a body's top
+    // face then catches identical lighting and camouflages as leftover
+    // body material ("the recess left material on top").
     const matFastener = new THREE.MeshStandardMaterial({
-      color: 0x9aa3ad,
-      roughness: 0.45, metalness: 0.6, flatShading: false,
+      color: 0x525c6b,
+      roughness: 0.55, metalness: 0.2, flatShading: false,
     });
     mesh = new THREE.Mesh(fgeo, matFastener);
     mesh.position.set(body.x || 0, body.y || 0, body.z || 0);
