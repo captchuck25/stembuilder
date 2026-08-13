@@ -12058,6 +12058,37 @@ function openThreadedHolesDialog() {
   }, 0);
 }
 
+// Snap a mark-companion bolt back into the hole it belongs to — same
+// placement math as processThreadMarks' visualizer-bolt creation. Gives a
+// moved bolt a one-click way home (re-placing it by hand is nearly
+// impossible to line up).
+function returnBoltToItsMark(body) {
+  const ref = body?._threadMarkRef;
+  if (!ref) return false;
+  const sketch = doc.sketches.find(s => s.id === ref.sketchId);
+  const mark = sketch?.entities?.find(e => e.id === ref.markId && e.type === 'threadMark');
+  if (!sketch || !mark) return false;
+  const planeM = makePlaneMatrix(sketch.plane);
+  const n = new THREE.Vector3(...sketch.plane.n).normalize();
+  const holeAxis = n.clone().negate();
+  const depth = (typeof mark._settings?.depth === 'number') ? mark._settings.depth : body.length;
+  const markWorld = new THREE.Vector3(mark.cx, mark.cy, 0).applyMatrix4(planeM);
+  const shaftBottom = markWorld.clone().add(holeAxis.clone().multiplyScalar(depth));
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+  const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+  pushUndo();
+  body.x = shaftBottom.x; body.y = shaftBottom.y; body.z = shaftBottom.z;
+  body.rotation = {
+    x: THREE.MathUtils.radToDeg(euler.x),
+    y: THREE.MathUtils.radToDeg(euler.y),
+    z: THREE.MathUtils.radToDeg(euler.z),
+  };
+  if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo(); }
+  renderProps();
+  setStatus('Bolt snapped back into its hole');
+  return true;
+}
+
 function processThreadMarks(sketch, marks, opts) {
   pushUndo();
   const planeM = makePlaneMatrix(sketch.plane);
@@ -14600,8 +14631,10 @@ function renderProps() {
         const partLabel = fPart === 'nut' ? 'Nut' : fPart === 'both' ? 'Bolt + nut' : 'Bolt';
         const infoRow = (k, v) => `<div class="field"><label>${k}</label><div>${v}</div></div>`;
         dimFields = `<h4>Fastener</h4>
-          <div style="padding:4px 0 6px">
+          <div style="display:flex;flex-direction:column;gap:6px;padding:4px 0 6px">
             <button class="action" id="fastener-adjust-hole" style="display:block;width:100%" title="Open the settings for this bolt and its hole">🔧 Adjust bolt…</button>
+            <button class="action" id="fastener-return-btn" style="display:block;width:100%" title="Snap this bolt back into the hole it belongs to">⤵ Put back in its hole</button>
+            <button class="action" id="fastener-place-btn" style="display:block;width:100%" title="Click any body face — the bolt seats flush there and snaps to nearby holes">📌 Place on face</button>
           </div>
           ${infoRow('Part', partLabel)}
           ${infoRow('Shaft', fThread === 'smooth' ? 'Smooth (real hardware)' : 'Threaded (printable)')}
@@ -14691,6 +14724,10 @@ function renderProps() {
     if (adjustHoleBtn) adjustHoleBtn.onclick = () => {
       const ref = body._threadMarkRef;
       if (ref) openThreadedHoleForMark(ref.sketchId, ref.markId);
+    };
+    const returnBtn = $('fastener-return-btn');
+    if (returnBtn) returnBtn.onclick = () => {
+      if (!returnBoltToItsMark(body)) setStatus('⚠ Could not find this bolt\'s hole — its sketch or mark was deleted.');
     };
     const placeBtn = $('fastener-place-btn');
     if (placeBtn) placeBtn.onclick = () => {
