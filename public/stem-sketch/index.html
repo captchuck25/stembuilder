@@ -14513,15 +14513,27 @@ function renderProps() {
       const fPart = body.part || (body.nutPocket ? 'both' : 'bolt');
       const fThread = body.thread || (body.style === 'clearance' ? 'smooth' : 'threaded');
       const isNutOnly = fPart === 'nut';
-      // Bolts that visualize a bolt-hole mark carry a link back to the mark;
-      // the hole itself is adjusted through the mark dialog, so surface it
-      // here as an explicit button (a plain click in 3D just selects/moves).
-      const markBtn = body._threadMarkRef
-        ? `<div style="padding:4px 0 6px">
-            <button class="action" id="fastener-adjust-hole" style="display:block;width:100%" title="Open the bolt-hole settings for the hole this bolt sits in">🔧 Adjust bolt hole…</button>
-          </div>`
-        : '';
-      dimFields = `<h4>Fastener</h4>${markBtn}
+      if (body._threadMarkRef) {
+        // Bolt seated in a bolt-hole mark: the bolt and its hole are a
+        // matched pair, so the panel is READ-ONLY info — every change goes
+        // through the Adjust dialog (which re-cuts the hole to match and can
+        // apply to all matching holes at once). Editing part/size here only
+        // changed the visual bolt and desynced it from its hole.
+        const partLabel = fPart === 'nut' ? 'Nut' : fPart === 'both' ? 'Bolt + nut' : 'Bolt';
+        const infoRow = (k, v) => `<div class="field"><label>${k}</label><div>${v}</div></div>`;
+        dimFields = `<h4>Fastener</h4>
+          <div style="padding:4px 0 6px">
+            <button class="action" id="fastener-adjust-hole" style="display:block;width:100%" title="Open the settings for this bolt and its hole">🔧 Adjust bolt…</button>
+          </div>
+          ${infoRow('Part', partLabel)}
+          ${infoRow('Shaft', fThread === 'smooth' ? 'Smooth (real hardware)' : 'Threaded (printable)')}
+          ${isNutOnly ? '' : infoRow('Head', FASTENER_HEAD_LABELS[body.headType] || body.headType || '—')}
+          ${infoRow('Size', spec ? `${spec.label} · ${spec.p.toFixed(2)} mm pitch` : body.size)}
+          ${isNutOnly ? '' : infoRow('Length', fmtUL(body.length))}
+          ${infoRow('Seat', body.sinkHead ? 'Recessed flush' : 'Resting on the surface')}
+          <div class="hint">This bolt matches its bolt hole. Click <b>Adjust bolt…</b> to change the size, head, seat, or every matching hole at once.</div>`;
+      } else {
+      dimFields = `<h4>Fastener</h4>
         <div class="field"><label>Part</label><select data-k="part">
           <option value="bolt"${fPart === 'bolt' ? ' selected' : ''}>Bolt</option>
           <option value="nut"${fPart === 'nut' ? ' selected' : ''}>Nut</option>
@@ -14547,6 +14559,7 @@ function renderProps() {
           <button class="action" id="fastener-place-btn" title="Click any body face — the part seats flush on that face, perpendicular to it">📌 Place on face</button>
         </div>
         <div class="hint">As a solid it prints as part of the design. Set <b>Operation</b> to Negative + <b>Group</b> to cut it out instead: threaded cuts real threads, smooth cuts a plain hole, a nut cuts a hex pocket.</div>`;
+      }
     } else if (body.type === 'group') {
       const childList = (body.children || []).map(c => `${c.type}${c.op === 'subtract' ? ' (neg)' : ''}`).join(', ');
       // Compute the merged bbox so the user can see the group's overall
