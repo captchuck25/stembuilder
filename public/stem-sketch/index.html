@@ -3255,15 +3255,19 @@ class SketchEngine {
     const defH = doc.units === 'in' ? 0.5 : 12;
     openModal({
       title: 'Add text',
-      body: `<p>Letters become real shapes: <b>extrude</b> them for raised text, or set them <b>Negative</b> and extrude to engrave into a face.</p>
+      body: `<p>Letters become real shapes: <b>extrude</b> them for raised text, or set them <b>Negative</b> and extrude to engrave into a face. The word moves as one — edit it any time in Properties.</p>
              <div class="field"><label>Text</label><input id="tx-str" type="text" maxlength="40" placeholder="MY NAME"/></div>
-             <div class="field"><label>Letter height (${u})</label><input id="tx-h" type="number" value="${defH}" min="0.05" step="0.25"/></div>`,
+             <div class="field"><label>Style</label><select id="tx-font">${fontChoiceOptions('block')}</select></div>
+             <div class="field"><label>Letter height (${u})</label><input id="tx-h" type="number" value="${defH}" min="0.05" step="0.25"/></div>
+             <div class="field"><label>Spacing (%)</label><input id="tx-sp" type="number" value="0" min="-20" max="200" step="5"/></div>`,
       onConfirm: () => {
         const str = ($('tx-str').value || '').replace(/\s+$/, '');
         const h = fromUnit(parseFloat($('tx-h').value));
+        const fontKey = $('tx-font')?.value || 'block';
+        const sp = parseFloat($('tx-sp')?.value) || 0;
         if (!str.trim()) { showHint('Type some text first.'); return; }
         if (!(h > 0)) { showHint('Letter height must be positive.'); return; }
-        insertTextEntities(str, h, start);
+        insertTextEntities(str, h, start, fontKey, sp);
       },
     });
     setTimeout(() => $('tx-str')?.focus(), 60);
@@ -3808,24 +3812,34 @@ class SketchEngine {
 // as separate closed contours — the region engine already treats nested
 // closed shapes as holes. Font: vendored helvetiker_bold typeface.json
 // (three.js format), lazy-loaded on first use.
-let _sketchFont = null;
-let _sketchFontCapH = 1000;
-function loadSketchFont() {
-  if (_sketchFont) return Promise.resolve(_sketchFont);
-  return fetch('helvetiker_bold.typeface.json')
+const FONT_CHOICES = {
+  block:  { label: 'Block — bold & sturdy',  file: 'helvetiker_bold.typeface.json' },
+  simple: { label: 'Simple — clean & thin',  file: 'helvetiker_regular.typeface.json' },
+  fancy:  { label: 'Fancy — serif',          file: 'gentilis_bold.typeface.json' },
+};
+const _sketchFonts = {}; // key → { font, capH }
+function loadSketchFont(key = 'block') {
+  if (_sketchFonts[key]) return Promise.resolve(_sketchFonts[key]);
+  const choice = FONT_CHOICES[key] || FONT_CHOICES.block;
+  return fetch(choice.file)
     .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
     .then(font => {
-      _sketchFont = font;
       // Cap height from 'H' so "letter height" means what a kid expects.
+      let capH = 1000;
       try {
         let maxY = 0;
         for (const c of _glyphContours(font.glyphs['H'], 1, 0, 0)) {
           for (const p of c) maxY = Math.max(maxY, p.y);
         }
-        if (maxY > 100) _sketchFontCapH = maxY;
+        if (maxY > 100) capH = maxY;
       } catch (_) {}
-      return font;
+      _sketchFonts[key] = { font, capH };
+      return _sketchFonts[key];
     });
+}
+function fontChoiceOptions(selectedKey) {
+  return Object.entries(FONT_CHOICES).map(([k, c]) =>
+    `<option value="${k}"${k === selectedKey ? ' selected' : ''}>${c.label}</option>`).join('');
 }
 // Parse one glyph's typeface.js outline string ("m x y l x y q ex ey cx cy
 // b ex ey c1x c1y c2x c2y ...") into closed contours of polyline points.
@@ -3880,39 +3894,120 @@ function _glyphContours(glyph, scale, penX, baseY) {
   closeCur();
   return out;
 }
-function insertTextEntities(str, height, start) {
-  const build = (font) => {
+// Build the contour list for one text run.
+function _buildTextContours(fd, text, height, origin, spacingPct) {
+  const scale = height / (fd.capH || 1000);
+  const extra = ((spacingPct || 0) / 100) * height;
+  let penX = origin.x;
+  const contours = [];
+  for (const ch of text) {
+    const glyph = fd.font.glyphs[ch];
+    if (!glyph) {
+      penX += (fd.font.glyphs[' ']?.ha || 500) * scale + extra;
+      continue;
+    }
+    for (const c of _glyphContours(glyph, scale, penX, origin.y)) contours.push(c);
+    penX += (glyph.ha || 600) * scale + extra;
+  }
+  return contours;
+}
+function _textGroupBBoxMin(ids) {
+  let mn = null;
+  for (const id of ids) {
+    const ent = doc.sketch.entities.find(e => e.id === id);
+    const bb = ent && entityBBox(ent);
+    if (!bb) continue;
+    mn = mn ? { x: Math.min(mn.x, bb.minX), y: Math.min(mn.y, bb.minY) } : { x: bb.minX, y: bb.minY };
+  }
+  return mn;
+}
+// Placed text is a parametric GROUP: the letters are ordinary polylines
+// (every tool works on them), tagged with a shared groupId (click selects
+// the whole word, drag moves it as one) and backed by meta stored on the
+// sketch so the Properties panel can re-generate them — change the text,
+// the font, the height, or the letter spacing at any time. "Explode"
+// drops the meta and leaves plain letter shapes.
+function insertTextEntities(str, height, start, fontKey = 'block', spacingPct = 0) {
+  setStatus('Loading letter shapes…');
+  loadSketchFont(fontKey).then(fd => {
     if (!doc.sketch) return;
-    const scale = height / (_sketchFontCapH || 1000);
-    let penX = start.x;
-    const created = [];
     pushUndo();
-    for (const ch of str) {
-      const glyph = font.glyphs[ch];
-      if (!glyph) {
-        penX += ((font.glyphs[' ']?.ha || 500)) * scale;
-        continue;
-      }
-      for (const contour of _glyphContours(glyph, scale, penX, start.y)) {
-        const ent = { id: doc.sketch.nextId++, type: 'polyline', closed: true, points: contour };
-        doc.sketch.entities.push(ent);
-        created.push(ent.id);
-      }
-      penX += (glyph.ha || 600) * scale;
+    const gid = 'txt' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const created = [];
+    for (const contour of _buildTextContours(fd, str, height, start, spacingPct)) {
+      const ent = { id: doc.sketch.nextId++, type: 'polyline', closed: true, points: contour, groupId: gid };
+      doc.sketch.entities.push(ent);
+      created.push(ent.id);
     }
     if (!created.length) { setStatus('No letters could be built from that text.'); return; }
+    doc.sketch.textMeta = doc.sketch.textMeta || {};
+    doc.sketch.textMeta[gid] = {
+      text: str, height, font: fontKey, spacing: spacingPct || 0,
+      origin: { x: start.x, y: start.y },
+      builtMin: _textGroupBBoxMin(created) || { x: start.x, y: start.y },
+    };
     doc.multiSelectedSketch = created;
     doc.selection = { kind: 'sketch', id: created[0] };
     if (sketchEng) { sketchEng.setTool('select'); sketchEng.render(); }
     renderTree(); renderProps();
-    setStatus(`Added "${str}" as ${created.length} shape${created.length === 1 ? '' : 's'} — extrude to raise it, or set Negative + extrude to engrave.`);
-  };
-  if (_sketchFont) { build(_sketchFont); return; }
-  setStatus('Loading letter shapes…');
-  loadSketchFont().then(build).catch(err => {
+    setStatus(`Added "${str}" — it moves as one. Extrude to raise it, set Negative + extrude to engrave, or edit it in Properties.`);
+  }).catch(err => {
     console.error('Text tool font load failed:', err);
     setStatus('⚠ Could not load the letter font — check the connection and try again.');
   });
+}
+// Re-generate a text group from its (possibly patched) meta. Any move the
+// user made since the letters were built is preserved by measuring how far
+// the group's bbox has drifted from where it was built.
+function regenerateTextGroup(gid, patch = {}) {
+  const sk = doc.sketch;
+  const meta = sk?.textMeta?.[gid];
+  if (!meta) return;
+  const memberIds = sk.entities.filter(e => e.groupId === gid).map(e => e.id);
+  const curMin = _textGroupBBoxMin(memberIds);
+  const drift = (curMin && meta.builtMin)
+    ? { x: curMin.x - meta.builtMin.x, y: curMin.y - meta.builtMin.y }
+    : { x: 0, y: 0 };
+  const next = Object.assign({}, meta, patch);
+  const origin = { x: meta.origin.x + drift.x, y: meta.origin.y + drift.y };
+  loadSketchFont(next.font).then(fd => {
+    if (!doc.sketch || doc.sketch !== sk) return;
+    pushUndo();
+    sk.entities = sk.entities.filter(e => e.groupId !== gid);
+    const created = [];
+    for (const contour of _buildTextContours(fd, next.text, next.height, origin, next.spacing)) {
+      const ent = { id: sk.nextId++, type: 'polyline', closed: true, points: contour, groupId: gid };
+      sk.entities.push(ent);
+      created.push(ent.id);
+    }
+    if (!created.length) {
+      delete sk.textMeta[gid];
+      doc.selection = null; doc.multiSelectedSketch = [];
+      setStatus('Text removed (no letters left).');
+    } else {
+      sk.textMeta[gid] = Object.assign(next, {
+        origin, builtMin: _textGroupBBoxMin(created) || origin,
+      });
+      doc.multiSelectedSketch = created;
+      doc.selection = { kind: 'sketch', id: created[0] };
+      setStatus(`Updated "${next.text}"`);
+    }
+    if (sketchEng) sketchEng.render();
+    renderTree(); renderProps();
+  }).catch(err => {
+    console.error('Text regenerate failed:', err);
+    setStatus('⚠ Could not load that font — try again.');
+  });
+}
+function explodeTextGroup(gid) {
+  const sk = doc.sketch;
+  if (!sk?.textMeta?.[gid]) return;
+  pushUndo();
+  for (const e of sk.entities) if (e.groupId === gid) delete e.groupId;
+  delete sk.textMeta[gid];
+  renderProps();
+  if (sketchEng) sketchEng.render();
+  setStatus('Text exploded — each letter is now its own shape.');
 }
 
 function entityKeyPoints(ent) {
@@ -14617,6 +14712,47 @@ function renderProps() {
     const ent = doc.sketch.entities.find(e => e.id === doc.selection.id);
     if (!ent) { props.innerHTML = ''; return; }
     const u = unitLabel();
+    // Parametric text group — one panel for the whole word. All edits
+    // re-generate the letters from the stored settings.
+    const tMeta = ent.groupId && doc.sketch.textMeta && doc.sketch.textMeta[ent.groupId];
+    if (tMeta) {
+      const gid = ent.groupId;
+      const safeText = String(tMeta.text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      props.innerHTML = `
+        <h4>Text</h4>
+        <div class="field"><label>Text</label><input id="tprop-str" type="text" maxlength="40" value="${safeText}"/></div>
+        <div class="field"><label>Style</label><select id="tprop-font">${fontChoiceOptions(tMeta.font)}</select></div>
+        <div class="field"><label>Letter height (${u})</label><input id="tprop-h" type="number" value="${fmtU(tMeta.height)}" min="0.05" step="0.25"/></div>
+        <div class="field"><label>Spacing (%)</label><input id="tprop-sp" type="number" value="${tMeta.spacing || 0}" min="-20" max="200" step="5"/></div>
+        <div class="hint">The word moves as one. <b>Extrude</b> to raise it, set <b>Negative</b> + extrude to engrave. Explode to edit letters one by one.</div>
+        <button class="action" id="tprop-explode" style="margin-top:8px">⚡ Explode into letters</button>
+        <button class="action" id="del-text-group" style="margin-top:8px">Delete text</button>`;
+      const commitStr = () => {
+        const v = ($('tprop-str')?.value || '').replace(/\s+$/, '');
+        if (v.trim() && v !== tMeta.text) regenerateTextGroup(gid, { text: v });
+      };
+      $('tprop-str')?.addEventListener('change', commitStr);
+      $('tprop-str')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') commitStr(); });
+      $('tprop-font')?.addEventListener('change', () => regenerateTextGroup(gid, { font: $('tprop-font').value }));
+      $('tprop-h')?.addEventListener('change', () => {
+        const v = fromUnit(parseFloat($('tprop-h').value));
+        if (v > 0) regenerateTextGroup(gid, { height: v });
+      });
+      $('tprop-sp')?.addEventListener('change', () => {
+        const v = parseFloat($('tprop-sp').value);
+        if (isFinite(v)) regenerateTextGroup(gid, { spacing: v });
+      });
+      $('tprop-explode')?.addEventListener('click', () => explodeTextGroup(gid));
+      $('del-text-group')?.addEventListener('click', () => {
+        pushUndo();
+        doc.sketch.entities = doc.sketch.entities.filter(e => e.groupId !== gid);
+        delete doc.sketch.textMeta[gid];
+        doc.selection = null; doc.multiSelectedSketch = [];
+        renderProps(); renderTree(); sketchEng.render();
+        setStatus('Text deleted');
+      });
+      return;
+    }
     if (ent.type === 'rect') {
       props.innerHTML = `
         <h4>Rectangle</h4>
