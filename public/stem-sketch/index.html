@@ -38,7 +38,7 @@
   .app {
     display: grid;
     grid-template-rows: auto 1fr 36px;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 300px 1fr;
     grid-template-areas:
       "topbar topbar"
       "left   canvas"
@@ -14513,8 +14513,8 @@ function renderProps() {
       // the hole itself is adjusted through the mark dialog, so surface it
       // here as an explicit button (a plain click in 3D just selects/moves).
       const markBtn = body._threadMarkRef
-        ? `<div class="field"><label></label>
-            <button class="action" id="fastener-adjust-hole" title="Open the bolt-hole settings for the hole this bolt sits in">🔧 Adjust bolt hole…</button>
+        ? `<div style="padding:4px 0 6px">
+            <button class="action" id="fastener-adjust-hole" style="display:block;width:100%" title="Open the bolt-hole settings for the hole this bolt sits in">🔧 Adjust bolt hole…</button>
           </div>`
         : '';
       dimFields = `<h4>Fastener</h4>${markBtn}
