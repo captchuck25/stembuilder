@@ -138,7 +138,7 @@ export const TOOLS: MarketingTool[] = [
     tagline:
       "Design a bridge, then stress-test it under load and watch it hold — or crumble. Engineering, physics, and problem-solving in one.",
     toolHref: "/tools/bridge",
-    image: "/ui/bridge-button.png",
+    image: "/ui/bridge-button-v2.png",
     gradeBand: "Grades 4–10",
     subjects: ["Physics", "Engineering"],
     description: [
@@ -255,7 +255,7 @@ export const TOOLS: MarketingTool[] = [
     tagline:
       "Practice measurement, scale, and precision with instant feedback — plus timed sprints and class leaderboards to keep students pushing for accuracy.",
     toolHref: "/tools/measurement-lab",
-    image: "/ui/measurement-button.png",
+    image: "/ui/measurement-button-v2.png",
     gradeBand: "Grades 3–6",
     subjects: ["Math", "Science"],
     description: [

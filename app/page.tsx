@@ -10,7 +10,7 @@ const tiles = [
   {
     label: "Bridge Builder",
     href: "/tools/bridge",
-    src: "/ui/bridge-button.png",
+    src: "/ui/bridge-button-v2.png",
   },
   {
     label: "Code Lab",
@@ -20,7 +20,7 @@ const tiles = [
   {
     label: "Measurement Lab",
     href: "/tools/measurement-lab",
-    src: "/ui/measurement-button.png",
+    src: "/ui/measurement-button-v2.png",
   },
   {
     label: "STEM Sketch",
