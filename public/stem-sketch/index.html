@@ -15698,19 +15698,30 @@ function renderProps() {
         if (!b) return '?';
         return b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`;
       };
-      const jointRows = (doc.joints || []).filter(j => j.a && j.b).map(j =>
-        `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+      const jointRows = (doc.joints || []).filter(j => j.a && j.b).map(j => {
+        const zero = j.zero || 0;
+        const rel = Math.round((j.angle || 0) - zero);
+        const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
+        const tMax = (typeof j.travelMax === 'number') ? j.travelMax : 180;
+        return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="color:#b45309;font-size:14px">🔗</span>
             <span style="flex:1;font-size:12px"><b>${partName(j.b)}</b> swings on ${partName(j.a)}</span>
             <button class="action" data-del-joint="${j.id}" title="Remove this joint (the parts stay where they are)" style="padding:2px 8px;font-size:11px">×</button>
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-            <input type="range" data-joint-slider="${j.id}" min="-180" max="180" step="1" value="${Math.round(j.angle || 0)}" style="flex:1"/>
-            <input type="number" data-joint-num="${j.id}" value="${Math.round(j.angle || 0)}" step="5" style="width:58px"/>°
+            <input type="range" data-joint-slider="${j.id}" min="${tMin}" max="${tMax}" step="1" value="${rel}" style="flex:1"/>
+            <input type="number" data-joint-num="${j.id}" value="${rel}" step="1" min="${tMin}" max="${tMax}" style="width:58px"/>°
           </div>
-        </div>`
-      ).join('');
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:var(--ink-soft)">
+            <button class="action" data-joint-zero="${j.id}" title="Make the current position this joint's 0°" style="padding:2px 8px;font-size:11px">🧭 Set 0° here</button>
+            <span>travel</span>
+            <input type="number" data-joint-min="${j.id}" value="${tMin}" step="5" max="0" style="width:54px;font-size:11px"/>°
+            <span>to</span>
+            <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:54px;font-size:11px"/>°
+          </div>
+        </div>`;
+      }).join('');
       props.innerHTML = `
         <div class="empty" style="margin-bottom:8px">Select a body or use the tools above.</div>
         <h4 style="margin-top:6px">Joints</h4>
@@ -15729,29 +15740,64 @@ function renderProps() {
       props.querySelectorAll('[data-del-joint]').forEach(btn => {
         btn.onclick = () => deleteJoint(parseInt(btn.dataset.delJoint, 10));
       });
-      // Swing sliders — one undo snapshot per drag gesture, live motion while
-      // dragging, number field kept in sync (and vice versa).
+      // Swing sliders — angles shown RELATIVE to the joint's zero, clamped
+      // to its travel limits. One undo per drag gesture; number field steps
+      // 1° and stays in sync with the slider.
+      const jointOf = (el, key) => doc.joints.find(x => x.id === parseInt(el.dataset[key], 10));
+      const relOf = (j) => Math.round((j.angle || 0) - (j.zero || 0));
+      const clampRel = (j, v) => {
+        const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
+        const tMax = (typeof j.travelMax === 'number') ? j.travelMax : 180;
+        return Math.max(tMin, Math.min(tMax, v));
+      };
+      const setRel = (j, v) => {
+        applyJointAngle(j, clampRel(j, v) + (j.zero || 0));
+        const sl = props.querySelector(`[data-joint-slider="${j.id}"]`);
+        const num = props.querySelector(`[data-joint-num="${j.id}"]`);
+        if (sl) sl.value = relOf(j);
+        if (num) num.value = relOf(j);
+      };
       props.querySelectorAll('[data-joint-slider]').forEach(sl => {
-        const jid = parseInt(sl.dataset.jointSlider, 10);
         sl.addEventListener('pointerdown', () => pushUndo());
         sl.addEventListener('input', () => {
-          const j = doc.joints.find(x => x.id === jid);
-          if (!j) return;
-          applyJointAngle(j, parseFloat(sl.value) || 0);
-          const num = props.querySelector(`[data-joint-num="${jid}"]`);
-          if (num) num.value = Math.round(j.angle);
+          const j = jointOf(sl, 'jointSlider');
+          if (j) setRel(j, parseFloat(sl.value) || 0);
         });
       });
       props.querySelectorAll('[data-joint-num]').forEach(inp => {
-        const jid = parseInt(inp.dataset.jointNum, 10);
         inp.addEventListener('change', () => {
-          const j = doc.joints.find(x => x.id === jid);
+          const j = jointOf(inp, 'jointNum');
           const v = parseFloat(inp.value);
           if (!j || !isFinite(v)) return;
           pushUndo();
-          applyJointAngle(j, Math.max(-180, Math.min(180, v)));
-          const sl = props.querySelector(`[data-joint-slider="${jid}"]`);
-          if (sl) sl.value = Math.round(j.angle);
+          setRel(j, v);
+        });
+      });
+      props.querySelectorAll('[data-joint-zero]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const j = jointOf(btn, 'jointZero');
+          if (!j) return;
+          pushUndo();
+          j.zero = j.angle || 0;
+          renderProps();
+          setStatus('This position is now the joint\'s 0° — travel limits count from here.');
+        });
+      });
+      props.querySelectorAll('[data-joint-min], [data-joint-max]').forEach(inp => {
+        inp.addEventListener('change', () => {
+          const isMin = 'jointMin' in inp.dataset;
+          const j = jointOf(inp, isMin ? 'jointMin' : 'jointMax');
+          let v = parseFloat(inp.value);
+          if (!j || !isFinite(v)) return;
+          pushUndo();
+          if (isMin) j.travelMin = Math.max(-180, Math.min(0, v));
+          else j.travelMax = Math.min(180, Math.max(0, v));
+          // If the joint currently sits outside the new limits, bring it back
+          const rel = relOf(j);
+          const clamped = clampRel(j, rel);
+          if (clamped !== rel) applyJointAngle(j, clamped + (j.zero || 0));
+          renderProps();
+          setDirty(true);
         });
       });
     }
