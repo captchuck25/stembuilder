@@ -7642,6 +7642,12 @@ class Viewer3D {
           this.rebuildBodies();
           this.updateGizmo();
           renderProps();
+          // Red warning while rotating into the ground / another part
+          // (throttled — the parity test is cheap but not free)
+          if (!this._colCheckT || Date.now() - this._colCheckT > 120) {
+            this._colCheckT = Date.now();
+            checkCollisionWarnings(rotateState.ids);
+          }
         }
         return;
       }
@@ -10012,6 +10018,8 @@ function snapshotDoc() {
     grid: JSON.parse(JSON.stringify(doc.grid || {})),
     joints: JSON.parse(JSON.stringify(doc.joints || [])),
     nextJointId: doc.nextJointId || 1,
+    collisionWarnGround: doc.collisionWarnGround !== false,
+    collisionWarnBodies: doc.collisionWarnBodies !== false,
   };
 }
 function applySnapshot(s, opts = {}) {
@@ -10086,6 +10094,8 @@ function applySnapshot(s, opts = {}) {
   // Articulation joints (older saves may not have them).
   doc.joints = Array.isArray(s.joints) ? JSON.parse(JSON.stringify(s.joints)) : [];
   doc.nextJointId = typeof s.nextJointId === 'number' ? s.nextJointId : 1;
+  doc.collisionWarnGround = s.collisionWarnGround !== false;
+  doc.collisionWarnBodies = s.collisionWarnBodies !== false;
   doc.jointPickStage = null;
   doc.jointDraft = null;
   doc.selection = null;
@@ -14740,6 +14750,7 @@ function applyJointAngle(j, newAngle) {
   _applyRigidToBody(B.body, R, A.P, A.P);
   j.angle = newAngle;
   if (viewer) { viewer.rebuildBodies(); viewer.updateJointGizmos(); viewer.updateGizmo(); }
+  checkCollisionWarnings([B.body.id]);
   setDirty(true);
 }
 
@@ -14862,6 +14873,81 @@ function pruneOrphanJoints() {
   const before = doc.joints.length;
   doc.joints = doc.joints.filter(j => ok(j.a) && ok(j.b));
   if (doc.joints.length !== before && viewer) viewer.updateJointGizmos();
+}
+
+// ── Collision warnings — rotating/swinging parts hitting the ground or
+// each other flash RED with a status warning. The grid plane (y=0) acts
+// as the ground. Options doc.collisionWarnGround / doc.collisionWarnBodies
+// (both default ON) live in the Joints panel.
+let _lastCollisionMsg = '';
+// Sampled parity test: pull A's vertices slightly inward (so face-to-face
+// contact — like a jointed arm against its bracket — doesn't count as a
+// crash) and count ray crossings against B. ~90 samples keeps it fast
+// enough to run during a slider drag.
+function _meshesOverlap(meshA, meshB) {
+  const posA = meshA.geometry?.attributes?.position;
+  if (!posA || !posA.count) return false;
+  const bbB = new THREE.Box3().setFromObject(meshB);
+  const centroid = new THREE.Box3().setFromObject(meshA).getCenter(new THREE.Vector3());
+  const step = Math.max(1, Math.floor(posA.count / 90));
+  const v = new THREE.Vector3();
+  const rc = new THREE.Raycaster();
+  const dir = new THREE.Vector3(0.5773, 0.5773, 0.5773);
+  for (let i = 0; i < posA.count; i += step) {
+    v.fromBufferAttribute(posA, i).applyMatrix4(meshA.matrixWorld);
+    const inward = centroid.clone().sub(v);
+    if (inward.lengthSq() > 1e-6) v.addScaledVector(inward.normalize(), 0.3);
+    if (!bbB.containsPoint(v)) continue;
+    rc.set(v, dir);
+    if (rc.intersectObject(meshB, false).length % 2 === 1) return true;
+  }
+  return false;
+}
+function _collisionLabel(b) {
+  return (b.name && b.name.trim()) || (b.type === 'group' ? `Part ${b.id}` : `${b.type} ${b.id}`);
+}
+// Check the given bodies against the ground plane + every other solid;
+// colliding bodies get tinted red (transient — the next rebuild restores
+// the normal material). Returns true when anything is hitting.
+function checkCollisionWarnings(bodyIds) {
+  if (!viewer) return false;
+  const warnGround = doc.collisionWarnGround !== false;
+  const warnBodies = doc.collisionWarnBodies !== false;
+  if (!warnGround && !warnBodies) return false;
+  viewer.scene.updateMatrixWorld(true);
+  const msgs = [];
+  for (const id of bodyIds || []) {
+    const body = doc.bodies.find(b => b.id === id);
+    if (!body?.mesh || body.hidden) continue;
+    let hit = false;
+    if (warnGround) {
+      const bb = new THREE.Box3().setFromObject(body.mesh);
+      if (bb.min.y < -0.05) { hit = true; msgs.push(`${_collisionLabel(body)} is through the ground`); }
+    }
+    if (warnBodies && !hit) {
+      const bbA = new THREE.Box3().setFromObject(body.mesh);
+      for (const other of doc.bodies) {
+        if (other.id === body.id || !other.mesh || other.hidden) continue;
+        if (other.type === 'fastener' || other.type === 'threadShell') continue;
+        if (!bbA.intersectsBox(new THREE.Box3().setFromObject(other.mesh))) continue;
+        if (_meshesOverlap(body.mesh, other.mesh) || _meshesOverlap(other.mesh, body.mesh)) {
+          hit = true;
+          msgs.push(`${_collisionLabel(body)} is hitting ${_collisionLabel(other)}`);
+          break;
+        }
+      }
+    }
+    if (hit && body.mesh.material?.color) body.mesh.material.color.setHex(0xef4444);
+  }
+  const msg = msgs.join(' · ');
+  if (msg) {
+    if (msg !== _lastCollisionMsg) setStatus(`⚠ ${msg} — back it off or adjust the design.`);
+    _lastCollisionMsg = msg;
+  } else if (_lastCollisionMsg) {
+    _lastCollisionMsg = '';
+    setStatus('✓ Clear — no contact.');
+  }
+  return msgs.length > 0;
 }
 
 function copySelection() {
@@ -15628,7 +15714,18 @@ function renderProps() {
       props.innerHTML = `
         <div class="empty" style="margin-bottom:8px">Select a body or use the tools above.</div>
         <h4 style="margin-top:6px">Joints</h4>
-        ${jointRows || '<div class="hint">No joints yet. Draw a <b>Pivot</b> point (⊕) in a face sketch on each of two parts, then click <b>Joint</b> and pick the two pivots.</div>'}`;
+        ${jointRows || '<div class="hint">No joints yet. Draw a <b>Pivot</b> point (⊕) in a face sketch on each of two parts, then click <b>Joint</b> and pick the two pivots.</div>'}
+        <h4 style="margin-top:14px">Warnings</h4>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="warn-ground" style="width:auto;margin:0"${doc.collisionWarnGround !== false ? ' checked' : ''}/>
+          <label for="warn-ground" style="margin:0;cursor:pointer">Flash red when a part goes through the ground</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="warn-bodies" style="width:auto;margin:0"${doc.collisionWarnBodies !== false ? ' checked' : ''}/>
+          <label for="warn-bodies" style="margin:0;cursor:pointer">Flash red when parts hit each other</label>
+        </div>`;
+      $('warn-ground')?.addEventListener('change', (e) => { doc.collisionWarnGround = e.target.checked; setDirty(true); });
+      $('warn-bodies')?.addEventListener('change', (e) => { doc.collisionWarnBodies = e.target.checked; setDirty(true); });
       props.querySelectorAll('[data-del-joint]').forEach(btn => {
         btn.onclick = () => deleteJoint(parseInt(btn.dataset.delJoint, 10));
       });
@@ -15814,9 +15911,14 @@ function renderProps() {
         </button>
       </div>
       <h4 style="margin-top:14px">Rotation (°)</h4>
-      <div class="field"><label>X axis</label><input type="number" data-rk="x" value="${fmt(rot.x)}" step="15"/></div>
-      <div class="field"><label>Y axis</label><input type="number" data-rk="z" value="${fmt(rot.z)}" step="15"/></div>
-      <div class="field"><label>Z axis</label><input type="number" data-rk="y" value="${fmt(rot.y)}" step="15"/></div>`;
+      <div class="field"><label>X axis</label><input type="number" data-rk="x" value="${fmt((rot.x || 0) - ((body.rotZero || {}).x || 0))}" step="15"/></div>
+      <div class="field"><label>Y axis</label><input type="number" data-rk="z" value="${fmt((rot.z || 0) - ((body.rotZero || {}).z || 0))}" step="15"/></div>
+      <div class="field"><label>Z axis</label><input type="number" data-rk="y" value="${fmt((rot.y || 0) - ((body.rotZero || {}).y || 0))}" step="15"/></div>
+      <div class="field"><label></label>
+        <button class="action" id="rot-zero-btn" title="Make the CURRENT tilt the new 0° — rotation numbers count from here" style="font-size:12px;padding:6px 10px">🧭 Set current as 0°</button>
+      </div>
+      ${(body.rotZero && ((body.rotZero.x || 0) || (body.rotZero.y || 0) || (body.rotZero.z || 0)))
+        ? `<div class="hint">Angles count from your saved zero. <a href="#" id="rot-zero-clear">Show true angles</a></div>` : ''}`;
 
     let dimFields = '';
     if (body.type === 'cube') {
@@ -15962,15 +16064,32 @@ function renderProps() {
         const v = parseFloat(inp.value);
         if (!isFinite(v)) return;
         if (inp.dataset.rk) {
-          // Rotation field — store in body.rotation, in degrees (no unit conversion)
+          // Rotation field — displayed relative to the user's zero reference;
+          // stored absolute in body.rotation (degrees, no unit conversion).
           body.rotation = body.rotation || { x: 0, y: 0, z: 0 };
-          body.rotation[inp.dataset.rk] = v;
+          body.rotation[inp.dataset.rk] = v + ((body.rotZero || {})[inp.dataset.rk] || 0);
         } else if (inp.dataset.k) {
           body[inp.dataset.k] = fromUnit(v);
         }
         viewer?.rebuildBodies();
+        if (typeof checkCollisionWarnings === 'function') checkCollisionWarnings([body.id]);
       });
     });
+    const rotZeroBtn = $('rot-zero-btn');
+    if (rotZeroBtn) rotZeroBtn.onclick = () => {
+      pushUndo();
+      body.rotZero = { ...(body.rotation || { x: 0, y: 0, z: 0 }) };
+      renderProps();
+      setStatus('This tilt is now 0° — rotation numbers count from here.');
+    };
+    const rotZeroClear = $('rot-zero-clear');
+    if (rotZeroClear) rotZeroClear.onclick = (ev) => {
+      ev.preventDefault();
+      pushUndo();
+      delete body.rotZero;
+      renderProps();
+      setStatus('Showing true angles again.');
+    };
     // Place-on-face: enter a pick mode where the next 3D face click seats
     // the bolt with its head-bottom face flush against that face,
     // perpendicular to it (shaft pointing INTO the body).
