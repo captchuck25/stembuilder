@@ -7013,9 +7013,23 @@ class Viewer3D {
             else doc.selectedRegions.push(regionId);
           } else {
             doc.selectedRegions = [regionId];
+            // Text: clicking one letter selects the whole word's letters so
+            // extruding raises/cuts the word as one piece.
+            let pickedWord = false;
+            try {
+              const expanded = expandRegionSelectionForText(regionId);
+              if (expanded) { doc.selectedRegions = expanded; pickedWord = true; }
+            } catch (_) {}
             doc.selection = { kind: 'region', id: regionId };
             doc.multiSelectedBodies = [];
             this.updateGizmo();
+            if (pickedWord) {
+              this.updateRegions();
+              this.updateExtrudeGizmo();
+              renderTree(); renderProps();
+              setStatus('Whole word selected — drag the arrow to raise it or push in to engrave');
+              return;
+            }
           }
           this.updateRegions();
           this.updateExtrudeGizmo();
@@ -8866,6 +8880,48 @@ function computeSketchRegions(sketch) {
     });
   }
   return regs;
+}
+
+// If the clicked region is one letter of a parametric text group, return
+// the region ids for EVERY letter-body of that word so the extrude
+// raises/cuts the whole word as one piece. Counter faces (the hole in an
+// O) are skipped — they stay holes via the synthetic-sketch hole pickup.
+// Returns null when the region isn't part of a text group.
+function expandRegionSelectionForText(regionId) {
+  const m = /^s(\d+)-/.exec(regionId || '');
+  if (!m) return null;
+  const sketch = doc.sketches.find(s => s.id === +m[1]);
+  if (!sketch || !sketch.textMeta || !Object.keys(sketch.textMeta).length) return null;
+  const regions = computeSketchRegions(sketch);
+  const clicked = regions.find(r => r.id === regionId);
+  if (!clicked || !clicked.points || clicked.points.length < 3) return null;
+  // Outline-only membership: a face's vertices are sampled from its source
+  // contour, so a few point-to-outline distance checks identify the owner.
+  // (entityHit would also match interiors — a counter face sits inside its
+  // outer contour and would false-positive.)
+  const onOutline = (ent, region) => {
+    if (!ent || ent.type !== 'polyline' || !region.points) return false;
+    const segs = entityToSegments(ent);
+    if (!segs.length) return false;
+    const probes = [region.points[0],
+                    region.points[Math.floor(region.points.length / 3)],
+                    region.points[Math.floor(2 * region.points.length / 3)]];
+    return probes.every(p => p && segs.some(s => pointSegDist(p.x, p.y, s.a.x, s.a.y, s.b.x, s.b.y) < 0.3));
+  };
+  for (const gid of Object.keys(sketch.textMeta)) {
+    const members = sketch.entities.filter(e => e.groupId === gid && e.type === 'polyline');
+    if (!members.length) continue;
+    // Outer contours only — counters are nested inside another member.
+    const outers = members.filter(e => !members.some(f => f !== e && entityFullyInside(e, f)));
+    if (!outers.some(o => onOutline(o, clicked))) continue;
+    const ids = [];
+    for (const o of outers) {
+      const reg = regions.find(r => onOutline(o, r));
+      if (reg) ids.push(reg.id);
+    }
+    return ids.length > 1 ? ids : null;
+  }
+  return null;
 }
 
 // Build a THREE.Shape from a region (used both for picker overlay and extrude geometry).
