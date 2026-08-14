@@ -14499,14 +14499,76 @@ function performBooleanCut(targetId, toolId) {
 // One hinge, no chains — this is an introduction to CAD, not a kinematics
 // package.
 
+// Which part does this sketch sit on? Uses sourceBodyId when it's valid;
+// otherwise HEALS the link geometrically — original drawing sketches (made
+// with "+ Sketch", then extruded) never got a sourceBodyId, yet their plane
+// lies exactly on the extruded part's face. Sample points on the plane are
+// raycast against every body; a face coplanar with the sketch (and facing
+// the same way) claims it, and the repaired id is stored.
+function _sketchAttachedBody(sk) {
+  if (!sk || !sk.plane || !Array.isArray(sk.plane.origin)) return null;
+  if (sk.sourceBodyId != null) {
+    const b = doc.bodies.find(x => x.id === sk.sourceBodyId);
+    if (b) return b;
+  }
+  if (typeof viewer === 'undefined' || !viewer) return null;
+  const n = new THREE.Vector3(...sk.plane.n).normalize();
+  const planeM = makePlaneMatrix(sk.plane);
+  // Sample points: plane origin, each pivot mark plus a ring around it
+  // (marks often sit at hole centers where a ray finds nothing), and a few
+  // entity bbox centers.
+  const samples = [new THREE.Vector3(...sk.plane.origin)];
+  const toWorld = (x, y) => new THREE.Vector3(x, y, 0).applyMatrix4(planeM);
+  for (const e of (sk.entities || [])) {
+    if (e.type === 'pivotMark' || e.type === 'threadMark') {
+      samples.push(toWorld(e.cx, e.cy));
+      for (const [ox, oy] of [[7, 0], [-7, 0], [0, 7], [0, -7]]) samples.push(toWorld(e.cx + ox, e.cy + oy));
+    }
+  }
+  let count = 0;
+  for (const e of (sk.entities || [])) {
+    if (count >= 5) break;
+    const bb = entityBBox(e);
+    if (!bb) continue;
+    samples.push(toWorld((bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2));
+    count++;
+  }
+  viewer.scene.updateMatrixWorld(true);
+  let best = null;
+  for (const body of doc.bodies) {
+    if (!body.mesh || body.hidden) continue;
+    if (body.type === 'fastener' || body.type === 'threadShell') continue;
+    for (const p of samples) {
+      const rc = new THREE.Raycaster(p.clone().add(n.clone().multiplyScalar(1)), n.clone().negate(), 0, 2.5);
+      const hits = rc.intersectObject(body.mesh, false);
+      if (!hits.length) continue;
+      const hit = hits[0];
+      const d = Math.abs(hit.distance - 1); // how far off the sketch plane
+      if (d > 0.6) continue;
+      // The face must LOOK the same way as the sketch (rules out the
+      // coplanar face of a part assembled face-to-face against this one).
+      if (hit.face) {
+        const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+        if (wn.dot(n) < 0.5) continue;
+      }
+      if (!best || d < best.d) best = { body, d };
+    }
+  }
+  if (best) {
+    sk.sourceBodyId = best.body.id; // persist the healed link
+    return best.body;
+  }
+  return null;
+}
+
 // Resolve a joint side {sketchId, markId} → live world pivot + axis + body.
-// The bodyId is read from the sketch's CURRENT sourceBodyId so grouping /
-// re-pointing keeps the joint alive.
+// The body is resolved through _sketchAttachedBody (valid link or healed)
+// so grouping / re-pointing / legacy drawing-sketches all keep working.
 function _resolveJointAnchor(ref) {
   const sk = doc.sketches.find(s => s.id === ref.sketchId);
   const mark = sk?.entities?.find(e => e.id === ref.markId && e.type === 'pivotMark');
-  if (!sk || !mark || sk.sourceBodyId == null) return null;
-  const body = doc.bodies.find(b => b.id === sk.sourceBodyId);
+  if (!sk || !mark) return null;
+  const body = _sketchAttachedBody(sk);
   if (!body) return null;
   const planeM = makePlaneMatrix(sk.plane);
   const P = new THREE.Vector3(mark.cx, mark.cy, 0).applyMatrix4(planeM);
@@ -14545,6 +14607,11 @@ function assembleJoint(refA, refB) {
   const A = _resolveJointAnchor(refA);
   const B = _resolveJointAnchor(refB);
   if (!A || !B) return false;
+  // Resolving may have just HEALED a sketch→part link (drawing sketches
+  // have none until now). Establish motion anchors at the CURRENT pose
+  // before transforming, or the first assembly move leaves the newly
+  // linked sketch (and its pivot) behind.
+  syncSketchAnchorsToBodies();
   pushUndo();
   const q = new THREE.Quaternion().setFromUnitVectors(B.n, A.n.clone().negate());
   const R = new THREE.Matrix4().makeRotationFromQuaternion(q);
@@ -14599,12 +14666,13 @@ function handleJointPivotPick(sketchId, markId) {
 }
 
 function startJointCreation() {
-  // Need pivots on at least two different parts
+  // Need pivots on at least two different parts (links are healed on the
+  // fly — pivots in original drawing sketches count too)
   const pivotBodies = new Set();
   for (const sk of doc.sketches) {
-    if (sk.sourceBodyId == null) continue;
-    if (!doc.bodies.some(b => b.id === sk.sourceBodyId)) continue;
-    if (sk.entities?.some(e => e.type === 'pivotMark')) pivotBodies.add(sk.sourceBodyId);
+    if (!sk.entities?.some(e => e.type === 'pivotMark')) continue;
+    const body = _sketchAttachedBody(sk);
+    if (body) pivotBodies.add(body.id);
   }
   if (pivotBodies.size < 2) {
     showHint('Each part needs a pivot point first: open a face sketch on the part and use the Pivot tool (⊕). Do that on both parts, then try Joint again.');
@@ -14683,9 +14751,12 @@ function pruneOrphanJoints() {
   const ok = (r) => {
     if (!r) return false;
     const sk = doc.sketches.find(s => s.id === r.sketchId);
-    return !!(sk && sk.sourceBodyId != null &&
-      doc.bodies.some(b => b.id === sk.sourceBodyId) &&
-      sk.entities?.some(e => e.id === r.markId && e.type === 'pivotMark'));
+    if (!sk || !sk.entities?.some(e => e.id === r.markId && e.type === 'pivotMark')) return false;
+    // Keep the joint as long as the sketch still resolves to SOME part —
+    // healing covers drawing-sketches and regrouped bodies. Only prune
+    // when the pivot or its part is genuinely gone.
+    if (sk.sourceBodyId != null && doc.bodies.some(b => b.id === sk.sourceBodyId)) return true;
+    return !!_sketchAttachedBody(sk);
   };
   const before = doc.joints.length;
   doc.joints = doc.joints.filter(j => ok(j.a) && ok(j.b));
