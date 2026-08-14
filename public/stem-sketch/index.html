@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1157,7 +1157,7 @@
         <button class="tool" data-tool="circle" title="Circle (C)"><svg class="ico"><use href="#i-circle"/></svg><span class="tool-label">Circle</span></button>
         <button class="tool" data-tool="ellipse" title="Ellipse — click and drag to draw an oval. Hold Shift for a circle."><svg class="ico"><use href="#i-ellipse"/></svg><span class="tool-label">Ellipse</span></button>
         <button class="tool" data-tool="text" title="Text — click where the text should start, then type it. Letters become real shapes you can extrude or engrave."><svg class="ico"><use href="#i-text"/></svg><span class="tool-label">Text</span></button>
-        <button class="tool" data-tool="line" title="Line / Polyline (L)"><svg class="ico"><use href="#i-line"/></svg><span class="tool-label">Line</span></button>
+        <button class="tool" data-tool="line" title="Line (L) — click point by point to draw connected lines"><svg class="ico"><use href="#i-line"/></svg><span class="tool-label">Line</span></button>
         <button class="tool" data-tool="arc" title="Arc (A) — 3-point arc"><svg class="ico"><use href="#i-arc"/></svg><span class="tool-label">Arc</span></button>
         <button class="tool" data-tool="construction" title="Construction line (G) — dashed reference, not exported"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Constr</span></button>
         <button class="tool" data-action="toggle-construction-vis" id="toggle-construction-vis" title="Show/hide all construction lines (visibility only — they stay in the sketch)"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Show</span></button>
@@ -1181,14 +1181,14 @@
         <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)"><svg class="ico"><use href="#i-copy"/></svg><span class="tool-label">Copy</span></button>
         <button class="tool" data-action="paste" title="Paste (Ctrl+V)"><svg class="ico"><use href="#i-paste"/></svg><span class="tool-label">Paste</span></button>
         <button class="tool" data-action="duplicate" title="Duplicate (Ctrl+D) — copies the selection in place, on top of the original"><svg class="ico"><use href="#i-duplicate"/></svg><span class="tool-label">Duplicate</span></button>
-        <button class="tool" data-action="fillet-2d" title="Fillet — round a polyline corner"><svg class="ico"><use href="#i-fillet"/></svg><span class="tool-label">Fillet</span></button>
+        <button class="tool" data-action="fillet-2d" title="Fillet — round off a corner"><svg class="ico"><use href="#i-fillet"/></svg><span class="tool-label">Fillet</span></button>
         <button class="tool" data-action="scale-2d" title="Scale — resize selected shape(s) by a typed factor"><svg class="ico"><use href="#i-scale"/></svg><span class="tool-label">Scale</span></button>
         <button class="tool" data-action="array-2d" title="Array along a line"><svg class="ico"><use href="#i-array"/></svg><span class="tool-label">Array</span></button>
         <button class="tool" data-action="offset-2d" title="Offset — duplicate the selected shape by a typed distance"><svg class="ico"><use href="#i-offset"/></svg><span class="tool-label">Offset</span></button>
         <button class="tool" data-action="group" title="Group (Ctrl+G) — Shift-click to add shapes to selection first"><svg class="ico"><use href="#i-group"/></svg><span class="tool-label">Group</span></button>
         <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)"><svg class="ico"><use href="#i-ungroup"/></svg><span class="tool-label">Ungroup</span></button>
         <button class="tool" data-action="trim" title="Trim — hover a shape to preview the piece that will be removed in red, then click to remove it"><svg class="ico"><use href="#i-trim"/></svg><span class="tool-label">Trim</span></button>
-        <button class="tool" data-action="explode-2d" title="Explode — break a rectangle or closed polyline into individual line segments so each edge can be selected, offset, or moved on its own"><svg class="ico"><use href="#i-explode"/></svg><span class="tool-label">Explode</span></button>
+        <button class="tool" data-action="explode-2d" title="Explode — break a rectangle or closed shape into separate lines so each edge can be selected, offset, or moved on its own"><svg class="ico"><use href="#i-explode"/></svg><span class="tool-label">Explode</span></button>
         <button class="tool" data-tool="extend" title="Extend (X) — click a line near the end you want to extend; it grows along its angle until it hits another line or the workplane edge"><svg class="ico"><use href="#i-extend"/></svg><span class="tool-label">Extend</span></button>
         <span class="tool-sep"></span>
         <button class="tool node-btn" id="tb-node-add"   title="Insert node — select a node first, then click to insert a new node after it"><svg class="ico"><use href="#i-node-add"/></svg><span class="tool-label">Add Node</span></button>
@@ -1243,7 +1243,7 @@
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
              2D BEFORE Extrude / Revolve. See action 'fillet-3d' (still wired) if you
              want to reach it from the console. -->
-        <button class="tool" data-action="revolve" title="Revolve / Lathe — spin a polyline profile around the sketch's Y axis"><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
+        <button class="tool" data-action="revolve" title="Revolve — spin a drawn profile around the sketch's Y axis, like a lathe"><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
       </div>
     </div>
   </header>
@@ -1550,7 +1550,7 @@ class SketchEngine {
       circle: 'Click the center, drag to set radius.',
       ellipse: 'Click and drag to draw an oval. Hold <b>Shift</b> for a circle. Type W (Tab H) + <b>Enter</b> for an exact size.',
       text: 'Click where the text should start. Letters become real shapes — extrude them for raised text, or set them Negative and extrude to engrave.',
-      line: 'Click to drop points. Auto-snaps to <b>horizontal</b> / <b>vertical</b>. <b>Shift</b> forces ortho. Type a length and press <b>Enter</b> for an exact distance. <b>Enter</b> finishes, <b>Esc</b> cancels.',
+      line: 'Click to drop points. Auto-snaps to <b>horizontal</b> / <b>vertical</b>. <b>Shift</b> keeps the line perfectly straight. Type a length and press <b>Enter</b> for an exact distance. <b>Enter</b> finishes, <b>Esc</b> cancels.',
       arc: 'Click a start point, click an end point, then move the mouse to shape the arc and click to finish.',
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
       eraser: 'The shape under your cursor turns red — click to delete it (works on dimensions too). Press <b>V</b> to return to Select.',
@@ -1847,7 +1847,7 @@ class SketchEngine {
       // strokes, which is what they'd expect from a 2D editor.
       doc.sketch.entities.push(ent);
       doc.selection = { kind: 'sketch', id: ent.id };
-      setStatus(ent.closed ? 'Closed polyline added' : 'Polyline added');
+      setStatus(ent.closed ? 'Closed shape added' : 'Line added');
       renderTree();
       renderProps();
     }
@@ -13661,7 +13661,7 @@ function revolveCurrentSketch() {
   if (!sketch) return;
   const profile = sketch.entities.find(e => e.type === 'polyline' && !e.construction && e.points?.length >= 2);
   if (!profile) {
-    showHint('Draw a polyline profile first — a series of connected lines on one side of the sketch\'s Y axis.');
+    showHint('Draw a profile first — connected lines on one side of the sketch\'s Y axis.');
     return;
   }
   // Validate: all profile points should have x >= 0 (revolve axis is sketch X = 0)
@@ -13780,7 +13780,7 @@ function groupSelected(skipUndo) {
   if (doc.mode === '3d') {
     // 3D Group = boolean: positives unioned, negatives subtracted.
     // Children are stored on the group so Ungroup is reversible.
-    if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
+    if (typeof CSG === 'undefined') { showHint('The 3D cutting engine did not load — refresh the page and try again.'); return; }
     if (!doc.multiSelectedBodies || doc.multiSelectedBodies.length < 2) {
       showHint('Shift-click 2+ bodies first, then group.');
       return;
@@ -13897,7 +13897,7 @@ function groupSelected(skipUndo) {
     doc.multiSelectedSketch = [newEnt.id];
     sketchEng.render();
     renderProps();
-    setStatus(`Merged ${selectedEnts.length} shapes into one polyline${merged.closed ? ' (closed)' : ''}`);
+    setStatus(`Merged ${selectedEnts.length} shapes into one${merged.closed ? ' closed shape' : ''}`);
     return;
   }
   const newGroupId = 'g' + Date.now() + '_' + Math.floor(Math.random() * 1000);
@@ -14131,7 +14131,7 @@ function openMirror3DDialog() {
 
 function combineBodies() {
   if (typeof CSG === 'undefined') {
-    showHint('CSG library failed to load — keep csg.bundle.js next to mini-cad.html.');
+    showHint('The 3D cutting engine did not load — refresh the page and try again.');
     return;
   }
   if (!doc.bodies.length) { showHint('No bodies to combine.'); return; }
@@ -14171,7 +14171,7 @@ function combineBodies() {
 // by a single 'combined' body. Op flags (positive/negative) are ignored — the
 // cut direction is explicit from the pick order.
 function startBooleanCut() {
-  if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
+  if (typeof CSG === 'undefined') { showHint('The 3D cutting engine did not load — refresh the page and try again.'); return; }
   if (doc.bodies.length < 2) { showHint('Need at least two bodies. Add another, then try Cut.'); return; }
   if (doc.mode !== '3d') setMode('3d');
   doc.cutMode = { stage: 'target', targetId: null };
@@ -14577,7 +14577,7 @@ function explodeEntityToSegments(ent) {
 function explodeSelected() {
   const ids = (doc.multiSelectedSketch?.length ? doc.multiSelectedSketch.slice()
               : (doc.selection?.kind === 'sketch' ? [doc.selection.id] : []));
-  if (!ids.length) { showHint('Select a rectangle or closed polyline first, then click Explode.'); return; }
+  if (!ids.length) { showHint('Select a rectangle or closed shape first, then click Explode.'); return; }
   const targets = ids.map(id => doc.sketch.entities.find(e => e.id === id)).filter(Boolean);
   const explodable = targets.filter(e => e.type === 'rect' || (e.type === 'polyline' && (e.closed || e.points.length > 2)));
   if (!explodable.length) {
@@ -15181,15 +15181,15 @@ function renderProps() {
         len += Math.hypot(a.x - b.x, a.y - b.y);
       }
       props.innerHTML = `
-        <h4>${ent.closed ? 'Closed polyline' : 'Polyline'}</h4>
-        <div class="field"><label>Vertices</label><div>${ent.points.length}</div></div>
+        <h4>${ent.closed ? 'Closed shape' : 'Line'}</h4>
+        <div class="field"><label>Points</label><div>${ent.points.length}</div></div>
         <div class="field"><label>Length</label><div>${fmtUL(len)}</div></div>
         ${ent.closed ? `<div class="field"><label>Area</label><div>${fmt(doc.units === 'in' ? entityArea(ent) / (MM_PER_IN * MM_PER_IN) : entityArea(ent))} ${u}²</div></div>` : ''}
         <div class="field"><label>Type</label><div class="type-toggle">
           <button type="button" data-type="regular"${!ent.construction ? ' class="active"' : ''}>Regular</button>
           <button type="button" data-type="construction"${ent.construction ? ' class="active"' : ''}>Construction</button>
         </div></div>
-        ${!ent.closed && !ent.construction ? `<div class="hint">Open polyline — close it to make it extrudable.</div>` : ''}
+        ${!ent.closed && !ent.construction ? `<div class="hint">Open shape — close the loop to make it something you can extrude.</div>` : ''}
         <button class="action" id="del-ent" style="margin-top:10px">Delete shape</button>`;
     }
     props.querySelectorAll('input[type="number"]').forEach(inp => {
@@ -15867,7 +15867,7 @@ function enterFilletPickMode() {
   const ents = (doc.sketch?.entities || []).filter(e =>
     !e.construction && (e.type === 'polyline' || e.type === 'rect'));
   if (!ents.length) {
-    showHint('Draw a rectangle or polyline first — Fillet rounds / chamfers its corners.');
+    showHint('Draw a rectangle or shape first — Fillet rounds off its corners.');
     return;
   }
   doc.filletPickMode = true;
@@ -16779,7 +16779,7 @@ function applyBevelToBody(body, edge, kind, style, size) {
 // the end keep this snappy and undo-friendly (single Ctrl+Z reverts the
 // whole batch).
 async function applyBevelsBatch(selections, style, size) {
-  if (typeof CSG === 'undefined') { showHint('CSG library failed to load.'); return; }
+  if (typeof CSG === 'undefined') { showHint('The 3D cutting engine did not load — refresh the page and try again.'); return; }
   // Stash the undo snapshot BEFORE any work so we can roll back if nothing
   // succeeds — pushing an undo entry for a no-op bevel was creating a
   // confusing "nothing happened, but undo blanks my body" loop where the
@@ -16849,7 +16849,7 @@ async function applyBevelsBatch(selections, style, size) {
     } else {
       // Total failure — no doc state changed. Don't pollute the undo stack
       // and surface a clear message so the user knows nothing happened.
-      setStatus(`Fillet did nothing — CSG couldn't carve ${selections.length === 1 ? 'that edge' : 'any of the picked edges'}. Try a smaller size or a different edge. (See console for the per-edge reasons.)`);
+      setStatus(`Fillet did nothing — couldn't carve ${selections.length === 1 ? 'that edge' : 'any of the picked edges'}. Try a smaller size or a different edge. (See console for the per-edge reasons.)`);
       showHint('Fillet failed — try a smaller bevel size or a different edge. Check the browser console for details.');
     }
   } catch (err) {
@@ -17859,13 +17859,13 @@ function autoAddDimensions() {
 
 // ---------- Node editing actions ----------
 function nodeAddAction() {
-  if (!sketchEng?.selectedNode) { setStatus('Select a node first: switch to Select tool, click the polyline, then click a vertex square'); return; }
+  if (!sketchEng?.selectedNode) { setStatus('Pick a point first: switch to Select tool, click the shape, then click one of its corner squares'); return; }
   const { entId, pointIdx } = sketchEng.selectedNode;
   const ent = doc.sketch.entities.find(e => e.id === entId);
   if (!ent || ent.type !== 'polyline') return;
   const n = ent.points.length;
   const nextIdx = ent.closed ? (pointIdx + 1) % n : (pointIdx < n - 1 ? pointIdx + 1 : -1);
-  if (nextIdx < 0) { showHint('Cannot add a node after the last point of an open polyline.'); return; }
+  if (nextIdx < 0) { showHint('Cannot add a point after the end of an open line.'); return; }
   const p0 = ent.points[pointIdx], p1 = ent.points[nextIdx];
   pushUndo();
   ent.points.splice(pointIdx + 1, 0, { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 });
@@ -17876,7 +17876,7 @@ function nodeAddAction() {
 }
 
 function nodeDeleteAction() {
-  if (!sketchEng?.selectedNode) { setStatus('Select a node first: switch to Select tool, click the polyline, then click a vertex square'); return; }
+  if (!sketchEng?.selectedNode) { setStatus('Pick a point first: switch to Select tool, click the shape, then click one of its corner squares'); return; }
   const { entId, pointIdx } = sketchEng.selectedNode;
   const ent = doc.sketch.entities.find(e => e.id === entId);
   if (!ent || ent.type !== 'polyline') return;
@@ -17912,7 +17912,7 @@ function nodeRmOutAction() {
 }
 
 function nodeCurveAction() {
-  if (!sketchEng?.selectedNode) { setStatus('Select a node first: switch to Select tool, click the polyline, then click a vertex square'); return; }
+  if (!sketchEng?.selectedNode) { setStatus('Pick a point first: switch to Select tool, click the shape, then click one of its corner squares'); return; }
   const { entId, pointIdx } = sketchEng.selectedNode;
   const ent = doc.sketch.entities.find(e => e.id === entId);
   if (!ent || ent.type !== 'polyline') return;
