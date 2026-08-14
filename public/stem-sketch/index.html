@@ -9570,11 +9570,24 @@ function computeSketchRegions(sketch) {
       const body = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(sketch) : null;
       if (body) {
         outlineSegs = [];
+        // The part's OWN face edges (in-plane) = the sketch perimeter…
         for (const s of projectBodiesOntoPlane(sketch.plane, body.id)) {
           if (s._hidden) continue;
-          if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue; // in-plane face edges only
+          if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
           if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
           outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
+        }
+        // …plus the visible silhouettes of OTHER parts crossing this face:
+        // their projected outline is the interference boundary a trim line
+        // wants to close against (cut the arm where the bracket overlaps).
+        for (const other of doc.bodies) {
+          if (other.id === body.id || other.hidden || !other.mesh) continue;
+          if (other.type === 'fastener' || other.type === 'threadShell') continue;
+          for (const s of projectBodiesOntoPlane(sketch.plane, other.id)) {
+            if (s._hidden) continue;
+            if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
+            outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
+          }
         }
       }
     } catch (_) { outlineSegs = null; }
@@ -9596,6 +9609,35 @@ function computeSketchRegions(sketch) {
       points: f.points,
       area: f.area,
     });
+  }
+  // Classify: regions whose boundary runs along the projected OUTLINE (not
+  // just drawn shapes) are snapshots of the part's current pose. Extrudes
+  // made from them must NOT auto-rebuild when the sketch is edited later —
+  // the outline has changed by then (the first cut moved it!) and the
+  // centroid re-match grabs garbage, shredding the part.
+  if (outlineSegs && outlineSegs.length) {
+    const entSegs = [];
+    for (const e of candidates) for (const s of entityToSegments(e)) entSegs.push(s);
+    const distTo = (p, list) => {
+      let m = Infinity;
+      for (const s of list) {
+        m = Math.min(m, pointSegDist(p.x, p.y, s.a.x, s.a.y, s.b.x, s.b.y));
+        if (m < 0.15) break;
+      }
+      return m;
+    };
+    for (const r of regs) {
+      const pts = r.points || [];
+      if (pts.length < 3) continue;
+      let outlineHits = 0, checked = 0;
+      const step = Math.max(1, Math.floor(pts.length / 24));
+      for (let i = 0; i < pts.length; i += step) {
+        checked++;
+        const p = pts[i];
+        if (distTo(p, entSegs) > 0.3 && distTo(p, outlineSegs) < 0.3) outlineHits++;
+      }
+      if (outlineHits > Math.max(1, checked * 0.2)) r._usedOutline = true;
+    }
   }
   return regs;
 }
@@ -9801,9 +9843,17 @@ function rebuildExtrudesForSketch(sketchId) {
     }
   }
   if (!dependents.length) return;
+  // The rebuild below mutates cut geometry — snapshot first so a bad
+  // re-match is never a one-way door.
+  pushUndo();
   const newRegions = computeSketchRegions(sketch);
   const groupsToRebuild = new Set();
   for (const { body, parentGroup } of dependents) {
+    // Outline-derived cuts are pose snapshots (trim-by-lines against the
+    // part's outline at that moment). The outline has since moved — the cut
+    // itself moved it — so re-matching would grab garbage and shred the
+    // part. They stay exactly as cut.
+    if (body.outlineDerived) continue;
     if (body.regionCentroid) {
       if (!newRegions.length) continue;
       let bestRegion = null, bestDist = Infinity;
@@ -9813,7 +9863,9 @@ function rebuildExtrudesForSketch(sketchId) {
         const d = Math.hypot(c.x - body.regionCentroid.x, c.y - body.regionCentroid.y);
         if (d < bestDist) { bestDist = d; bestRegion = r; }
       }
-      if (bestRegion) {
+      // A match miles away is NOT the same region — leave the body alone
+      // rather than rebuilding it into something unrecognizable.
+      if (bestRegion && bestDist <= 25 && !bestRegion._usedOutline) {
         body.sketch = regionToSyntheticSketch(bestRegion, sketch);
         body.regionCentroid = regionCentroidOf(bestRegion);
         if (parentGroup) groupsToRebuild.add(parentGroup);
@@ -10864,6 +10916,8 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
       // back to 3D. Centroid match within ~5mm finds the updated region.
       sourceSketchId: sketch.id,
       regionCentroid: regionCentroidOf(region),
+      // Outline-derived regions are pose snapshots — frozen from rebuild.
+      ...(region._usedOutline ? { outlineDerived: true } : {}),
     };
     doc.bodies.push(body);
     newBodyIds.push(body.id);
@@ -11258,6 +11312,8 @@ function extrudeCurrentSketch() {
             // rebuild this body on 2D→3D switch.
             sourceSketchId: job.sketch.id,
             regionCentroid: regionCentroidOf(job.region),
+            // Outline-derived regions are pose snapshots — frozen from rebuild.
+            ...(job.region._usedOutline ? { outlineDerived: true } : {}),
           };
           doc.bodies.push(body);
           lastBodyId = body.id;
