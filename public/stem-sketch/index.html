@@ -2289,6 +2289,62 @@ class SketchEngine {
       }
     }
 
+    // Projected body-outline lines (the technical view) are traceable:
+    // snap along them, to their real corners, and to CROSSINGS — including
+    // where another part's outline crosses this one, which is exactly the
+    // interference boundary a student wants to design against.
+    const pSegs = this._projSegs || [];
+    if (pSegs.length) {
+      const near = [];
+      for (const s of pSegs) {
+        if (wx < Math.min(s.p1.x, s.p2.x) - endpointTolMm || wx > Math.max(s.p1.x, s.p2.x) + endpointTolMm ||
+            wy < Math.min(s.p1.y, s.p2.y) - endpointTolMm || wy > Math.max(s.p1.y, s.p2.y) + endpointTolMm) continue;
+        near.push(s);
+        if (near.length > 24) break;
+      }
+      for (const s of near) {
+        const dx = s.p2.x - s.p1.x, dy = s.p2.y - s.p1.y;
+        const L2 = dx * dx + dy * dy;
+        if (L2 < 1e-6) continue;
+        const t = clamp(((wx - s.p1.x) * dx + (wy - s.p1.y) * dy) / L2, 0, 1);
+        const cx = s.p1.x + t * dx, cy = s.p1.y + t * dy;
+        const d = Math.hypot(wx - cx, wy - cy);
+        // Along-the-line snap sits just above grid so tracing wins, while
+        // corners / crossings still dominate.
+        if (d < tolMm) candidates.push({ x: cx, y: cy, kind: 'edge', strength: 1.15 - 0.4 * (d / tolMm) });
+        if (L2 >= 4) { // real feature corners only — skip curve tessellation chords
+          for (const p of [s.p1, s.p2]) {
+            const de = Math.hypot(wx - p.x, wy - p.y);
+            if (de < endpointTolMm) candidates.push({ x: p.x, y: p.y, kind: 'endpoint', strength: 1.45 - 0.9 * (de / endpointTolMm) });
+          }
+        }
+      }
+      if (near.length) {
+        // Crossings: outline × outline (interference!) + outline × drawn shapes
+        const pairs = [];
+        for (let i = 0; i < near.length; i++) {
+          for (let k = i + 1; k < near.length; k++) pairs.push([near[i], near[k]]);
+        }
+        for (const ent of doc.sketch.entities) {
+          if (ent.id === ignoreId || ent.type === 'dimension' || ent.type === 'threadMark' || ent.type === 'pivotMark') continue;
+          const bb = entityBBox(ent);
+          if (!bb || wx < bb.minX - endpointTolMm || wx > bb.maxX + endpointTolMm ||
+              wy < bb.minY - endpointTolMm || wy > bb.maxY + endpointTolMm) continue;
+          for (const es of (entityToSegments(ent) || [])) {
+            for (const s of near) pairs.push([s, { p1: es.a, p2: es.b }]);
+          }
+        }
+        let checked = 0;
+        for (const [sa, sb] of pairs) {
+          if (checked++ > 500) break;
+          const hit = segmentIntersection(sa.p1, sa.p2, sb.p1, sb.p2);
+          if (!hit) continue;
+          const di = Math.hypot(wx - hit.x, wy - hit.y);
+          if (di < endpointTolMm) candidates.push({ x: hit.x, y: hit.y, kind: 'intersection', strength: 1.5 - 1.0 * (di / endpointTolMm) });
+        }
+      }
+    }
+
     // Snap to entity endpoints + edges. Computed BEFORE grid so we can prefer
     // them — endpoint strength dominates the grid candidate (which is constant
     // and weak), so the cursor still locks to a real geometric feature when
@@ -3834,6 +3890,10 @@ class SketchEngine {
     // with only what the user actually drew in it.
     if (doc.bodies.length && doc.sketch?.plane && doc.sketch.sourceBodyId) {
       const segs = projectBodiesOntoPlane(doc.sketch.plane);
+      // Cache the visible outline segments for the snap engine — students
+      // trace these lines (and their crossings = interference boundaries)
+      // to build tight-tolerance profiles.
+      this._projSegs = segs.filter(s => !s._hidden);
       // Edges with both endpoints near z=0 lie ON the sketch plane → highlight
       const onPlaneTol = 0.5; // mm
       for (const seg of segs) {
@@ -3847,6 +3907,10 @@ class SketchEngine {
         else if (seg._vis) cls.push('visible-line'); // classified visible → solid
         svg += `<line class="${cls.join(' ')}" x1="${sx1}" y1="${sy1}" x2="${sx2}" y2="${sy2}"/>`;
       }
+    }
+
+    if (!(doc.bodies.length && doc.sketch?.plane && doc.sketch.sourceBodyId)) {
+      this._projSegs = [];
     }
 
     // Fillet pick mode — draw a ring around every selectable corner so the
@@ -14754,6 +14818,46 @@ function applyJointAngle(j, newAngle) {
   setDirty(true);
 }
 
+// ── Play articulation: sweep a joint back and forth through its travel
+// range, live (collision warnings run every frame — the red flash shows
+// exactly where the design binds). Toggled per joint; Esc stops.
+let _jointPlay = null; // { jointId, timer, dir }
+function stopJointPlay() {
+  if (_jointPlay) {
+    clearInterval(_jointPlay.timer);
+    _jointPlay = null;
+    document.querySelectorAll('[data-joint-play]').forEach(b => { b.textContent = '▶ Play'; });
+  }
+}
+function toggleJointPlay(j) {
+  if (_jointPlay && _jointPlay.jointId === j.id) {
+    stopJointPlay();
+    setStatus('Articulation stopped.');
+    return;
+  }
+  stopJointPlay();
+  const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
+  const tMax = (typeof j.travelMax === 'number') ? j.travelMax : 180;
+  if (tMax - tMin < 2) { showHint('Set a travel range first (the two ° fields).'); return; }
+  pushUndo();
+  const state = { jointId: j.id, dir: 1 };
+  state.timer = setInterval(() => {
+    const jj = doc.joints.find(x => x.id === state.jointId);
+    if (!jj || doc.mode !== '3d') { stopJointPlay(); return; }
+    let rel = (jj.angle || 0) - (jj.zero || 0) + state.dir * 2.5;
+    if (rel >= tMax) { rel = tMax; state.dir = -1; }
+    if (rel <= tMin) { rel = tMin; state.dir = 1; }
+    applyJointAngle(jj, rel + (jj.zero || 0));
+    const sl = document.querySelector(`[data-joint-slider="${jj.id}"]`);
+    const num = document.querySelector(`[data-joint-num="${jj.id}"]`);
+    const shown = Math.round((jj.angle || 0) - (jj.zero || 0));
+    if (sl) sl.value = shown;
+    if (num) num.value = shown;
+  }, 33);
+  _jointPlay = state;
+  setStatus('Playing articulation — ⏸ Stop or Esc ends it. Red flash = it hit something.');
+}
+
 function handleJointPivotPick(sketchId, markId) {
   const ref = { sketchId, markId };
   const anchor = _resolveJointAnchor(ref);
@@ -15719,6 +15823,7 @@ function renderProps() {
             <input type="number" data-joint-min="${j.id}" value="${tMin}" step="5" max="0" style="width:54px;font-size:11px"/>°
             <span>to</span>
             <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:54px;font-size:11px"/>°
+            <button class="action" data-joint-play="${j.id}" title="Swing back and forth through the travel range — red flash shows where it binds" style="padding:2px 8px;font-size:11px">${(_jointPlay && _jointPlay.jointId === j.id) ? '⏸ Stop' : '▶ Play'}</button>
           </div>
         </div>`;
       }).join('');
@@ -15771,6 +15876,14 @@ function renderProps() {
           if (!j || !isFinite(v)) return;
           pushUndo();
           setRel(j, v);
+        });
+      });
+      props.querySelectorAll('[data-joint-play]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const j = jointOf(btn, 'jointPlay');
+          if (!j) return;
+          toggleJointPlay(j);
+          btn.textContent = (_jointPlay && _jointPlay.jointId === j.id) ? '⏸ Stop' : '▶ Play';
         });
       });
       props.querySelectorAll('[data-joint-zero]').forEach(btn => {
@@ -19045,6 +19158,19 @@ function init() {
     if (e.key === 'Enter' && doc.filletPickMode && doc.filletSelectedCorners.length) {
       e.preventDefault();
       openFilletDialog();
+      return;
+    }
+    // Esc stops a playing articulation and drops the Orbit/Pan toggles
+    // back to plain select.
+    if (e.key === 'Escape' && typeof _jointPlay !== 'undefined' && _jointPlay) {
+      stopJointPlay();
+      setStatus('Articulation stopped.');
+      return;
+    }
+    if (e.key === 'Escape' && (doc.orbitMode || doc.panMode)) {
+      if (doc.orbitMode && typeof toggleOrbitMode === 'function') toggleOrbitMode();
+      if (doc.panMode && typeof togglePanMode === 'function') togglePanMode();
+      setStatus('Back to select — orbit/pan off.');
       return;
     }
     if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode || doc.filletPickMode)) {
