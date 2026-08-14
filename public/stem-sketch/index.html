@@ -9577,14 +9577,16 @@ function computeSketchRegions(sketch) {
           if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
           outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
         }
-        // …plus the visible silhouettes of OTHER parts crossing this face:
-        // their projected outline is the interference boundary a trim line
-        // wants to close against (cut the arm where the bracket overlaps).
+        // …plus the silhouettes of OTHER parts crossing this face: their
+        // projected outline is the interference boundary a trim line wants
+        // to close against (cut the arm where the bracket overlaps).
+        // Hidden-classified segments are INCLUDED — the overlap zone is by
+        // definition occluded by this part, and that's exactly where the
+        // interference wedge lives.
         for (const other of doc.bodies) {
           if (other.id === body.id || other.hidden || !other.mesh) continue;
           if (other.type === 'fastener' || other.type === 'threadShell') continue;
           for (const s of projectBodiesOntoPlane(sketch.plane, other.id)) {
-            if (s._hidden) continue;
             if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
             outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
           }
@@ -9639,7 +9641,22 @@ function computeSketchRegions(sketch) {
       if (outlineHits > Math.max(1, checked * 0.2)) r._usedOutline = true;
     }
   }
-  return regs;
+  // Drop SLIVER outline regions — hair-thin faces between near-parallel
+  // outline edges (a tapered part projects several close edges). Clicking
+  // one looks like a normal pick but extrudes a trough that follows the
+  // whole outline. Mean width under ~0.4mm = artifact, not a feature.
+  // Drawn-shape regions are never dropped.
+  return regs.filter(r => {
+    if (!r._usedOutline) return true;
+    const pts = r.points || [];
+    if (pts.length < 3) return false;
+    let per = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      per += Math.hypot(b.x - a.x, b.y - a.y);
+    }
+    return per < 1 || Math.abs(r.area) / per > 0.4;
+  });
 }
 
 // If the clicked region is one letter of a parametric text group, return
