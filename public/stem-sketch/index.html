@@ -997,6 +997,19 @@
   .eraser-target text { fill: #e5484d !important; }
   /* Hidden lines — edges of the body that lie BEHIND the visible face.
      Orthographic convention: dashed and noticeably faded, but still readable. */
+  .ground-line {
+    stroke: #b45309;
+    stroke-width: 1.4;
+    stroke-dasharray: 9 5;
+    opacity: 0.65;
+    fill: none;
+  }
+  .ground-label {
+    fill: #b45309;
+    font-size: 10px;
+    opacity: 0.8;
+    user-select: none;
+  }
   .body-outline {
     stroke: #6b7a96;
     stroke-width: 1.2;
@@ -3911,6 +3924,35 @@ class SketchEngine {
 
     if (!(doc.bodies.length && doc.sketch?.plane && doc.sketch.sourceBodyId)) {
       this._projSegs = [];
+    }
+
+    // GROUND LINE — where the grid plane (world y = 0) crosses this sketch.
+    // Rotate a part through the floor and this is the line to design
+    // against. Drawn dashed tan + labeled; joins the snap segments so
+    // lines can be drawn along it and crossings with the part outline
+    // (= where it enters the ground) are snappable.
+    if (doc.sketch?.plane) {
+      const pl = doc.sketch.plane;
+      const uy = pl.u[1], vy = pl.v[1], oy = pl.origin[1];
+      if (Math.abs(uy) > 1e-6 || Math.abs(vy) > 1e-6) {
+        // Line in sketch coords: uy·s + vy·t + oy = 0
+        let s0, t0;
+        if (Math.abs(vy) >= Math.abs(uy)) { s0 = 0; t0 = -oy / vy; }
+        else { t0 = 0; s0 = -oy / uy; }
+        const dl = Math.hypot(uy, vy);
+        const dx = vy / dl, dy = -uy / dl;
+        const r = this.rect();
+        const span = (Math.hypot(r.width, r.height) / this.view.pxPerMm) * 1.5 + 50;
+        const g1 = { x: s0 - dx * span, y: t0 - dy * span };
+        const g2 = { x: s0 + dx * span, y: t0 + dy * span };
+        const [gx1, gy1] = this.worldToScreen(g1.x, g1.y);
+        const [gx2, gy2] = this.worldToScreen(g2.x, g2.y);
+        svg += `<line class="ground-line" x1="${gx1}" y1="${gy1}" x2="${gx2}" y2="${gy2}"/>`;
+        const [lx, ly] = this.worldToScreen(s0 + dx * (span * 0.02), t0 + dy * (span * 0.02));
+        svg += `<text class="ground-label" x="${lx + 6}" y="${ly - 5}">ground</text>`;
+        if (!this._projSegs) this._projSegs = [];
+        this._projSegs.push({ p1: g1, p2: g2, _ground: true });
+      }
     }
 
     // Fillet pick mode — draw a ring around every selectable corner so the
@@ -9340,12 +9382,15 @@ function segmentIntersection(p1, p2, p3, p4) {
 }
 
 // Build the planar graph: nodes (deduped points) + undirected edges between them.
-function buildPlanarGraph(entities, boundary) {
+function buildPlanarGraph(entities, boundary, extraSegs) {
   const segs = [];
   for (const ent of entities) {
     if (ent.construction) continue;
     for (const s of entityToSegments(ent)) segs.push(s);
   }
+  // Extra graph edges (the part's real face outline on face sketches) —
+  // drawn lines can close regions against them.
+  if (Array.isArray(extraSegs)) for (const s of extraSegs) segs.push(s);
   // Implicit boundary (face perimeter for sketch-on-face) joins the planar graph
   if (boundary && boundary.type === 'rect' && boundary.w > 0 && boundary.h > 0) {
     const bx = boundary.x, by = boundary.y, bw = boundary.w, bh = boundary.h;
@@ -9489,7 +9534,27 @@ function computeSketchRegions(sketch) {
   if (!sketch || !sketch.entities.length) return [];
   const candidates = sketch.entities.filter(e => !e.construction);
   if (!candidates.length) return [];
-  const graph = buildPlanarGraph(candidates, sketch.boundary);
+  // Face sketches: the part's OWN face edges join the region graph, so a
+  // couple of drawn lines across the part enclose real clickable regions
+  // against the true outline — draw two lines, click the wedge, cut it.
+  // (The projection is cached per mesh+plane, so this stays cheap.)
+  let outlineSegs = null;
+  if (sketch.sourceBodyId != null && typeof viewer !== 'undefined' && viewer &&
+      typeof projectBodiesOntoPlane === 'function') {
+    try {
+      const body = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(sketch) : null;
+      if (body) {
+        outlineSegs = [];
+        for (const s of projectBodiesOntoPlane(sketch.plane, body.id)) {
+          if (s._hidden) continue;
+          if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue; // in-plane face edges only
+          if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
+          outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
+        }
+      }
+    } catch (_) { outlineSegs = null; }
+  }
+  const graph = buildPlanarGraph(candidates, sketch.boundary, outlineSegs);
   const faces = findPlanarFaces(graph);
   if (!faces.length) return [];
   const regs = [];
@@ -11198,6 +11263,17 @@ function extrudeCurrentSketch() {
             : `Extruded ${nR} region${nR === 1 ? '' : 's'} to ${fmtUL(h)}`);
         }
       } else {
+        // Open lines only + a face boundary used to silently extrude the
+        // whole boundary rectangle — a giant wonky slab nobody asked for.
+        // The lines DO partition the part's face into regions now, so send
+        // the user there instead.
+        const hasClosed = doc.sketch.entities.some(e => !e.construction &&
+          (e.type === 'rect' || e.type === 'circle' || e.type === 'ellipse' ||
+           (e.type === 'polyline' && e.closed)));
+        if (!hasClosed && doc.sketch.boundary) {
+          showHint('Your lines split the part\'s face into regions — go to 3D and click the piece you want to push or cut. (Or draw a closed shape to extrude it directly.)');
+          return;
+        }
         const sketchCopy = JSON.parse(JSON.stringify(doc.sketch));
         sketchCopy.entities = sketchCopy.entities.filter(e => !e.construction);
         const body = {
@@ -15817,13 +15893,15 @@ function renderProps() {
             <input type="range" data-joint-slider="${j.id}" min="${tMin}" max="${tMax}" step="1" value="${rel}" style="flex:1"/>
             <input type="number" data-joint-num="${j.id}" value="${rel}" step="1" min="${tMin}" max="${tMax}" style="width:58px"/>°
           </div>
-          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:var(--ink-soft)">
-            <button class="action" data-joint-zero="${j.id}" title="Make the current position this joint's 0°" style="padding:2px 8px;font-size:11px">🧭 Set 0° here</button>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
+            <button class="action" data-joint-zero="${j.id}" title="Make the current position this joint's 0°" style="padding:4px 10px;font-size:11px;white-space:nowrap">🧭 Set 0° here</button>
+            <button class="action" data-joint-play="${j.id}" title="Swing back and forth through the travel range — red flash shows where it binds" style="padding:4px 10px;font-size:11px;white-space:nowrap;margin-left:auto">${(_jointPlay && _jointPlay.jointId === j.id) ? '⏸ Stop' : '▶ Play'}</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11px;color:var(--ink-soft)">
             <span>travel</span>
-            <input type="number" data-joint-min="${j.id}" value="${tMin}" step="5" max="0" style="width:54px;font-size:11px"/>°
+            <input type="number" data-joint-min="${j.id}" value="${tMin}" step="5" max="0" style="width:58px;font-size:11px"/><span>°</span>
             <span>to</span>
-            <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:54px;font-size:11px"/>°
-            <button class="action" data-joint-play="${j.id}" title="Swing back and forth through the travel range — red flash shows where it binds" style="padding:2px 8px;font-size:11px">${(_jointPlay && _jointPlay.jointId === j.id) ? '⏸ Stop' : '▶ Play'}</button>
+            <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:58px;font-size:11px"/><span>°</span>
           </div>
         </div>`;
       }).join('');
