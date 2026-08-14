@@ -6426,6 +6426,87 @@ class Viewer3D {
                                -((e.clientY - r.top) / r.height) * 2 + 1);
     };
 
+    // ── Fastener live placement ──────────────────────────────────────────
+    // Where would the pending fastener seat if the user clicked now?
+    // Shared by the hover ghost and the actual placement click. Includes
+    // the hole-axis snap and in-plane grid snap.
+    const computeFastenerSeat = (e) => {
+      this.raycaster.setFromCamera(ndc(e), this.camera);
+      const allHits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
+      const hits = allHits.filter(h => {
+        const b = doc.bodies.find(x => x.id === h.object.userData.bodyId);
+        if (!b) return true;
+        if (b.id === doc.fastenerPlaceTarget) return false; // never seat on itself
+        if (b.type === 'threadShell') return false;
+        if (b.type === 'fastener' && b._threadMarkRef) return false;
+        return true;
+      });
+      if (!hits.length) return null;
+      const hit = hits[0];
+      const sourceBody = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
+      const nWorld = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+      let seatPoint = hit.point.clone();
+      let snapAxis = nWorld.clone();
+      let snappedToHole = false;
+      const cylinders = findHoleCylindersInBody(sourceBody);
+      let best = null;
+      for (const cyl of cylinders) {
+        const dot = cyl.axis.dot(nWorld);
+        if (Math.abs(dot) < 0.92) continue;
+        const t = hit.point.clone().sub(cyl.center).dot(nWorld) / dot;
+        const onFace = cyl.center.clone().add(cyl.axis.clone().multiplyScalar(t));
+        const perpDist = hit.point.distanceTo(onFace);
+        if (perpDist > cyl.radius + 0.5) continue;
+        if (!best || perpDist < best.perpDist) best = { cyl, onFace, perpDist, dot };
+      }
+      if (best) {
+        seatPoint = best.onFace;
+        snapAxis = (best.dot >= 0 ? best.cyl.axis.clone() : best.cyl.axis.clone().negate()).normalize();
+        snappedToHole = true;
+      }
+      if (!snappedToHole && doc.grid?.snap) {
+        const sp = doc.grid.spacing || 1;
+        const snapC = (v) => Math.round(v / sp) * sp;
+        if (Math.abs(snapAxis.x) < 0.9) seatPoint.x = snapC(seatPoint.x);
+        if (Math.abs(snapAxis.y) < 0.9) seatPoint.y = snapC(seatPoint.y);
+        if (Math.abs(snapAxis.z) < 0.9) seatPoint.z = snapC(seatPoint.z);
+      }
+      return { seatPoint, snapAxis, snappedToHole, sourceBody };
+    };
+    const clearFastenerGhost = () => {
+      if (this._fastGhost) {
+        this.scene.remove(this._fastGhost);
+        try { this._fastGhost.geometry.dispose(); this._fastGhost.material.dispose(); } catch (_) {}
+        this._fastGhost = null;
+      }
+    };
+    this.clearFastenerGhost = clearFastenerGhost;
+    const updateFastenerGhost = (e) => {
+      const fb = doc.fastenerPlaceTarget ? doc.bodies.find(b => b.id === doc.fastenerPlaceTarget) : null;
+      if (!fb) { clearFastenerGhost(); return; }
+      const seat = computeFastenerSeat(e);
+      if (!seat) { if (this._fastGhost) this._fastGhost.visible = false; return; }
+      if (!this._fastGhost || this._fastGhost.userData.forId !== fb.id) {
+        clearFastenerGhost();
+        const geo = buildFastenerGeometry(fb);
+        if (!geo) return;
+        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: 0x2c64ff, transparent: true, opacity: 0.55,
+          roughness: 0.5, metalness: 0.1, depthWrite: false,
+        }));
+        mesh.userData.forId = fb.id;
+        mesh.renderOrder = 9;
+        this._fastGhost = mesh;
+        this.scene.add(mesh);
+      }
+      const g = this._fastGhost;
+      g.visible = true;
+      // Green when centered on a hole — the "you found it" cue
+      g.material.color.setHex(seat.snappedToHole ? 0x22c55e : 0x2c64ff);
+      g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), seat.snapAxis);
+      g.position.copy(seat.seatPoint.clone().sub(seat.snapAxis.clone().multiplyScalar(fb.length || 0)));
+    };
+
     this.canvas.addEventListener('pointerdown', (e) => {
       // Thread mark — click a mark in 3D to open the per-mark thread
       // dialog. The hit-disc is invisible but raycastable; tagged with
@@ -6610,6 +6691,40 @@ class Viewer3D {
       }
       // Face-pick mode (Sketch on Face workflow)
       if (doc.faceMode && e.button === 0) {
+        // Fastener live placement — commit where the ghost shows, or cancel
+        // back to the origin when clicking empty space.
+        if (doc.fastenerPlaceTarget) {
+          const fb = doc.bodies.find(b => b.id === doc.fastenerPlaceTarget);
+          const seat = computeFastenerSeat(e);
+          doc.fastenerPlaceTarget = null;
+          doc.faceMode = false;
+          this.canvas.style.cursor = '';
+          clearFastenerGhost();
+          if (fb && fb.type === 'fastener' && seat) {
+            pushUndo();
+            const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), seat.snapAxis);
+            const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+            fb.rotation = {
+              x: THREE.MathUtils.radToDeg(euler.x),
+              y: THREE.MathUtils.radToDeg(euler.y),
+              z: THREE.MathUtils.radToDeg(euler.z),
+            };
+            const origin = seat.seatPoint.clone().sub(seat.snapAxis.clone().multiplyScalar(fb.length || 0));
+            fb.x = origin.x; fb.y = origin.y; fb.z = origin.z;
+            fb.hidden = false;
+            this.rebuildBodies();
+            renderTree(); renderProps();
+            setStatus(seat.snappedToHole
+              ? 'Fastener seated — centered on hole'
+              : (doc.grid?.snap ? 'Fastener seated on face (snapped to grid)' : 'Fastener seated on face'));
+          } else if (fb) {
+            fb.hidden = false;
+            this.rebuildBodies();
+            renderTree();
+            setStatus('Placement cancelled — bolt parked at the origin. 📌 Place on face to try again.');
+          }
+          return;
+        }
         this.raycaster.setFromCamera(ndc(e), this.camera);
         const allHits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
         // Skip visualizer overlays (thread shells + thread-mark visualizer bolts)
@@ -6627,84 +6742,8 @@ class Viewer3D {
         if (hits.length > 0) {
           const hit = hits[0];
           const sourceBody = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
-          // Fastener-placement variant: seat the bolt with the bottom of its
-          // head face flush against the picked face, shaft perpendicular into
-          // the body. Skips the sketch-on-face flow entirely.
-          if (doc.fastenerPlaceTarget) {
-            const fb = doc.bodies.find(b => b.id === doc.fastenerPlaceTarget);
-            doc.fastenerPlaceTarget = null;
-            doc.faceMode = false;
-            this.canvas.style.cursor = '';
-            if (fb && fb.type === 'fastener') {
-              const nLocal = hit.face.normal.clone();
-              const nWorld = nLocal.transformDirection(hit.object.matrixWorld).normalize();
-              // Cylinder/hole detection: walk the picked body's negative
-              // children for circular holes whose axis is perpendicular to
-              // the picked face. If the click sits inside (or near) one of
-              // those holes, snap the seat point to the hole's axis-on-face
-              // intersection — that's "perfectly centered" placement.
-              let seatPoint = hit.point.clone();
-              let snapAxis = nWorld.clone();
-              let snappedToHole = false;
-              const cylinders = findHoleCylindersInBody(sourceBody);
-              let best = null;
-              for (const cyl of cylinders) {
-                // Need cylinder axis (anti-)parallel to face normal to be
-                // a hole on THIS face.
-                const dot = cyl.axis.dot(nWorld);
-                if (Math.abs(dot) < 0.92) continue;
-                // Cylinder-axis intersection with the face plane through
-                // hit.point: hit.point lies in plane (P - hit.point)·nWorld = 0.
-                // P = cyl.center + t * cyl.axis  →  t = ((hit.point − cyl.center)·nWorld) / (cyl.axis·nWorld)
-                const t = hit.point.clone().sub(cyl.center).dot(nWorld) / dot;
-                const onFace = cyl.center.clone().add(cyl.axis.clone().multiplyScalar(t));
-                const perpDist = hit.point.distanceTo(onFace);
-                // Click must fall within the hole's radius (small slack for
-                // edge-of-hole picks).
-                if (perpDist > cyl.radius + 0.5) continue;
-                if (!best || perpDist < best.perpDist) best = { cyl, onFace, perpDist, dot };
-              }
-              if (best) {
-                seatPoint = best.onFace;
-                // Axis points OUT of the face (so the head sits on the +axis
-                // side and the shaft drops into the hole along -axis).
-                snapAxis = (best.dot >= 0 ? best.cyl.axis.clone() : best.cyl.axis.clone().negate()).normalize();
-                snappedToHole = true;
-              }
-              // Grid snap on the face (same rule as 2D drawing): snap the
-              // world axes that lie IN the face plane, leave the normal
-              // direction alone so the bolt stays flush. Skipped when the
-              // click snapped to an existing hole — that's more precise.
-              if (!snappedToHole && doc.grid?.snap) {
-                const sp = doc.grid.spacing || 1;
-                const snapC = (v) => Math.round(v / sp) * sp;
-                if (Math.abs(snapAxis.x) < 0.9) seatPoint.x = snapC(seatPoint.x);
-                if (Math.abs(snapAxis.y) < 0.9) seatPoint.y = snapC(seatPoint.y);
-                if (Math.abs(snapAxis.z) < 0.9) seatPoint.z = snapC(seatPoint.z);
-              }
-              // Fastener is modeled with shaft bottom at y=0, head sitting on
-              // top; head BOTTOM face is at y = shaft length. We want that
-              // point flush against seatPoint with the head sticking out
-              // along +snapAxis (so the shaft goes in along -snapAxis).
-              const shaftLen = fb.length || 0;
-              const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), snapAxis);
-              const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
-              pushUndo();
-              fb.rotation = {
-                x: THREE.MathUtils.radToDeg(euler.x),
-                y: THREE.MathUtils.radToDeg(euler.y),
-                z: THREE.MathUtils.radToDeg(euler.z),
-              };
-              const origin = seatPoint.clone().sub(snapAxis.clone().multiplyScalar(shaftLen));
-              fb.x = origin.x; fb.y = origin.y; fb.z = origin.z;
-              this.rebuildBodies();
-              renderProps();
-              setStatus(snappedToHole
-                ? 'Fastener seated — centered on hole'
-                : (doc.grid?.snap ? 'Fastener seated on face (snapped to grid)' : 'Fastener seated on face'));
-            }
-            return;
-          }
+          // (Fastener placement is handled at the top of the faceMode block
+          // via computeFastenerSeat — never reaches here.)
           // Decide if the picked surface is FLAT or CURVED. On curved surfaces
           // a tessellated triangle's normal would produce a slanted sketch
           // plane — show the bbox 6-face picker instead.
@@ -7111,6 +7150,8 @@ class Viewer3D {
     });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('pointermove', (e) => {
+      // Fastener live placement — ghost bolt follows the face under the cursor
+      if (doc.fastenerPlaceTarget) updateFastenerGhost(e);
       // Rotation-handle drag — rotate body around the axis
       if (rotateState.active) {
         this.raycaster.setFromCamera(ndc(e), this.camera);
@@ -11171,6 +11212,16 @@ function buildFastenerCSGMesh(body) {
     wGeo.translate(0, length - wT + H / 2, 0);
     parts.push(wGeo);
   }
+  // Washer pocket at the NUT end — same washer, far side: a shallow disk
+  // from the exit face inward so a real flat washer sits under the nut.
+  if (part === 'both' && body.nutWasher) {
+    const wT = spec.d * 0.25 + 0.3;
+    const wR = spec.d + Math.max(clearance, 0.25);
+    const H = wT + 2;
+    const wGeo = new THREE.CylinderGeometry(wR, wR, H, 32);
+    wGeo.translate(0, H / 2 - 2, 0); // spans −2 … wT past the exit face
+    parts.push(wGeo);
+  }
   // Sink-head: a chimney shaped like the head (or like the washer when one
   // has to drop in past it) keeps the counterbore open to the surface after
   // the whole cutter shifts down by the head height.
@@ -11727,12 +11778,21 @@ function addFastener(headType, size, length, fit, part, thread, extras) {
   };
   doc.bodies.push(body);
   doc.selection = { kind: 'body', id: body.id };
-  viewer.rebuildBodies();
+  // Straight into live placement: the part follows the cursor as a ghost
+  // and seats flush on the face you click (snapping to holes). Esc parks
+  // it at the origin instead.
+  body.hidden = true;
+  doc.fastenerPlaceTarget = body.id;
+  doc.faceMode = true;
+  if (viewer) {
+    viewer.canvas.style.cursor = 'crosshair';
+    viewer.rebuildBodies();
+  }
   renderTree();
   renderProps();
   const partLabel = p === 'nut' ? 'nut'
     : `${FASTENER_HEAD_LABELS[body.headType]}${p === 'both' ? ' + nut' : ''}`;
-  setStatus(`Added ${spec.label} ${th === 'smooth' ? 'smooth ' : ''}${partLabel}${p === 'nut' ? '' : ` (${fmtUL(len)})`} — 📌 Place on face to position it. Set Operation to Negative + Group to cut it out.`);
+  setStatus(`${spec.label} ${th === 'smooth' ? 'smooth ' : ''}${partLabel}${p === 'nut' ? '' : ` (${fmtUL(len)})`} ready — move over a face and click to place it (green = centered on a hole). Esc to park it at the origin.`);
 }
 
 // Open the fastener picker dialog — head type, size, length, fit all at once.
@@ -11802,6 +11862,10 @@ function openThreadedHoleForMark(sketchId, markId) {
              <input type="checkbox" id="th1-nutpocket" style="width:auto;margin:0"${prev.nutPocket ? ' checked' : ''}/>
              <label for="th1-nutpocket" style="margin:0;cursor:pointer">Hex nut pocket at the far end</label>
            </div>
+           <div class="field" id="th1-nutwasher-row" style="display:none;align-items:center;gap:8px">
+             <input type="checkbox" id="th1-nutwasher" style="width:auto;margin:0"${prev.nutWasher ? ' checked' : ''}/>
+             <label for="th1-nutwasher" style="margin:0;cursor:pointer">Washer pocket under the nut</label>
+           </div>
            <div class="field">
              <label>Thread size</label>
              <select id="th1-size">${sizeOpts}</select>
@@ -11847,9 +11911,10 @@ function openThreadedHoleForMark(sketchId, markId) {
       const boltHead = $('th1-head').value || 'hex';
       const holeType = $('th1-type')?.value || 'threaded';
       const nutPocket = holeType === 'clearance' && !!$('th1-nutpocket')?.checked;
+      const nutWasher = nutPocket && !!$('th1-nutwasher')?.checked;
       const headSeat = $('th1-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      const opts = { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, headSeat };
+      const opts = { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, nutWasher, headSeat };
       if ($('th1-all')?.checked) {
         // Apply to every bolt location in this sketch: peel any existing
         // holes/bolts first, then cut them all fresh with these settings.
@@ -11875,8 +11940,12 @@ function openThreadedHoleForMark(sketchId, markId) {
     const typeSel = $('th1-type');
     const syncType = () => {
       const row = $('th1-nutpocket-row');
-      if (row) row.style.display = typeSel?.value === 'clearance' ? 'flex' : 'none';
+      const isClr = typeSel?.value === 'clearance';
+      if (row) row.style.display = isClr ? 'flex' : 'none';
+      const wrow = $('th1-nutwasher-row');
+      if (wrow) wrow.style.display = (isClr && $('th1-nutpocket')?.checked) ? 'flex' : 'none';
     };
+    $('th1-nutpocket')?.addEventListener('change', syncType);
     const syncSeat = () => {
       // Tapered machine-screw heads can only sit flush — force recess.
       const isFlat = headSel?.value === 'flat';
@@ -12270,6 +12339,10 @@ function openThreadedHolesDialog() {
              <input type="checkbox" id="th-nutpocket" style="width:auto;margin:0"${seed.nutPocket ? ' checked' : ''}/>
              <label for="th-nutpocket" style="margin:0;cursor:pointer">Hex nut pocket at the far end of each hole</label>
            </div>
+           <div class="field" id="th-nutwasher-row" style="display:none;align-items:center;gap:8px">
+             <input type="checkbox" id="th-nutwasher" style="width:auto;margin:0"${seed.nutWasher ? ' checked' : ''}/>
+             <label for="th-nutwasher" style="margin:0;cursor:pointer">Washer pocket under the nut</label>
+           </div>
            <div class="field">
              <label>Thread size</label>
              <select id="th-size">${sizeOpts}</select>
@@ -12309,9 +12382,10 @@ function openThreadedHolesDialog() {
       const boltHead = $('th-head').value || 'hex';
       const holeType = $('th-type')?.value || 'threaded';
       const nutPocket = holeType === 'clearance' && !!$('th-nutpocket')?.checked;
+      const nutWasher = nutPocket && !!$('th-nutwasher')?.checked;
       const headSeat = $('th-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, headSeat });
+      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, nutWasher, headSeat });
     },
   });
   setTimeout(() => {
@@ -12344,9 +12418,13 @@ function openThreadedHolesDialog() {
     if (typeSel) {
       const syncType = () => {
         const row = $('th-nutpocket-row');
-        if (row) row.style.display = typeSel.value === 'clearance' ? 'flex' : 'none';
+        const isClr = typeSel.value === 'clearance';
+        if (row) row.style.display = isClr ? 'flex' : 'none';
+        const wrow = $('th-nutwasher-row');
+        if (wrow) wrow.style.display = (isClr && $('th-nutpocket')?.checked) ? 'flex' : 'none';
       };
       typeSel.addEventListener('change', syncType);
+      $('th-nutpocket')?.addEventListener('change', syncType);
       syncType();
     }
     // Live 3D preview of the hole cutter (red void shape, incl. nut pocket)
@@ -12390,11 +12468,18 @@ function returnBoltToItsMark(body) {
   const holeAxis = n.clone().negate();
   const depth = (typeof mark._settings?.depth === 'number') ? mark._settings.depth : body.length;
   const markWorld = new THREE.Vector3(mark.cx, mark.cy, 0).applyMatrix4(planeM);
-  const shaftBottom = markWorld.clone().add(holeAxis.clone().multiplyScalar(depth));
+  let base = markWorld.clone().add(holeAxis.clone().multiplyScalar(depth));
+  // Recessed bolts are shortened + lifted so the tip stays at the hole
+  // bottom — mirror the creation-path math or the return lands too deep.
+  if (body.sinkHead) {
+    const spec = getFastenerSpec(body.size);
+    const headH = ({ hex: 0.65, phillips: 0.65, cap: 1, flat: 0.55 }[body.headType] || 0) * (spec?.d || 0);
+    base.add(n.clone().multiplyScalar(headH + 0.2));
+  }
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
   const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
   pushUndo();
-  body.x = shaftBottom.x; body.y = shaftBottom.y; body.z = shaftBottom.z;
+  body.x = base.x; body.y = base.y; body.z = base.z;
   body.rotation = {
     x: THREE.MathUtils.radToDeg(euler.x),
     y: THREE.MathUtils.radToDeg(euler.y),
@@ -12467,6 +12552,7 @@ function processThreadMarks(sketch, marks, opts) {
       fit: opts.fit,
       thread: isClearance ? 'smooth' : 'threaded',
       part: (isClearance && opts.nutPocket) ? 'both' : 'bolt',
+      nutWasher: !!(isClearance && opts.nutPocket && opts.nutWasher),
       x: cutBottom.x, y: cutBottom.y, z: cutBottom.z,
       rotation: { ...rotDeg },
       op: 'subtract',
@@ -12577,14 +12663,22 @@ function processThreadMarks(sketch, marks, opts) {
     if (opts.placeBolt) {
       // Matching bolt: head bottom flush on sketch plane at the mark, shaft
       // points into the body along holeAxis = same orientation as the hole
-      // but with a real head (hex by default). Length matches depth.
+      // but with a real head (hex by default). Length matches depth —
+      // EXCEPT recessed seats: the whole bolt sinks by headH+0.2, so keep
+      // the tip at the hole bottom by shortening the shaft and lifting the
+      // body by the same amount (otherwise it pokes out the far face and
+      // looks broken).
       const spec = getFastenerSpec(opts.size);
-      const shaftLen = opts.depth;
-      // Bolt body origin (shaft bottom) should land at shaftBottom too.
+      const headKey = opts.boltHead || 'hex';
+      const headH = ({ hex: 0.65, phillips: 0.65, cap: 1, flat: 0.55 }[headKey] || 0) * spec.d;
+      const sink = recess ? headH + 0.2 : 0;
+      const shaftLen = Math.max(1, opts.depth - sink);
+      const boltBase = shaftBottom.clone().add(n.clone().multiplyScalar(sink));
+      // Bolt body origin (shaft bottom) should land at boltBase.
       const bolt = {
         id: doc.nextBodyId++,
         type: 'fastener',
-        headType: opts.boltHead || 'hex',
+        headType: headKey,
         size: opts.size,
         length: shaftLen,
         fit: 'tight',
@@ -12592,7 +12686,7 @@ function processThreadMarks(sketch, marks, opts) {
         thread: isClearance ? 'smooth' : 'threaded',
         part: 'bolt',
         sinkHead: recess,
-        x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
+        x: boltBase.x, y: boltBase.y, z: boltBase.z,
         rotation: { ...rotDeg },
         op: 'add',
         // Tagged so the tree can label it as a thread-mark companion and
@@ -12614,6 +12708,7 @@ function processThreadMarks(sketch, marks, opts) {
       boltHead: opts.boltHead || 'hex',
       holeType: opts.holeType || 'threaded',
       nutPocket: !!opts.nutPocket,
+      nutWasher: !!(opts.nutPocket && opts.nutWasher),
       headSeat: opts.headSeat || 'rest',
     };
   }
@@ -15023,7 +15118,11 @@ function renderProps() {
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="fastener-washer-prop" style="width:auto;margin:0"${body.washerPocket ? ' checked' : ''}/>
           <label for="fastener-washer-prop" style="margin:0;cursor:pointer">Washer pocket under the head when cutting</label>
-        </div>`}
+        </div>
+        ${fPart === 'both' ? `<div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="fastener-nutwasher-prop" style="width:auto;margin:0"${body.nutWasher ? ' checked' : ''}/>
+          <label for="fastener-nutwasher-prop" style="margin:0;cursor:pointer">Washer pocket under the nut (far side) when cutting</label>
+        </div>` : ''}`}
         <div class="field"><label></label>
           <button class="action" id="fastener-place-btn" title="Click any body face — the part seats flush on that face, perpendicular to it">📌 Place on face</button>
         </div>
@@ -15091,13 +15190,16 @@ function renderProps() {
     if (placeBtn) placeBtn.onclick = () => {
       doc.fastenerPlaceTarget = body.id;
       doc.faceMode = true; // reuse the existing face-pick infra
-      setStatus('Place fastener: click any body face. Esc to cancel.');
+      body.hidden = true;  // the ghost stands in while placing
+      viewer?.rebuildBodies();
+      setStatus('Move over a face — the part follows (green = centered on a hole). Click to place, Esc to cancel.');
       if (viewer) viewer.canvas.style.cursor = 'crosshair';
     };
     // Fastener option toggles
     for (const [elId, key] of [
       ['fastener-sink-prop', 'sinkHead'],
       ['fastener-washer-prop', 'washerPocket'],
+      ['fastener-nutwasher-prop', 'nutWasher'],
     ]) {
       const cb = document.getElementById(elId);
       if (cb) cb.onchange = () => {
@@ -17982,6 +18084,12 @@ function init() {
       const wasFastener = !!doc.fastenerPlaceTarget;
       const wasBevel = !!doc.bevelPickMode;
       const wasFillet = !!doc.filletPickMode;
+      // Un-hide the fastener that was riding the cursor as a ghost
+      const pendingFastener = doc.fastenerPlaceTarget
+        ? doc.bodies.find(b => b.id === doc.fastenerPlaceTarget) : null;
+      if (pendingFastener) pendingFastener.hidden = false;
+      if (viewer) viewer.clearFastenerGhost && viewer.clearFastenerGhost();
+      if (pendingFastener && viewer) viewer.rebuildBodies();
       doc.faceMode = false;
       doc.curvedPickBody = null;
       doc.fastenerPlaceTarget = null;
