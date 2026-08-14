@@ -1064,6 +1064,7 @@
   <symbol id="i-view-front" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 7l3-3h10l-3 3" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.5"/></symbol>
   <symbol id="i-view-right" viewBox="0 0 24 24"><rect x="8" y="7" width="11" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 7L4 4v10l4 3" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.5"/></symbol>
   <symbol id="i-view-iso" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.6"/></symbol>
+  <symbol id="i-pivot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
   <symbol id="i-line" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 20L20 4"/><circle cx="4" cy="20" r="1.6" fill="currentColor"/><circle cx="20" cy="4" r="1.6" fill="currentColor"/></symbol>
   <symbol id="i-arc" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 19C 7 5, 17 5, 21 19"/></symbol>
   <symbol id="i-construction" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3" d="M3 12L21 12"/></symbol>
@@ -1163,6 +1164,7 @@
         <button class="tool" data-action="toggle-construction-vis" id="toggle-construction-vis" title="Show/hide all construction lines (visibility only — they stay in the sketch)"><svg class="ico"><use href="#i-construction"/></svg><span class="tool-label">Show</span></button>
         <button class="tool" data-tool="dimension" title="Dimension (D) — click two points, then move and click to place it where you want. Snapped dimensions follow their shapes; click the number to type an exact distance"><svg class="ico"><use href="#i-dimension"/></svg><span class="tool-label">Dim</span></button>
         <button class="tool" data-tool="thread-mark" title="Thread mark — drops a hole-center marker. In 3D, &quot;Threaded holes&quot; turns every mark into a real threaded hole at a chosen size + depth."><svg class="ico"><use href="#i-thread-mark"/></svg><span class="tool-label">Thread</span></button>
+        <button class="tool" data-tool="pivot" title="Pivot point — marks where this part can hinge. Put one on each of two parts, then use Joint in 3D to pin them together."><svg class="ico"><use href="#i-pivot"/></svg><span class="tool-label">Pivot</span></button>
         <button class="tool" id="tb-auto-dim" data-action="auto-dim" title="Auto Dim — click to show dimensions on every shape, click again to hide them"><svg class="ico"><use href="#i-auto-dim"/></svg><span class="tool-label">Auto Dim</span></button>
         <div class="dropdown" id="shape2d-dropdown">
           <button class="tool has-dropdown" data-action="shape2d-menu" title="Insert a pre-made shape into the sketch"><svg class="ico"><use href="#i-hexagon"/></svg><span class="tool-label">Shape</span></button>
@@ -1540,7 +1542,7 @@ class SketchEngine {
     this.updateNodeActions();
 
     this.tool = t;
-    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-ellipse', 'tool-text', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark');
+    this.svg.classList.remove('tool-select', 'tool-rect', 'tool-circle', 'tool-ellipse', 'tool-text', 'tool-line', 'tool-arc', 'tool-construction', 'tool-eraser', 'tool-trim', 'tool-dimension', 'tool-thread-mark', 'tool-pivot');
     this.svg.classList.add('tool-' + t);
     document.querySelectorAll('#tools-2d .tool').forEach(b =>
       b.classList.toggle('active', b.dataset.tool === t));
@@ -1550,6 +1552,7 @@ class SketchEngine {
       circle: 'Click the center, drag to set radius.',
       ellipse: 'Click and drag to draw an oval. Hold <b>Shift</b> for a circle. Type W (Tab H) + <b>Enter</b> for an exact size.',
       text: 'Click where the text should start. Letters become real shapes — extrude them for raised text, or set them Negative and extrude to engrave.',
+      pivot: 'Click where this part should hinge. Put a pivot on each of two parts, then use <b>Joint</b> in 3D to pin them together and swing them.',
       line: 'Click to drop points. Auto-snaps to <b>horizontal</b> / <b>vertical</b>. <b>Shift</b> keeps the line perfectly straight. Type a length and press <b>Enter</b> for an exact distance. <b>Enter</b> finishes, <b>Esc</b> cancels.',
       arc: 'Click a start point, click an end point, then move the mouse to shape the arc and click to finish.',
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
@@ -3055,6 +3058,21 @@ class SketchEngine {
       doc.sketch.entities.push(mark);
       doc.selection = { kind: 'sketch', id: mark.id };
       setStatus('Thread mark placed — switch to 3D and click "Thd Holes" to turn marks into real threaded holes.');
+      this.render(); renderTree(); renderProps();
+      return;
+    }
+
+    if (this.tool === 'pivot') {
+      // Drop a pivot-point marker — the hinge point the Joint tool pins.
+      pushUndo();
+      const mark = {
+        id: doc.sketch.nextId++,
+        type: 'pivotMark',
+        cx: px, cy: py,
+      };
+      doc.sketch.entities.push(mark);
+      doc.selection = { kind: 'sketch', id: mark.id };
+      setStatus('Pivot point placed — add one to another part too, then use Joint in 3D to pin them together.');
       this.render(); renderTree(); renderProps();
       return;
     }
@@ -4566,7 +4584,7 @@ function pointSegDist(px, py, ax, ay, bx, by) {
 }
 
 function entityHit(ent, wx, wy, tol) {
-  if (ent.type === 'threadMark') {
+  if (ent.type === 'threadMark' || ent.type === 'pivotMark') {
     // ~5 mm click target on top of the marker
     return Math.hypot(wx - ent.cx, wy - ent.cy) < Math.max(tol, 5);
   }
@@ -4673,7 +4691,9 @@ function pointInPolygon(px, py, pts) {
 
 function moveEntity(ent, start, dx, dy) {
   if (ent.type === 'rect') { ent.x = start.x + dx; ent.y = start.y + dy; }
-  if (ent.type === 'circle') { ent.cx = start.cx + dx; ent.cy = start.cy + dy; }
+  if (ent.type === 'circle' || ent.type === 'threadMark' || ent.type === 'pivotMark') {
+    ent.cx = start.cx + dx; ent.cy = start.cy + dy;
+  }
   if (ent.type === 'polyline') {
     ent.points = start.points.map(p => {
       const np = { x: p.x + dx, y: p.y + dy };
@@ -4710,7 +4730,7 @@ function findDimAnchorAt(x, y) {
   const near = (px, py) => Math.abs(px - x) < tol && Math.abs(py - y) < tol;
   for (let i = doc.sketch.entities.length - 1; i >= 0; i--) {
     const ent = doc.sketch.entities[i];
-    if (ent.type === 'dimension' || ent.type === 'threadMark') continue;
+    if (ent.type === 'dimension' || ent.type === 'threadMark' || ent.type === 'pivotMark') continue;
     if (ent.type === 'circle') {
       if (near(ent.cx, ent.cy)) return { entId: ent.id, kind: 'center' };
     } else if (ent.type === 'rect') {
@@ -4941,7 +4961,7 @@ function remapDimAnchors(entities, idMap) {
 // form so the bbox reflects the actual rendered curve, not just the control pts.
 function entityBBox(ent) {
   if (!ent) return null;
-  if (ent.type === 'threadMark') {
+  if (ent.type === 'threadMark' || ent.type === 'pivotMark') {
     return { minX: ent.cx, minY: ent.cy, maxX: ent.cx, maxY: ent.cy };
   }
   if (ent.type === 'rect') {
@@ -5429,6 +5449,25 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
     s += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${stroke}" stroke-width="1.6"/>`;
     s += `<line x1="${cx - r - 3}" y1="${cy}" x2="${cx + r + 3}" y2="${cy}" stroke="${stroke}" stroke-width="1.4"/>`;
     s += `<line x1="${cx}" y1="${cy - r - 3}" x2="${cx}" y2="${cy + r + 3}" stroke="${stroke}" stroke-width="1.4"/>`;
+    if (selected) {
+      s += `<rect class="entity-handle" x="${cx-3}" y="${cy-3}" width="6" height="6"/>`;
+    }
+    s += `</g>`;
+    return s;
+  }
+  if (ent.type === 'pivotMark') {
+    // Pivot-point marker: violet circle with a solid center dot — the hinge
+    // point another part can be pinned to. Feature only, never exported.
+    const [cx, cy] = eng.worldToScreen(ent.cx, ent.cy);
+    const r = 8;
+    const stroke = selected ? '#6d28d9' : '#8b5cf6';
+    let s = `<g class="pivot-mark" data-pivot-id="${ent.id}">`;
+    s += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${stroke}" stroke-width="1.8"/>`;
+    s += `<circle cx="${cx}" cy="${cy}" r="2.6" fill="${stroke}"/>`;
+    s += `<line x1="${cx - r - 3}" y1="${cy}" x2="${cx - r + 2}" y2="${cy}" stroke="${stroke}" stroke-width="1.4"/>`;
+    s += `<line x1="${cx + r - 2}" y1="${cy}" x2="${cx + r + 3}" y2="${cy}" stroke="${stroke}" stroke-width="1.4"/>`;
+    s += `<line x1="${cx}" y1="${cy - r - 3}" x2="${cx}" y2="${cy - r + 2}" stroke="${stroke}" stroke-width="1.4"/>`;
+    s += `<line x1="${cx}" y1="${cy + r - 2}" x2="${cx}" y2="${cy + r + 3}" stroke="${stroke}" stroke-width="1.4"/>`;
     if (selected) {
       s += `<rect class="entity-handle" x="${cx-3}" y="${cy-3}" width="6" height="6"/>`;
     }
@@ -7145,52 +7184,20 @@ class Viewer3D {
         exitAlignMode();
         // Fall through so the empty-area click also processes (deselect / box-select)
       }
-      // Joint creation — 3-click pick (body A, body B, edge for axis)
+      // Joint creation — pivot-to-pivot: click part A's pivot marker, then
+      // part B's. B swings; A stays put.
       if (doc.jointPickStage && e.button === 0) {
         this.raycaster.setFromCamera(ndc(e), this.camera);
-        const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
+        const targets = [];
+        this.sketchGroup.traverse(o => { if (o.userData?.kind === 'pivotMark') targets.push(o); });
+        const hits = this.raycaster.intersectObjects(targets, false);
         if (!hits.length) {
-          showHint('Click on a body.');
+          showHint('Click a pivot point — the violet ⊕ marker on a part. (Draw one with the Pivot tool in a face sketch first.)');
           return;
         }
-        const pickedId = hits[0].object.userData.bodyId;
-        if (doc.jointPickStage === 'bodyA') {
-          doc.jointDraft.bodyA = pickedId;
-          doc.jointPickStage = 'bodyB';
-          doc.selection = { kind: 'body', id: pickedId };
-          doc.multiSelectedBodies = [pickedId];
-          renderTree(); renderProps();
-          setStatus('Joint — click the second body (B). Esc to cancel.');
-          return;
-        }
-        if (doc.jointPickStage === 'bodyB') {
-          if (pickedId === doc.jointDraft.bodyA) {
-            showHint('Pick a DIFFERENT body for B.');
-            return;
-          }
-          doc.jointDraft.bodyB = pickedId;
-          doc.jointPickStage = 'axis';
-          doc.multiSelectedBodies = [doc.jointDraft.bodyA, doc.jointDraft.bodyB];
-          renderTree(); renderProps();
-          setStatus('Joint — click near an edge of either body to set the hinge axis. Esc to cancel.');
-          return;
-        }
-        if (doc.jointPickStage === 'axis') {
-          // Picking constrained to the two chosen bodies — clicks on others ignored.
-          const { bodyA, bodyB } = doc.jointDraft;
-          if (pickedId !== bodyA && pickedId !== bodyB) {
-            showHint('Click on body A or body B, near the edge that should be the hinge axis.');
-            return;
-          }
-          const body = doc.bodies.find(b => b.id === pickedId);
-          const edge = findClosestBodyEdge(body, this.raycaster.ray);
-          if (!edge) {
-            showHint('Could not find an edge there — try a sharp corner or straight edge.');
-            return;
-          }
-          commitJointAxis(edge);
-          return;
-        }
+        const ud = hits[0].object.userData;
+        handleJointPivotPick(ud.sketchId, ud.markId);
+        return;
       }
 
       // Right-mouse always orbits; middle-mouse always pans
@@ -7946,8 +7953,11 @@ class Viewer3D {
     const pinLen = 8, pinRad = 1.2, capRad = 1.8;
     const pinColor = 0xf59e0b, capColor = 0xb45309;
     for (const j of doc.joints) {
-      const origin = new THREE.Vector3(j.origin[0], j.origin[1], j.origin[2]);
-      const axis = new THREE.Vector3(j.axis[0], j.axis[1], j.axis[2]).normalize();
+      // Pivot-to-pivot joints resolve their pin from part A's live pivot
+      const anchor = (j.a && typeof _resolveJointAnchor === 'function') ? _resolveJointAnchor(j.a) : null;
+      if (!anchor) continue;
+      const origin = anchor.P;
+      const axis = anchor.n;
       const g = new THREE.Group();
       g.userData = { kind: 'joint', jointId: j.id };
       const cyl = new THREE.Mesh(
@@ -8629,6 +8639,44 @@ class Viewer3D {
           hitDisc.userData = { kind: 'threadMark', markId: ent.id, sketchId: sketch.id };
           hitDisc.renderOrder = 8;
           this.sketchGroup.add(hitDisc);
+          continue;
+        }
+
+        // Pivot mark — violet ring + center dot on the sketch plane. The
+        // Joint tool raycasts the invisible disc (kind 'pivotMark') to pin
+        // two parts together at their pivots.
+        if (ent.type === 'pivotMark') {
+          const violetMat = new THREE.LineBasicMaterial({ color: 0x8b5cf6, transparent: true, opacity: 0.95 });
+          const R = 3;
+          const cPts = [];
+          for (let i = 0; i <= 32; i++) {
+            const t = (i / 32) * Math.PI * 2;
+            cPts.push(sketch2dTo3d(ent.cx + Math.cos(t) * R, ent.cy + Math.sin(t) * R));
+          }
+          const ring = new THREE.Line(new THREE.BufferGeometry().setFromPoints(cPts), violetMat);
+          ring.renderOrder = 7;
+          ring.userData = { kind: 'pivotMark', markId: ent.id, sketchId: sketch.id };
+          this.sketchGroup.add(ring);
+          const dot = new THREE.Mesh(
+            new THREE.CircleGeometry(1.1, 16),
+            new THREE.MeshBasicMaterial({ color: 0x8b5cf6, side: THREE.DoubleSide, depthWrite: false }),
+          );
+          const dotWorld = new THREE.Vector3(ent.cx, ent.cy, 0.06).applyMatrix4(planeM);
+          dot.position.copy(dotWorld);
+          const pn = new THREE.Vector3(...sketch.plane.n).normalize();
+          dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pn);
+          dot.renderOrder = 7;
+          dot.userData = { kind: 'pivotMark', markId: ent.id, sketchId: sketch.id };
+          this.sketchGroup.add(dot);
+          const pHit = new THREE.Mesh(
+            new THREE.CircleGeometry(R + 2, 16),
+            new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide, depthWrite: false }),
+          );
+          pHit.position.copy(dotWorld);
+          pHit.quaternion.copy(dot.quaternion);
+          pHit.userData = { kind: 'pivotMark', markId: ent.id, sketchId: sketch.id };
+          pHit.renderOrder = 8;
+          this.sketchGroup.add(pHit);
           continue;
         }
 
@@ -14443,26 +14491,134 @@ function performBooleanCut(targetId, toolId) {
   }
 }
 
-// ─── Joints (articulation) — Phase 1: definition only ─────────────────────
-// 3-click flow: click body A, click body B, click near an edge on either
-// picked body. The edge defines the hinge axis (direction) and origin
-// (segment midpoint). Phase 2 will read these to drive forward kinematics.
+// ─── Joints (articulation) — pivot-to-pivot ────────────────────────────────
+// Simple model, by design: each of two parts carries a PIVOT POINT drawn in
+// one of its face sketches (Pivot tool). The Joint tool pins part B's pivot
+// onto part A's pivot, face-to-face, and B can then swing around that pin.
+// One hinge, no chains — this is an introduction to CAD, not a kinematics
+// package.
+
+// Resolve a joint side {sketchId, markId} → live world pivot + axis + body.
+// The bodyId is read from the sketch's CURRENT sourceBodyId so grouping /
+// re-pointing keeps the joint alive.
+function _resolveJointAnchor(ref) {
+  const sk = doc.sketches.find(s => s.id === ref.sketchId);
+  const mark = sk?.entities?.find(e => e.id === ref.markId && e.type === 'pivotMark');
+  if (!sk || !mark || sk.sourceBodyId == null) return null;
+  const body = doc.bodies.find(b => b.id === sk.sourceBodyId);
+  if (!body) return null;
+  const planeM = makePlaneMatrix(sk.plane);
+  const P = new THREE.Vector3(mark.cx, mark.cy, 0).applyMatrix4(planeM);
+  const n = new THREE.Vector3(...sk.plane.n).normalize();
+  return { P, n, body, sketch: sk, mark };
+}
+
+// Apply a rigid transform to a body: rotate by matrix R about pivotFrom,
+// then land pivotFrom on pivotTo. Body fields are updated so the render
+// pivot (mesh position) moves correctly; the sketch-anchor sync then drags
+// the body's sketches, marks, and companion bolts along automatically.
+function _applyRigidToBody(body, R, pivotFrom, pivotTo) {
+  const fields = new THREE.Vector3(body.x || 0, body.y || 0, body.z || 0);
+  const meshPos = body.mesh ? body.mesh.position.clone() : fields.clone();
+  const off = meshPos.clone().sub(fields); // constant world offset (e.g. cube +h/2)
+  const newMesh = meshPos.sub(pivotFrom).applyMatrix4(R).add(pivotTo);
+  const rad = THREE.MathUtils.degToRad;
+  const r0 = body.rotation || { x: 0, y: 0, z: 0 };
+  const m0 = new THREE.Matrix4().makeRotationFromEuler(
+    new THREE.Euler(rad(r0.x || 0), rad(r0.y || 0), rad(r0.z || 0), 'XYZ'));
+  const e2 = new THREE.Euler().setFromRotationMatrix(
+    new THREE.Matrix4().multiplyMatrices(R, m0), 'XYZ');
+  body.rotation = {
+    x: THREE.MathUtils.radToDeg(e2.x),
+    y: THREE.MathUtils.radToDeg(e2.y),
+    z: THREE.MathUtils.radToDeg(e2.z),
+  };
+  body.x = newMesh.x - off.x;
+  body.y = newMesh.y - off.y;
+  body.z = newMesh.z - off.z;
+}
+
+// Pin B onto A: B rotates so its pivot axis faces A's (face-to-face), then
+// translates so the pivot points coincide. Creates the joint record.
+function assembleJoint(refA, refB) {
+  const A = _resolveJointAnchor(refA);
+  const B = _resolveJointAnchor(refB);
+  if (!A || !B) return false;
+  pushUndo();
+  const q = new THREE.Quaternion().setFromUnitVectors(B.n, A.n.clone().negate());
+  const R = new THREE.Matrix4().makeRotationFromQuaternion(q);
+  _applyRigidToBody(B.body, R, B.P, A.P);
+  const j = { id: doc.nextJointId++, a: { ...refA }, b: { ...refB }, angle: 0 };
+  doc.joints.push(j);
+  doc.selection = null;
+  doc.multiSelectedBodies = [];
+  if (viewer) { viewer.rebuildBodies(); viewer.updateJointGizmos(); viewer.updateGizmo(); }
+  renderTree(); renderProps();
+  setDirty(true);
+  return true;
+}
+
+// Swing B to a new angle about A's CURRENT pivot axis (self-healing if A
+// has moved). Called live from the angle slider — no undo here; the UI
+// snapshots once per gesture.
+function applyJointAngle(j, newAngle) {
+  const A = _resolveJointAnchor(j.a);
+  const B = _resolveJointAnchor(j.b);
+  if (!A || !B) return;
+  const delta = newAngle - (j.angle || 0);
+  if (!delta) return;
+  const R = new THREE.Matrix4().makeRotationAxis(A.n, THREE.MathUtils.degToRad(delta));
+  _applyRigidToBody(B.body, R, A.P, A.P);
+  j.angle = newAngle;
+  if (viewer) { viewer.rebuildBodies(); viewer.updateJointGizmos(); viewer.updateGizmo(); }
+  setDirty(true);
+}
+
+function handleJointPivotPick(sketchId, markId) {
+  const ref = { sketchId, markId };
+  const anchor = _resolveJointAnchor(ref);
+  if (!anchor) { showHint('That pivot is not attached to a part — draw it in a face sketch of the part.'); return; }
+  if (doc.jointPickStage === 'pivotA') {
+    doc.jointDraft = { a: ref };
+    doc.jointPickStage = 'pivotB';
+    setStatus('Now click the pivot on the part that should SWING. Esc to cancel.');
+    return;
+  }
+  if (doc.jointPickStage === 'pivotB') {
+    const aAnchor = _resolveJointAnchor(doc.jointDraft.a);
+    if (aAnchor && aAnchor.body.id === anchor.body.id) {
+      showHint('Pick a pivot on a DIFFERENT part.');
+      return;
+    }
+    const ok = assembleJoint(doc.jointDraft.a, ref);
+    exitJointCreation(ok
+      ? 'Parts pinned together! Click empty space to open the Joints panel and swing it.'
+      : 'Could not pin those parts — check both pivots sit on parts.');
+  }
+}
+
 function startJointCreation() {
-  if (doc.bodies.length < 2) {
-    showHint('Need at least two bodies. Add another, then try Joint.');
+  // Need pivots on at least two different parts
+  const pivotBodies = new Set();
+  for (const sk of doc.sketches) {
+    if (sk.sourceBodyId == null) continue;
+    if (!doc.bodies.some(b => b.id === sk.sourceBodyId)) continue;
+    if (sk.entities?.some(e => e.type === 'pivotMark')) pivotBodies.add(sk.sourceBodyId);
+  }
+  if (pivotBodies.size < 2) {
+    showHint('Each part needs a pivot point first: open a face sketch on the part and use the Pivot tool (⊕). Do that on both parts, then try Joint again.');
     return;
   }
   if (doc.mode !== '3d') setMode('3d');
-  // Cancel any conflicting modal pick states
   if (doc.cutMode) exitBooleanCut();
   if (doc.mirrorMode) exitMirrorPick();
   if (doc.alignMode) exitAlignMode();
   if (doc.faceMode) { doc.faceMode = false; if (viewer) viewer.canvas.style.cursor = ''; }
-  doc.jointPickStage = 'bodyA';
-  doc.jointDraft = { bodyA: null, bodyB: null };
+  doc.jointPickStage = 'pivotA';
+  doc.jointDraft = {};
   if (viewer) viewer.canvas.style.cursor = 'crosshair';
   document.querySelectorAll('[data-action="joint"]').forEach(b => b.classList.add('active'));
-  setStatus('Joint — click the first body (A). Esc to cancel.');
+  setStatus('Joint — click the pivot (⊕) on the part that STAYS PUT. Esc to cancel.');
 }
 function exitJointCreation(msg) {
   doc.jointPickStage = null;
@@ -14505,28 +14661,6 @@ function findClosestBodyEdge(body, ray) {
   return best;
 }
 
-function commitJointAxis(edgePick) {
-  if (!doc.jointDraft) return;
-  const { bodyA, bodyB } = doc.jointDraft;
-  pushUndo();
-  const j = {
-    id: doc.nextJointId++,
-    bodyA, bodyB,
-    origin: [edgePick.origin.x, edgePick.origin.y, edgePick.origin.z],
-    axis: [edgePick.axis.x, edgePick.axis.y, edgePick.axis.z],
-    angle: 0,
-  };
-  doc.joints.push(j);
-  exitJointCreation(`Joint ${j.id} created (bodies ${bodyA} ↔ ${bodyB}).`);
-  // Clear the body selection picked during the flow so the panel pops to the
-  // Joints list (renderProps's no-selection 3D branch).
-  doc.selection = null;
-  doc.multiSelectedBodies = [];
-  if (viewer) { viewer.updateJointGizmos(); viewer.updateGizmo(); }
-  renderTree(); renderProps();
-  setDirty(true);
-}
-
 function deleteJoint(jointId) {
   const before = doc.joints.length;
   pushUndo();
@@ -14539,13 +14673,21 @@ function deleteJoint(jointId) {
   }
 }
 
-// Drop any joints whose bodies no longer exist. Called from rebuildBodies so
-// every code path that removes bodies (cut, group, delete, undo) gets covered.
+// Drop any joints whose pivots no longer resolve (mark erased, sketch or
+// body deleted). Also discards legacy edge-pick joints (definition-only —
+// they never articulated anything). Called from rebuildBodies so every
+// path that removes things gets covered.
 function pruneOrphanJoints() {
   if (!doc.joints?.length) return;
-  const ids = new Set(doc.bodies.map(b => b.id));
+  const ok = (r) => {
+    if (!r) return false;
+    const sk = doc.sketches.find(s => s.id === r.sketchId);
+    return !!(sk && sk.sourceBodyId != null &&
+      doc.bodies.some(b => b.id === sk.sourceBodyId) &&
+      sk.entities?.some(e => e.id === r.markId && e.type === 'pivotMark'));
+  };
   const before = doc.joints.length;
-  doc.joints = doc.joints.filter(j => ids.has(j.bodyA) && ids.has(j.bodyB));
+  doc.joints = doc.joints.filter(j => ok(j.a) && ok(j.b));
   if (doc.joints.length !== before && viewer) viewer.updateJointGizmos();
 }
 
@@ -15291,19 +15433,56 @@ function renderProps() {
         <div class="field"><label>Entities</label><div>${n} ${n === 1 ? 'shape' : 'shapes'}</div></div>
         <div class="hint">Click a shape to edit dimensions, or pick a tool above to draw a new one.</div>`;
     } else {
-      const jointRows = (doc.joints || []).map(j =>
-        `<div class="field" style="display:flex;align-items:center;gap:6px;padding:4px 0">
-          <span style="color:#b45309;font-size:14px">🔗</span>
-          <span style="flex:1">Joint ${j.id}: Body ${j.bodyA} ↔ Body ${j.bodyB}</span>
-          <button class="action" data-del-joint="${j.id}" style="padding:2px 8px;font-size:11px">×</button>
+      const partName = (r) => {
+        const sk = doc.sketches.find(s => s.id === r?.sketchId);
+        const b = sk && doc.bodies.find(x => x.id === sk.sourceBodyId);
+        if (!b) return '?';
+        return b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`;
+      };
+      const jointRows = (doc.joints || []).filter(j => j.a && j.b).map(j =>
+        `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="color:#b45309;font-size:14px">🔗</span>
+            <span style="flex:1;font-size:12px"><b>${partName(j.b)}</b> swings on ${partName(j.a)}</span>
+            <button class="action" data-del-joint="${j.id}" title="Remove this joint (the parts stay where they are)" style="padding:2px 8px;font-size:11px">×</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <input type="range" data-joint-slider="${j.id}" min="-180" max="180" step="1" value="${Math.round(j.angle || 0)}" style="flex:1"/>
+            <input type="number" data-joint-num="${j.id}" value="${Math.round(j.angle || 0)}" step="5" style="width:58px"/>°
+          </div>
         </div>`
       ).join('');
       props.innerHTML = `
         <div class="empty" style="margin-bottom:8px">Select a body or use the tools above.</div>
         <h4 style="margin-top:6px">Joints</h4>
-        ${jointRows || '<div class="hint">No joints yet. Click the <b>Joint</b> tool, pick two bodies, then click near an edge.</div>'}`;
+        ${jointRows || '<div class="hint">No joints yet. Draw a <b>Pivot</b> point (⊕) in a face sketch on each of two parts, then click <b>Joint</b> and pick the two pivots.</div>'}`;
       props.querySelectorAll('[data-del-joint]').forEach(btn => {
         btn.onclick = () => deleteJoint(parseInt(btn.dataset.delJoint, 10));
+      });
+      // Swing sliders — one undo snapshot per drag gesture, live motion while
+      // dragging, number field kept in sync (and vice versa).
+      props.querySelectorAll('[data-joint-slider]').forEach(sl => {
+        const jid = parseInt(sl.dataset.jointSlider, 10);
+        sl.addEventListener('pointerdown', () => pushUndo());
+        sl.addEventListener('input', () => {
+          const j = doc.joints.find(x => x.id === jid);
+          if (!j) return;
+          applyJointAngle(j, parseFloat(sl.value) || 0);
+          const num = props.querySelector(`[data-joint-num="${jid}"]`);
+          if (num) num.value = Math.round(j.angle);
+        });
+      });
+      props.querySelectorAll('[data-joint-num]').forEach(inp => {
+        const jid = parseInt(inp.dataset.jointNum, 10);
+        inp.addEventListener('change', () => {
+          const j = doc.joints.find(x => x.id === jid);
+          const v = parseFloat(inp.value);
+          if (!j || !isFinite(v)) return;
+          pushUndo();
+          applyJointAngle(j, Math.max(-180, Math.min(180, v)));
+          const sl = props.querySelector(`[data-joint-slider="${jid}"]`);
+          if (sl) sl.value = Math.round(j.angle);
+        });
       });
     }
     return;
@@ -15385,6 +15564,13 @@ function renderProps() {
         <div class="field"><label>Y (${u})</label><input type="number" data-k="cy" value="${fmtU(ent.cy)}" step="0.5"/></div>
         <div class="hint">Switch to 3D and click <b>Thd Holes</b> to turn every mark in this sketch into a real threaded hole + visualizer bolt.</div>
         <button class="action" id="del-ent" style="margin-top:10px">Delete mark</button>`;
+    } else if (ent.type === 'pivotMark') {
+      props.innerHTML = `
+        <h4>Pivot point</h4>
+        <div class="field"><label>X (${u})</label><input type="number" data-k="cx" value="${fmtU(ent.cx)}" step="0.5"/></div>
+        <div class="field"><label>Y (${u})</label><input type="number" data-k="cy" value="${fmtU(ent.cy)}" step="0.5"/></div>
+        <div class="hint">This is where the part can hinge. Put a pivot on another part too, then click <b>Joint</b> in 3D and pick both pivots to pin the parts together.</div>
+        <button class="action" id="del-ent" style="margin-top:10px">Delete pivot</button>`;
     } else if (ent.type === 'polyline') {
       let len = 0;
       for (let i = 0; i < ent.points.length - 1; i++) {
@@ -15588,7 +15774,15 @@ function renderProps() {
       </div>
       ${body.op === 'subtract' ? '<div class="hint">Negative bodies cut into a body when you <b>Group</b> them together (Shift-click both, then Group).</div>' : ''}`;
 
-    props.innerHTML = dimFields + positionFields + opField + `<button class="action" id="del-body" style="margin-top:14px">Delete body</button>`;
+    // Jointed part — point the user at the swing controls
+    const inJoint = (doc.joints || []).some(j => {
+      const sideBody = (r) => doc.sketches.find(s => s.id === r?.sketchId)?.sourceBodyId;
+      return sideBody(j.a) === body.id || sideBody(j.b) === body.id;
+    });
+    const jointHint = inJoint
+      ? `<div class="hint" style="margin-top:8px">🔗 This part is in a <b>joint</b> — click empty space to open the Joints panel and swing it.</div>`
+      : '';
+    props.innerHTML = dimFields + jointHint + positionFields + opField + `<button class="action" id="del-body" style="margin-top:14px">Delete body</button>`;
 
     props.querySelectorAll('input').forEach(inp => {
       inp.addEventListener('input', () => {
