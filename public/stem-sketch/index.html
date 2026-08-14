@@ -1603,6 +1603,13 @@ class SketchEngine {
     }
     if (!clickedOrig) return null;
 
+    // Curved (Bezier) polylines get the exact planner — the sampled-polyline
+    // path below would flatten their curves into facets on every trim.
+    if (clickedOrig.type === 'polyline' && clickedOrig.points.length >= 2 &&
+        clickedOrig.points.some(p => p.cpIn || p.cpOut)) {
+      return this._computeTrimPlanCurved(clickedOrig, wx, wy);
+    }
+
     // 2. Cumulative arc-length parameters along the simple polyline.
     const n = simplePoly.points.length;
     const segCount = simplePoly.closed ? n : n - 1;
@@ -1805,6 +1812,183 @@ class SketchEngine {
     return {
       kind: 'trim', ent: clickedOrig, results, removedPts,
       status: `Trimmed at ${intersections.length === 1 ? '1 crossing' : `${intersections.length} crossings`}`,
+    };
+  }
+
+  // Exact slice of a curved polyline from cut A to cut B (each {k, t} —
+  // segment index + parameter). Straight segments interpolate; curved
+  // segments keep TRUE Bezier sub-curves via de Casteljau, so a trimmed
+  // smooth shape stays smooth. B may wrap past the end on closed shapes.
+  _polySliceCurved(ent, A, B) {
+    const n = ent.points.length;
+    const limit = ent.closed ? n : n - 1;
+    const EPS = 1e-6;
+    let steps;
+    if (ent.closed) {
+      steps = ((B.k - A.k) % limit + limit) % limit;
+      if (steps === 0 && B.t <= A.t + EPS) steps = limit; // full wrap
+    } else {
+      steps = B.k - A.k;
+      if (steps < 0) return [];
+    }
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+      const k = (A.k + i) % limit;
+      const tS = i === 0 ? A.t : 0;
+      const tE = i === steps ? B.t : 1;
+      if (tE <= tS + EPS) continue;
+      const seg = _cubicOf(ent, k);
+      let aPt, bPt;
+      if (!seg.curved) {
+        aPt = { x: seg.p0.x + (seg.p3.x - seg.p0.x) * tS, y: seg.p0.y + (seg.p3.y - seg.p0.y) * tS };
+        bPt = { x: seg.p0.x + (seg.p3.x - seg.p0.x) * tE, y: seg.p0.y + (seg.p3.y - seg.p0.y) * tE };
+      } else {
+        const sub = _cubicSubRange(seg, tS, tE);
+        aPt = { x: sub.ax, y: sub.ay, cpOut: { dx: sub.c1x - sub.ax, dy: sub.c1y - sub.ay } };
+        bPt = { x: sub.bx, y: sub.by, cpIn: { dx: sub.c2x - sub.bx, dy: sub.c2y - sub.by } };
+      }
+      if (!pts.length) pts.push(aPt);
+      else if (aPt.cpOut) pts[pts.length - 1].cpOut = aPt.cpOut;
+      pts.push(bPt);
+    }
+    return pts;
+  }
+
+  // Trim planner for polylines that contain Bezier segments. Mirrors the
+  // sampled planner's flow (click → crossings → bracket → kept pieces) but
+  // every sampled location carries (segment k, parameter t) provenance so
+  // the kept pieces are rebuilt with exact sub-curves.
+  _computeTrimPlanCurved(ent, wx, wy) {
+    const n = ent.points.length;
+    const limit = ent.closed ? n : n - 1;
+    const EPS = 1e-6;
+    // Sampled subsegments with provenance
+    const subs = [];
+    for (let k = 0; k < limit; k++) {
+      const seg = _cubicOf(ent, k);
+      if (!seg.curved) {
+        subs.push({ ax: seg.p0.x, ay: seg.p0.y, bx: seg.p3.x, by: seg.p3.y, k, t0: 0, t1: 1 });
+      } else {
+        const S = cubicBezierPoints(seg.p0, seg.c1, seg.c2, seg.p3, 24);
+        for (let j = 0; j < S.length - 1; j++) {
+          subs.push({ ax: S[j].x, ay: S[j].y, bx: S[j + 1].x, by: S[j + 1].y,
+                      k, t0: j / (S.length - 1), t1: (j + 1) / (S.length - 1) });
+        }
+      }
+    }
+    let total = 0;
+    for (const s of subs) { s.len = Math.hypot(s.bx - s.ax, s.by - s.ay); s.cum = total; total += s.len; }
+    if (total < 1e-6) return { kind: 'hint', message: 'Shape too small to trim.' };
+    // Click position along the path
+    let clickedS = 0, bestD = Infinity;
+    for (const s of subs) {
+      const dx = s.bx - s.ax, dy = s.by - s.ay;
+      const L2 = dx * dx + dy * dy;
+      const t = L2 ? Math.max(0, Math.min(1, ((wx - s.ax) * dx + (wy - s.ay) * dy) / L2)) : 0;
+      const d = Math.hypot(wx - (s.ax + t * dx), wy - (s.ay + t * dy));
+      if (d < bestD) { bestD = d; clickedS = s.cum + t * s.len; }
+    }
+    const cutAt = (s0) => {
+      const sw = ((s0 % total) + total) % total;
+      let sub = subs[subs.length - 1];
+      for (const s of subs) { if (sw <= s.cum + s.len + EPS) { sub = s; break; } }
+      const f = sub.len ? Math.max(0, Math.min(1, (sw - sub.cum) / sub.len)) : 0;
+      return { k: sub.k, t: sub.t0 + f * (sub.t1 - sub.t0),
+               x: sub.ax + f * (sub.bx - sub.ax), y: sub.ay + f * (sub.by - sub.ay), s: sw };
+    };
+    // Crossings with every other entity (construction lines count)
+    let cuts = [];
+    for (const other of doc.sketch.entities) {
+      if (other.id === ent.id) continue;
+      const oSegs = entityToSegments(other);
+      if (!oSegs.length) continue;
+      for (const s of subs) {
+        for (const os of oSegs) {
+          const hit = segmentIntersection({ x: s.ax, y: s.ay }, { x: s.bx, y: s.by }, os.a, os.b);
+          if (!hit) continue;
+          const sAt = s.cum + hit.t * s.len;
+          if (Math.abs(sAt - clickedS) < 1e-3) continue;
+          cuts.push({ s: sAt, x: hit.x, y: hit.y, k: s.k, t: s.t0 + hit.t * (s.t1 - s.t0) });
+        }
+      }
+    }
+    cuts.sort((a, b) => a.s - b.s);
+    cuts = cuts.filter((c, i) => i === 0 || Math.abs(c.s - cuts[i - 1].s) > 1e-6);
+    if (ent.closed && cuts.length > 1 &&
+        Math.abs((cuts[0].s + total) - cuts[cuts.length - 1].s) < 1e-6) cuts.pop();
+
+    const baseProps = { type: 'polyline', construction: ent.construction || false, groupId: ent.groupId };
+    const mk = (pts, closed) => ({ ...baseProps, points: pts, closed });
+    const spanPts = (sa, sb) => {
+      let span = sb - sa; if (span <= EPS) span += total;
+      const mids = [];
+      for (const s of subs) {
+        let ds = s.cum - sa;
+        if (ent.closed && ds <= EPS) ds += total;
+        if (ds > EPS && ds < span - EPS) mids.push({ ds, x: s.ax, y: s.ay });
+      }
+      mids.sort((a, b) => a.ds - b.ds);
+      const A = cutAt(sa), B = cutAt(sb);
+      return [{ x: A.x, y: A.y }, ...mids.map(m => ({ x: m.x, y: m.y })), { x: B.x, y: B.y }];
+    };
+
+    // No crossings → remove just the clicked segment, curves kept elsewhere
+    if (cuts.length === 0) {
+      const kC = cutAt(clickedS).k;
+      const results = [];
+      if (ent.closed) {
+        const pts = this._polySliceCurved(ent, { k: (kC + 1) % limit, t: 0 }, { k: (kC - 1 + limit) % limit, t: 1 });
+        if (pts.length >= 2) results.push(mk(pts, false));
+      } else {
+        if (kC > 0) {
+          const ptsL = this._polySliceCurved(ent, { k: 0, t: 0 }, { k: kC - 1, t: 1 });
+          if (ptsL.length >= 2) results.push(mk(ptsL, false));
+        }
+        if (kC < limit - 1) {
+          const ptsR = this._polySliceCurved(ent, { k: kC + 1, t: 0 }, { k: limit - 1, t: 1 });
+          if (ptsR.length >= 2) results.push(mk(ptsR, false));
+        }
+      }
+      const segSubs = subs.filter(s => s.k === kC);
+      const removedPts = [...segSubs.map(s => ({ x: s.ax, y: s.ay })),
+        segSubs.length ? { x: segSubs[segSubs.length - 1].bx, y: segSubs[segSubs.length - 1].by } : null].filter(Boolean);
+      if (!results.length) return { kind: 'hint', message: 'No crossings found — overlap this with another shape, then trim.' };
+      return { kind: 'trim', ent, results, removedPts, status: 'Trimmed segment (no crossings found)' };
+    }
+    if (ent.closed && cuts.length < 2) {
+      return { kind: 'hint', message: 'Need two crossings to trim a closed shape — overlap it further, then trim.' };
+    }
+    // Bracket the click
+    let leftC = null, rightC = null;
+    for (const c of cuts) {
+      if (c.s < clickedS - EPS) leftC = c;
+      else if (c.s > clickedS + EPS && !rightC) rightC = c;
+    }
+    if (ent.closed) {
+      if (!leftC) leftC = cuts[cuts.length - 1];
+      if (!rightC) rightC = cuts[0];
+    } else {
+      if (!leftC) leftC = { s: 0, k: 0, t: 0, x: ent.points[0].x, y: ent.points[0].y };
+      if (!rightC) rightC = { s: total, k: limit - 1, t: 1, x: ent.points[n - 1].x, y: ent.points[n - 1].y };
+    }
+    const removedPts = spanPts(leftC.s, rightC.s);
+    const results = [];
+    if (ent.closed) {
+      const pts = this._polySliceCurved(ent, rightC, leftC);
+      if (pts.length >= 2) results.push(mk(pts, false));
+    } else {
+      if (leftC.s > EPS) {
+        const ptsL = this._polySliceCurved(ent, { k: 0, t: 0 }, leftC);
+        if (ptsL.length >= 2) results.push(mk(ptsL, false));
+      }
+      if (rightC.s < total - EPS) {
+        const ptsR = this._polySliceCurved(ent, rightC, { k: limit - 1, t: 1 });
+        if (ptsR.length >= 2) results.push(mk(ptsR, false));
+      }
+    }
+    return {
+      kind: 'trim', ent, results, removedPts,
+      status: `Trimmed at ${cuts.length === 1 ? '1 crossing' : `${cuts.length} crossings`}`,
     };
   }
 
@@ -4128,6 +4312,36 @@ function entityKeyPoints(ent) {
     return ent.points.map(p => ({ x: p.x, y: p.y }));
   }
   return [];
+}
+
+// ── Exact cubic-Bezier helpers (curve-preserving trim) ──────────────────
+// Control points of polyline segment k as a cubic (straight segs flagged).
+function _cubicOf(ent, k) {
+  const n = ent.points.length;
+  const p0 = ent.points[k], p3 = ent.points[(k + 1) % n];
+  const curved = !!(p0.cpOut || p3.cpIn);
+  return {
+    p0, p3, curved,
+    c1: p0.cpOut ? { x: p0.x + p0.cpOut.dx, y: p0.y + p0.cpOut.dy } : { x: p0.x, y: p0.y },
+    c2: p3.cpIn ? { x: p3.x + p3.cpIn.dx, y: p3.y + p3.cpIn.dy } : { x: p3.x, y: p3.y },
+  };
+}
+// de Casteljau split of a cubic at t → left + right control polygons
+function _bezSplit(p0, c1, c2, p3, t) {
+  const L = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const q0 = L(p0, c1), q1 = L(c1, c2), q2 = L(c2, p3);
+  const r0 = L(q0, q1), r1 = L(q1, q2);
+  const s = L(r0, r1);
+  return { left: [p0, q0, r0, s], right: [s, r1, q2, p3] };
+}
+// Exact sub-curve of segment `seg` over parameter range [t0, t1]
+function _cubicSubRange(seg, t0, t1) {
+  let cp = [seg.p0, seg.c1, seg.c2, seg.p3].map(p => ({ x: p.x, y: p.y }));
+  if (t0 > 1e-9) cp = _bezSplit(cp[0], cp[1], cp[2], cp[3], t0).right;
+  const tt = Math.max(0, Math.min(1, (t1 - t0) / ((1 - t0) || 1)));
+  if (tt < 1 - 1e-9) cp = _bezSplit(cp[0], cp[1], cp[2], cp[3], tt).left;
+  return { ax: cp[0].x, ay: cp[0].y, c1x: cp[1].x, c1y: cp[1].y,
+           c2x: cp[2].x, c2y: cp[2].y, bx: cp[3].x, by: cp[3].y };
 }
 
 // Build an arc polyline through three points (start, on-arc, end)
