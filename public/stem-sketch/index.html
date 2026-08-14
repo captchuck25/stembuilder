@@ -5632,21 +5632,39 @@ function findHoleCylindersInBody(body) {
   if (!body) return [];
   const out = [];
   const mw = body.mesh ? body.mesh.matrixWorld.clone() : new THREE.Matrix4();
-  const mwNormal = new THREE.Matrix3().getNormalMatrix(mw);
-  // addOffset: group children carry their own x/y/z on top of the group's
-  // matrix; a top-level extrude's matrixWorld already includes its
-  // position + rotation, so adding the fields again would double them.
-  const scanExtrude = (child, cumCut, addOffset) => {
+  const rad = THREE.MathUtils.degToRad;
+  // How a child maps its own (baked) coords into its parent's frame:
+  // T(position [+ pivot lift]) · R(rotation). A child group that was moved
+  // or rotated BEFORE being wrapped by a bigger group carries that pose in
+  // its record — losing it put detected holes ~100mm from the real ones on
+  // nested parts (Charlie's arm).
+  const placementOf = (c, liftY) => {
+    const r = c.rotation || {};
+    const m = new THREE.Matrix4().makeRotationFromEuler(
+      new THREE.Euler(rad(r.x || 0), rad(r.y || 0), rad(r.z || 0), 'XYZ'));
+    m.setPosition((c.x || 0), (c.y || 0) + (liftY || 0), (c.z || 0));
+    return m;
+  };
+  // Emit one hole: local center/axis, through frame `frameM`, then the
+  // body's own matrixWorld.
+  const pushCyl = (centerLocal, axisLocal, radius, frameM) => {
+    if (!(radius > 0.2)) return;
+    const M = new THREE.Matrix4().multiplyMatrices(mw, frameM);
+    const center = centerLocal.clone().applyMatrix4(M);
+    const nm = new THREE.Matrix3().getNormalMatrix(M);
+    const axis = axisLocal.clone().applyMatrix3(nm).normalize();
+    out.push({ center, axis, radius });
+  };
+  // Extrude: circles in the profile — cutters always, positives when the
+  // circle nests inside another closed shape (the region engine makes
+  // those through-holes; it's how most students draw holes).
+  const scanExtrude = (child, cumCut, frameM) => {
     if (child.type !== 'extrude' || !child.sketch || !child.plane) return;
     const planeMat = makePlaneMatrix(child.plane);
     const axisLocal = new THREE.Vector3(...child.plane.n).normalize();
     const ents = child.sketch.entities || [];
     for (const ent of ents) {
       if (ent.type !== 'circle' || !(ent.r > 0)) continue;
-      // A circle counts as a hole when the extrude is a cutter, OR when it
-      // sits nested inside another closed shape of the same profile (the
-      // region engine turns those into through-holes on positive extrudes —
-      // the way most students actually draw holes).
       let isHole = cumCut;
       if (!isHole) {
         isHole = ents.some(o => o !== ent &&
@@ -5654,58 +5672,40 @@ function findHoleCylindersInBody(body) {
           entityFullyInside(ent, o));
       }
       if (!isHole) continue;
-      const centerLocal = new THREE.Vector3(ent.cx, ent.cy, 0).applyMatrix4(planeMat);
-      if (addOffset) {
-        centerLocal.x += (child.x || 0);
-        centerLocal.y += (child.y || 0);
-        centerLocal.z += (child.z || 0);
-      }
-      const center = centerLocal.applyMatrix4(mw);
-      const axis = axisLocal.clone().applyMatrix3(mwNormal).normalize();
-      out.push({ center, axis, radius: ent.r });
+      pushCyl(new THREE.Vector3(ent.cx, ent.cy, 0).applyMatrix4(planeMat), axisLocal, ent.r, frameM);
     }
   };
-  // Cylinder-primitive and fastener (bolt-tool) cutters are holes too —
-  // most student holes come from these, not from profile circles.
-  const scanCylinderish = (child, cumCut) => {
+  // Cylinder-primitive and fastener (bolt-tool) cutters are holes too.
+  const scanCylinderish = (child, cumCut, acc) => {
     if (!cumCut) return;
-    const rad = THREE.MathUtils.degToRad;
-    const rot = child.rotation || {};
-    const axisL = new THREE.Vector3(0, 1, 0).applyEuler(
-      new THREE.Euler(rad(rot.x || 0), rad(rot.y || 0), rad(rot.z || 0), 'XYZ'));
-    let centerLocal, radius;
     if (child.type === 'cylinder') {
-      radius = Math.min(child.w || 0, child.d || 0) / 2;
-      // Cylinder meshes are centered at (x, y+h/2, z); rotation pivots there,
-      // so the center itself doesn't move.
-      centerLocal = new THREE.Vector3(child.x || 0, (child.y || 0) + (child.h || 0) / 2, child.z || 0);
+      const frameM = acc.clone().multiply(placementOf(child, (child.h || 0) / 2));
+      pushCyl(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0),
+        Math.min(child.w || 0, child.d || 0) / 2, frameM);
     } else if (child.type === 'fastener') {
       const spec = typeof getFastenerSpec === 'function' ? getFastenerSpec(child.size) : null;
       if (!spec) return;
-      radius = spec.d / 2;
-      // Fastener origin = shaft bottom; shaft runs along its rotated +Y.
-      centerLocal = new THREE.Vector3(child.x || 0, child.y || 0, child.z || 0)
-        .add(axisL.clone().multiplyScalar((child.length || 0) / 2));
-    } else return;
-    if (!(radius > 0.2)) return;
-    const center = centerLocal.applyMatrix4(mw);
-    const axis = axisL.applyMatrix3(mwNormal).normalize();
-    out.push({ center, axis, radius });
+      const frameM = acc.clone().multiply(placementOf(child, 0));
+      pushCyl(new THREE.Vector3(0, (child.length || 0) / 2, 0), new THREE.Vector3(0, 1, 0),
+        spec.d / 2, frameM);
+    }
   };
-  const walk = (kids, parentIsCut) => {
+  const walk = (kids, parentIsCut, acc) => {
     if (!Array.isArray(kids)) return;
     for (const child of kids) {
       const cumCut = parentIsCut || child.op === 'subtract';
       if (child.type === 'group' || child.type === 'combined') {
-        walk(child.children, cumCut);
+        walk(child.children, cumCut, acc.clone().multiply(placementOf(child, 0)));
         continue;
       }
-      scanExtrude(child, cumCut, true);
-      scanCylinderish(child, cumCut);
+      scanExtrude(child, cumCut, acc.clone().multiply(placementOf(child, 0)));
+      scanCylinderish(child, cumCut, acc);
     }
   };
-  if (body.type === 'extrude') scanExtrude(body, body.op === 'subtract', false);
-  walk(body.children, body.op === 'subtract');
+  // The body's own geometry frame: matrixWorld already carries its pose,
+  // so the top-level extrude scans with an identity frame.
+  if (body.type === 'extrude') scanExtrude(body, body.op === 'subtract', new THREE.Matrix4());
+  walk(body.children, body.op === 'subtract', new THREE.Matrix4());
   return out;
 }
 
