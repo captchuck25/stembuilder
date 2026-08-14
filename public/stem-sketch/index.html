@@ -1563,6 +1563,17 @@ class SketchEngine {
     };
     // Tips are surfaced via the status bar instead of a dedicated panel
     if (tips[t]) setStatus(tips[t].replace(/<[^>]+>/g, ''));
+    // Pivot/Thread: tell the user up front whether hole centers are
+    // available to snap to — doubles as a diagnostic when they aren't.
+    if ((t === 'pivot' || t === 'thread-mark') && doc.sketch) {
+      try {
+        this._holeSnapCache = null;
+        const nHoles = this._bodyHoleCenters().length;
+        if (nHoles) {
+          setStatus(`${t === 'pivot' ? 'Pivot' : 'Thread mark'}: ${nHoles} hole center${nHoles === 1 ? '' : 's'} on this part will snap — hover a hole and look for “center”.`);
+        }
+      } catch (_) {}
+    }
     this.updateLengthOverlay();
     this.render();
   }
