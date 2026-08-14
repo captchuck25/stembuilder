@@ -9585,8 +9585,14 @@ function computeSketchRegions(sketch) {
   // couple of drawn lines across the part enclose real clickable regions
   // against the true outline — draw two lines, click the wedge, cut it.
   // (The projection is cached per mesh+plane, so this stays cheap.)
+  // Outline edges join the graph ONLY when the sketch has OPEN drawn
+  // lines — that's the trim-by-lines flow (lines + outline close wedges).
+  // A sketch of pure closed profiles (square, circle, text) keeps classic
+  // regions: drawn shapes extrude WHOLE, never subdivided by a part's
+  // silhouette crossing through them.
+  const hasOpenLines = candidates.some(e => e.type === 'polyline' && !e.closed);
   let outlineSegs = null;
-  if (sketch.sourceBodyId != null && typeof viewer !== 'undefined' && viewer &&
+  if (hasOpenLines && sketch.sourceBodyId != null && typeof viewer !== 'undefined' && viewer &&
       typeof projectBodiesOntoPlane === 'function') {
     try {
       const body = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(sketch) : null;
