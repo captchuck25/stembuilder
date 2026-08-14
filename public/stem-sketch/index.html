@@ -2217,6 +2217,36 @@ class SketchEngine {
     this.render();
   }
 
+  // Centers of existing circular holes in the part under the active face
+  // sketch, in sketch coords. The projected circles a student sees in a
+  // face sketch are BODY outline, not sketch entities — without this there
+  // was nothing to snap a pivot or thread mark onto. Cached per
+  // sketch+body+bodies-count; the attach lookup heals unlinked sketches.
+  _bodyHoleCenters() {
+    const sk = doc.sketch;
+    if (!sk || !sk.plane || typeof _sketchAttachedBody !== 'function') return [];
+    const preKey = `${sk.id}:${sk.sourceBodyId ?? 'null'}:${(doc.bodies || []).length}`;
+    if (this._holeSnapCache?.key === preKey) return this._holeSnapCache.pts;
+    const pts = [];
+    try {
+      const body = _sketchAttachedBody(sk); // may heal + persist the link
+      if (body) {
+        const n = new THREE.Vector3(...sk.plane.n).normalize();
+        const planeMInv = makePlaneMatrix(sk.plane).clone().invert();
+        for (const cyl of findHoleCylindersInBody(body)) {
+          if (Math.abs(cyl.axis.dot(n)) < 0.9) continue; // hole must face this sketch
+          const s = cyl.center.clone().applyMatrix4(planeMInv);
+          pts.push({ x: s.x, y: s.y, r: cyl.radius });
+        }
+      }
+    } catch (_) {}
+    this._holeSnapCache = {
+      key: `${sk.id}:${sk.sourceBodyId ?? 'null'}:${(doc.bodies || []).length}`,
+      pts,
+    };
+    return pts;
+  }
+
   computeSnap(wx, wy, ignoreId = null) {
     // Snap behaviour by grid-snap toggle:
     //   ON  → grid + KEY FEATURE points only (endpoint, midpoint,
@@ -2235,6 +2265,18 @@ class SketchEngine {
     const tolMm = 8 / this.view.pxPerMm;
     const endpointTolMm = 12 / this.view.pxPerMm;
     const candidates = [];
+
+    // Centers of existing holes in the part this face sketch sits on.
+    // Anywhere inside the hole should lock to its center (that's the whole
+    // point of hovering a hole), so the strength floor stays ABOVE the grid
+    // candidate (1.0) across the full pull radius.
+    for (const hc of this._bodyHoleCenters()) {
+      const tol = Math.max(endpointTolMm, (hc.r || 0) * 0.95);
+      const d = Math.hypot(wx - hc.x, wy - hc.y);
+      if (d < tol) {
+        candidates.push({ x: hc.x, y: hc.y, kind: 'center', strength: 1.6 - 0.5 * (d / tol) });
+      }
+    }
 
     // Snap to entity endpoints + edges. Computed BEFORE grid so we can prefer
     // them — endpoint strength dominates the grid candidate (which is constant
@@ -3509,7 +3551,7 @@ class SketchEngine {
     // snap — would point at the wrong spot) and have their own red previews.
     const HOVER_SNAP_TOOLS = new Set([
       'rect', 'circle', 'ellipse', 'line', 'construction', 'arc',
-      'dimension', 'extend',
+      'dimension', 'extend', 'thread-mark', 'pivot',
     ]);
     if (HOVER_SNAP_TOOLS.has(this.tool)) {
       this.snap = this.computeSnap(wx, wy);
@@ -5580,6 +5622,38 @@ function findHoleCylindersInBody(body) {
   const out = [];
   const mw = body.mesh ? body.mesh.matrixWorld.clone() : new THREE.Matrix4();
   const mwNormal = new THREE.Matrix3().getNormalMatrix(mw);
+  // addOffset: group children carry their own x/y/z on top of the group's
+  // matrix; a top-level extrude's matrixWorld already includes its
+  // position + rotation, so adding the fields again would double them.
+  const scanExtrude = (child, cumCut, addOffset) => {
+    if (child.type !== 'extrude' || !child.sketch || !child.plane) return;
+    const planeMat = makePlaneMatrix(child.plane);
+    const axisLocal = new THREE.Vector3(...child.plane.n).normalize();
+    const ents = child.sketch.entities || [];
+    for (const ent of ents) {
+      if (ent.type !== 'circle' || !(ent.r > 0)) continue;
+      // A circle counts as a hole when the extrude is a cutter, OR when it
+      // sits nested inside another closed shape of the same profile (the
+      // region engine turns those into through-holes on positive extrudes —
+      // the way most students actually draw holes).
+      let isHole = cumCut;
+      if (!isHole) {
+        isHole = ents.some(o => o !== ent &&
+          (o.type === 'rect' || o.type === 'circle' || (o.type === 'polyline' && o.closed)) &&
+          entityFullyInside(ent, o));
+      }
+      if (!isHole) continue;
+      const centerLocal = new THREE.Vector3(ent.cx, ent.cy, 0).applyMatrix4(planeMat);
+      if (addOffset) {
+        centerLocal.x += (child.x || 0);
+        centerLocal.y += (child.y || 0);
+        centerLocal.z += (child.z || 0);
+      }
+      const center = centerLocal.applyMatrix4(mw);
+      const axis = axisLocal.clone().applyMatrix3(mwNormal).normalize();
+      out.push({ center, axis, radius: ent.r });
+    }
+  };
   const walk = (kids, parentIsCut) => {
     if (!Array.isArray(kids)) return;
     for (const child of kids) {
@@ -5588,22 +5662,10 @@ function findHoleCylindersInBody(body) {
         walk(child.children, cumCut);
         continue;
       }
-      if (!cumCut) continue;
-      if (child.type !== 'extrude' || !child.sketch || !child.plane) continue;
-      const planeMat = makePlaneMatrix(child.plane);
-      const axisLocal = new THREE.Vector3(...child.plane.n).normalize();
-      for (const ent of (child.sketch.entities || [])) {
-        if (ent.type !== 'circle' || !(ent.r > 0)) continue;
-        const centerLocal = new THREE.Vector3(ent.cx, ent.cy, 0).applyMatrix4(planeMat);
-        centerLocal.x += (child.x || 0);
-        centerLocal.y += (child.y || 0);
-        centerLocal.z += (child.z || 0);
-        const center = centerLocal.applyMatrix4(mw);
-        const axis = axisLocal.clone().applyMatrix3(mwNormal).normalize();
-        out.push({ center, axis, radius: ent.r });
-      }
+      scanExtrude(child, cumCut, true);
     }
   };
+  if (body.type === 'extrude') scanExtrude(body, body.op === 'subtract', false);
   walk(body.children, body.op === 'subtract');
   return out;
 }
