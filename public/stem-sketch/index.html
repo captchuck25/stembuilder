@@ -3902,7 +3902,29 @@ class SketchEngine {
     // sketch made by picking a reference plane should be a clean canvas
     // with only what the user actually drew in it.
     if (doc.bodies.length && doc.sketch?.plane && doc.sketch.sourceBodyId) {
-      const segs = projectBodiesOntoPlane(doc.sketch.plane);
+      let segs = projectBodiesOntoPlane(doc.sketch.plane);
+      // DEPTH BAND: only silhouettes near the sketched part matter. A body
+      // far beyond it along the sketch normal projects a "random silhouette"
+      // onto the face (Charlie's bracket ghost) — drop segments outside the
+      // attached part's own depth range (+ a margin for touching parts).
+      const attached = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(doc.sketch) : null;
+      if (attached?.mesh) {
+        try {
+          const n = new THREE.Vector3(...doc.sketch.plane.n).normalize();
+          const o = new THREE.Vector3(...doc.sketch.plane.origin);
+          const bb = new THREE.Box3().setFromObject(attached.mesh);
+          let dzMin = Infinity, dzMax = -Infinity;
+          for (const cx of [bb.min.x, bb.max.x]) for (const cy of [bb.min.y, bb.max.y]) for (const cz of [bb.min.z, bb.max.z]) {
+            const dz = new THREE.Vector3(cx, cy, cz).sub(o).dot(n);
+            dzMin = Math.min(dzMin, dz); dzMax = Math.max(dzMax, dz);
+          }
+          const lo = dzMin - 8, hi = dzMax + 8;
+          segs = segs.filter(s => {
+            const m = ((s.dz1 || 0) + (s.dz2 || 0)) / 2;
+            return m >= lo && m <= hi;
+          });
+        } catch (_) {}
+      }
       // Cache the visible outline segments for the snap engine — students
       // trace these lines (and their crossings = interference boundaries)
       // to build tight-tolerance profiles.
@@ -9583,11 +9605,28 @@ function computeSketchRegions(sketch) {
         // Hidden-classified segments are INCLUDED — the overlap zone is by
         // definition occluded by this part, and that's exactly where the
         // interference wedge lives.
+        // Depth band: only neighbours near the sketched part matter — a
+        // body far beyond it along the normal is visual noise, not an
+        // interference candidate.
+        let bandLo = -Infinity, bandHi = Infinity;
+        if (body.mesh) {
+          const n = new THREE.Vector3(...sketch.plane.n).normalize();
+          const o = new THREE.Vector3(...sketch.plane.origin);
+          const bb = new THREE.Box3().setFromObject(body.mesh);
+          let dzMin = Infinity, dzMax = -Infinity;
+          for (const cx of [bb.min.x, bb.max.x]) for (const cy of [bb.min.y, bb.max.y]) for (const cz of [bb.min.z, bb.max.z]) {
+            const dz = new THREE.Vector3(cx, cy, cz).sub(o).dot(n);
+            dzMin = Math.min(dzMin, dz); dzMax = Math.max(dzMax, dz);
+          }
+          bandLo = dzMin - 8; bandHi = dzMax + 8;
+        }
         for (const other of doc.bodies) {
           if (other.id === body.id || other.hidden || !other.mesh) continue;
           if (other.type === 'fastener' || other.type === 'threadShell') continue;
           for (const s of projectBodiesOntoPlane(sketch.plane, other.id)) {
             if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
+            const m = ((s.dz1 || 0) + (s.dz2 || 0)) / 2;
+            if (m < bandLo || m > bandHi) continue;
             outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
           }
         }
