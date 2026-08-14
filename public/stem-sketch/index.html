@@ -3977,17 +3977,22 @@ class SketchEngine {
     // faint dashed silhouette so the body's perimeter is visible while
     // sketching. Cubes/extrudes get a rectangle; spheres/tori get a circle.
     const fb = doc.sketch?.boundary;
-    if (fb && fb.type === 'rect') {
+    // When the part's REAL face outline is on screen (the highlighted
+    // in-plane silhouette), it IS the perimeter — the face-pick bbox
+    // rectangle just confuses ("why is my boundary a big box?"), so skip it.
+    const hasFaceOutline = (this._projSegs || []).some(s => !s._ground &&
+      Math.abs(s.dz1 || 0) < 0.5 && Math.abs(s.dz2 || 0) < 0.5);
+    if (fb && !hasFaceOutline && fb.type === 'rect') {
       const [bx1, by1] = this.worldToScreen(fb.x, fb.y);
       const [bx2, by2] = this.worldToScreen(fb.x + fb.w, fb.y + fb.h);
       const left = Math.min(bx1, bx2), top = Math.min(by1, by2);
       const w = Math.abs(bx2 - bx1), h = Math.abs(by2 - by1);
       svg += `<rect x="${left}" y="${top}" width="${w}" height="${h}" fill="none" stroke="rgba(140,160,200,0.55)" stroke-width="1.5" stroke-dasharray="6 4"/>`;
-    } else if (fb && fb.type === 'circle') {
+    } else if (fb && !hasFaceOutline && fb.type === 'circle') {
       const [cx, cy] = this.worldToScreen(fb.cx, fb.cy);
       const r = fb.r * this.view.pxPerMm;
       svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(140,160,200,0.55)" stroke-width="1.5" stroke-dasharray="6 4"/>`;
-    } else if (fb && fb.type === 'ellipse') {
+    } else if (fb && !hasFaceOutline && fb.type === 'ellipse') {
       const [cx, cy] = this.worldToScreen(fb.cx, fb.cy);
       const rx = fb.rx * this.view.pxPerMm;
       const ry = fb.ry * this.view.pxPerMm;
@@ -9431,6 +9436,26 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
       }
     }
   }
+  // T-JUNCTIONS: a segment whose ENDPOINT lands on another segment (a line
+  // snapped edge-to-edge against the part's outline) must SPLIT that
+  // segment too, or the face-tracing can't turn the corner there and the
+  // enclosed region never forms.
+  const T_TOL = 0.5; // mm — matches the node-merge tolerance
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
+    const L2 = dx * dx + dy * dy;
+    if (L2 < 1e-9) continue;
+    for (let j = 0; j < segs.length; j++) {
+      if (i === j) continue;
+      for (const p of [segs[j].a, segs[j].b]) {
+        const t = ((p.x - s.a.x) * dx + (p.y - s.a.y) * dy) / L2;
+        if (t <= 1e-6 || t >= 1 - 1e-6) continue;
+        const px = s.a.x + t * dx, py = s.a.y + t * dy;
+        if (Math.hypot(p.x - px, p.y - py) < T_TOL) ix[i].push({ t, x: px, y: py });
+      }
+    }
+  }
   // Dedupe nodes by position with a small tolerance
   const nodes = [];
   const NODE_TOL = 0.5; // mm
@@ -9554,7 +9579,11 @@ function computeSketchRegions(sketch) {
       }
     } catch (_) { outlineSegs = null; }
   }
-  const graph = buildPlanarGraph(candidates, sketch.boundary, outlineSegs);
+  // When the part's real face outline is available, IT is the perimeter —
+  // the face-pick bbox rectangle would only add phantom regions around
+  // the part, so it stays out of the graph.
+  const useBoundary = (outlineSegs && outlineSegs.length) ? null : sketch.boundary;
+  const graph = buildPlanarGraph(candidates, useBoundary, outlineSegs);
   const faces = findPlanarFaces(graph);
   if (!faces.length) return [];
   const regs = [];
