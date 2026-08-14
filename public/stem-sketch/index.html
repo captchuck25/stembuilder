@@ -537,6 +537,7 @@
     inset: 0;
     width: 100%;
     height: 100%;
+    touch-action: none; /* we handle pinch/pan ourselves — stop browser zoom */
     display: none;
   }
   #sketch-svg.active, #three-canvas.active { display: block; }
@@ -1059,6 +1060,10 @@
   <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-ellipse" viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="9" ry="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
   <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-view-top" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></symbol>
+  <symbol id="i-view-front" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 7l3-3h10l-3 3" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.5"/></symbol>
+  <symbol id="i-view-right" viewBox="0 0 24 24"><rect x="8" y="7" width="11" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 7L4 4v10l4 3" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.5"/></symbol>
+  <symbol id="i-view-iso" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.6"/></symbol>
   <symbol id="i-line" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 20L20 4"/><circle cx="4" cy="20" r="1.6" fill="currentColor"/><circle cx="20" cy="4" r="1.6" fill="currentColor"/></symbol>
   <symbol id="i-arc" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 19C 7 5, 17 5, 21 19"/></symbol>
   <symbol id="i-construction" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="3 3" d="M3 12L21 12"/></symbol>
@@ -1196,6 +1201,10 @@
       <div class="tools" id="tools-3d">
         <button class="tool" data-action="orbit-mode" title="Orbit toggle — drag rotates the view. Also: hold Ctrl/⌘/Space/Alt or right-drag."><svg class="ico"><use href="#i-orbit"/></svg><span class="tool-label">Orbit</span></button>
         <button class="tool" data-action="pan-mode" title="Pan toggle — drag slides the view (middle-drag also pans)"><svg class="ico"><use href="#i-pan"/></svg><span class="tool-label">Pan</span></button>
+        <button class="tool" data-view="top" title="Look straight down at the part"><svg class="ico"><use href="#i-view-top"/></svg><span class="tool-label">Top</span></button>
+        <button class="tool" data-view="front" title="Look at the part from the front"><svg class="ico"><use href="#i-view-front"/></svg><span class="tool-label">Front</span></button>
+        <button class="tool" data-view="right" title="Look at the part from the right side"><svg class="ico"><use href="#i-view-right"/></svg><span class="tool-label">Right</span></button>
+        <button class="tool" data-view="iso" title="Back to the angled home view"><svg class="ico"><use href="#i-view-iso"/></svg><span class="tool-label">Home</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-action="extrude" title="Extrude the current sketch"><svg class="ico"><use href="#i-extrude"/></svg><span class="tool-label">Extrude</span></button>
         <div class="dropdown" id="prim-dropdown">
@@ -2258,7 +2267,65 @@ class SketchEngine {
     return null;
   }
 
+  // ── Touch gestures (2D): two fingers = pinch-zoom + pan ──────────────
+  // One finger keeps drawing/selecting exactly like the mouse; the moment
+  // a second finger lands, any in-progress single-finger action is
+  // cancelled and the pair controls the view until all fingers lift.
+  touchDown(e) {
+    if (!this._touchPts) this._touchPts = new Map();
+    this._touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { this.svg.setPointerCapture(e.pointerId); } catch (_) {}
+    if (this._touchPts.size === 2) {
+      this.draft = null; this.dragMode = null; this.boxSel = null;
+      this.nodeMoveState = null; this.cpDrag = null; this.snap = null;
+      const [a, b] = [...this._touchPts.values()];
+      const r = this.rect();
+      this._pinch = {
+        dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+        mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+        pxPerMm: this.view.pxPerMm, panX: this.view.panX, panY: this.view.panY,
+        rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      };
+      this.render();
+      return true;
+    }
+    return this._pinch ? true : false; // 3rd finger: ignore
+  }
+  touchMove(e) {
+    if (!this._touchPts?.has(e.pointerId)) return false;
+    this._touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!this._pinch || this._touchPts.size < 2) return !!this._pinchDone;
+    const [a, b] = [...this._touchPts.values()];
+    const p = this._pinch;
+    const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const newPx = clamp(p.pxPerMm * (dist / p.dist), 0.5, 80);
+    // World point that was under the starting midpoint…
+    const sx0 = p.mid.x - p.rect.left, sy0 = p.mid.y - p.rect.top;
+    const wx0 = (sx0 - p.rect.width / 2 - p.panX) / p.pxPerMm;
+    const wy0 = (p.panY - sy0 + p.rect.height / 2) / p.pxPerMm;
+    // …stays under the current midpoint (covers pinch AND two-finger pan)
+    const sx1 = mid.x - p.rect.left, sy1 = mid.y - p.rect.top;
+    this.view.pxPerMm = newPx;
+    this.view.panX = sx1 - p.rect.width / 2 - wx0 * newPx;
+    this.view.panY = sy1 - p.rect.height / 2 + wy0 * newPx;
+    $('zoom-display').textContent = Math.round(newPx * 25) + '%';
+    this.render();
+    return true;
+  }
+  touchUp(e) {
+    if (!this._touchPts?.has(e.pointerId)) return false;
+    this._touchPts.delete(e.pointerId);
+    if (this._pinch) {
+      this._pinchDone = true; // swallow the leftover finger's events too
+      if (this._touchPts.size < 2) this._pinch = null;
+    }
+    if (this._touchPts.size === 0) this._pinchDone = false;
+    return !!(this._pinch || this._pinchDone);
+  }
+
   onDown(e) {
+    if (e.pointerType === 'touch' && this.touchDown(e)) return;
     // Clicking the canvas should release focus from any overlay input
     const li = $('length-input');
     if (li && document.activeElement === li) li.blur();
@@ -2923,6 +2990,7 @@ class SketchEngine {
   }
 
   onMove(e) {
+    if (e.pointerType === 'touch' && this.touchMove(e)) return;
     const [wx, wy] = this.pointerWorld(e);
     this.cursorWorld = { x: wx, y: wy };
     $('cursor-coords').textContent = `${fmtU(wx)}, ${fmtU(wy)} ${unitLabel()}`;
@@ -3316,6 +3384,7 @@ class SketchEngine {
   }
 
   onUp(e) {
+    if (e.pointerType === 'touch' && this.touchUp(e)) return;
     try { this.svg.releasePointerCapture(e.pointerId); } catch(_) {}
 
     // Finalize bbox resize drag — snapshot done in onDown via pushUndo
@@ -6395,8 +6464,39 @@ class Viewer3D {
     this.camera.lookAt(this.target);
   }
 
+  // Standard views: frame everything, then look from a canonical direction.
+  setStandardView(kind) {
+    const bb = new THREE.Box3();
+    let any = false;
+    this.scene.updateMatrixWorld(true);
+    for (const b of doc.bodies) {
+      if (b.mesh && !b.hidden) {
+        try { bb.expandByObject(b.mesh); any = true; } catch (_) {}
+      }
+    }
+    const center = (any && !bb.isEmpty()) ? bb.getCenter(new THREE.Vector3()) : new THREE.Vector3(0, 10, 0);
+    const span = (any && !bb.isEmpty()) ? bb.getSize(new THREE.Vector3()).length() : 100;
+    const views = {
+      top:   { phi: 0.02, theta: 0 },
+      front: { phi: Math.PI / 2, theta: 0 },
+      right: { phi: Math.PI / 2, theta: Math.PI / 2 },
+      iso:   { phi: 1.05, theta: 0.85 },
+    };
+    const v = views[kind] || views.iso;
+    this.target.copy(center);
+    this.spherical.radius = clamp(span * 1.7 + 30, 60, 2000);
+    this.spherical.phi = v.phi;
+    this.spherical.theta = v.theta;
+    this.updateCamera();
+    const names = { top: 'Top', front: 'Front', right: 'Right', iso: 'Home' };
+    setStatus(`${names[kind] || 'Home'} view`);
+  }
+
   bind() {
     let dragKind = null, lastX = 0, lastY = 0;
+    // Touch gestures (3D): one finger orbits, two fingers pinch-zoom + pan
+    const touch3 = new Map();
+    let pinch3 = null;
     const gizmoState = { active: false, axis: null, startVals: null, axisDir: null, startT: 0, axisOrigin: null };
     const resizeState = { active: false, body: null, axis: null, sign: null, axisOrigin: null, startT: 0, startDims: null, startPos: null, uniform: false };
     const rotateState = { active: false, axis: null, plane: null, center: null, startAngle: 0, startRots: null, ids: null };
@@ -6508,6 +6608,26 @@ class Viewer3D {
     };
 
     this.canvas.addEventListener('pointerdown', (e) => {
+      // Touch: second finger starts a pinch (zoom + pan); cancels any
+      // one-finger drag in progress.
+      if (e.pointerType === 'touch') {
+        touch3.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+        if (touch3.size === 2) {
+          dragKind = null;
+          bodyDrag.armed = false; bodyDrag.active = false;
+          boxSel.active = false;
+          const [a, b] = [...touch3.values()];
+          pinch3 = {
+            dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+            mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+            radius: this.spherical.radius,
+            target: this.target.clone(),
+          };
+          return;
+        }
+        if (touch3.size > 2 || pinch3) return;
+      }
       // Thread mark — click a mark in 3D to open the per-mark thread
       // dialog. The hit-disc is invisible but raycastable; tagged with
       // userData.kind === 'threadMark'.
@@ -7121,6 +7241,13 @@ class Viewer3D {
             this.canvas.setPointerCapture(e.pointerId);
           }
           return;
+        } else if (e.pointerType === 'touch') {
+          // One finger on empty space (touch) → orbit. Box-select needs a
+          // keyboard-modifier world; on a tablet orbiting is what you mean.
+          dragKind = 'orbit';
+          lastX = e.clientX; lastY = e.clientY;
+          try { this.canvas.setPointerCapture(e.pointerId); } catch (_) {}
+          return;
         } else {
           // Empty-area click → start a box-select (additive with Shift)
           boxSel.active = true;
@@ -7150,6 +7277,24 @@ class Viewer3D {
     });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('pointermove', (e) => {
+      // Touch pinch — zoom by finger distance, pan by midpoint drag
+      if (e.pointerType === 'touch' && touch3.has(e.pointerId)) {
+        touch3.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinch3 && touch3.size >= 2) {
+          const [a, b] = [...touch3.values()];
+          const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          this.spherical.radius = clamp(pinch3.radius * (pinch3.dist / dist), 20, 2000);
+          const panSpeed = this.spherical.radius * 0.0018;
+          const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 1);
+          this.target.copy(pinch3.target)
+            .addScaledVector(right, -(mid.x - pinch3.mid.x) * panSpeed)
+            .addScaledVector(up, (mid.y - pinch3.mid.y) * panSpeed);
+          this.updateCamera();
+          return;
+        }
+      }
       // Fastener live placement — ghost bolt follows the face under the cursor
       if (doc.fastenerPlaceTarget) updateFastenerGhost(e);
       // Rotation-handle drag — rotate body around the axis
@@ -7323,6 +7468,10 @@ class Viewer3D {
       this.updateCamera();
     });
     this.canvas.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') {
+        touch3.delete(e.pointerId);
+        if (touch3.size < 2) pinch3 = null;
+      }
       if (extrudeState.active) {
         const len = extrudeState.length;
         const dir = extrudeState.direction;
@@ -10209,6 +10358,15 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
   if (parent && typeof CSG !== 'undefined') {
     doc.multiSelectedBodies = [parent.id, ...newBodyIds];
     groupSelected(true); // already snapshotted at the top of this function
+    // HONEST status: groupSelected returns silently when the boolean throws,
+    // leaving the new extrudes as orphan top-level bodies. Only claim the
+    // cut/add happened if every new body was actually consumed.
+    const leftover = newBodyIds.filter(id => doc.bodies.some(b => b.id === id));
+    if (leftover.length) {
+      renderTree(); renderProps();
+      setStatus(`⚠ ${leftover.length === n ? 'That didn\'t combine' : 'Part of that didn\'t combine'} — ${leftover.length} piece${leftover.length === 1 ? '' : 's'} could not merge with the body. Press Ctrl+Z, or select the piece + the body and click Group.`);
+      return;
+    }
     // Re-point the sketch at the new group so the next extrude on this
     // sketch can auto-group with the (now combined) body too.
     if (doc.selection?.kind === 'body') {
@@ -17839,6 +17997,11 @@ function init() {
     // disable 3D-only controls
     document.querySelectorAll('#tools-3d .tool, #export-btn').forEach(b => b.disabled = true);
   }
+
+  // Standard view buttons (Top / Front / Right / Home)
+  document.querySelectorAll('[data-view]').forEach(b => {
+    b.addEventListener('click', () => { if (viewer) viewer.setStandardView(b.dataset.view); });
+  });
 
   // Cloud save/load buttons
   const cloudSaveBtn = document.getElementById('cloud-save-btn');
