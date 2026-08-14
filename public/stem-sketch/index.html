@@ -9591,6 +9591,22 @@ function computeSketchRegions(sketch) {
             outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
           }
         }
+        // MERGE near-duplicate outline lines: a part's near and far edges
+        // (or an old cut's seam) can project as hairline-separated parallel
+        // lines. Feeding both into the graph creates sliver regions whose
+        // invisible tail runs the whole part — clicking the visible end
+        // then cuts a trough. Collapse any segment that lies within 0.6mm
+        // of an already-kept segment's line over its whole span.
+        const kept = [];
+        const nearLine = (p, s) => pointSegDist(p.x, p.y, s.a.x, s.a.y, s.b.x, s.b.y) < 0.6;
+        for (const s of outlineSegs) {
+          let dup = false;
+          for (const k of kept) {
+            if (nearLine(s.a, k) && nearLine(s.b, k)) { dup = true; break; }
+          }
+          if (!dup) kept.push(s);
+        }
+        outlineSegs = kept;
       }
     } catch (_) { outlineSegs = null; }
   }
@@ -9651,11 +9667,19 @@ function computeSketchRegions(sketch) {
     const pts = r.points || [];
     if (pts.length < 3) return false;
     let per = 0;
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], b = pts[(i + 1) % pts.length];
       per += Math.hypot(b.x - a.x, b.y - a.y);
+      mnx = Math.min(mnx, a.x); mny = Math.min(mny, a.y);
+      mxx = Math.max(mxx, a.x); mxy = Math.max(mxy, a.y);
     }
-    return per < 1 || Math.abs(r.area) / per > 0.4;
+    const area = Math.abs(r.area);
+    if (per < 1 || area / per <= 0.4) return false; // hair-thin sliver
+    // A region whose extent dwarfs its area is a sliver with a wide end —
+    // the classic 'looked like a wedge, cut a trough' trap.
+    const diag2 = (mxx - mnx) ** 2 + (mxy - mny) ** 2;
+    return diag2 / area <= 60;
   });
 }
 
