@@ -5654,6 +5654,33 @@ function findHoleCylindersInBody(body) {
       out.push({ center, axis, radius: ent.r });
     }
   };
+  // Cylinder-primitive and fastener (bolt-tool) cutters are holes too —
+  // most student holes come from these, not from profile circles.
+  const scanCylinderish = (child, cumCut) => {
+    if (!cumCut) return;
+    const rad = THREE.MathUtils.degToRad;
+    const rot = child.rotation || {};
+    const axisL = new THREE.Vector3(0, 1, 0).applyEuler(
+      new THREE.Euler(rad(rot.x || 0), rad(rot.y || 0), rad(rot.z || 0), 'XYZ'));
+    let centerLocal, radius;
+    if (child.type === 'cylinder') {
+      radius = Math.min(child.w || 0, child.d || 0) / 2;
+      // Cylinder meshes are centered at (x, y+h/2, z); rotation pivots there,
+      // so the center itself doesn't move.
+      centerLocal = new THREE.Vector3(child.x || 0, (child.y || 0) + (child.h || 0) / 2, child.z || 0);
+    } else if (child.type === 'fastener') {
+      const spec = typeof getFastenerSpec === 'function' ? getFastenerSpec(child.size) : null;
+      if (!spec) return;
+      radius = spec.d / 2;
+      // Fastener origin = shaft bottom; shaft runs along its rotated +Y.
+      centerLocal = new THREE.Vector3(child.x || 0, child.y || 0, child.z || 0)
+        .add(axisL.clone().multiplyScalar((child.length || 0) / 2));
+    } else return;
+    if (!(radius > 0.2)) return;
+    const center = centerLocal.applyMatrix4(mw);
+    const axis = axisL.applyMatrix3(mwNormal).normalize();
+    out.push({ center, axis, radius });
+  };
   const walk = (kids, parentIsCut) => {
     if (!Array.isArray(kids)) return;
     for (const child of kids) {
@@ -5663,6 +5690,7 @@ function findHoleCylindersInBody(body) {
         continue;
       }
       scanExtrude(child, cumCut, true);
+      scanCylinderish(child, cumCut);
     }
   };
   if (body.type === 'extrude') scanExtrude(body, body.op === 'subtract', false);
