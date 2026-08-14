@@ -12046,17 +12046,75 @@ function syncSketchAnchorsToBodies() {
     const b = doc.bodies.find(bb => bb.id === sk.sourceBodyId);
     if (!b) continue;
     const px = b.x || 0, py = b.y || 0, pz = b.z || 0;
+    const rot = b.rotation || { x: 0, y: 0, z: 0 };
+    const meshPivot = () => b.mesh
+      ? { x: b.mesh.position.x, y: b.mesh.position.y, z: b.mesh.position.z }
+      : { x: px, y: py, z: pz };
     if (sk._anchorBodyId !== sk.sourceBodyId || !sk._anchor) {
       sk._anchorBodyId = sk.sourceBodyId;
       sk._anchor = { x: px, y: py, z: pz };
+      sk._anchorRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
+      sk._anchorPivot = meshPivot();
       continue;
     }
+    // Back-compat: anchors saved before rotation tracking existed
+    if (!sk._anchorRot) sk._anchorRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
+    if (!sk._anchorPivot) sk._anchorPivot = meshPivot();
     const dx = px - sk._anchor.x, dy = py - sk._anchor.y, dz = pz - sk._anchor.z;
+    const rotChanged = (rot.x || 0) !== sk._anchorRot.x ||
+                       (rot.y || 0) !== sk._anchorRot.y ||
+                       (rot.z || 0) !== sk._anchorRot.z;
+    if (rotChanged) {
+      // Rigid transform from old pose to new: rotate by the delta rotation
+      // about the body's pivot (the mesh position — that's what the render
+      // rotates around), then translate. Applies to the sketch plane AND
+      // the companion bodies so the whole annotation set rides the body.
+      const rad = THREE.MathUtils.degToRad;
+      const m0 = new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(rad(sk._anchorRot.x), rad(sk._anchorRot.y), rad(sk._anchorRot.z), 'XYZ'));
+      const m1 = new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(rad(rot.x || 0), rad(rot.y || 0), rad(rot.z || 0), 'XYZ'));
+      const Rd = new THREE.Matrix4().multiplyMatrices(m1, m0.clone().invert());
+      const P0 = new THREE.Vector3(sk._anchorPivot.x, sk._anchorPivot.y, sk._anchorPivot.z);
+      const P1 = P0.clone().add(new THREE.Vector3(dx, dy, dz));
+      const xformPt = (x, y, z) => new THREE.Vector3(x, y, z).sub(P0).applyMatrix4(Rd).add(P1);
+      const xformDir = (arr) => {
+        const v = new THREE.Vector3(arr[0], arr[1], arr[2]).applyMatrix4(Rd);
+        return [v.x, v.y, v.z];
+      };
+      const o = xformPt(sk.plane.origin[0], sk.plane.origin[1], sk.plane.origin[2]);
+      sk.plane.origin = [o.x, o.y, o.z];
+      if (Array.isArray(sk.plane.u)) sk.plane.u = xformDir(sk.plane.u);
+      if (Array.isArray(sk.plane.v)) sk.plane.v = xformDir(sk.plane.v);
+      if (Array.isArray(sk.plane.n)) sk.plane.n = xformDir(sk.plane.n);
+      for (const cb of doc.bodies) {
+        if (cb._threadMarkRef && cb._threadMarkRef.sketchId === sk.id) {
+          const p = xformPt(cb.x || 0, cb.y || 0, cb.z || 0);
+          cb.x = p.x; cb.y = p.y; cb.z = p.z;
+          const cr = cb.rotation || { x: 0, y: 0, z: 0 };
+          const mc = new THREE.Matrix4().makeRotationFromEuler(
+            new THREE.Euler(rad(cr.x || 0), rad(cr.y || 0), rad(cr.z || 0), 'XYZ'));
+          const e2 = new THREE.Euler().setFromRotationMatrix(
+            new THREE.Matrix4().multiplyMatrices(Rd, mc), 'XYZ');
+          cb.rotation = {
+            x: THREE.MathUtils.radToDeg(e2.x),
+            y: THREE.MathUtils.radToDeg(e2.y),
+            z: THREE.MathUtils.radToDeg(e2.z),
+          };
+        }
+      }
+      sk._anchor = { x: px, y: py, z: pz };
+      sk._anchorRot = { x: rot.x || 0, y: rot.y || 0, z: rot.z || 0 };
+      sk._anchorPivot = { x: P1.x, y: P1.y, z: P1.z };
+      _sketchAnchorsMoved = true;
+      continue;
+    }
     if (dx || dy || dz) {
       sk.plane.origin[0] += dx;
       sk.plane.origin[1] += dy;
       sk.plane.origin[2] += dz;
       sk._anchor = { x: px, y: py, z: pz };
+      sk._anchorPivot.x += dx; sk._anchorPivot.y += dy; sk._anchorPivot.z += dz;
       // The sketch's companion bodies ride along too: visualizer bolts and
       // standalone thread shells are separate world-positioned bodies tagged
       // with _threadMarkRef back to this sketch's marks.
