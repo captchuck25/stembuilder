@@ -8,12 +8,12 @@ import styles from "./marketing.module.css";
 export const metadata: Metadata = {
   title: "STEM Builder for Teachers — Students building on day one",
   description:
-    "Interactive STEM tools for K-12 classrooms: design, engineering, coding, and electronics that run in any browser and export to the real world. Free for teachers.",
+    "Interactive STEM tools for K-12 classrooms: design, engineering, coding, and electronics that run in any browser and export to the real world. Free for teachers to get started.",
   alternates: { canonical: "/for-teachers" },
   openGraph: {
     title: "STEM Builder for Teachers — Students building on day one",
     description:
-      "Interactive STEM tools for K-12 classrooms: design, engineering, coding, and electronics that run in any browser and export to the real world. Free for teachers.",
+      "Interactive STEM tools for K-12 classrooms: design, engineering, coding, and electronics that run in any browser and export to the real world. Free for teachers to get started.",
     url: "/for-teachers",
   },
 };
@@ -78,7 +78,7 @@ const TRUST_ITEMS = [
   "No ads, ever",
   "We never sell student data",
   "Students can join with no email",
-  "Free for teachers",
+  "Free to get started",
 ];
 
 export default function ForTeachersPage() {
@@ -228,8 +228,8 @@ export default function ForTeachersPage() {
             to flatten the learning curve, so class time goes to making, not to
             mastering complicated software. Teachers create a class in minutes,
             students join with a code, and everyone&apos;s work saves automatically.
-            It&apos;s free for teachers, with no ads and student privacy designed in
-            from day one.
+            It&apos;s free for teachers to get started, with no ads and student
+            privacy designed in from day one.
           </p>
         </div>
       </section>
@@ -238,7 +238,7 @@ export default function ForTeachersPage() {
       <section className={styles.ctaBand} aria-labelledby="closing-cta">
         <div className={styles.container}>
           <h2 id="closing-cta">Ready to see your students build?</h2>
-          <p>It takes about a minute to start — and it&apos;s free for teachers.</p>
+          <p>It takes about a minute to get started — free, no credit card required.</p>
           <div className={styles.btnRow} style={{ justifyContent: "center" }}>
             <Link href="/teachers" className={styles.btnOnDark}>Start free</Link>
             <a href="#tools" className={styles.btnOnDarkOutline}>Explore the tools</a>

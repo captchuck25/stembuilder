@@ -151,7 +151,7 @@ export default async function ToolDetailPage(
       <section className={styles.ctaBand}>
         <div className={styles.container}>
           <h2>Put {tool.name} in front of your class</h2>
-          <p>It takes about a minute to start — and it&apos;s free for teachers.</p>
+          <p>It takes about a minute to get started — free, no credit card required.</p>
           <div className={styles.btnRow} style={{ justifyContent: "center" }}>
             <Link href="/teachers" className={styles.btnOnDark}>Start free</Link>
           </div>

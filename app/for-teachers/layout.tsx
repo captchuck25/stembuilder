@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     template: "%s | STEM Builder for Teachers",
   },
   description:
-    "Hands-on STEM tools for K-12 classrooms — design, engineering, coding, and electronics that run in the browser and export to the real world. Free for teachers.",
+    "Hands-on STEM tools for K-12 classrooms — design, engineering, coding, and electronics that run in the browser and export to the real world. Free for teachers to get started.",
   openGraph: {
     siteName: "STEM Builder",
     type: "website",
