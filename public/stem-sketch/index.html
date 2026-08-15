@@ -7654,8 +7654,13 @@ class Viewer3D {
           // student drew is what a click means.
           const d0 = regionHits[0].distance;
           const coplanar = regionHits.filter(h => Math.abs(h.distance - d0) <= 0.5);
-          const classic = coplanar.filter(h => !h.object.userData.regionOutline);
-          const pool = classic.length ? classic : coplanar;
+          // Priority: (1) regions bounded by DRAWN shapes, (2) wedges bounded
+          // by the part's true OUTLINE, (3) face-pick bbox leftovers. Clicking
+          // a drawn circle always picks it; clicking the part's rounded end
+          // follows the real silhouette, not the synthetic rectangle.
+          const drawn = coplanar.filter(h => !h.object.userData.regionOutline && !h.object.userData.regionBoundary);
+          const outlineWedges = coplanar.filter(h => h.object.userData.regionOutline);
+          const pool = drawn.length ? drawn : (outlineWedges.length ? outlineWedges : coplanar);
           let best = pool[0];
           let bestArea = best.object.userData.regionArea ?? Infinity;
           for (let i = 1; i < pool.length; i++) {
@@ -8401,6 +8406,7 @@ class Viewer3D {
           sketchId: r.sketchId,
           regionArea: Math.abs(r.area || 0),
           regionOutline: !!r._usedOutline,
+          regionBoundary: !!r._usedBoundary,
         };
         this.regionGroup.add(mesh);
       }
@@ -9780,17 +9786,51 @@ function computeSketchRegions(sketch) {
     for (const f of facesA) f.points = snapToRings(f.points);
     for (const f of facesB) f.points = snapToRings(f.points);
   }
-  // Pass A regions — classic, never tagged, never filtered.
+  // Pass A regions — classic, never filtered. Regions whose perimeter runs
+  // mostly along the synthetic BOUNDARY BBOX (not drawn shapes) get tagged
+  // _usedBoundary: they stay clickable, but an outline-bounded wedge at the
+  // same spot beats them (the true part silhouette beats the face-pick
+  // rectangle — clicking the rounded end of a part should not cut a slab).
   const regs = [];
   let fi = 0;
+  const bndSegs = [];
+  if (sketch.boundary && sketch.boundary.type === 'rect') {
+    const b = sketch.boundary;
+    const c4 = [
+      { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y },
+      { x: b.x + b.w, y: b.y + b.h }, { x: b.x, y: b.y + b.h },
+    ];
+    for (let i = 0; i < 4; i++) bndSegs.push({ a: c4[i], b: c4[(i + 1) % 4] });
+  }
+  const entSegsA = [];
+  if (bndSegs.length) {
+    for (const e of candidates) for (const s of entityToSegments(e)) entSegsA.push(s);
+  }
+  const nearSegs = (p, list, tol) => {
+    for (const s of list) {
+      if (pointSegDist(p.x, p.y, s.a.x, s.a.y, s.b.x, s.b.y) < tol) return true;
+    }
+    return false;
+  };
   for (const f of facesA) {
-    regs.push({
+    const reg = {
       id: `s${sketch.id}-f${fi++}`,
       sketchId: sketch.id,
       kind: 'face',
       points: f.points,
       area: f.area,
-    });
+    };
+    if (bndSegs.length && f.points.length >= 3) {
+      let bHits = 0, checked = 0;
+      const step = Math.max(1, Math.floor(f.points.length / 24));
+      for (let i = 0; i < f.points.length; i += step) {
+        checked++;
+        const p = f.points[i];
+        if (!nearSegs(p, entSegsA, 0.3) && nearSegs(p, bndSegs, 0.3)) bHits++;
+      }
+      if (bHits > checked * 0.4) reg._usedBoundary = true;
+    }
+    regs.push(reg);
   }
   // Pass B regions — keep ONLY faces genuinely bounded by the projected
   // OUTLINE (>20% of samples on outline, off drawn entities). Everything
