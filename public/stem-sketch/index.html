@@ -9728,6 +9728,43 @@ function computeSketchRegions(sketch) {
   const graph = buildPlanarGraph(candidates, useBoundary, outlineSegs);
   const faces = findPlanarFaces(graph);
   if (!faces.length) return [];
+  // MEASUREMENT-EXACT circle rims: graph node welding can nudge a circle's
+  // tessellation vertices by up to 0.5mm. Cutters built from region points
+  // then sit a hair off cutters built from the circle ENTITY (the hole-carry
+  // path), leaving paper-thin tube/ring membranes standing between two cuts
+  // at the same radius. Snap every region point that clearly IS a displaced
+  // circle vertex back to that circle's canonical tessellation, so every
+  // circle-derived wall shares identical geometry and coincident cuts merge
+  // cleanly. Genuine intersection points (mid-chord, trim mode) stay put —
+  // the 0.35mm snap radius is well under the half-chord distance.
+  const circleRings = candidates
+    .filter(e => e.type === 'circle')
+    .map(c => ({ c, verts: entityToSegments(c).map(s => ({ x: s.a.x, y: s.a.y })) }));
+  const snapToRings = (pts) => {
+    for (const p of pts) {
+      for (const ring of circleRings) {
+        const d = Math.hypot(p.x - ring.c.cx, p.y - ring.c.cy);
+        if (Math.abs(d - ring.c.r) > 0.5) continue;
+        let best = null, bd = 0.35;
+        for (const v of ring.verts) {
+          const dv = Math.hypot(p.x - v.x, p.y - v.y);
+          if (dv < bd) { bd = dv; best = v; }
+        }
+        if (best) { p.x = best.x; p.y = best.y; }
+        break;
+      }
+    }
+    // collapse consecutive duplicates the snap may have created
+    const out = [];
+    for (const p of pts) {
+      const prev = out[out.length - 1];
+      if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) < 1e-6) continue;
+      out.push(p);
+    }
+    while (out.length > 1 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) < 1e-6) out.pop();
+    return out;
+  };
+  if (circleRings.length) for (const f of faces) f.points = snapToRings(f.points);
   const regs = [];
   for (let i = 0; i < faces.length; i++) {
     const f = faces[i];
@@ -9868,7 +9905,15 @@ function regionToSyntheticSketch(region, sourceSketch) {
     if (e.type !== 'rect' && e.type !== 'circle' &&
         !(e.type === 'polyline' && e.closed)) continue;
     if (!entityFullyInside(e, ent)) continue;
-    const copy = JSON.parse(JSON.stringify(e));
+    // Carried CIRCLES become their canonical tessellation polygon — the SAME
+    // vertices the region graph used. An analytic circle here tessellates on
+    // a different vertex grid than region-polygon cutters at the same
+    // radius, and the sub-mm mismatch left paper-thin tube membranes
+    // between a hole cut and a recess cut around it.
+    const copy = e.type === 'circle'
+      ? { type: 'polyline', closed: true,
+          points: entityToSegments(e).map(s => ({ x: s.a.x, y: s.a.y })) }
+      : JSON.parse(JSON.stringify(e));
     copy.id = nextId++;
     entities.push(copy);
   }
@@ -10064,6 +10109,14 @@ function entityFullyInside(inner, outer) {
       const t = (i / 12) * Math.PI * 2;
       pts.push({ x: inner.cx + Math.cos(t) * inner.r, y: inner.cy + Math.sin(t) * inner.r });
     }
+  } else if (inner.type === 'polyline' && inner.closed && inner.points.length > 10) {
+    // Dense closed polylines (tessellated circles, glyph contours) have NO
+    // key points — sample the loop evenly instead, or nested holes carried
+    // as polygons are silently dropped from cutters.
+    pts = [];
+    const src = inner.points;
+    const step = Math.max(1, Math.floor(src.length / 12));
+    for (let i = 0; i < src.length; i += step) pts.push({ x: src[i].x, y: src[i].y });
   } else {
     pts = entityKeyPoints(inner);
   }
