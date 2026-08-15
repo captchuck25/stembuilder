@@ -15541,7 +15541,7 @@ function toggleJointPlay(j) {
   state.timer = setInterval(() => {
     const jj = doc.joints.find(x => x.id === state.jointId);
     if (!jj || doc.mode !== '3d') { stopJointPlay(); return; }
-    let rel = (jj.angle || 0) - (jj.zero || 0) + state.dir * 2.5;
+    let rel = (jj.angle || 0) - (jj.zero || 0) + state.dir * 2.5 * (jj.playSpeed || 1);
     if (rel >= tMax) { rel = tMax; state.dir = -1; }
     if (rel <= tMin) { rel = tMin; state.dir = 1; }
     applyJointAngle(jj, rel + (jj.zero || 0));
@@ -15768,16 +15768,41 @@ function _geoVolume(geo) {
 }
 // Cache for the expensive volume-gate during rapid checks (Play runs ~30/s).
 let _volGate = { t: 0, verdicts: new Map() };
+// Manifold-solid cache keyed on geometry + world transform. Converting a
+// 48k-vert bracket to a Manifold solid takes ~a second — doing it fresh on
+// every collision check made the joint slider STICKY the moment contact
+// began. Static parts hit the cache; a moving part just reconverts (small).
+const _manifoldGeoCache = new WeakMap(); // geometry -> { key, manifold }
+function _matrixKeyOf(mesh) {
+  const e = mesh.matrixWorld.elements;
+  let k = '';
+  for (let i = 0; i < 16; i++) k += e[i].toFixed(4) + ',';
+  return k;
+}
+function _cachedManifoldFor(mesh) {
+  const geo = mesh.geometry;
+  if (!geo) return null;
+  const key = _matrixKeyOf(mesh);
+  const hit = _manifoldGeoCache.get(geo);
+  if (hit && hit.key === key) return hit.manifold;
+  if (hit) { try { hit.manifold.delete(); } catch (_) {} _manifoldGeoCache.delete(geo); }
+  let m = null;
+  try { m = _geoToManifoldRepaired(mesh); } catch (_) { return null; }
+  _manifoldGeoCache.set(geo, { key, manifold: m });
+  return m;
+}
 // World-space intersection volume of two meshes via Manifold. Returns a
 // BufferGeometry or null (engine missing / rejected / empty overlap).
+// Inputs come from the manifold cache — do NOT delete them here.
 function _intersectWorldGeometry(meshA, meshB) {
   if (!window.__manifold || !meshA || !meshB) return null;
   const vertsOf = (m) => m.geometry?.attributes?.position?.count || 0;
   if (vertsOf(meshA) + vertsOf(meshB) > 120000) return null;
-  let a = null, b = null, r = null;
+  let r = null;
   try {
-    a = _geoToManifoldRepaired(meshA);
-    b = _geoToManifoldRepaired(meshB);
+    const a = _cachedManifoldFor(meshA);
+    const b = _cachedManifoldFor(meshB);
+    if (!a || !b) return null;
     r = a.intersect(b);
     const mesh = _manifoldToMesh(r);
     const geo = mesh?.geometry;
@@ -15785,8 +15810,6 @@ function _intersectWorldGeometry(meshA, meshB) {
   } catch (_) {
     return null;
   } finally {
-    try { if (a) a.delete(); } catch (_) {}
-    try { if (b) b.delete(); } catch (_) {}
     try { if (r) r.delete(); } catch (_) {}
   }
 }
@@ -16039,8 +16062,23 @@ function sweepAndCutJointOverlap(jointId) {
   const movingId = B0.body.id;
   const axis = A0.n.clone().normalize();
   const P = A0.P.clone();
-  const STEP = Math.max(6, (tMax - tMin) / 30);
+  // Step density adapts to the part's reach: at the tip of a long arm a
+  // coarse angular step leaves sliver ridges between pose slices (sagitta
+  // grows with radius). Aim for <0.2mm sag at the farthest point.
+  let maxR = 25;
+  try {
+    viewer.scene.updateMatrixWorld(true);
+    const bb0 = new THREE.Box3().setFromObject(B0.body.mesh);
+    for (const cx of [bb0.min.x, bb0.max.x]) for (const cy of [bb0.min.y, bb0.max.y]) for (const cz of [bb0.min.z, bb0.max.z]) {
+      const rv = new THREE.Vector3(cx, cy, cz).sub(P);
+      const radial = rv.clone().sub(axis.clone().multiplyScalar(rv.dot(axis)));
+      maxR = Math.max(maxR, radial.length());
+    }
+  } catch (_) {}
+  const sagStep = 2 * Math.acos(Math.max(0.5, 1 - 0.2 / maxR)) * 180 / Math.PI;
+  const STEP = Math.max((tMax - tMin) / 90, Math.min(8, Math.max(2, sagStep)));
   setStatus('🌀 Sweeping the joint through its travel — this can take a few seconds…');
+  const groundPoses = [];
   // PERFORMANCE + ROBUSTNESS: the static neighbours convert to Manifold
   // solids ONCE (a big bracket takes seconds); only the small moving part
   // re-converts per pose. The per-pose overlap volumes are NOT unioned —
@@ -16071,11 +16109,15 @@ function sweepAndCutJointOverlap(jointId) {
         const moving = doc.bodies.find(b => b.id === movingId);
         if (!moving?.mesh) break;
         const bbM = new THREE.Box3().setFromObject(moving.mesh);
+        if (bbM.min.y < -0.05) groundPoses.push(Math.round(rel));
         let aMov = null;
         try {
           for (const s of staticSolids) {
             if (!bbM.intersectsBox(s.bb)) continue;
-            if (!aMov) aMov = _geoToManifoldRepaired(moving.mesh);
+            if (!aMov) {
+              try { aMov = _geoToManifoldRepaired(moving.mesh); }
+              catch (_) { break; } // this pose's mesh defeats the engine — skip pose
+            }
             let r = null;
             try {
               r = aMov.intersect(s.manifold);
@@ -16117,10 +16159,19 @@ function sweepAndCutJointOverlap(jointId) {
     _suppressCollisionChecks = _sweepPrevSuppress;
     applyJointAngle(j, startAngle); // restore the pose no matter what
   }
+  const groundNote = groundPoses.length
+    ? ` (Heads up: the part dips under the floor between ${Math.min(...groundPoses)}° and ${Math.max(...groundPoses)}° — the ground can't be cut, so tighten the travel or raise the parts.)`
+    : '';
   if (!pieces.length) {
-    setStatus('✓ The swing is already clear — no overlap anywhere across the travel.');
+    setStatus('✓ The swing is already clear — no overlap anywhere across the travel.' + groundNote);
     return;
   }
+  // SANITY GUARD: if relieving this travel would consume most of the part,
+  // the travel is asking for the physically impossible (the arm plowing
+  // through the bracket's base, or under the floor). Cutting it would leave
+  // a useless blade of a part — measure, and refuse + undo if so.
+  const movingBody = doc.bodies.find(b => b.id === movingId);
+  const vBefore = movingBody?.geometry ? _geoVolume(movingBody.geometry) : 0;
   const markerIds = [];
   for (const g of pieces) {
     const marker = {
@@ -16137,12 +16188,31 @@ function sweepAndCutJointOverlap(jointId) {
   doc.multiSelectedBodies = [movingId, ...markerIds];
   groupSelected(true);
   const leftover = markerIds.filter(id => doc.bodies.some(b => b.id === id));
+  const resultGroup = doc.bodies.find(b => b.type === 'group' &&
+    Array.isArray(b.children) && b.children.some(c => c.id === movingId));
+  const vAfter = resultGroup?.geometry ? _geoVolume(resultGroup.geometry) : vBefore;
+  // Only true annihilation is refused — a deep clevis relief legitimately
+  // removes half the part or more. Big-but-accepted cuts announce their
+  // percentage so an over-eager travel range is one Ctrl+Z away.
+  if (vBefore > 0 && vAfter < 0.25 * vBefore) {
+    undo();
+    _clearCollisionHighlights();
+    _activeCollisions = [];
+    viewer.rebuildBodies();
+    renderTree(); renderProps();
+    setStatus(`⚠ Clearing ${Math.round(tMin)}° to ${Math.round(tMax)}° would cut away almost the whole part — that travel swings it straight through the other part${groundPoses.length ? ' and under the floor' : ''}. Nothing was changed. Tighten the travel limits and try again.`);
+    return;
+  }
   _clearCollisionHighlights();
   _activeCollisions = [];
   viewer.rebuildBodies();
   renderTree(); renderProps();
+  const removedPct = vBefore > 0 ? Math.round((1 - vAfter / vBefore) * 100) : 0;
+  const bigCutNote = removedPct >= 40
+    ? ` This relief removed ${removedPct}% of the part — if that looks like too much, press Ctrl+Z and tighten the travel.`
+    : '';
   setStatus(leftover.length === 0
-    ? `✂ Cleared the swing — cut the overlap across ${Math.round(tMax - tMin)}° of travel (${markerIds.length} slices). Press ▶ Play to check.`
+    ? `✂ Cleared the swing — cut the overlap across ${Math.round(tMax - tMin)}° of travel (${markerIds.length} slices). Press ▶ Play to check.` + bigCutNote + groundNote
     : `⚠ ${leftover.length} of ${markerIds.length} overlap slices could not merge — select them + the part and click Group.`);
 }
 
@@ -16911,7 +16981,12 @@ function renderProps() {
           </div>
           <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
             <button class="action" data-joint-zero="${j.id}" title="Make the current position this joint's 0°" style="padding:4px 10px;font-size:11px;white-space:nowrap">🧭 Set 0° here</button>
-            <button class="action" data-joint-play="${j.id}" title="Swing back and forth through the travel range — red flash shows where it binds" style="padding:4px 10px;font-size:11px;white-space:nowrap;margin-left:auto">${(_jointPlay && _jointPlay.jointId === j.id) ? '⏸ Stop' : '▶ Play'}</button>
+            <select data-joint-speed="${j.id}" title="Play speed" style="margin-left:auto;font-size:11px;padding:2px">
+              <option value="0.5"${(j.playSpeed || 1) === 0.5 ? ' selected' : ''}>slow</option>
+              <option value="1"${(j.playSpeed || 1) === 1 ? ' selected' : ''}>normal</option>
+              <option value="2"${(j.playSpeed || 1) === 2 ? ' selected' : ''}>fast</option>
+            </select>
+            <button class="action" data-joint-play="${j.id}" title="Swing back and forth through the travel range — red shows where it binds" style="padding:4px 10px;font-size:11px;white-space:nowrap">${(_jointPlay && _jointPlay.jointId === j.id) ? '⏸ Stop' : '▶ Play'}</button>
           </div>
           <div style="display:flex;align-items:center;gap:5px;margin-top:5px;font-size:11px;color:var(--ink-soft)">
             <span>travel</span>
@@ -16919,7 +16994,7 @@ function renderProps() {
             <span>to</span>
             <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:58px;font-size:11px"/><span>°</span>
           </div>
-          <button class="action" data-joint-sweep="${j.id}" title="Step through the whole travel, collect every overlap, and cut ONE relief shape so the part swings its full range without touching" style="width:100%;margin-top:6px;padding:5px 10px;font-size:11px">🌀 Clear the swing — cut all overlap across the travel</button>
+          <button class="action" data-joint-sweep="${j.id}" title="Step through the whole travel, collect every overlap, and cut a relief so the part swings its full range without touching" style="width:100%;margin-top:6px;padding:4px 8px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🌀 Clear the swing</button>
         </div>`;
       }).join('');
       props.innerHTML = `
@@ -17003,6 +17078,14 @@ function renderProps() {
         btn.addEventListener('click', () => {
           const j = jointOf(btn, 'jointSweep');
           if (j) sweepAndCutJointOverlap(j.id);
+        });
+      });
+      props.querySelectorAll('[data-joint-speed]').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const j = jointOf(sel, 'jointSpeed');
+          if (!j) return;
+          j.playSpeed = parseFloat(sel.value) || 1;
+          setDirty(true);
         });
       });
       props.querySelectorAll('[data-joint-min], [data-joint-max]').forEach(inp => {
