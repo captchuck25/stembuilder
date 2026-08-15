@@ -1655,11 +1655,31 @@ class SketchEngine {
     // 3. Intersections of the whole polyline with all OTHER entities.
     //    Construction lines count as cutters — if a line physically crosses
     //    a dashed reference, that crossing IS a valid trim bracket.
-    let intersections = []; // each: { s, x, y }
+    //    The FACE BOUNDARY, the part's projected OUTLINE and the GROUND
+    //    line count too: they're drawn on screen as lines, so a circle
+    //    poking past the face edge is visibly "crossing something" — trim
+    //    must honor that, not claim 'no crossings found'.
+    const cutterSegLists = [];
     for (const other of doc.sketch.entities) {
       if (other.id === clickedOrig.id) continue;
       const oSegs = entityToSegments(other);
-      if (!oSegs.length) continue;
+      if (oSegs.length) cutterSegLists.push(oSegs);
+    }
+    const fb2 = doc.sketch?.boundary;
+    if (fb2 && fb2.type === 'rect' && fb2.w > 0 && fb2.h > 0) {
+      const c4 = [
+        { x: fb2.x, y: fb2.y }, { x: fb2.x + fb2.w, y: fb2.y },
+        { x: fb2.x + fb2.w, y: fb2.y + fb2.h }, { x: fb2.x, y: fb2.y + fb2.h },
+      ];
+      cutterSegLists.push(c4.map((p, i) => ({ a: p, b: c4[(i + 1) % 4] })));
+    }
+    if (Array.isArray(this._projSegs) && this._projSegs.length) {
+      cutterSegLists.push(this._projSegs.map((s) => ({
+        a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y },
+      })));
+    }
+    let intersections = []; // each: { s, x, y }
+    for (const oSegs of cutterSegLists) {
       for (let i = 0; i < segCount; i++) {
         const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
         for (const os of oSegs) {
@@ -1924,12 +1944,30 @@ class SketchEngine {
       return { k: sub.k, t: sub.t0 + f * (sub.t1 - sub.t0),
                x: sub.ax + f * (sub.bx - sub.ax), y: sub.ay + f * (sub.by - sub.ay), s: sw };
     };
-    // Crossings with every other entity (construction lines count)
-    let cuts = [];
+    // Crossings with every other entity (construction lines count) — plus
+    // the face boundary, the part's projected outline, and the ground line,
+    // same as the straight-polyline planner.
+    const cutterLists = [];
     for (const other of doc.sketch.entities) {
       if (other.id === ent.id) continue;
       const oSegs = entityToSegments(other);
-      if (!oSegs.length) continue;
+      if (oSegs.length) cutterLists.push(oSegs);
+    }
+    const fbC = doc.sketch?.boundary;
+    if (fbC && fbC.type === 'rect' && fbC.w > 0 && fbC.h > 0) {
+      const c4 = [
+        { x: fbC.x, y: fbC.y }, { x: fbC.x + fbC.w, y: fbC.y },
+        { x: fbC.x + fbC.w, y: fbC.y + fbC.h }, { x: fbC.x, y: fbC.y + fbC.h },
+      ];
+      cutterLists.push(c4.map((p, i) => ({ a: p, b: c4[(i + 1) % 4] })));
+    }
+    if (Array.isArray(this._projSegs) && this._projSegs.length) {
+      cutterLists.push(this._projSegs.map((s2) => ({
+        a: { x: s2.p1.x, y: s2.p1.y }, b: { x: s2.p2.x, y: s2.p2.y },
+      })));
+    }
+    let cuts = [];
+    for (const oSegs of cutterLists) {
       for (const s of subs) {
         for (const os of oSegs) {
           const hit = segmentIntersection({ x: s.ax, y: s.ay }, { x: s.bx, y: s.by }, os.a, os.b);
@@ -2322,9 +2360,16 @@ class SketchEngine {
         const t = clamp(((wx - s.p1.x) * dx + (wy - s.p1.y) * dy) / L2, 0, 1);
         const cx = s.p1.x + t * dx, cy = s.p1.y + t * dy;
         const d = Math.hypot(wx - cx, wy - cy);
-        // Along-the-line snap sits just above grid so tracing wins, while
-        // corners / crossings still dominate.
-        if (d < tolMm) candidates.push({ x: cx, y: cy, kind: 'edge', strength: 1.15 - 0.4 * (d / tolMm) });
+        // Along-the-line snap: when GRID SNAP is ON, the grid wins over
+        // sliding to an arbitrary point on an edge — a student drawing on a
+        // 1/8" grid kept getting grabbed 0.1mm off-grid by nearby outlines
+        // (circles poking past faces, "tangent" lines that never crossed).
+        // With grid snap OFF, tracing along outlines stays dominant.
+        // Corners and crossings (exact points) beat the grid either way.
+        const edgeStrength = (doc.grid && doc.grid.snap)
+          ? 0.85 - 0.3 * (d / tolMm)
+          : 1.15 - 0.4 * (d / tolMm);
+        if (d < tolMm) candidates.push({ x: cx, y: cy, kind: 'edge', strength: edgeStrength });
         if (L2 >= 4) { // real feature corners only — skip curve tessellation chords
           for (const p of [s.p1, s.p2]) {
             const de = Math.hypot(wx - p.x, wy - p.y);
@@ -8194,6 +8239,9 @@ class Viewer3D {
     // every path that moved a body (drag, gizmo, typed position, nudge,
     // align, snap-to-plane) carries the attached sketches along.
     if (typeof syncSketchAnchorsToBodies === 'function') syncSketchAnchorsToBodies();
+    // Structural changes invalidate any red overlap highlight — the next
+    // collision check rebuilds it from live geometry.
+    if (typeof _clearCollisionHighlights === 'function') _clearCollisionHighlights();
     while (this.bodyGroup.children.length) {
       const c = this.bodyGroup.children.pop();
       // Deep dispose so edge-overlay child geometries/materials don't leak
@@ -8424,10 +8472,14 @@ class Viewer3D {
         geo.translate(0, 0, 0.2);
         geo.applyMatrix4(planeM);
         const isSelected = doc.selectedRegions?.includes(r.id);
+        // Boundary-bbox leftovers stay CLICKABLE but INVISIBLE until selected
+        // — their fill is a giant sheet covering the whole sketch plane
+        // (floating over neighbouring parts, reads as a ghost silhouette).
+        const idleOpacity = r._usedBoundary ? 0.0 : 0.16;
         const mat = new THREE.MeshBasicMaterial({
           color: isSelected ? 0x2c64ff : 0x6f8cff,
           transparent: true,
-          opacity: isSelected ? 0.45 : 0.16,
+          opacity: isSelected ? 0.45 : idleOpacity,
           side: THREE.DoubleSide,
           depthWrite: false,
         });
@@ -9089,7 +9141,7 @@ function buildBodyMesh(body) {
   // holes through the body (visible from one side, gone from the other).
   // The faceted CSG output hides the horizon artifact that bothered us on
   // smooth primitive curves, so DoubleSide is the lesser evil for groups.
-  const isCSGResult = body.type === 'group' || body.type === 'combined';
+  const isCSGResult = body.type === 'group' || body.type === 'combined' || body.type === 'baked';
   const matSolid = new THREE.MeshStandardMaterial({
     color: isNeg ? 0xff7070 : 0x9eb6ff,
     roughness: 0.55, metalness: 0.05, flatShading: false,
@@ -9130,7 +9182,7 @@ function buildBodyMesh(body) {
     );
   };
   let geo = null, mesh = null;
-  if (body.type === 'combined' || body.type === 'group') {
+  if (body.type === 'combined' || body.type === 'group' || body.type === 'baked') {
     // Guard against a transient null geometry — a batch op that's stripped
     // a group's geometry before re-deriving it can call rebuildBodies in
     // the middle, and three.js throws 'cannot read isBufferGeometry of
@@ -10533,7 +10585,10 @@ function _snapshotBody(b, asChild = false) {
       // previous body as a child and each level's geometry is several
       // MB of triangles. Now only the TOP-level geometry rides in the
       // save; nested groups carry just their children + ops.
-      if (asChild) continue;
+      // EXCEPTION: 'baked' bodies (marked interference overlaps) have no
+      // parametric recipe — their geometry IS the definition, so it must
+      // ride the snapshot even as a child or the cut vanishes on reload.
+      if (asChild && b.type !== 'baked') continue;
       out.geometry = _serializeGeometry(b.geometry);
       out._geomSerialized = true;
       continue;
@@ -15542,22 +15597,111 @@ function _meshesOverlap(meshA, meshB) {
   const v = new THREE.Vector3();
   const rc = new THREE.Raycaster();
   const dir = new THREE.Vector3(0.5773, 0.5773, 0.5773);
-  for (let i = 0; i < posA.count; i += step) {
-    v.fromBufferAttribute(posA, i).applyMatrix4(meshA.matrixWorld);
-    const inward = centroid.clone().sub(v);
-    if (inward.lengthSq() > 1e-6) v.addScaledVector(inward.normalize(), 0.3);
-    if (!bbB.containsPoint(v)) continue;
-    rc.set(v, dir);
-    if (rc.intersectObject(meshB, false).length % 2 === 1) return true;
+  // The parity ray must see BACKFACES — primitives render FrontSide and the
+  // raycaster culls by material.side, so from inside such a mesh the ray
+  // counted zero crossings and the overlap was missed entirely.
+  const matB = meshB.material;
+  const prevSide = matB ? matB.side : null;
+  if (matB) matB.side = THREE.DoubleSide;
+  let overlap = false;
+  try {
+    for (let i = 0; i < posA.count; i += step) {
+      v.fromBufferAttribute(posA, i).applyMatrix4(meshA.matrixWorld);
+      const inward = centroid.clone().sub(v);
+      if (inward.lengthSq() > 1e-6) v.addScaledVector(inward.normalize(), 0.3);
+      if (!bbB.containsPoint(v)) continue;
+      rc.set(v, dir);
+      if (rc.intersectObject(meshB, false).length % 2 === 1) { overlap = true; break; }
+    }
+  } finally {
+    if (matB) matB.side = prevSide;
   }
-  return false;
+  return overlap;
 }
 function _collisionLabel(b) {
   return (b.name && b.name.trim()) || (b.type === 'group' ? `Part ${b.id}` : `${b.type} ${b.id}`);
 }
-// Check the given bodies against the ground plane + every other solid;
-// colliding bodies get tinted red (transient — the next rebuild restores
-// the normal material). Returns true when anything is hitting.
+// Active interference pairs from the last check — drives the red overlap
+// highlight AND the "Mark overlap" button in the Warnings panel.
+// Each entry: { bodyId, otherId } with otherId === null meaning the ground.
+let _activeCollisions = [];
+let _collisionHiGroup = null;
+let _collisionGroundMesh = null;
+function _groundColliderMesh() {
+  if (!_collisionGroundMesh) {
+    _collisionGroundMesh = new THREE.Mesh(new THREE.BoxGeometry(4000, 1000, 4000), new THREE.MeshBasicMaterial());
+    _collisionGroundMesh.position.y = -500;
+  }
+  _collisionGroundMesh.updateMatrixWorld(true);
+  return _collisionGroundMesh;
+}
+// World-space intersection volume of two meshes via Manifold. Returns a
+// BufferGeometry or null (engine missing / rejected / empty overlap).
+function _intersectWorldGeometry(meshA, meshB) {
+  if (!window.__manifold || !meshA || !meshB) return null;
+  const vertsOf = (m) => m.geometry?.attributes?.position?.count || 0;
+  if (vertsOf(meshA) + vertsOf(meshB) > 120000) return null;
+  let a = null, b = null, r = null;
+  try {
+    a = _geoToManifoldRepaired(meshA);
+    b = _geoToManifoldRepaired(meshB);
+    r = a.intersect(b);
+    const mesh = _manifoldToMesh(r);
+    const geo = mesh?.geometry;
+    return (geo && geo.attributes?.position?.count > 0) ? geo : null;
+  } catch (_) {
+    return null;
+  } finally {
+    try { if (a) a.delete(); } catch (_) {}
+    try { if (b) b.delete(); } catch (_) {}
+    try { if (r) r.delete(); } catch (_) {}
+  }
+}
+// Rebuild the glowing red overlap meshes for the current collision pairs.
+// Returns the set of bodyIds whose overlap could NOT be computed (fallback:
+// whole-part tint). depthTest OFF so the zone shows through both parts.
+function _updateCollisionHighlights(pairs) {
+  if (!viewer) return new Set((pairs || []).map(p => p.bodyId));
+  if (!_collisionHiGroup) {
+    _collisionHiGroup = new THREE.Group();
+    _collisionHiGroup.renderOrder = 50;
+    viewer.scene.add(_collisionHiGroup);
+  }
+  while (_collisionHiGroup.children.length) {
+    const c = _collisionHiGroup.children.pop();
+    c.geometry?.dispose();
+    c.material?.dispose();
+  }
+  const failed = new Set();
+  for (const p of pairs || []) {
+    const body = doc.bodies.find(b => b.id === p.bodyId);
+    const otherMesh = p.otherId === null
+      ? _groundColliderMesh()
+      : doc.bodies.find(b => b.id === p.otherId)?.mesh;
+    const geo = (body?.mesh && otherMesh) ? _intersectWorldGeometry(body.mesh, otherMesh) : null;
+    if (!geo) { failed.add(p.bodyId); continue; }
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      color: 0xef4444, transparent: true, opacity: 0.55,
+      depthTest: false, depthWrite: false, side: THREE.DoubleSide,
+    }));
+    m.renderOrder = 50;
+    m.raycast = () => {}; // never steals clicks
+    _collisionHiGroup.add(m);
+  }
+  return failed;
+}
+function _clearCollisionHighlights() {
+  if (!_collisionHiGroup) return;
+  while (_collisionHiGroup.children.length) {
+    const c = _collisionHiGroup.children.pop();
+    c.geometry?.dispose();
+    c.material?.dispose();
+  }
+}
+// Check the given bodies against the ground plane + every other solid.
+// The touching REGION lights up red (exact intersection volume via the
+// boolean engine); parts whose overlap can't be computed tint whole-red as
+// before. Returns true when anything is hitting.
 function checkCollisionWarnings(bodyIds) {
   if (!viewer) return false;
   const warnGround = doc.collisionWarnGround !== false;
@@ -15565,38 +15709,112 @@ function checkCollisionWarnings(bodyIds) {
   if (!warnGround && !warnBodies) return false;
   viewer.scene.updateMatrixWorld(true);
   const msgs = [];
+  const pairs = [];
   for (const id of bodyIds || []) {
     const body = doc.bodies.find(b => b.id === id);
     if (!body?.mesh || body.hidden) continue;
-    let hit = false;
     if (warnGround) {
       const bb = new THREE.Box3().setFromObject(body.mesh);
-      if (bb.min.y < -0.05) { hit = true; msgs.push(`${_collisionLabel(body)} is through the ground`); }
+      if (bb.min.y < -0.05) {
+        pairs.push({ bodyId: body.id, otherId: null });
+        msgs.push(`${_collisionLabel(body)} is through the ground`);
+      }
     }
-    if (warnBodies && !hit) {
+    if (warnBodies) {
       const bbA = new THREE.Box3().setFromObject(body.mesh);
       for (const other of doc.bodies) {
         if (other.id === body.id || !other.mesh || other.hidden) continue;
         if (other.type === 'fastener' || other.type === 'threadShell') continue;
         if (!bbA.intersectsBox(new THREE.Box3().setFromObject(other.mesh))) continue;
         if (_meshesOverlap(body.mesh, other.mesh) || _meshesOverlap(other.mesh, body.mesh)) {
-          hit = true;
+          pairs.push({ bodyId: body.id, otherId: other.id });
           msgs.push(`${_collisionLabel(body)} is hitting ${_collisionLabel(other)}`);
           break;
         }
       }
     }
-    if (hit && body.mesh.material?.color) body.mesh.material.color.setHex(0xef4444);
+  }
+  const hadCollisions = _activeCollisions.length > 0;
+  _activeCollisions = pairs;
+  const failed = _updateCollisionHighlights(pairs);
+  for (const p of pairs) {
+    if (!failed.has(p.bodyId)) continue;
+    const body = doc.bodies.find(b => b.id === p.bodyId);
+    if (body?.mesh?.material?.color) body.mesh.material.color.setHex(0xef4444);
   }
   const msg = msgs.join(' · ');
   if (msg) {
-    if (msg !== _lastCollisionMsg) setStatus(`⚠ ${msg} — back it off or adjust the design.`);
+    if (msg !== _lastCollisionMsg) {
+      setStatus(`⚠ ${msg} — the red zone is the overlap. Mark it in the Warnings panel to cut it away.`);
+      renderProps();
+    }
     _lastCollisionMsg = msg;
   } else if (_lastCollisionMsg) {
     _lastCollisionMsg = '';
     setStatus('✓ Clear — no contact.');
+    if (hadCollisions) renderProps();
   }
   return msgs.length > 0;
+}
+// "Mark overlap" — snapshot each red interference volume into a NEGATIVE
+// baked body sitting exactly where the parts overlap. The student can then
+// Group it with the part to cut the interference away — no sketching.
+function markCollisionOverlaps() {
+  if (!_activeCollisions.length) { showHint('Nothing is overlapping right now — swing or move a part until the red zone appears.'); return []; }
+  if (!window.__manifold) { showHint('The precise engine is still loading — try again in a moment.'); return []; }
+  viewer && viewer.scene.updateMatrixWorld(true);
+  pushUndo();
+  const made = [];
+  for (const p of _activeCollisions) {
+    const body = doc.bodies.find(b => b.id === p.bodyId);
+    const otherMesh = p.otherId === null
+      ? _groundColliderMesh()
+      : doc.bodies.find(b => b.id === p.otherId)?.mesh;
+    if (!body?.mesh || !otherMesh) continue;
+    const geo = _intersectWorldGeometry(body.mesh, otherMesh);
+    if (!geo) continue;
+    const marker = {
+      id: doc.nextBodyId++, type: 'baked', op: 'subtract',
+      name: 'overlap cut', x: 0, y: 0, z: 0,
+      geometry: geo,
+      _overlapOf: body.id,
+    };
+    doc.bodies.push(marker);
+    made.push(marker);
+  }
+  if (!made.length) { showHint('Could not capture the overlap volume — try again after moving slightly.'); return []; }
+  viewer.rebuildBodies();
+  renderTree(); renderProps();
+  setStatus(`Marked ${made.length} overlap piece${made.length === 1 ? '' : 's'} — select one + its part and Group to cut, or use ✂ Cut overlap away.`);
+  return made;
+}
+// "Cut overlap away" — mark + auto-group each overlap with its part in one
+// step. The interference is gone and the cut survives save/reload (baked
+// children keep their geometry in the snapshot).
+function cutCollisionOverlaps() {
+  const made = markCollisionOverlaps();
+  if (!made.length) return;
+  // group per source part
+  const byBody = new Map();
+  for (const m of made) {
+    if (!byBody.has(m._overlapOf)) byBody.set(m._overlapOf, []);
+    byBody.get(m._overlapOf).push(m.id);
+  }
+  let cut = 0;
+  for (const [bodyId, markerIds] of byBody) {
+    if (!doc.bodies.some(b => b.id === bodyId)) continue;
+    doc.multiSelectedBodies = [bodyId, ...markerIds];
+    groupSelected(true); // undo snapshot already taken in markCollisionOverlaps
+    const leftover = markerIds.filter(id => doc.bodies.some(b => b.id === id));
+    cut += markerIds.length - leftover.length;
+  }
+  _clearCollisionHighlights();
+  _activeCollisions = [];
+  viewer.rebuildBodies();
+  renderTree(); renderProps();
+  setStatus(cut > 0
+    ? `✂ Cut ${cut} overlap piece${cut === 1 ? '' : 's'} away — parts now clear.`
+    : '⚠ The overlap could not be cut — the pieces are marked; select one + the part and Group.');
 }
 
 function copySelection() {
@@ -16386,9 +16604,17 @@ function renderProps() {
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="warn-bodies" style="width:auto;margin:0"${doc.collisionWarnBodies !== false ? ' checked' : ''}/>
           <label for="warn-bodies" style="margin:0;cursor:pointer">Flash red when parts hit each other</label>
-        </div>`;
+        </div>
+        ${(typeof _activeCollisions !== 'undefined' && _activeCollisions.length) ? `
+        <div class="hint" style="margin-top:6px">The red zone is where parts overlap. Mark it to get a cut-out shape — no sketching needed.</div>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <button type="button" id="mark-overlap-btn" style="flex:1;white-space:nowrap">🔴 Mark overlap</button>
+          <button type="button" id="cut-overlap-btn" style="flex:1;white-space:nowrap">✂ Cut overlap away</button>
+        </div>` : ''}`;
       $('warn-ground')?.addEventListener('change', (e) => { doc.collisionWarnGround = e.target.checked; setDirty(true); });
       $('warn-bodies')?.addEventListener('change', (e) => { doc.collisionWarnBodies = e.target.checked; setDirty(true); });
+      $('mark-overlap-btn')?.addEventListener('click', () => markCollisionOverlaps());
+      $('cut-overlap-btn')?.addEventListener('click', () => cutCollisionOverlaps());
       props.querySelectorAll('[data-del-joint]').forEach(btn => {
         btn.onclick = () => deleteJoint(parseInt(btn.dataset.delJoint, 10));
       });
