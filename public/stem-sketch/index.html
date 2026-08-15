@@ -10447,6 +10447,10 @@ function applySnapshot(s, opts = {}) {
     viewer.updateRegions && viewer.updateRegions();
     viewer.updateExtrudeGizmo && viewer.updateExtrudeGizmo();
     viewer.updateGizmo && viewer.updateGizmo();
+    // Visible sketches must reappear in 3D right away — without this, a
+    // page refresh restored the doc but left the sketch overlay empty until
+    // the user toggled the sketch's eye off and on.
+    viewer.updateSketchOverlay && viewer.updateSketchOverlay();
   }
   hideExtrudeTooltip && hideExtrudeTooltip();
   if (sketchEng) sketchEng.render();
@@ -12283,6 +12287,11 @@ function _ensureGroupGeometry(body) {
     geo.applyMatrix4(result.matrixWorld);
     geo.computeVertexNormals();
     body.geometry = geo;
+    // Track which engine baked this: csg.js output gets re-baked cleanly
+    // when Manifold arrives (engine-ready hook); a Manifold bake clears
+    // any stale fallback tag.
+    if (result.userData?.__viaCsgJs) body._bakedWithoutManifold = true;
+    else delete body._bakedWithoutManifold;
     // Phase 2 — threads are NOT baked into geometry anymore; the viewport
     // overlay + STL export regenerate them from _mergedShells metadata, which
     // rides the snapshot untouched. Leave the rebuilt geometry shell-free —
@@ -12407,7 +12416,16 @@ function csgOp(op, meshA, meshB) {
     try { showHint('⚠ That cut could not be completed safely — nothing was changed. Try again in a moment (the 3D engine may still be loading), or press Ctrl+Z.'); } catch (_) {}
     return meshA;
   }
-  return (op === 'union') ? CSG.union(meshA, meshB) : CSG.subtract(meshA, meshB);
+  const res = (op === 'union') ? CSG.union(meshA, meshB) : CSG.subtract(meshA, meshB);
+  // Mark fallback output so callers can tag the resulting body for a clean
+  // re-bake once Manifold is up — csg.js quietly produces membranes /
+  // leftover-surface garbage on tangent geometry (boss circle flush with a
+  // bar edge), and the user has no way to know the "cut" is fake.
+  if (res) {
+    res.userData = res.userData || {};
+    res.userData.__viaCsgJs = true;
+  }
+  return res;
 }
 
 function getCSGMesh(body) {
@@ -14478,7 +14496,20 @@ function groupSelected(skipUndo) {
     if (!positives.length) { showHint('Group needs at least one positive body.'); return; }
 
     setStatus('Grouping…');
+    // A group that lost its baked geometry mid-session (failed earlier
+    // boolean, stale undo) has NO mesh — feeding undefined into the boolean
+    // used to fail every later cut on that body. Rebuild it from children
+    // first so the cut has something real to work on.
+    for (const b of bodies) {
+      if ((b.type === 'group' || b.type === 'combined') &&
+          !(b.geometry instanceof THREE.BufferGeometry)) {
+        try {
+          if (_ensureGroupGeometry(b) && !b.mesh) b.mesh = buildBodyMesh(b);
+        } catch (_) {}
+      }
+    }
     let geometry;
+    let viaFallbackEngine = false;
     try {
       viewer.scene.updateMatrixWorld(true);
       // Fasteners use a simplified smooth-cylinder envelope for CSG (their
@@ -14487,10 +14518,19 @@ function groupSelected(skipUndo) {
       let result = getCSGMesh(positives[0]);
       for (let i = 1; i < positives.length; i++) result = csgOp('union', result, getCSGMesh(positives[i]));
       for (const n of negatives) result = csgOp('subtract', result, getCSGMesh(n));
+      viaFallbackEngine = !!result.userData?.__viaCsgJs;
       result.updateMatrixWorld(true);
       geometry = result.geometry.clone();
       geometry.applyMatrix4(result.matrixWorld);
       geometry.computeVertexNormals();
+      // Sanity-check the boolean output before committing it: empty or
+      // NaN-laced geometry rendered as a see-through "ghost" while the
+      // status bar claimed the cut succeeded.
+      const pos = geometry.attributes?.position;
+      if (!pos || pos.count === 0) throw new Error('boolean produced empty geometry');
+      for (let i = 0; i < Math.min(9, pos.array.length); i++) {
+        if (!isFinite(pos.array[i])) throw new Error('boolean produced NaN geometry');
+      }
     } catch (err) {
       console.error('Group CSG failed:', err);
       showHint('Group failed — geometry too complex. Check console.');
@@ -14522,6 +14562,10 @@ function groupSelected(skipUndo) {
       id: doc.nextBodyId++, type: 'group',
       children, geometry,
       op: 'add', x: 0, y: 0, z: 0,
+      // Baked on the csg.js fallback (Manifold not ready / rejected input)?
+      // Remember it — the moment Manifold comes up, this body gets a clean
+      // re-bake from its children (see the engine-ready hook in init).
+      ...(viaFallbackEngine ? { _bakedWithoutManifold: true } : {}),
     };
     // Forward any thread-shell metadata from the consumed positives onto
     // the new wrapper so successive thread cuts / bevels don't strand
@@ -19587,6 +19631,44 @@ function init() {
     try {
       if (restoreLocalDraft()) setDirty(true);
     } catch (err) { console.warn('Local draft restore failed:', err); }
+  });
+
+  // Self-healing bakes: any body cut on the csg.js fallback (Manifold slow
+  // to load, or it rejected an input) carries _bakedWithoutManifold. The
+  // moment the real engine is up, re-bake those bodies cleanly from their
+  // children — csg.js quietly leaves membranes / uncut surfaces on tangent
+  // geometry and the user has no way to tell the cut is fake. Registered
+  // AFTER the draft restore so it also heals tagged bodies from a reload.
+  whenBooleanEngineReady(() => {
+    if (!window.__manifold) return; // engine failed outright — nothing better to re-bake with
+    try {
+      const tagged = doc.bodies.filter(b =>
+        b._bakedWithoutManifold && (b.type === 'group' || b.type === 'combined') &&
+        Array.isArray(b.children) && b.children.length);
+      if (!tagged.length) return;
+      const dropGeo = (b) => {
+        if (b.geometry instanceof THREE.BufferGeometry) { try { b.geometry.dispose(); } catch (_) {} }
+        b.geometry = null;
+        if (Array.isArray(b.children)) b.children.forEach(dropGeo);
+      };
+      let healed = 0;
+      for (const b of tagged) {
+        try {
+          dropGeo(b);
+          if (_ensureGroupGeometry(b) && !b._bakedWithoutManifold) healed++;
+        } catch (err) {
+          console.warn(`Engine-ready re-bake failed for body id=${b.id}:`, err);
+        }
+      }
+      if (healed > 0) {
+        if (viewer) {
+          viewer.rebuildBodies();
+          viewer.updateSketchOverlay && viewer.updateSketchOverlay();
+        }
+        renderTree(); renderProps();
+        setStatus(`🔧 Re-cut ${healed} bod${healed === 1 ? 'y' : 'ies'} with the precise engine — earlier cuts were made with the backup engine.`);
+      }
+    } catch (err) { console.warn('Engine-ready re-bake pass failed:', err); }
   });
 
   // Re-render the 2D sketch whenever the canvas changes size (handles iframe resize
