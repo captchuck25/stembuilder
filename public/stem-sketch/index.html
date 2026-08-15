@@ -2560,7 +2560,13 @@ class SketchEngine {
 
   hitTest(wx, wy) {
     const tolMm = 5 / this.view.pxPerMm;
-    // top-down: most recently added on top
+    // Two-pass picking so nested shapes stay selectable (pivot hole drawn
+    // inside a boss circle). Pass 1: a click ON a shape's outline always
+    // grabs that shape — top-down so exact overlaps keep draw-order feel.
+    // Pass 2: interior (fill) clicks pick the SMALLEST shape containing the
+    // point — previously the newest shape's fill swallowed every click
+    // inside it and anything drawn earlier in the same area was unreachable.
+    const fillHits = [];
     for (let i = doc.sketch.entities.length - 1; i >= 0; i--) {
       const ent = doc.sketch.entities[i];
       // Hidden construction lines aren't visible, so they shouldn't be
@@ -2572,9 +2578,16 @@ class SketchEngine {
         if (this.tool === 'eraser' && dimensionHit(ent, wx, wy, tolMm)) return ent;
         continue;
       }
-      if (entityHit(ent, wx, wy, tolMm)) return ent;
+      if (entityStrokeHit(ent, wx, wy, tolMm)) return ent;
+      if (entityHit(ent, wx, wy, tolMm)) fillHits.push(ent);
     }
-    return null;
+    let best = null, bestArea = Infinity;
+    for (const ent of fillHits) {
+      const bb = entityBBox(ent);
+      const a = bb ? Math.max(1e-6, (bb.maxX - bb.minX) * (bb.maxY - bb.minY)) : Infinity;
+      if (a < bestArea) { bestArea = a; best = ent; }
+    }
+    return best;
   }
 
   // ── Touch gestures (2D): two fingers = pinch-zoom + pan ──────────────
@@ -4768,6 +4781,32 @@ function pointSegDist(px, py, ax, ay, bx, by) {
   if (L2 === 0) return Math.hypot(px - ax, py - ay);
   const t = clamp(((px - ax) * dx + (py - ay) * dy) / L2, 0, 1);
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+// Stroke-only hit: the drawn OUTLINE of the shape (or a point mark),
+// excluding filled interiors. hitTest tries this first so a click on a
+// small shape's outline wins over a larger filled shape covering it.
+function entityStrokeHit(ent, wx, wy, tol) {
+  if (ent.type === 'threadMark' || ent.type === 'pivotMark') {
+    return Math.hypot(wx - ent.cx, wy - ent.cy) < Math.max(tol, 5);
+  }
+  if (ent.type === 'rect') {
+    const inX = wx >= ent.x - tol && wx <= ent.x + ent.w + tol;
+    const inY = wy >= ent.y - tol && wy <= ent.y + ent.h + tol;
+    if (!inX || !inY) return false;
+    return Math.abs(wx - ent.x) < tol || Math.abs(wx - (ent.x + ent.w)) < tol ||
+           Math.abs(wy - ent.y) < tol || Math.abs(wy - (ent.y + ent.h)) < tol;
+  }
+  if (ent.type === 'circle') {
+    return Math.abs(Math.hypot(wx - ent.cx, wy - ent.cy) - ent.r) < tol;
+  }
+  if (ent.type === 'polyline') {
+    for (const s of entityToSegments(ent)) {
+      if (pointSegDist(wx, wy, s.a.x, s.a.y, s.b.x, s.b.y) < tol) return true;
+    }
+    return false;
+  }
+  return false;
 }
 
 function entityHit(ent, wx, wy, tol) {
@@ -8816,8 +8855,17 @@ class Viewer3D {
       }
       if (ent.type === 'polyline' && ent.closed && ent.points.length >= 3) {
         const s = new THREE.Shape();
-        s.moveTo(ent.points[0].x, ent.points[0].y);
-        for (let i = 1; i < ent.points.length; i++) s.lineTo(ent.points[i].x, ent.points[i].y);
+        // Tessellate curves so the translucent fill matches the true shape
+        const hasCurve = ent.points.some(p => p.cpIn || p.cpOut);
+        if (hasCurve) {
+          const segs = entityToSegments(ent);
+          if (segs.length < 3) return null;
+          s.moveTo(segs[0].a.x, segs[0].a.y);
+          for (const sg of segs) s.lineTo(sg.b.x, sg.b.y);
+        } else {
+          s.moveTo(ent.points[0].x, ent.points[0].y);
+          for (let i = 1; i < ent.points.length; i++) s.lineTo(ent.points[i].x, ent.points[i].y);
+        }
         s.closePath();
         return s;
       }
@@ -8959,8 +9007,20 @@ class Viewer3D {
             pts.push(sketch2dTo3d(ent.cx + Math.cos(t) * ent.r, ent.cy + Math.sin(t) * ent.r));
           }
         } else if (ent.type === 'polyline') {
-          pts = ent.points.map(p => sketch2dTo3d(p.x, p.y));
-          if (ent.closed && pts.length) pts.push(pts[0].clone());
+          // Curved polylines (arcs, broken-apart circles, smoothed lines)
+          // must tessellate their Beziers — mapping raw points drew straight
+          // chords in 3D while the region fill showed the true curve.
+          const hasCurve = ent.points.some(p => p.cpIn || p.cpOut);
+          if (hasCurve) {
+            const segs = entityToSegments(ent);
+            pts = segs.length
+              ? [sketch2dTo3d(segs[0].a.x, segs[0].a.y),
+                 ...segs.map(s => sketch2dTo3d(s.b.x, s.b.y))]
+              : null;
+          } else {
+            pts = ent.points.map(p => sketch2dTo3d(p.x, p.y));
+            if (ent.closed && pts.length) pts.push(pts[0].clone());
+          }
         }
         if (pts && pts.length > 1) {
           const geo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -9993,7 +10053,20 @@ function pointInsideEntity(p, ent) {
 // All entity vertices inside the outer entity? Cheap "fully inside" test.
 function entityFullyInside(inner, outer) {
   if (inner === outer) return false;
-  const pts = entityKeyPoints(inner);
+  // Sample the inner entity's real extent. entityKeyPoints for a circle is
+  // its CENTER alone (snap semantics) — under that test a concentric BIGGER
+  // circle counted as "inside" a small region, so extruding a selected small
+  // circle dragged the big one along and produced a ring instead of a disc.
+  let pts;
+  if (inner.type === 'circle') {
+    pts = [];
+    for (let i = 0; i < 12; i++) {
+      const t = (i / 12) * Math.PI * 2;
+      pts.push({ x: inner.cx + Math.cos(t) * inner.r, y: inner.cy + Math.sin(t) * inner.r });
+    }
+  } else {
+    pts = entityKeyPoints(inner);
+  }
   if (!pts.length) return false;
   for (const p of pts) if (!pointInsideEntity(p, outer)) return false;
   return true;
