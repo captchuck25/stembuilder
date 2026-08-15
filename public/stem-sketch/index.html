@@ -16198,11 +16198,12 @@ function _sweepAndCutNow(jointId) {
   const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
   const tMax = (typeof j.travelMax === 'number') ? j.travelMax : 180;
   if (tMax - tMin < 2) { showHint('Set a travel range first (the two ° fields).'); return; }
-  pushUndo();
   // IDEMPOTENT RESTORE: remove any previous swing relief from the moving
   // part before computing a fresh one. Without this, each sweep re-cut the
   // already-relieved arm — clearance compounded and repeated runs hollowed
-  // the part out.
+  // the part out. This happens BEFORE the undo snapshot: serializing dozens
+  // of old baked slices froze the browser for a minute on Ctrl+Z, and the
+  // meaningful undo target IS the pristine no-relief part.
   {
     const topMoving = B0.body;
     const { removed } = _stripSwingSlicesFromTree(topMoving);
@@ -16220,6 +16221,7 @@ function _sweepAndCutNow(jointId) {
       if (!A0 || !B0) { setStatus('⚠ Could not re-link the joint after restoring the part — press Ctrl+Z.'); return; }
     }
   }
+  pushUndo();
   const startAngle = j.angle || 0;
   const movingId = B0.body.id;
   const axis = A0.n.clone().normalize();
@@ -16291,51 +16293,67 @@ function _sweepAndCutNow(jointId) {
       const poseList = [];
       for (let rel = tMin; rel <= tMax + 1e-6; rel += STEP) poseList.push(rel);
       if (poseList[poseList.length - 1] < tMax - 0.01) poseList.push(tMax);
-      for (const rel of poseList) {
-        applyJointAngle(j, rel + (j.zero || 0));
-        viewer.scene.updateMatrixWorld(true);
-        const moving = doc.bodies.find(b => b.id === movingId);
-        if (!moving?.mesh) break;
-        const bbM = new THREE.Box3().setFromObject(moving.mesh);
-        let aMov = null;
-        try {
-          for (const s of staticSolids) {
-            if (!bbM.intersectsBox(s.bb)) continue;
-            if (!aMov) {
-              try { aMov = _geoToManifoldRepaired(moving.mesh); }
-              catch (_) { break; } // this pose's mesh defeats the engine — skip pose
-            }
-            let r = null;
-            try {
-              r = aMov.intersect(s.manifold);
-              const probe = _manifoldToMesh(r);
-              if (probe?.geometry?.attributes?.position?.count > 0) {
-                // rotate this pose's overlap back into the START pose frame
-                const delta = THREE.MathUtils.degToRad(startAngle - (rel + (j.zero || 0)));
-                const M = new THREE.Matrix4().makeTranslation(P.x, P.y, P.z)
-                  .multiply(new THREE.Matrix4().makeRotationAxis(axis, delta))
-                  .multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
-                // Slice stays manifold-pure (raw engine output) — the
-                // running clearance comes from the DILATED statics, so no
-                // per-slice inflation is needed.
-                const g = probe.geometry;
-                g.applyMatrix4(M);
-                g.computeVertexNormals();
-                pieces.push(g);
-                if (s.isGround) groundPoses.push(Math.round(rel));
-              }
-            } catch (_) {}
-            try { if (r) r.delete(); } catch (_) {}
-          }
-        } finally {
-          try { if (aMov) aMov.delete(); } catch (_) {}
+      // FRAME-FIXED SLICING: convert the moving part ONCE at its current
+      // pose; every other pose transforms that ONE solid with Manifold's
+      // own affine transform (column-major 16 = THREE .elements) and
+      // transforms the slice back. The joint never steps and nothing
+      // reconverts per pose — the per-pose conversion failures that
+      // silently skipped poses (leaving uncut wedges near the pivot) are
+      // structurally impossible now.
+      const moving = doc.bodies.find(b => b.id === movingId);
+      let aMov0 = null;
+      let bbMov0 = null;
+      try {
+        if (moving?.mesh) {
+          aMov0 = _geoToManifoldRepaired(moving.mesh);
+          bbMov0 = new THREE.Box3().setFromObject(moving.mesh);
         }
+      } catch (_) {}
+      if (!aMov0) {
+        setStatus('⚠ This part\'s shape is too tangled for the engine right now — try Ungroup + re-Group to rebuild it, then Clear the swing again.');
+        return;
+      }
+      try {
+        for (const rel of poseList) {
+          const dRad = THREE.MathUtils.degToRad((rel + (j.zero || 0)) - startAngle);
+          const Mpose = new THREE.Matrix4().makeTranslation(P.x, P.y, P.z)
+            .multiply(new THREE.Matrix4().makeRotationAxis(axis, dRad))
+            .multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
+          const Minv = Mpose.clone().invert();
+          const bbP = new THREE.Box3();
+          for (const cx of [bbMov0.min.x, bbMov0.max.x]) for (const cy of [bbMov0.min.y, bbMov0.max.y]) for (const cz of [bbMov0.min.z, bbMov0.max.z]) {
+            bbP.expandByPoint(new THREE.Vector3(cx, cy, cz).applyMatrix4(Mpose));
+          }
+          let aMovP = null;
+          try {
+            aMovP = aMov0.transform(Mpose.elements);
+            for (const s of staticSolids) {
+              if (!bbP.intersectsBox(s.bb)) continue;
+              let I = null, Ib = null;
+              try {
+                I = aMovP.intersect(s.manifold);
+                Ib = I.transform(Minv.elements); // slice into the part frame
+                const probe = _manifoldToMesh(Ib);
+                if (probe?.geometry?.attributes?.position?.count > 0) {
+                  const g = probe.geometry;
+                  g.computeVertexNormals();
+                  pieces.push(g);
+                  if (s.isGround) groundPoses.push(Math.round(rel));
+                }
+              } catch (_) {}
+              try { if (I) I.delete(); } catch (_) {}
+              try { if (Ib) Ib.delete(); } catch (_) {}
+            }
+          } catch (_) {}
+          try { if (aMovP) aMovP.delete(); } catch (_) {}
+        }
+      } finally {
+        try { aMov0.delete(); } catch (_) {}
       }
     }
   } finally {
     for (const s of staticSolids) { try { s.manifold.delete(); } catch (_) {} }
     _suppressCollisionChecks = _sweepPrevSuppress;
-    applyJointAngle(j, startAngle); // restore the pose no matter what
   }
   const groundNote = groundPoses.length
     ? ` (The part was also shaved to clear the floor between ${Math.min(...groundPoses)}° and ${Math.max(...groundPoses)}°.)`
