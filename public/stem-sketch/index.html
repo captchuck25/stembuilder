@@ -844,6 +844,9 @@
   .entity.selected { stroke: var(--accent-ink); stroke-width: 2.2; fill: none; }
   .entity.construction { stroke: #ff9a3e; stroke-dasharray: 6 4; fill: none; opacity: 0.85; }
   .entity.construction.selected { stroke: #d97419; }
+  /* Traced face perimeter — the part's edge as a real (muted) line */
+  .entity.face-perimeter { stroke: #5b6b8c; stroke-width: 1.9; opacity: 0.8; }
+  .entity.face-perimeter.selected { stroke: var(--accent-ink); }
   .entity-handle { fill: white; stroke: var(--accent); stroke-width: 1.5; }
   .entity-handle.has-curve { fill: #fff3e0; stroke: #ff9a3e; }
   /* Midpoint marker on a single-segment line — same colour, triangle shape */
@@ -1666,7 +1669,8 @@ class SketchEngine {
       if (oSegs.length) cutterSegLists.push(oSegs);
     }
     const fb2 = doc.sketch?.boundary;
-    if (fb2 && fb2.type === 'rect' && fb2.w > 0 && fb2.h > 0) {
+    const trimHasPerimeter = doc.sketch.entities.some((e) => e.facePerimeter);
+    if (!trimHasPerimeter && fb2 && fb2.type === 'rect' && fb2.w > 0 && fb2.h > 0) {
       const c4 = [
         { x: fb2.x, y: fb2.y }, { x: fb2.x + fb2.w, y: fb2.y },
         { x: fb2.x + fb2.w, y: fb2.y + fb2.h }, { x: fb2.x, y: fb2.y + fb2.h },
@@ -1954,7 +1958,8 @@ class SketchEngine {
       if (oSegs.length) cutterLists.push(oSegs);
     }
     const fbC = doc.sketch?.boundary;
-    if (fbC && fbC.type === 'rect' && fbC.w > 0 && fbC.h > 0) {
+    const curvedHasPerimeter = doc.sketch.entities.some((e) => e.facePerimeter);
+    if (!curvedHasPerimeter && fbC && fbC.type === 'rect' && fbC.w > 0 && fbC.h > 0) {
       const c4 = [
         { x: fbC.x, y: fbC.y }, { x: fbC.x + fbC.w, y: fbC.y },
         { x: fbC.x + fbC.w, y: fbC.y + fbC.h }, { x: fbC.x, y: fbC.y + fbC.h },
@@ -3974,9 +3979,16 @@ class SketchEngine {
       // bracket merely sitting beside a fresh arm used to project a ghost
       // silhouette across the sketch (and phantom regions floating in space).
       const attached = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(doc.sketch) : null;
+      // A traced facePerimeter ENTITY already draws (and snaps as) the
+      // part's own in-plane edges — projecting them again would double
+      // every line a hair apart.
+      const skHasPerimeter = (doc.sketch.entities || []).some(e => e.facePerimeter);
       let segs;
       if (attached?.mesh) {
         segs = projectBodiesOntoPlane(doc.sketch.plane, attached.id);
+        if (skHasPerimeter) {
+          segs = segs.filter(s => Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5);
+        }
         let ownBB = null;
         for (const s of segs) {
           if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
@@ -4094,10 +4106,12 @@ class SketchEngine {
     // sketching. Cubes/extrudes get a rectangle; spheres/tori get a circle.
     const fb = doc.sketch?.boundary;
     // When the part's REAL face outline is on screen (the highlighted
-    // in-plane silhouette), it IS the perimeter — the face-pick bbox
-    // rectangle just confuses ("why is my boundary a big box?"), so skip it.
+    // in-plane silhouette OR a traced facePerimeter entity), it IS the
+    // perimeter — the face-pick bbox rectangle just confuses ("why is my
+    // boundary a big box?"), so skip it.
     const hasFaceOutline = (this._projSegs || []).some(s => !s._ground &&
-      Math.abs(s.dz1 || 0) < 0.5 && Math.abs(s.dz2 || 0) < 0.5);
+      Math.abs(s.dz1 || 0) < 0.5 && Math.abs(s.dz2 || 0) < 0.5) ||
+      (doc.sketch?.entities || []).some(e => e.facePerimeter);
     if (fb && !hasFaceOutline && fb.type === 'rect') {
       const [bx1, by1] = this.worldToScreen(fb.x, fb.y);
       const [bx2, by2] = this.worldToScreen(fb.x + fb.w, fb.y + fb.h);
@@ -5601,7 +5615,8 @@ function bboxHandlesSVG(entId, bX, bY, bW, bH, hasW, hasH) {
 
 function renderEntitySVG(ent, eng, selected = false, preview = false, singleSelected = false) {
   const constructionCls = ent.construction ? ' construction' : '';
-  const cls = `entity${constructionCls}${selected ? ' selected' : ''}${preview ? ' preview' : ''}`;
+  const perimeterCls = ent.facePerimeter ? ' face-perimeter' : '';
+  const cls = `entity${constructionCls}${perimeterCls}${selected ? ' selected' : ''}${preview ? ' preview' : ''}`;
   if (ent.type === 'rect') {
     const [x1, y1] = eng.worldToScreen(ent.x, ent.y + ent.h);
     const w = ent.w * eng.view.pxPerMm, h = ent.h * eng.view.pxPerMm;
@@ -9066,8 +9081,9 @@ class Viewer3D {
           continue;
         }
 
-        // Shaded fill for closed shapes
-        if (!ent.construction) {
+        // Shaded fill for closed shapes (traced perimeters stay outline-only
+        // — their fill would tint the entire face)
+        if (!ent.construction && !ent.facePerimeter) {
           const shape = buildClosedShape(ent);
           if (shape) {
             const fillGeo = new THREE.ShapeGeometry(shape);
@@ -9754,6 +9770,10 @@ function computeSketchRegions(sketch) {
   // regions: drawn shapes extrude WHOLE, never subdivided by a part's
   // silhouette crossing through them.
   const hasOpenLines = candidates.some(e => e.type === 'polyline' && !e.closed);
+  // A traced face perimeter (real drawn geometry) makes the synthetic bbox
+  // boundary AND the own-face outline projection redundant — worse, feeding
+  // near-duplicate copies into the graph welds them into sliver membranes.
+  const hasPerimeter = candidates.some(e => e.facePerimeter);
   let outlineSegs = null;
   if (hasOpenLines && sketch.sourceBodyId != null && typeof viewer !== 'undefined' && viewer &&
       typeof projectBodiesOntoPlane === 'function') {
@@ -9762,10 +9782,12 @@ function computeSketchRegions(sketch) {
       if (body) {
         outlineSegs = [];
         // The part's OWN face edges (in-plane) = the sketch perimeter…
+        // (skipped when a facePerimeter ENTITY already carries them)
         for (const s of projectBodiesOntoPlane(sketch.plane, body.id)) {
           if (s._hidden) continue;
           if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
           if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
+          if (hasPerimeter) continue; // still projected for the overlap-gate bbox below
           outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
         }
         // …plus the silhouettes of OTHER parts crossing this face: their
@@ -9795,11 +9817,16 @@ function computeSketchRegions(sketch) {
         // ghost silhouette into the sketch — confusing regions floating in
         // space that had nothing to do with what was drawn.
         let ownBB = null;
-        for (const s of outlineSegs) {
+        const growOwn = (p) => {
           if (!ownBB) ownBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-          for (const p of [s.a, s.b]) {
-            ownBB.minX = Math.min(ownBB.minX, p.x); ownBB.minY = Math.min(ownBB.minY, p.y);
-            ownBB.maxX = Math.max(ownBB.maxX, p.x); ownBB.maxY = Math.max(ownBB.maxY, p.y);
+          ownBB.minX = Math.min(ownBB.minX, p.x); ownBB.minY = Math.min(ownBB.minY, p.y);
+          ownBB.maxX = Math.max(ownBB.maxX, p.x); ownBB.maxY = Math.max(ownBB.maxY, p.y);
+        };
+        for (const s of outlineSegs) { growOwn(s.a); growOwn(s.b); }
+        if (hasPerimeter) {
+          for (const e of candidates) {
+            if (!e.facePerimeter || !Array.isArray(e.points)) continue;
+            for (const p of e.points) growOwn(p);
           }
         }
         for (const other of doc.bodies) {
@@ -9851,7 +9878,10 @@ function computeSketchRegions(sketch) {
   // regions — it never replaces or subdivides a classic region. A stray
   // helper line used to flip the ENTIRE sketch into trim mode and shred
   // the drawn circles' regions with the part's own silhouette.
-  const graphA = buildPlanarGraph(candidates, sketch.boundary, null);
+  // With a traced perimeter in the sketch, IT is the boundary — the
+  // synthetic bbox rectangle would only add phantom slab regions around
+  // the part.
+  const graphA = buildPlanarGraph(candidates, hasPerimeter ? null : sketch.boundary, null);
   const facesA = graphA ? findPlanarFaces(graphA) : [];
   let facesB = [];
   if (outlineSegs && outlineSegs.length) {
@@ -9907,7 +9937,7 @@ function computeSketchRegions(sketch) {
   const regs = [];
   let fi = 0;
   const bndSegs = [];
-  if (sketch.boundary && sketch.boundary.type === 'rect') {
+  if (!hasPerimeter && sketch.boundary && sketch.boundary.type === 'rect') {
     const b = sketch.boundary;
     const c4 = [
       { x: b.x, y: b.y }, { x: b.x + b.w, y: b.y },
@@ -14321,6 +14351,58 @@ function computeFaceBoundary(bbox, plane, body) {
   return { type: 'rect', x: umin, y: vmin, w: umax - umin, h: vmax - vmin };
 }
 
+// Trace the source body's face outline into closed point-loops (sketch
+// coords). The outer perimeter AND any openings in the face (hole rims)
+// become loops — the face profile is complete, so the sketch alone can
+// recreate the face by extrusion even after the body is deleted.
+function _traceFacePerimeter(sk) {
+  const body = doc.bodies.find(b => b.id === sk.sourceBodyId);
+  if (!body?.mesh || typeof projectBodiesOntoPlane !== 'function') return [];
+  if (viewer) viewer.scene.updateMatrixWorld(true);
+  const segs = [];
+  for (const s of projectBodiesOntoPlane(sk.plane, body.id)) {
+    if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
+    if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
+    segs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
+  }
+  const TOL = 0.3;
+  const used = new Array(segs.length).fill(false);
+  const loops = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = true;
+    const pts = [{ ...segs[i].a }, { ...segs[i].b }];
+    for (;;) {
+      const tail = pts[pts.length - 1];
+      if (pts.length > 2 && Math.hypot(pts[0].x - tail.x, pts[0].y - tail.y) < TOL) break;
+      let advanced = false;
+      for (let j = 0; j < segs.length; j++) {
+        if (used[j]) continue;
+        if (Math.hypot(segs[j].a.x - tail.x, segs[j].a.y - tail.y) < TOL) {
+          pts.push({ ...segs[j].b }); used[j] = true; advanced = true; break;
+        }
+        if (Math.hypot(segs[j].b.x - tail.x, segs[j].b.y - tail.y) < TOL) {
+          pts.push({ ...segs[j].a }); used[j] = true; advanced = true; break;
+        }
+      }
+      if (!advanced) break;
+    }
+    const tail = pts[pts.length - 1];
+    const closed = pts.length > 3 && Math.hypot(pts[0].x - tail.x, pts[0].y - tail.y) < TOL;
+    if (!closed) continue; // open chains = projection noise, not a face edge
+    pts.pop();
+    // area guard — degenerate micro-loops from tessellation noise
+    let area = 0;
+    for (let k = 0; k < pts.length; k++) {
+      const p = pts[k], q = pts[(k + 1) % pts.length];
+      area += p.x * q.y - q.x * p.y;
+    }
+    if (Math.abs(area / 2) < 1) continue;
+    loops.push(pts);
+  }
+  return loops;
+}
+
 function createSketchOnPlane(plane, opts = {}) {
   pushUndo();
   const id = doc.nextSketchId++;
@@ -14328,6 +14410,21 @@ function createSketchOnPlane(plane, opts = {}) {
   const sk = { id, plane, entities: [], nextId: 1, name };
   if (opts.boundary)     sk.boundary     = opts.boundary;
   if (opts.sourceBodyId) sk.sourceBodyId = opts.sourceBodyId;
+  // FACE PERIMETER AS REAL GEOMETRY: the face's edges become closed
+  // polylines in the sketch — they snap, trim, and close regions like any
+  // drawn line, and the sketch can rebuild the face even if the body is
+  // later deleted. Tagged facePerimeter for muted styling; the region
+  // engine drops the synthetic bbox boundary when a perimeter exists.
+  if (plane.kind === 'face' && opts.sourceBodyId) {
+    try {
+      for (const pts of _traceFacePerimeter(sk)) {
+        sk.entities.push({
+          id: sk.nextId++, type: 'polyline', closed: true,
+          points: pts, facePerimeter: true,
+        });
+      }
+    } catch (_) {}
+  }
   doc.sketches.push(sk);
   doc.activeSketchId = id;
   doc.selection = null;
