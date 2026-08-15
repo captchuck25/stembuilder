@@ -51,6 +51,10 @@
   .statusbar { grid-area: status; }
   .left-section {
     overflow-y: auto;
+    /* Reserve the scrollbar lane permanently — content growing/shrinking
+       during Play used to toggle the scrollbar and visibly change the
+       panel's inner width. */
+    scrollbar-gutter: stable;
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -459,7 +463,7 @@
   .tree-cat-kids { margin-left: 11px; border-left: 1px solid rgba(31,37,64,0.1); padding-left: 3px; }
   .tree-cat-empty { padding: 4px 8px 6px; color: var(--ink-muted); font-size: 11px; font-style: italic; }
 
-  .props { padding: 4px 14px 14px; }
+  .props { padding: 4px 14px 14px; scrollbar-gutter: stable; }
   .props .empty { color: var(--ink-muted); font-style: italic; padding: 8px 0; }
   .field { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; padding: 5px 0; }
   .field label { color: var(--ink-soft); font-size: 13px; }
@@ -12625,7 +12629,9 @@ function _ensureGroupGeometry(body) {
     const geo = result.geometry.clone();
     geo.applyMatrix4(result.matrixWorld);
     geo.computeVertexNormals();
-    body.geometry = geo;
+    // Same crumb-drop as the live group path so a reload rebuilds the
+    // exact same shape (severed hair-thin islands stay gone).
+    body.geometry = _dropCrumbComponents(geo);
     // Track which engine baked this: csg.js output gets re-baked cleanly
     // when Manifold arrives (engine-ready hook); a Manifold bake clears
     // any stale fallback tag.
@@ -14937,6 +14943,8 @@ function groupSelected(skipUndo) {
       for (let i = 0; i < Math.min(9, pos.array.length); i++) {
         if (!isFinite(pos.array[i])) throw new Error('boolean produced NaN geometry');
       }
+      // Repeated cuts can sever hair-thin islands — drop the crumbs.
+      geometry = _dropCrumbComponents(geometry);
     } catch (err) {
       console.error('Group CSG failed:', err);
       showHint('Group failed — geometry too complex. Check console.');
@@ -15746,6 +15754,40 @@ function _groundColliderMesh() {
   _collisionGroundMesh.updateMatrixWorld(true);
   return _collisionGroundMesh;
 }
+// Drop tiny DISCONNECTED crumbs from a boolean result — swing reliefs and
+// repeated cuts can leave floating slivers (thin islands fully severed from
+// the part). Keeps every component above 0.3% of the largest one's volume
+// (a deliberate union of two separate parts is far above that).
+function _dropCrumbComponents(geo) {
+  if (!window.__manifold || !geo) return geo;
+  let m = null;
+  try {
+    m = _geoToManifoldRepaired(new THREE.Mesh(geo));
+    if (typeof m.decompose !== 'function') return geo;
+    const parts = m.decompose();
+    if (!parts || parts.length <= 1) {
+      for (const p of parts || []) { try { p.delete(); } catch (_) {} }
+      return geo;
+    }
+    const sized = parts.map(p => {
+      const mm = _manifoldToMesh(p);
+      return { p, geo: mm?.geometry, vol: mm?.geometry ? _geoVolume(mm.geometry) : 0 };
+    });
+    const maxVol = Math.max(...sized.map(s => s.vol));
+    const keep = sized.filter(s => s.vol >= maxVol * 0.003 && s.geo);
+    let out = geo;
+    if (keep.length < sized.length && keep.length > 0) {
+      out = _mergeBufferGeometries(keep.map(s => s.geo));
+      out.computeVertexNormals();
+    }
+    for (const s of sized) { try { s.p.delete(); } catch (_) {} }
+    return out;
+  } catch (_) {
+    return geo;
+  } finally {
+    try { if (m) m.delete(); } catch (_) {}
+  }
+}
 // Signed volume of a closed triangle mesh (divergence theorem). Used to
 // tell a REAL penetration (substantial volume) from a flush/kissing fit
 // (sliver volume) — sampled parity tests cannot make that distinction on
@@ -15888,8 +15930,28 @@ function checkCollisionWarnings(bodyIds) {
     if (warnGround) {
       const bb = new THREE.Box3().setFromObject(body.mesh);
       if (bb.min.y < -0.05) {
-        pairs.push({ bodyId: body.id, otherId: null });
-        msgs.push(`${_collisionLabel(body)} is through the ground`);
+        // Volume-confirm like the body check: CSG output can carry invisible
+        // zero-volume membranes that stretch the bbox below the floor and
+        // flashed the whole part red on a perfectly shaved swing.
+        let real = true;
+        let gGeo = null;
+        if (window.__manifold) {
+          const key = body.id + ':ground';
+          const now = performance.now();
+          if (now - _volGate.t > 150) { _volGate = { t: now, verdicts: new Map() }; }
+          if (_volGate.verdicts.has(key)) {
+            const v = _volGate.verdicts.get(key);
+            real = v.real; gGeo = v.geo;
+          } else {
+            gGeo = _intersectWorldGeometry(body.mesh, _groundColliderMesh());
+            real = !!gGeo && _geoVolume(gGeo) > 2;
+            _volGate.verdicts.set(key, { real, geo: gGeo });
+          }
+        }
+        if (real) {
+          pairs.push({ bodyId: body.id, otherId: null, geo: gGeo });
+          msgs.push(`${_collisionLabel(body)} is through the ground`);
+        }
       }
     }
     if (warnBodies) {
@@ -15950,17 +16012,21 @@ function checkCollisionWarnings(bodyIds) {
       _tintedRed.add(p.bodyId);
     }
   }
+  // Toggle the Mark/Cut buttons WITHOUT re-rendering the whole panel — a
+  // full renderProps() here replaced the slider mid-drag (sticky dial),
+  // ate clicks on the speed select, and made the sidebar glitch during
+  // Play.
+  const oa = document.getElementById('overlap-actions');
+  if (oa) oa.style.display = pairs.length ? '' : 'none';
   const msg = msgs.join(' · ');
   if (msg) {
     if (msg !== _lastCollisionMsg) {
       setStatus(`⚠ ${msg} — the red zone is the overlap. Mark it in the Warnings panel to cut it away.`);
-      renderProps();
     }
     _lastCollisionMsg = msg;
   } else if (_lastCollisionMsg) {
     _lastCollisionMsg = '';
     setStatus('✓ Clear — no contact.');
-    if (hadCollisions) renderProps();
   }
   return msgs.length > 0;
 }
@@ -16046,18 +16112,66 @@ function cutCollisionOverlaps() {
 // back into the moving part's current-pose frame by rotating about the
 // joint axis), union them into ONE arc-shaped volume, and cut it away.
 // After this the part swings its whole travel without touching.
+// Restore a part to its PRE-RELIEF shape: remove every swing-overlap slice
+// from its tree (at any nesting level) and collapse the empty wrapper
+// groups. This is what makes Clear-the-swing IDEMPOTENT — each sweep
+// replaces the previous relief instead of cutting deeper and deeper into
+// an already-relieved part (which hollowed the arm out over repeated runs).
+function _stripSwingSlicesFromTree(top) {
+  // Filter ONLY — never collapse wrapper groups. The outermost group's
+  // x/y/z/rotation carries all accumulated joint motion; collapsing it
+  // displaced the restored part and every subsequent cut landed wrong.
+  let removed = 0;
+  const strip = (b) => {
+    if (!Array.isArray(b.children)) return;
+    const before = b.children.length;
+    b.children = b.children.filter(c => !(c.type === 'baked' && c._overlapOf != null));
+    removed += before - b.children.length;
+    b.children.forEach(strip);
+  };
+  strip(top);
+  return { removed };
+}
 function sweepAndCutJointOverlap(jointId) {
+  setStatus('🌀 Sweeping the joint through its travel — this can take a few seconds…');
+  setTimeout(() => { try { _sweepAndCutNow(jointId); } catch (err) {
+    console.error('Clear-the-swing failed:', err);
+    setStatus('⚠ Clear the swing hit a snag — nothing was changed. Press Ctrl+Z if anything looks off, then try again.');
+  } }, 30); // let the status paint before the heavy work
+}
+function _sweepAndCutNow(jointId) {
   const j = doc.joints.find(x => x.id === jointId);
   if (!j) return;
   if (!window.__manifold) { showHint('The precise engine is still loading — try again in a moment.'); return; }
   stopJointPlay();
-  const A0 = _resolveJointAnchor(j.a);
-  const B0 = _resolveJointAnchor(j.b);
+  let A0 = _resolveJointAnchor(j.a);
+  let B0 = _resolveJointAnchor(j.b);
   if (!A0 || !B0) { showHint('This joint is missing a pivot — re-check its two pivot marks.'); return; }
   const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
   const tMax = (typeof j.travelMax === 'number') ? j.travelMax : 180;
   if (tMax - tMin < 2) { showHint('Set a travel range first (the two ° fields).'); return; }
   pushUndo();
+  // IDEMPOTENT RESTORE: remove any previous swing relief from the moving
+  // part before computing a fresh one. Without this, each sweep re-cut the
+  // already-relieved arm — clearance compounded and repeated runs hollowed
+  // the part out.
+  {
+    const topMoving = B0.body;
+    const { removed } = _stripSwingSlicesFromTree(topMoving);
+    if (removed > 0) {
+      const dropGeo = (b) => {
+        if (b.type === 'group' || b.type === 'combined') b.geometry = null;
+        (b.children || []).forEach(dropGeo);
+      };
+      dropGeo(topMoving);
+      try { _ensureGroupGeometry(topMoving); } catch (_) {}
+      viewer.rebuildBodies();
+      viewer.scene.updateMatrixWorld(true);
+      A0 = _resolveJointAnchor(j.a);
+      B0 = _resolveJointAnchor(j.b);
+      if (!A0 || !B0) { setStatus('⚠ Could not re-link the joint after restoring the part — press Ctrl+Z.'); return; }
+    }
+  }
   const startAngle = j.angle || 0;
   const movingId = B0.body.id;
   const axis = A0.n.clone().normalize();
@@ -16092,16 +16206,53 @@ function sweepAndCutJointOverlap(jointId) {
   const pieces = [];
   try {
     viewer.scene.updateMatrixWorld(true);
+    // Statics are DILATED ~0.3mm along their vertex normals: every slice
+    // cut from the moving part then carries running clearance for free,
+    // and the slices themselves stay manifold-pure. (A closed mesh offset
+    // along averaged post-weld normals stays closed.)
+    const CLEAR = 0.3;
+    const dilatedStaticMesh = (mesh) => {
+      let g = mesh.geometry.clone();
+      g.applyMatrix4(mesh.matrixWorld);
+      g = weldGeometryForEdges(g, 0.005);
+      g.computeVertexNormals();
+      const pA = g.attributes.position, nA = g.attributes.normal;
+      for (let vi = 0; vi < pA.count; vi++) {
+        pA.setXYZ(vi,
+          pA.getX(vi) + nA.getX(vi) * CLEAR,
+          pA.getY(vi) + nA.getY(vi) * CLEAR,
+          pA.getZ(vi) + nA.getZ(vi) * CLEAR);
+      }
+      pA.needsUpdate = true;
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial());
+      m.updateMatrixWorld(true);
+      return m;
+    };
     for (const other of doc.bodies) {
       if (other.id === movingId || other.hidden || !other.mesh) continue;
       if (other.type === 'fastener' || other.type === 'threadShell' || other.type === 'baked') continue;
       try {
+        const dm = dilatedStaticMesh(other.mesh);
         staticSolids.push({
-          manifold: _geoToManifoldRepaired(other.mesh),
-          bb: new THREE.Box3().setFromObject(other.mesh),
+          manifold: _geoToManifoldRepaired(dm),
+          bb: new THREE.Box3().setFromObject(dm),
         });
       } catch (_) {}
     }
+    // The GROUND joins the sweep: the part gets shaved wherever it would
+    // dip below the floor across the travel (you can't cut the floor, but
+    // you CAN round the part so it clears it — Charlie's ask). Its top
+    // sits at +CLEAR so the shave leaves the same running clearance.
+    try {
+      const gm = new THREE.Mesh(new THREE.BoxGeometry(4000, 1000, 4000), new THREE.MeshBasicMaterial());
+      gm.position.y = -500 + CLEAR;
+      gm.updateMatrixWorld(true);
+      staticSolids.push({
+        manifold: _geoToManifoldRepaired(gm),
+        bb: new THREE.Box3().setFromObject(gm),
+      });
+    } catch (_) {}
     if (staticSolids.length) {
       for (let rel = tMin; rel <= tMax + 1e-6; rel += STEP) {
         applyJointAngle(j, rel + (j.zero || 0));
@@ -16128,21 +16279,12 @@ function sweepAndCutJointOverlap(jointId) {
                 const M = new THREE.Matrix4().makeTranslation(P.x, P.y, P.z)
                   .multiply(new THREE.Matrix4().makeRotationAxis(axis, delta))
                   .multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
-                const g = probe.geometry; // manifold-pure — do NOT weld/strip
+                // Slice stays manifold-pure (raw engine output) — the
+                // running clearance comes from the DILATED statics below,
+                // so no per-slice inflation is needed (offsetting slices
+                // shattered the cut into hundreds of shell fragments).
+                const g = probe.geometry;
                 g.applyMatrix4(M);
-                // Inflate slightly about the piece centre: the relief must
-                // CLEAR the neighbour, not kiss it — and a printed mechanism
-                // needs running clearance anyway (~0.3mm).
-                g.computeBoundingBox();
-                const c = g.boundingBox.getCenter(new THREE.Vector3());
-                const diag = g.boundingBox.getSize(new THREE.Vector3()).length();
-                if (diag > 0.5) {
-                  const s = Math.min(1.06, (diag + 0.6) / diag);
-                  const MS = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z)
-                    .multiply(new THREE.Matrix4().makeScale(s, s, s))
-                    .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
-                  g.applyMatrix4(MS);
-                }
                 g.computeVertexNormals();
                 pieces.push(g);
               }
@@ -16160,10 +16302,10 @@ function sweepAndCutJointOverlap(jointId) {
     applyJointAngle(j, startAngle); // restore the pose no matter what
   }
   const groundNote = groundPoses.length
-    ? ` (Heads up: the part dips under the floor between ${Math.min(...groundPoses)}° and ${Math.max(...groundPoses)}° — the ground can't be cut, so tighten the travel or raise the parts.)`
+    ? ` (The part was also shaved to clear the floor between ${Math.min(...groundPoses)}° and ${Math.max(...groundPoses)}°.)`
     : '';
   if (!pieces.length) {
-    setStatus('✓ The swing is already clear — no overlap anywhere across the travel.' + groundNote);
+    setStatus('✓ The swing is already clear — no overlap anywhere across the travel.');
     return;
   }
   // SANITY GUARD: if relieving this travel would consume most of the part,
@@ -17010,12 +17152,13 @@ function renderProps() {
           <input type="checkbox" id="warn-bodies" style="width:auto;margin:0"${doc.collisionWarnBodies !== false ? ' checked' : ''}/>
           <label for="warn-bodies" style="margin:0;cursor:pointer">Flash red when parts hit each other</label>
         </div>
-        ${(typeof _activeCollisions !== 'undefined' && _activeCollisions.length) ? `
-        <div class="hint" style="margin-top:6px">The red zone is where parts overlap. Mark it to get a cut-out shape — no sketching needed.</div>
-        <div style="display:flex;gap:6px;margin-top:4px">
-          <button type="button" id="mark-overlap-btn" style="flex:1;white-space:nowrap">🔴 Mark overlap</button>
-          <button type="button" id="cut-overlap-btn" style="flex:1;white-space:nowrap">✂ Cut overlap away</button>
-        </div>` : ''}`;
+        <div id="overlap-actions" style="display:${(typeof _activeCollisions !== 'undefined' && _activeCollisions.length) ? '' : 'none'}">
+          <div class="hint" style="margin-top:6px">The red zone is where parts overlap. Mark it to get a cut-out shape — no sketching needed.</div>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button type="button" id="mark-overlap-btn" style="flex:1;white-space:nowrap">🔴 Mark overlap</button>
+            <button type="button" id="cut-overlap-btn" style="flex:1;white-space:nowrap">✂ Cut overlap away</button>
+          </div>
+        </div>`;
       $('warn-ground')?.addEventListener('change', (e) => { doc.collisionWarnGround = e.target.checked; setDirty(true); });
       $('warn-bodies')?.addEventListener('change', (e) => { doc.collisionWarnBodies = e.target.checked; setDirty(true); });
       $('mark-overlap-btn')?.addEventListener('click', () => markCollisionOverlaps());
