@@ -9462,8 +9462,14 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
   // snapped edge-to-edge against the part's outline) must SPLIT that
   // segment too, or the face-tracing can't turn the corner there and the
   // enclosed region never forms.
+  // TRIM MODE ONLY (outline segs present). On plain closed-profile sketches
+  // this splitting corrupts the classic regions: a circle drawn tangent to
+  // the face boundary (boss flush with a bar edge — the everyday student
+  // move) gets welded to the boundary at the tangent point and the face
+  // walk shreds the disc into wedge fragments.
+  const wantTJunctions = Array.isArray(extraSegs) && extraSegs.length > 0;
   const T_TOL = 0.5; // mm — matches the node-merge tolerance
-  for (let i = 0; i < segs.length; i++) {
+  for (let i = 0; wantTJunctions && i < segs.length; i++) {
     const s = segs[i];
     const dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
     const L2 = dx * dx + dy * dy;
