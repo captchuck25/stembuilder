@@ -3426,6 +3426,14 @@ class SketchEngine {
         this.trimPreview = pts;
         this.scheduleRender();
       }
+      // Say WHY nothing highlights — a shape with no crossings (e.g. a line
+      // that only touches a circle tangentially) used to just sit silent,
+      // which read as "the trim tool ignores this shape".
+      const hint = (plan && plan.kind === 'hint') ? plan.message : null;
+      if (hint !== this._trimHoverHint) {
+        this._trimHoverHint = hint;
+        if (hint) setStatus('✂ ' + hint);
+      }
     }
 
     // Eraser hover — highlight whatever a click would delete in red. No
@@ -3915,13 +3923,25 @@ class SketchEngine {
     // sketch made by picking a reference plane should be a clean canvas
     // with only what the user actually drew in it.
     if (doc.bodies.length && doc.sketch?.plane && doc.sketch.sourceBodyId) {
-      let segs = projectBodiesOntoPlane(doc.sketch.plane);
-      // DEPTH BAND: only silhouettes near the sketched part matter. A body
-      // far beyond it along the sketch normal projects a "random silhouette"
-      // onto the face (Charlie's bracket ghost) — drop segments outside the
-      // attached part's own depth range (+ a margin for touching parts).
+      // The ATTACHED part's silhouette always shows. OTHER bodies join only
+      // when they could actually interfere: within the depth band along the
+      // sketch normal AND overlapping this part's in-plane footprint. A
+      // bracket merely sitting beside a fresh arm used to project a ghost
+      // silhouette across the sketch (and phantom regions floating in space).
       const attached = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(doc.sketch) : null;
+      let segs;
       if (attached?.mesh) {
+        segs = projectBodiesOntoPlane(doc.sketch.plane, attached.id);
+        let ownBB = null;
+        for (const s of segs) {
+          if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
+          if (!ownBB) ownBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+          for (const p of [s.p1, s.p2]) {
+            ownBB.minX = Math.min(ownBB.minX, p.x); ownBB.minY = Math.min(ownBB.minY, p.y);
+            ownBB.maxX = Math.max(ownBB.maxX, p.x); ownBB.maxY = Math.max(ownBB.maxY, p.y);
+          }
+        }
+        let lo = -Infinity, hi = Infinity;
         try {
           const n = new THREE.Vector3(...doc.sketch.plane.n).normalize();
           const o = new THREE.Vector3(...doc.sketch.plane.origin);
@@ -3931,12 +3951,28 @@ class SketchEngine {
             const dz = new THREE.Vector3(cx, cy, cz).sub(o).dot(n);
             dzMin = Math.min(dzMin, dz); dzMax = Math.max(dzMax, dz);
           }
-          const lo = dzMin - 8, hi = dzMax + 8;
-          segs = segs.filter(s => {
+          lo = dzMin - 8; hi = dzMax + 8;
+        } catch (_) {}
+        for (const other of doc.bodies) {
+          if (other.id === attached.id || other.hidden || !other.mesh) continue;
+          if (other.type === 'fastener' || other.type === 'threadShell') continue;
+          const cand = projectBodiesOntoPlane(doc.sketch.plane, other.id).filter(s => {
             const m = ((s.dz1 || 0) + (s.dz2 || 0)) / 2;
             return m >= lo && m <= hi;
           });
-        } catch (_) {}
+          if (!cand.length || !ownBB) continue;
+          let ob = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+          for (const s of cand) for (const p of [s.p1, s.p2]) {
+            ob.minX = Math.min(ob.minX, p.x); ob.minY = Math.min(ob.minY, p.y);
+            ob.maxX = Math.max(ob.maxX, p.x); ob.maxY = Math.max(ob.maxY, p.y);
+          }
+          if (ob.minX <= ownBB.maxX + 2 && ob.maxX >= ownBB.minX - 2 &&
+              ob.minY <= ownBB.maxY + 2 && ob.maxY >= ownBB.minY - 2) {
+            for (const s of cand) segs.push(s);
+          }
+        }
+      } else {
+        segs = projectBodiesOntoPlane(doc.sketch.plane);
       }
       // Cache the visible outline segments for the snap engine — students
       // trace these lines (and their crossings = interference boundaries)
@@ -9701,15 +9737,40 @@ function computeSketchRegions(sketch) {
           }
           bandLo = dzMin - 8; bandHi = dzMax + 8;
         }
+        // In-plane overlap gate: interference means the neighbour's projected
+        // footprint actually overlaps THIS part's face. A body merely sitting
+        // beside the part (the bracket next to a fresh arm) used to project a
+        // ghost silhouette into the sketch — confusing regions floating in
+        // space that had nothing to do with what was drawn.
+        let ownBB = null;
+        for (const s of outlineSegs) {
+          if (!ownBB) ownBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+          for (const p of [s.a, s.b]) {
+            ownBB.minX = Math.min(ownBB.minX, p.x); ownBB.minY = Math.min(ownBB.minY, p.y);
+            ownBB.maxX = Math.max(ownBB.maxX, p.x); ownBB.maxY = Math.max(ownBB.maxY, p.y);
+          }
+        }
         for (const other of doc.bodies) {
           if (other.id === body.id || other.hidden || !other.mesh) continue;
           if (other.type === 'fastener' || other.type === 'threadShell') continue;
+          const cand = [];
+          let ob = null;
           for (const s of projectBodiesOntoPlane(sketch.plane, other.id)) {
             if (Math.hypot(s.p2.x - s.p1.x, s.p2.y - s.p1.y) < 0.05) continue;
             const m = ((s.dz1 || 0) + (s.dz2 || 0)) / 2;
             if (m < bandLo || m > bandHi) continue;
-            outlineSegs.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
+            cand.push({ a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y } });
+            if (!ob) ob = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+            for (const p of [s.p1, s.p2]) {
+              ob.minX = Math.min(ob.minX, p.x); ob.minY = Math.min(ob.minY, p.y);
+              ob.maxX = Math.max(ob.maxX, p.x); ob.maxY = Math.max(ob.maxY, p.y);
+            }
           }
+          if (!cand.length || !ownBB || !ob) continue;
+          const overlaps = ob.minX <= ownBB.maxX + 2 && ob.maxX >= ownBB.minX - 2 &&
+                           ob.minY <= ownBB.maxY + 2 && ob.maxY >= ownBB.minY - 2;
+          if (!overlaps) continue;
+          for (const s of cand) outlineSegs.push(s);
         }
         // MERGE near-duplicate outline lines: a part's near and far edges
         // (or an old cut's seam) can project as hairline-separated parallel
