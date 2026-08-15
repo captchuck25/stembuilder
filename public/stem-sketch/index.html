@@ -16386,6 +16386,27 @@ function _sweepAndCutNow(jointId) {
   const leftover = markerIds.filter(id => doc.bodies.some(b => b.id === id));
   const resultGroup = doc.bodies.find(b => b.type === 'group' &&
     Array.isArray(b.children) && b.children.some(c => c.id === movingId));
+  // POLISH PASS: run the swept result through Manifold's native simplify —
+  // 38 slice subtractions leave seam scars, stray membrane fragments, and
+  // geometry that intermittently defeats later verification (the random
+  // red flashes). simplify merges coplanar facets and drops the junk.
+  if (resultGroup?.geometry && window.__manifold) {
+    let m = null, ms = null;
+    try {
+      m = _geoToManifoldRepaired(new THREE.Mesh(resultGroup.geometry));
+      ms = (typeof m.simplify === 'function') ? m.simplify(0.05) : null;
+      const om = _manifoldToMesh(ms || m);
+      if (om?.geometry?.attributes?.position?.count > 0) {
+        const g = _dropCrumbComponents(om.geometry);
+        g.computeVertexNormals();
+        resultGroup.geometry = g;
+      }
+    } catch (_) {
+    } finally {
+      try { if (ms) ms.delete(); } catch (_) {}
+      try { if (m) m.delete(); } catch (_) {}
+    }
+  }
   const vAfter = resultGroup?.geometry ? _geoVolume(resultGroup.geometry) : vBefore;
   // Only true annihilation is refused — a deep clevis relief legitimately
   // removes half the part or more. Big-but-accepted cuts announce their
