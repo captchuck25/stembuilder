@@ -7649,16 +7649,18 @@ class Viewer3D {
           // Prefer the smallest-area region when several are coplanar at this
           // hit point — this lets the user click a square drawn inside a
           // sphere/cube boundary and actually pick the square, not the
-          // surrounding boundary.
-          let best = regionHits[0];
+          // surrounding boundary. Regions from DRAWN SHAPES always beat
+          // outline-derived trim wedges overlapping the same spot: what the
+          // student drew is what a click means.
+          const d0 = regionHits[0].distance;
+          const coplanar = regionHits.filter(h => Math.abs(h.distance - d0) <= 0.5);
+          const classic = coplanar.filter(h => !h.object.userData.regionOutline);
+          const pool = classic.length ? classic : coplanar;
+          let best = pool[0];
           let bestArea = best.object.userData.regionArea ?? Infinity;
-          const d0 = best.distance;
-          for (let i = 1; i < regionHits.length; i++) {
-            const h = regionHits[i];
-            // Only compare hits that landed on essentially the same plane
-            if (Math.abs(h.distance - d0) > 0.5) continue;
-            const a = h.object.userData.regionArea ?? Infinity;
-            if (a < bestArea) { best = h; bestArea = a; }
+          for (let i = 1; i < pool.length; i++) {
+            const a = pool[i].object.userData.regionArea ?? Infinity;
+            if (a < bestArea) { best = pool[i]; bestArea = a; }
           }
           const regionId = best.object.userData.regionId;
           if (e.shiftKey) {
@@ -8398,6 +8400,7 @@ class Viewer3D {
           regionId: r.id,
           sketchId: r.sketchId,
           regionArea: Math.abs(r.area || 0),
+          regionOutline: !!r._usedOutline,
         };
         this.regionGroup.add(mesh);
       }
@@ -9721,13 +9724,22 @@ function computeSketchRegions(sketch) {
       }
     } catch (_) { outlineSegs = null; }
   }
-  // When the part's real face outline is available, IT is the perimeter —
-  // the face-pick bbox rectangle would only add phantom regions around
-  // the part, so it stays out of the graph.
-  const useBoundary = (outlineSegs && outlineSegs.length) ? null : sketch.boundary;
-  const graph = buildPlanarGraph(candidates, useBoundary, outlineSegs);
-  const faces = findPlanarFaces(graph);
-  if (!faces.length) return [];
+  // TWO-PASS REGION ENGINE. Pass A (always) = the CLASSIC arrangement of
+  // everything the user drew plus the sketch boundary — byte-identical to
+  // the pre-articulation engine, so drawn shapes always produce their whole
+  // regions no matter what else is in the sketch. Pass B (only when open
+  // trim lines exist on a face sketch) ADDS the outline-bounded wedge
+  // regions — it never replaces or subdivides a classic region. A stray
+  // helper line used to flip the ENTIRE sketch into trim mode and shred
+  // the drawn circles' regions with the part's own silhouette.
+  const graphA = buildPlanarGraph(candidates, sketch.boundary, null);
+  const facesA = graphA ? findPlanarFaces(graphA) : [];
+  let facesB = [];
+  if (outlineSegs && outlineSegs.length) {
+    const graphB = buildPlanarGraph(candidates, null, outlineSegs);
+    facesB = graphB ? findPlanarFaces(graphB) : [];
+  }
+  if (!facesA.length && !facesB.length) return [];
   // MEASUREMENT-EXACT circle rims: graph node welding can nudge a circle's
   // tessellation vertices by up to 0.5mm. Cutters built from region points
   // then sit a hair off cutters built from the circle ENTITY (the hole-carry
@@ -9764,24 +9776,30 @@ function computeSketchRegions(sketch) {
     while (out.length > 1 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) < 1e-6) out.pop();
     return out;
   };
-  if (circleRings.length) for (const f of faces) f.points = snapToRings(f.points);
+  if (circleRings.length) {
+    for (const f of facesA) f.points = snapToRings(f.points);
+    for (const f of facesB) f.points = snapToRings(f.points);
+  }
+  // Pass A regions — classic, never tagged, never filtered.
   const regs = [];
-  for (let i = 0; i < faces.length; i++) {
-    const f = faces[i];
+  let fi = 0;
+  for (const f of facesA) {
     regs.push({
-      id: `s${sketch.id}-f${i}`,
+      id: `s${sketch.id}-f${fi++}`,
       sketchId: sketch.id,
       kind: 'face',
       points: f.points,
       area: f.area,
     });
   }
-  // Classify: regions whose boundary runs along the projected OUTLINE (not
-  // just drawn shapes) are snapshots of the part's current pose. Extrudes
-  // made from them must NOT auto-rebuild when the sketch is edited later —
-  // the outline has changed by then (the first cut moved it!) and the
-  // centroid re-match grabs garbage, shredding the part.
-  if (outlineSegs && outlineSegs.length) {
+  // Pass B regions — keep ONLY faces genuinely bounded by the projected
+  // OUTLINE (>20% of samples on outline, off drawn entities). Everything
+  // else in pass B is a re-derivation (or a welded subdivision) of a
+  // classic region and would only steal clicks from drawn shapes.
+  // Outline-bounded regions are pose snapshots: extrudes from them are
+  // FROZEN from auto-rebuild (the first cut moves the outline, and a
+  // centroid re-match would grab garbage and shred the part).
+  if (facesB.length) {
     const entSegs = [];
     for (const e of candidates) for (const s of entityToSegments(e)) entSegs.push(s);
     const distTo = (p, list) => {
@@ -9792,43 +9810,46 @@ function computeSketchRegions(sketch) {
       }
       return m;
     };
-    for (const r of regs) {
-      const pts = r.points || [];
+    for (const f of facesB) {
+      const pts = f.points || [];
       if (pts.length < 3) continue;
       let outlineHits = 0, checked = 0;
       const step = Math.max(1, Math.floor(pts.length / 24));
       for (let i = 0; i < pts.length; i += step) {
         checked++;
-        const p = pts[i];
-        if (distTo(p, entSegs) > 0.3 && distTo(p, outlineSegs) < 0.3) outlineHits++;
+        if (distTo(pts[i], entSegs) > 0.3 && distTo(pts[i], outlineSegs) < 0.3) outlineHits++;
       }
-      if (outlineHits > Math.max(1, checked * 0.2)) r._usedOutline = true;
+      // Keep the face if the OUTLINE genuinely bounds part of it (any sample
+      // on-outline-and-off-entities). Pure entity-bounded faces are
+      // re-derivations of classic pass-A regions and would only steal
+      // clicks from drawn shapes. Majority-outline is too strict: a corner
+      // wedge is mostly bounded by the drawn line with one outline corner.
+      if (outlineHits < 1) continue;
+      // Sliver filters — hair-thin faces between near-parallel outline
+      // edges, and 'wedge with a secret tail' shapes whose extent dwarfs
+      // their area. Both cut troughs when clicked.
+      let per = 0;
+      let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        per += Math.hypot(b.x - a.x, b.y - a.y);
+        mnx = Math.min(mnx, a.x); mny = Math.min(mny, a.y);
+        mxx = Math.max(mxx, a.x); mxy = Math.max(mxy, a.y);
+      }
+      const area = Math.abs(f.area);
+      if (per < 1 || area / per <= 0.4) continue;
+      if (((mxx - mnx) ** 2 + (mxy - mny) ** 2) / area > 60) continue;
+      regs.push({
+        id: `s${sketch.id}-f${fi++}`,
+        sketchId: sketch.id,
+        kind: 'face',
+        points: f.points,
+        area: f.area,
+        _usedOutline: true,
+      });
     }
   }
-  // Drop SLIVER outline regions — hair-thin faces between near-parallel
-  // outline edges (a tapered part projects several close edges). Clicking
-  // one looks like a normal pick but extrudes a trough that follows the
-  // whole outline. Mean width under ~0.4mm = artifact, not a feature.
-  // Drawn-shape regions are never dropped.
-  return regs.filter(r => {
-    if (!r._usedOutline) return true;
-    const pts = r.points || [];
-    if (pts.length < 3) return false;
-    let per = 0;
-    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
-    for (let i = 0; i < pts.length; i++) {
-      const a = pts[i], b = pts[(i + 1) % pts.length];
-      per += Math.hypot(b.x - a.x, b.y - a.y);
-      mnx = Math.min(mnx, a.x); mny = Math.min(mny, a.y);
-      mxx = Math.max(mxx, a.x); mxy = Math.max(mxy, a.y);
-    }
-    const area = Math.abs(r.area);
-    if (per < 1 || area / per <= 0.4) return false; // hair-thin sliver
-    // A region whose extent dwarfs its area is a sliver with a wide end —
-    // the classic 'looked like a wedge, cut a trough' trap.
-    const diag2 = (mxx - mnx) ** 2 + (mxy - mny) ** 2;
-    return diag2 / area <= 60;
-  });
+  return regs;
 }
 
 // If the clicked region is one letter of a parametric text group, return
