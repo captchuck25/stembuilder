@@ -851,6 +851,24 @@
   /* Traced face perimeter — the part's edge as a real (muted) line */
   .entity.face-perimeter { stroke: #5b6b8c; stroke-width: 1.9; opacity: 0.8; }
   .entity.face-perimeter.selected { stroke: var(--accent-ink); }
+  /* Busy overlay — a status-bar note is invisible to students; heavy ops
+     (Clear the swing) show a centered card until they finish. */
+  #busy-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(250, 251, 254, 0.55);
+  }
+  #busy-overlay .busy-card {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px 30px; box-shadow: 0 10px 34px rgba(20, 30, 60, 0.18);
+    display: flex; align-items: center; gap: 14px;
+    font-size: 15px; color: var(--ink);
+  }
+  #busy-overlay .busy-spin {
+    font-size: 26px; display: inline-block;
+    animation: busy-rot 1.1s linear infinite;
+  }
+  @keyframes busy-rot { to { transform: rotate(360deg); } }
   .entity-handle { fill: white; stroke: var(--accent); stroke-width: 1.5; }
   .entity-handle.has-curve { fill: #fff3e0; stroke: #ff9a3e; }
   /* Midpoint marker on a single-segment line — same colour, triangle shape */
@@ -15936,7 +15954,7 @@ function checkCollisionWarnings(bodyIds) {
         let real = true;
         let gGeo = null;
         if (window.__manifold) {
-          const key = body.id + ':ground';
+          const key = body.id + ':ground:' + _matrixKeyOf(body.mesh);
           const now = performance.now();
           if (now - _volGate.t > 150) { _volGate = { t: now, verdicts: new Map() }; }
           if (_volGate.verdicts.has(key)) {
@@ -15944,7 +15962,9 @@ function checkCollisionWarnings(bodyIds) {
             real = v.real; gGeo = v.geo;
           } else {
             gGeo = _intersectWorldGeometry(body.mesh, _groundColliderMesh());
-            real = !!gGeo && _geoVolume(gGeo) > 2;
+            // Can't compute the volume (mesh defeats the engine) → warn on a
+            // DEEP dip (a real plunge, not boundary-precision noise).
+            real = gGeo ? _geoVolume(gGeo) > 10 : bb.min.y < -3;
             _volGate.verdicts.set(key, { real, geo: gGeo });
           }
         }
@@ -15961,30 +15981,38 @@ function checkCollisionWarnings(bodyIds) {
         if (other.type === 'fastener' || other.type === 'threadShell') continue;
         if (other.type === 'baked') continue; // ghost negatives never "collide"
         if (!bbA.intersectsBox(new THREE.Box3().setFromObject(other.mesh))) continue;
-        if (_meshesOverlap(body.mesh, other.mesh) || _meshesOverlap(other.mesh, body.mesh)) {
-          // Volume gate: the sampled test flags flush/kissing fits too (an
-          // arm snug in a bracket fork). Only substantial interpenetration
-          // volume is a crash. Cached briefly — Play checks ~30x/second.
-          let realHit = true;
-          let hitGeo = null;
-          if (window.__manifold) {
-            const key = body.id + ':' + other.id;
-            const now = performance.now();
-            if (now - _volGate.t > 150) { _volGate = { t: now, verdicts: new Map() }; }
-            if (_volGate.verdicts.has(key)) {
-              const v = _volGate.verdicts.get(key);
-              realHit = v.real; hitGeo = v.geo;
-            } else {
-              hitGeo = _intersectWorldGeometry(body.mesh, other.mesh);
-              realHit = !!hitGeo && _geoVolume(hitGeo) > 2; // mm³
-              _volGate.verdicts.set(key, { real: realHit, geo: hitGeo });
-            }
+        // Volume-FIRST detection (cached ~150ms; ~3ms warm): the true
+        // intersection volume decides. The old sampled-vertex test missed
+        // shallow face/edge contact where no vertex lands inside the other
+        // part (an arm edge digging into the bracket base). Flush fits have
+        // ~zero volume and stay clear; the sampling is only the fallback
+        // when the engine can't convert a mesh.
+        let realHit = false;
+        let hitGeo = null;
+        if (window.__manifold) {
+          // Pose-aware key: reusing a verdict from a DIFFERENT pose while a
+          // joint swings ate real ground/part hits for up to 150ms of motion.
+          const key = body.id + ':' + other.id + ':' + _matrixKeyOf(body.mesh);
+          const now = performance.now();
+          if (now - _volGate.t > 150) { _volGate = { t: now, verdicts: new Map() }; }
+          if (_volGate.verdicts.has(key)) {
+            const v = _volGate.verdicts.get(key);
+            realHit = v.real; hitGeo = v.geo;
+          } else {
+            hitGeo = _intersectWorldGeometry(body.mesh, other.mesh);
+            // Unverifiable body pairs stay silent — the parity fallback
+            // false-flags snug fits on CSG geometry with unreliable normals,
+            // and a permanent red is worse than a rare miss.
+            realHit = !!hitGeo && _geoVolume(hitGeo) > 10; // mm³
+            _volGate.verdicts.set(key, { real: realHit, geo: hitGeo });
           }
-          if (realHit) {
-            pairs.push({ bodyId: body.id, otherId: other.id, geo: hitGeo });
-            msgs.push(`${_collisionLabel(body)} is hitting ${_collisionLabel(other)}`);
-            break;
-          }
+        } else {
+          realHit = _meshesOverlap(body.mesh, other.mesh) || _meshesOverlap(other.mesh, body.mesh);
+        }
+        if (realHit) {
+          pairs.push({ bodyId: body.id, otherId: other.id, geo: hitGeo });
+          msgs.push(`${_collisionLabel(body)} is hitting ${_collisionLabel(other)}`);
+          break;
         }
       }
     }
@@ -16132,12 +16160,32 @@ function _stripSwingSlicesFromTree(top) {
   strip(top);
   return { removed };
 }
+function _showBusyOverlay(text) {
+  let el = document.getElementById('busy-overlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'busy-overlay';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<div class="busy-card"><span class="busy-spin">🌀</span><div>${text}</div></div>`;
+  el.style.display = 'flex';
+}
+function _hideBusyOverlay() {
+  const el = document.getElementById('busy-overlay');
+  if (el) el.style.display = 'none';
+}
 function sweepAndCutJointOverlap(jointId) {
+  _showBusyOverlay('Clearing the swing — checking every angle of the travel.<br><span style="color:var(--ink-soft);font-size:13px">This can take a few seconds…</span>');
   setStatus('🌀 Sweeping the joint through its travel — this can take a few seconds…');
-  setTimeout(() => { try { _sweepAndCutNow(jointId); } catch (err) {
-    console.error('Clear-the-swing failed:', err);
-    setStatus('⚠ Clear the swing hit a snag — nothing was changed. Press Ctrl+Z if anything looks off, then try again.');
-  } }, 30); // let the status paint before the heavy work
+  setTimeout(() => {
+    try { _sweepAndCutNow(jointId); }
+    catch (err) {
+      console.error('Clear-the-swing failed:', err);
+      setStatus('⚠ Clear the swing hit a snag — nothing was changed. Press Ctrl+Z if anything looks off, then try again.');
+    } finally {
+      _hideBusyOverlay();
+    }
+  }, 60); // let the overlay paint before the heavy work
 }
 function _sweepAndCutNow(jointId) {
   const j = doc.joints.find(x => x.id === jointId);
@@ -16206,37 +16254,20 @@ function _sweepAndCutNow(jointId) {
   const pieces = [];
   try {
     viewer.scene.updateMatrixWorld(true);
-    // Statics are DILATED ~0.3mm along their vertex normals: every slice
-    // cut from the moving part then carries running clearance for free,
-    // and the slices themselves stay manifold-pure. (A closed mesh offset
-    // along averaged post-weld normals stays closed.)
+    // Statics convert AS-IS. (Dilating them along vertex normals for
+    // running clearance made the offset bracket self-intersect — Manifold
+    // resolved it into a monster that turned 2-second sweeps into
+    // 60-second ones and poisoned every downstream cut. Kissing-contact
+    // residue between poses stays under the 10mm³ collision threshold, so
+    // the swing still reads clear.)
     const CLEAR = 0.3;
-    const dilatedStaticMesh = (mesh) => {
-      let g = mesh.geometry.clone();
-      g.applyMatrix4(mesh.matrixWorld);
-      g = weldGeometryForEdges(g, 0.005);
-      g.computeVertexNormals();
-      const pA = g.attributes.position, nA = g.attributes.normal;
-      for (let vi = 0; vi < pA.count; vi++) {
-        pA.setXYZ(vi,
-          pA.getX(vi) + nA.getX(vi) * CLEAR,
-          pA.getY(vi) + nA.getY(vi) * CLEAR,
-          pA.getZ(vi) + nA.getZ(vi) * CLEAR);
-      }
-      pA.needsUpdate = true;
-      g.computeVertexNormals();
-      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial());
-      m.updateMatrixWorld(true);
-      return m;
-    };
     for (const other of doc.bodies) {
       if (other.id === movingId || other.hidden || !other.mesh) continue;
       if (other.type === 'fastener' || other.type === 'threadShell' || other.type === 'baked') continue;
       try {
-        const dm = dilatedStaticMesh(other.mesh);
         staticSolids.push({
-          manifold: _geoToManifoldRepaired(dm),
-          bb: new THREE.Box3().setFromObject(dm),
+          manifold: _geoToManifoldRepaired(other.mesh),
+          bb: new THREE.Box3().setFromObject(other.mesh),
         });
       } catch (_) {}
     }
@@ -16251,16 +16282,21 @@ function _sweepAndCutNow(jointId) {
       staticSolids.push({
         manifold: _geoToManifoldRepaired(gm),
         bb: new THREE.Box3().setFromObject(gm),
+        isGround: true,
       });
     } catch (_) {}
     if (staticSolids.length) {
-      for (let rel = tMin; rel <= tMax + 1e-6; rel += STEP) {
+      // Sample poses INCLUDING the exact travel end (the stepped loop could
+      // stop one fraction of a degree short and leave a paper sliver there).
+      const poseList = [];
+      for (let rel = tMin; rel <= tMax + 1e-6; rel += STEP) poseList.push(rel);
+      if (poseList[poseList.length - 1] < tMax - 0.01) poseList.push(tMax);
+      for (const rel of poseList) {
         applyJointAngle(j, rel + (j.zero || 0));
         viewer.scene.updateMatrixWorld(true);
         const moving = doc.bodies.find(b => b.id === movingId);
         if (!moving?.mesh) break;
         const bbM = new THREE.Box3().setFromObject(moving.mesh);
-        if (bbM.min.y < -0.05) groundPoses.push(Math.round(rel));
         let aMov = null;
         try {
           for (const s of staticSolids) {
@@ -16280,13 +16316,13 @@ function _sweepAndCutNow(jointId) {
                   .multiply(new THREE.Matrix4().makeRotationAxis(axis, delta))
                   .multiply(new THREE.Matrix4().makeTranslation(-P.x, -P.y, -P.z));
                 // Slice stays manifold-pure (raw engine output) — the
-                // running clearance comes from the DILATED statics below,
-                // so no per-slice inflation is needed (offsetting slices
-                // shattered the cut into hundreds of shell fragments).
+                // running clearance comes from the DILATED statics, so no
+                // per-slice inflation is needed.
                 const g = probe.geometry;
                 g.applyMatrix4(M);
                 g.computeVertexNormals();
                 pieces.push(g);
+                if (s.isGround) groundPoses.push(Math.round(rel));
               }
             } catch (_) {}
             try { if (r) r.delete(); } catch (_) {}
