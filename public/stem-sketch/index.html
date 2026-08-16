@@ -2661,7 +2661,10 @@ class SketchEngine {
         continue;
       }
       if (entityStrokeHit(ent, wx, wy, tolMm)) return ent;
-      if (entityHit(ent, wx, wy, tolMm)) fillHits.push(ent);
+      // Traced face perimeters are selectable ON their line only — their
+      // interior spans the whole face and would swallow every click,
+      // acting like a big shape sitting in front of everything.
+      if (!ent.facePerimeter && entityHit(ent, wx, wy, tolMm)) fillHits.push(ent);
     }
     let best = null, bestArea = Infinity;
     for (const ent of fillHits) {
