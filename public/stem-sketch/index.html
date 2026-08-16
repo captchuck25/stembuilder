@@ -13222,6 +13222,10 @@ function openThreadedHoleForMark(sketchId, markId) {
              <input type="checkbox" id="th1-bolt"${curPlaceBolt ? ' checked' : ''}/>
              <span>Show matching visualizer bolt</span>
            </label>
+           <label class="field" id="th1-nut-row" style="display:none;margin-top:6px">
+             <input type="checkbox" id="th1-nut"${(prev.placeNut !== undefined ? !!prev.placeNut : true) ? ' checked' : ''}/>
+             <span>Show matching nut at the far end</span>
+           </label>
            <div class="field" id="th1-head-row">
              <label>Bolt head type</label>
              <select id="th1-head">${headOpts}</select>
@@ -13252,9 +13256,10 @@ function openThreadedHoleForMark(sketchId, markId) {
       const holeType = $('th1-type')?.value || 'threaded';
       const nutPocket = holeType === 'clearance' && !!$('th1-nutpocket')?.checked;
       const nutWasher = nutPocket && !!$('th1-nutwasher')?.checked;
+      const placeNut = holeType === 'clearance' && !!$('th1-nut')?.checked;
       const headSeat = $('th1-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      const opts = { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, nutWasher, headSeat };
+      const opts = { size, depth, fit, placeBolt, placeNut, boltHead, holeType, nutPocket, nutWasher, headSeat };
       if ($('th1-all')?.checked) {
         // Apply to every bolt location in this sketch: peel any existing
         // holes/bolts first, then cut them all fresh with these settings.
@@ -13284,6 +13289,10 @@ function openThreadedHoleForMark(sketchId, markId) {
       if (row) row.style.display = isClr ? 'flex' : 'none';
       const wrow = $('th1-nutwasher-row');
       if (wrow) wrow.style.display = (isClr && $('th1-nutpocket')?.checked) ? 'flex' : 'none';
+      // Nut visual only makes sense on clearance holes (threaded plastic
+      // holes ARE the nut).
+      const nrow = $('th1-nut-row');
+      if (nrow) nrow.style.display = isClr ? '' : 'none';
     };
     $('th1-nutpocket')?.addEventListener('change', syncType);
     const syncSeat = () => {
@@ -13508,7 +13517,7 @@ function deleteMaterialisedThreadMark(mark, opts = {}) {
   // doc.bodies looking for any fastener whose _threadMarkRef points at
   // this mark — that catches the bolts the user still sees on screen even
   // when the bookkeeping id is missing.
-  const drop = new Set([mark._boltBodyId, mark._threadShellBodyId].filter(Boolean));
+  const drop = new Set([mark._boltBodyId, mark._nutBodyId, mark._threadShellBodyId].filter(Boolean));
   for (const b of doc.bodies) {
     if (b.type === 'fastener' && b._threadMarkRef && b._threadMarkRef.markId === mark.id) {
       drop.add(b.id);
@@ -13538,6 +13547,7 @@ function deleteMaterialisedThreadMark(mark, opts = {}) {
   }
   delete mark._materialised;
   delete mark._boltBodyId;
+  delete mark._nutBodyId;
   delete mark._holeBodyId;
   delete mark._threadShellBodyId;
   delete mark._mergedShellInBodyId;
@@ -13757,6 +13767,10 @@ function openThreadedHolesDialog() {
              <input type="checkbox" id="th-bolt"${curBolt ? ' checked' : ''}/>
              <span>Place a matching visualizer bolt at each mark</span>
            </label>
+           <label class="field" id="th-nut-row" style="display:none;margin-top:6px">
+             <input type="checkbox" id="th-nut"${(seed.placeNut !== undefined ? !!seed.placeNut : true) ? ' checked' : ''}/>
+             <span>Place a matching nut at the far end of each hole</span>
+           </label>
            <div class="field" id="th-head-row">
              <label>Bolt head type</label>
              <select id="th-head">${headOpts}</select>
@@ -13781,9 +13795,10 @@ function openThreadedHolesDialog() {
       const holeType = $('th-type')?.value || 'threaded';
       const nutPocket = holeType === 'clearance' && !!$('th-nutpocket')?.checked;
       const nutWasher = nutPocket && !!$('th-nutwasher')?.checked;
+      const placeNut = holeType === 'clearance' && !!$('th-nut')?.checked;
       const headSeat = $('th-seat')?.value || 'rest';
       if (depth <= 0) { showHint('Depth must be positive.'); return; }
-      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, boltHead, holeType, nutPocket, nutWasher, headSeat });
+      processThreadMarks(sketch, freshMarks, { size, depth, fit, placeBolt, placeNut, boltHead, holeType, nutPocket, nutWasher, headSeat });
     },
   });
   setTimeout(() => {
@@ -13820,6 +13835,9 @@ function openThreadedHolesDialog() {
         if (row) row.style.display = isClr ? 'flex' : 'none';
         const wrow = $('th-nutwasher-row');
         if (wrow) wrow.style.display = (isClr && $('th-nutpocket')?.checked) ? 'flex' : 'none';
+        // Nut visual only makes sense on clearance holes
+        const nrow = $('th-nut-row');
+        if (nrow) nrow.style.display = isClr ? '' : 'none';
       };
       typeSel.addEventListener('change', syncType);
       $('th-nutpocket')?.addEventListener('change', syncType);
@@ -14095,6 +14113,35 @@ function processThreadMarks(sketch, marks, opts) {
       m._boltBodyId = bolt.id; // bookkeeping for "already materialised" check
       newSelection.push(bolt.id);
     }
+    if (opts.placeNut && isClearance) {
+      // Matching visualizer nut at the FAR end of the hole. With a nut
+      // pocket it sits IN the pocket (same origin as the pocket cutter, so
+      // the ring occupies exactly the carved hex void); without one it
+      // rests on the far face, threading over the ghost bolt's exit.
+      // Fastener local +Y points back toward the sketch plane, so a nut at
+      // position p spans p → p + nutH·n.
+      const nSpec = getFastenerSpec(opts.size);
+      const nutH = nSpec.d * 0.8;
+      const nutPos = opts.nutPocket
+        ? cutBottom.clone()
+        : shaftBottom.clone().add(holeAxis.clone().multiplyScalar(nutH));
+      const nut = {
+        id: doc.nextBodyId++,
+        type: 'fastener',
+        part: 'nut',
+        size: opts.size,
+        thread: 'smooth', // bore slides over the smooth ghost bolt
+        fit: 'tight',
+        length: nutH,
+        x: nutPos.x, y: nutPos.y, z: nutPos.z,
+        rotation: { ...rotDeg },
+        op: 'add',
+        _threadMarkRef: { sketchId: sketch.id, markId: m.id },
+      };
+      doc.bodies.push(nut);
+      m._nutBodyId = nut.id;
+      newSelection.push(nut.id);
+    }
     m._materialised = true;
     // Persist the chosen settings on the mark so re-opening the dialog
     // pre-fills with what's actually there (not the defaults).
@@ -14103,6 +14150,7 @@ function processThreadMarks(sketch, marks, opts) {
       depth: opts.depth,
       fit: opts.fit,
       placeBolt: !!opts.placeBolt,
+      placeNut: !!(opts.placeNut && opts.holeType === 'clearance'),
       boltHead: opts.boltHead || 'hex',
       holeType: opts.holeType || 'threaded',
       nutPocket: !!opts.nutPocket,
@@ -17254,7 +17302,7 @@ function renderTree() {
         if (key !== 'sketches' && it._threadMarkRef) {
           const sk = doc.sketches.find(s => s.id === it._threadMarkRef.sketchId);
           const mk = sk?.entities?.find(en => en.id === it._threadMarkRef.markId);
-          if (mk?._settings) mk._settings.placeBolt = !it.hidden;
+          if (mk?._settings) mk._settings[it.part === 'nut' ? 'placeNut' : 'placeBolt'] = !it.hidden;
         }
       }
       renderTree();
@@ -17309,7 +17357,7 @@ function renderTree() {
         if (b._threadMarkRef) {
           const sk = doc.sketches.find(s => s.id === b._threadMarkRef.sketchId);
           const mk = sk?.entities?.find(e => e.id === b._threadMarkRef.markId);
-          if (mk?._settings) mk._settings.placeBolt = !b.hidden;
+          if (mk?._settings) mk._settings[b.part === 'nut' ? 'placeNut' : 'placeBolt'] = !b.hidden;
         }
         renderTree();
         if (viewer) viewer.rebuildBodies();
