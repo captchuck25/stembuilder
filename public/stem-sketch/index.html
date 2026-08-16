@@ -16314,7 +16314,10 @@ function _sweepAndCutNow(jointId) {
         return;
       }
       try {
-        for (const rel of poseList) {
+        // Slice at one pose against a subset of statics. Returns true when
+        // any BODY (non-ground) slice was produced at this pose.
+        const sliceAtPose = (rel, solids) => {
+          let foundBody = false;
           const dRad = THREE.MathUtils.degToRad((rel + (j.zero || 0)) - startAngle);
           const Mpose = new THREE.Matrix4().makeTranslation(P.x, P.y, P.z)
             .multiply(new THREE.Matrix4().makeRotationAxis(axis, dRad))
@@ -16327,7 +16330,7 @@ function _sweepAndCutNow(jointId) {
           let aMovP = null;
           try {
             aMovP = aMov0.transform(Mpose.elements);
-            for (const s of staticSolids) {
+            for (const s of solids) {
               if (!bbP.intersectsBox(s.bb)) continue;
               let I = null, Ib = null;
               try {
@@ -16339,6 +16342,7 @@ function _sweepAndCutNow(jointId) {
                   g.computeVertexNormals();
                   pieces.push(g);
                   if (s.isGround) groundPoses.push(Math.round(rel));
+                  else foundBody = true;
                 }
               } catch (_) {}
               try { if (I) I.delete(); } catch (_) {}
@@ -16346,6 +16350,36 @@ function _sweepAndCutNow(jointId) {
             }
           } catch (_) {}
           try { if (aMovP) aMovP.delete(); } catch (_) {}
+          return foundBody;
+        };
+        const bodySolids = staticSolids.filter(s => !s.isGround);
+        const groundSolids = staticSolids.filter(s => s.isGround);
+        // BODY relief at the adaptive step, then ONSET REFINEMENT: where a
+        // contact starts/stops between two neighbouring poses, sample the
+        // midpoints (twice) — the contact depth ramps from zero at onset,
+        // so refining the boundary kills the visible stepped ledges.
+        const found = new Map();
+        for (const rel of poseList) found.set(rel, sliceAtPose(rel, bodySolids));
+        let keys = [...found.keys()].sort((a, b) => a - b);
+        for (let pass = 0; pass < 2; pass++) {
+          const mids = [];
+          for (let i = 0; i + 1 < keys.length; i++) {
+            if (found.get(keys[i]) !== found.get(keys[i + 1])) {
+              mids.push((keys[i] + keys[i + 1]) / 2);
+            }
+          }
+          for (const m of mids) found.set(m, sliceAtPose(m, bodySolids));
+          keys = [...found.keys()].sort((a, b) => a - b);
+        }
+        // GROUND shave at a FINE step — the ground solid is an 8-vertex box,
+        // so dense sampling is nearly free and the shave boundary ramps
+        // smoothly instead of ending in a ledge.
+        if (groundSolids.length) {
+          const gStep = Math.min(2, STEP);
+          for (let rel = tMin; rel <= tMax + 1e-6; rel += gStep) {
+            sliceAtPose(rel, groundSolids);
+          }
+          if (((tMax - tMin) % gStep) > 0.01) sliceAtPose(tMax, groundSolids);
         }
       } finally {
         try { aMov0.delete(); } catch (_) {}
