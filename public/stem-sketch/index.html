@@ -848,8 +848,9 @@
   .entity.selected { stroke: var(--accent-ink); stroke-width: 2.2; fill: none; }
   .entity.construction { stroke: #ff9a3e; stroke-dasharray: 6 4; fill: none; opacity: 0.85; }
   .entity.construction.selected { stroke: #d97419; }
-  /* Traced face perimeter — the part's edge as a real (muted) line */
-  .entity.face-perimeter { stroke: #5b6b8c; stroke-width: 1.9; opacity: 0.8; }
+  /* Traced face perimeter — the sketched part's own edge, drawn BLACK so
+     it reads as "this is MY part" against red neighbours */
+  .entity.face-perimeter { stroke: #16181f; stroke-width: 1.9; opacity: 0.9; }
   .entity.face-perimeter.selected { stroke: var(--accent-ink); }
   /* Interference guide — where the parts currently overlap, projected onto
      the sketch so the relief cut can be drawn against it */
@@ -1038,10 +1039,6 @@
     opacity: 0.8;
     user-select: none;
   }
-  .body-outline.ref { opacity: 0.4; }
-  /* Neighbouring parts draw in red — where red crosses your part's outline
-     is the overlap; the designer decides the relief */
-  .body-outline.other-part { stroke: #ef4444; }
   .body-outline {
     stroke: #6b7a96;
     stroke-width: 1.2;
@@ -1088,6 +1085,12 @@
     opacity: 0.5 !important;
     stroke-width: 1.2 !important;
   }
+  /* PART COLOR SCHEME (last so it wins over the classifications above):
+     the sketched part draws BLACK; every other part draws RED. Where red
+     crosses black is the overlap — the designer decides the relief. */
+  .body-outline.own-part { stroke: #16181f; }
+  .body-outline.other-part { stroke: #ef4444; }
+  .body-outline.ref { opacity: 0.4; }
 </style>
 </head>
 <body>
@@ -4018,6 +4021,7 @@ class SketchEngine {
         if (skHasPerimeter) {
           segs = segs.filter(s => Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5);
         }
+        for (const s of segs) s._own = true; // the sketched part draws BLACK
         let ownBB = null;
         for (const s of segs) {
           if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
@@ -4071,6 +4075,9 @@ class SketchEngine {
       } else {
         segs = projectBodiesOntoPlane(doc.sketch.plane);
       }
+      // Draw order: red neighbours first, the sketched part's black lines
+      // LAST — where a red and black edge coincide, black sits on top.
+      segs.sort((a, b) => (a._own ? 1 : 0) - (b._own ? 1 : 0));
       // Cache the visible outline segments for the snap engine — students
       // trace these lines (and their crossings = interference boundaries)
       // to build tight-tolerance profiles.
@@ -4083,6 +4090,7 @@ class SketchEngine {
         const inPlane = Math.abs(seg.dz1) < onPlaneTol && Math.abs(seg.dz2) < onPlaneTol;
         const cls = ['body-outline'];
         if (inPlane) cls.push('in-plane');
+        if (seg._own) cls.push('own-part'); // the sketched part = black
         if (seg._other) cls.push('other-part'); // neighbour = red outline
         if (seg._ref) cls.push('ref'); // muted (in front of / behind the face)
         if (seg._cut) cls.push('cut'); // dashed — shows interior holes/cuts
