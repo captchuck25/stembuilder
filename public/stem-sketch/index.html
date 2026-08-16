@@ -4026,12 +4026,23 @@ class SketchEngine {
         }
         for (const s of segs) s._own = true; // the sketched part draws BLACK
         let ownBB = null;
+        const growOwnBB = (x, y) => {
+          if (!ownBB) ownBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+          ownBB.minX = Math.min(ownBB.minX, x); ownBB.minY = Math.min(ownBB.minY, y);
+          ownBB.maxX = Math.max(ownBB.maxX, x); ownBB.maxY = Math.max(ownBB.maxY, y);
+        };
         for (const s of segs) {
           if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) continue;
-          if (!ownBB) ownBB = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-          for (const p of [s.p1, s.p2]) {
-            ownBB.minX = Math.min(ownBB.minX, p.x); ownBB.minY = Math.min(ownBB.minY, p.y);
-            ownBB.maxX = Math.max(ownBB.maxX, p.x); ownBB.maxY = Math.max(ownBB.maxY, p.y);
+          growOwnBB(s.p1.x, s.p1.y); growOwnBB(s.p2.x, s.p2.y);
+        }
+        // With a traced perimeter, the own in-plane projections were just
+        // filtered out — measure the face from the PERIMETER ENTITY instead.
+        // (This bug hid every neighbour: no face bbox → neighbour loop
+        // skipped → the bracket vanished until the perimeter was deleted.)
+        if (skHasPerimeter) {
+          for (const e of doc.sketch.entities) {
+            if (!e.facePerimeter || !Array.isArray(e.points)) continue;
+            for (const p of e.points) growOwnBB(p.x, p.y);
           }
         }
         let lo = -Infinity, hi = Infinity;
@@ -9579,7 +9590,11 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
   const segs = [];
   for (const ent of entities) {
     if (ent.construction) continue;
-    for (const s of entityToSegments(ent)) segs.push(s);
+    const isOpen = ent.type === 'polyline' && !ent.closed;
+    for (const s of entityToSegments(ent)) {
+      if (isOpen) s._openSrc = true; // relief/trim lines — junction-relevant
+      segs.push(s);
+    }
   }
   // Extra graph edges (the part's real face outline on face sketches) —
   // drawn lines can close regions against them.
@@ -9628,12 +9643,14 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
   // snapped edge-to-edge against the part's outline) must SPLIT that
   // segment too, or the face-tracing can't turn the corner there and the
   // enclosed region never forms.
-  // TRIM MODE ONLY (outline segs present). On plain closed-profile sketches
-  // this splitting corrupts the classic regions: a circle drawn tangent to
-  // the face boundary (boss flush with a bar edge — the everyday student
-  // move) gets welded to the boundary at the tangent point and the face
-  // walk shreds the disc into wedge fragments.
-  const wantTJunctions = Array.isArray(extraSegs) && extraSegs.length > 0;
+  // T-junctions run in two modes. Full (trim/outline mode, extraSegs
+  // present): every pair, as before. Restricted (open relief lines drawn
+  // in a classic sketch): ONLY pairs involving an open-line segment — a
+  // drawn line ending ON the face perimeter (or a circle) must split it or
+  // the enclosed region never forms, but closed-vs-closed pairs stay
+  // untouched (a circle tangent to an edge would get welded and shredded).
+  const fullT = Array.isArray(extraSegs) && extraSegs.length > 0;
+  const wantTJunctions = fullT || segs.some(s => s._openSrc);
   const T_TOL = 0.5; // mm — matches the node-merge tolerance
   for (let i = 0; wantTJunctions && i < segs.length; i++) {
     const s = segs[i];
@@ -9642,6 +9659,7 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
     if (L2 < 1e-9) continue;
     for (let j = 0; j < segs.length; j++) {
       if (i === j) continue;
+      if (!fullT && !s._openSrc && !segs[j]._openSrc) continue;
       for (const p of [segs[j].a, segs[j].b]) {
         const t = ((p.x - s.a.x) * dx + (p.y - s.a.y) * dy) / L2;
         if (t <= 1e-6 || t >= 1 - 1e-6) continue;
