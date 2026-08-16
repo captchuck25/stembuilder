@@ -851,6 +851,9 @@
   /* Traced face perimeter — the part's edge as a real (muted) line */
   .entity.face-perimeter { stroke: #5b6b8c; stroke-width: 1.9; opacity: 0.8; }
   .entity.face-perimeter.selected { stroke: var(--accent-ink); }
+  /* Interference guide — where the parts currently overlap, projected onto
+     the sketch so the relief cut can be drawn against it */
+  .interference-line { fill: rgba(239, 68, 68, 0.12); stroke: #ef4444; stroke-width: 2; stroke-dasharray: 7 4; vector-effect: non-scaling-stroke; pointer-events: none; }
   /* Busy overlay — a status-bar note is invisible to students; heavy ops
      (Clear the swing) show a centered card until they finish. */
   #busy-overlay {
@@ -4103,6 +4106,61 @@ class SketchEngine {
         if (!this._projSegs) this._projSegs = [];
         this._projSegs.push({ p1: g1, p2: g2, _ground: true });
       }
+    }
+
+    // INTERFERENCE GUIDE — while parts are colliding, the overlap volume
+    // projects onto a face sketch as a RED snappable outline: the student
+    // draws their relief cut right against the true problem area (they
+    // design the fix; the tool only shows where). Convex-hull outline of
+    // the projected overlap — a guide, not exact geometry.
+    if (doc.sketch?.plane && doc.sketch.sourceBodyId &&
+        typeof _activeCollisions !== 'undefined' && _activeCollisions.length) {
+      try {
+        const attachedB = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(doc.sketch) : null;
+        if (attachedB) {
+          const planeInv = makePlaneMatrix(doc.sketch.plane).clone().invert();
+          for (const pair of _activeCollisions) {
+            if (pair.bodyId !== attachedB.id && pair.otherId !== attachedB.id) continue;
+            const geo = pair.geo;
+            const posAttr = geo?.attributes?.position;
+            if (!posAttr || posAttr.count < 3) continue;
+            // project the overlap volume's points into sketch coords
+            const pts2 = [];
+            const v = new THREE.Vector3();
+            const step = Math.max(1, Math.floor(posAttr.count / 200));
+            for (let i = 0; i < posAttr.count; i += step) {
+              v.fromBufferAttribute(posAttr, i).applyMatrix4(planeInv);
+              pts2.push({ x: v.x, y: v.y });
+            }
+            if (pts2.length < 3) continue;
+            // 2D convex hull (gift wrap on a small point set)
+            pts2.sort((a, b) => a.x - b.x || a.y - b.y);
+            const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+            const lower = [];
+            for (const p of pts2) {
+              while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+              lower.push(p);
+            }
+            const upper = [];
+            for (let i = pts2.length - 1; i >= 0; i--) {
+              const p = pts2[i];
+              while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+              upper.push(p);
+            }
+            const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+            if (hull.length < 3) continue;
+            let path = '';
+            for (let i = 0; i < hull.length; i++) {
+              const a = hull[i], b = hull[(i + 1) % hull.length];
+              const [ax, ay] = this.worldToScreen(a.x, a.y);
+              path += (i === 0 ? `M ${ax} ${ay} ` : `L ${ax} ${ay} `);
+              if (!this._projSegs) this._projSegs = [];
+              this._projSegs.push({ p1: { x: a.x, y: a.y }, p2: { x: b.x, y: b.y }, _hot: true });
+            }
+            svg += `<path class="interference-line" d="${path}Z"/>`;
+          }
+        }
+      } catch (_) {}
     }
 
     // Fillet pick mode — draw a ring around every selectable corner so the
@@ -17245,7 +17303,6 @@ function renderProps() {
             <span>to</span>
             <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:58px;font-size:11px"/><span>°</span>
           </div>
-          <button class="action" data-joint-sweep="${j.id}" title="Step through the whole travel, collect every overlap, and cut a relief so the part swings its full range without touching" style="width:100%;margin-top:6px;padding:4px 8px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🌀 Clear the swing</button>
         </div>`;
       }).join('');
       props.innerHTML = `
@@ -17324,12 +17381,6 @@ function renderProps() {
           j.zero = j.angle || 0;
           renderProps();
           setStatus('This position is now the joint\'s 0° — travel limits count from here.');
-        });
-      });
-      props.querySelectorAll('[data-joint-sweep]').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const j = jointOf(btn, 'jointSweep');
-          if (j) sweepAndCutJointOverlap(j.id);
         });
       });
       props.querySelectorAll('[data-joint-speed]').forEach(sel => {
