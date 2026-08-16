@@ -15636,6 +15636,7 @@ function assembleJoint(refA, refB) {
   _applyRigidToBody(B.body, R, B.P, A.P);
   const j = { id: doc.nextJointId++, a: { ...refA }, b: { ...refB }, angle: 0 };
   doc.joints.push(j);
+  doc.selectedJointId = j.id; // a new joint becomes the working joint
   doc.selection = null;
   doc.multiSelectedBodies = [];
   if (viewer) { viewer.rebuildBodies(); viewer.updateJointGizmos(); viewer.updateGizmo(); }
@@ -15793,8 +15794,10 @@ function deleteJoint(jointId) {
   const before = doc.joints.length;
   pushUndo();
   doc.joints = doc.joints.filter(j => j.id !== jointId);
+  if (doc.selectedJointId === jointId) doc.selectedJointId = null;
   if (doc.joints.length !== before) {
     if (viewer) viewer.updateJointGizmos();
+    renderTree();
     renderProps();
     setDirty(true);
     setStatus(`Joint ${jointId} deleted.`);
@@ -17051,16 +17054,35 @@ function renderTree() {
       <button class="tree-del" data-action="del-body" data-id="${body.id}" title="Delete body">×</button></div>`;
     if (_isHardwareBody(body)) hwHtml += row; else bodyHtml += row;
   }
-  // Compose the three collapsible category folders. Each header carries its
-  // own eye (hide/show every member) + lock (lock/unlock every member).
-  const catBlock = (key, icon, title, items, kidsHtml) => {
+  // Joints — one row per joint; click a row to pick which joint the
+  // Properties panel works with (multi-joint designs). The category only
+  // appears once a joint exists. No eye/lock — joints aren't hideable.
+  const jointPartName = (r) => {
+    const sk = doc.sketches.find(s => s.id === r?.sketchId);
+    const b = sk && doc.bodies.find(x => x.id === sk.sourceBodyId);
+    return b ? (b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`) : '?';
+  };
+  const jointItems = (doc.joints || []).filter(j => j.a && j.b);
+  let jointHtml = '';
+  for (const j of jointItems) {
+    const active = doc.selectedJointId === j.id;
+    jointHtml += `<div class="tree-node ${active ? 'active' : ''}" data-kind="joint" data-id="${j.id}">
+      <span class="ico">🔗</span> <span class="tree-label">${jointPartName(j.b)} swings on ${jointPartName(j.a)}</span>
+      <button class="tree-del" data-action="del-joint" data-id="${j.id}" title="Remove this joint (the parts stay where they are)">×</button></div>`;
+  }
+  // Compose the collapsible category folders. Each header carries its
+  // own eye (hide/show every member) + lock (lock/unlock every member),
+  // unless opts.tools === false (joints have neither).
+  const catBlock = (key, icon, title, items, kidsHtml, opts = {}) => {
     const open = treeCatOpen[key] !== false;
     const allHidden = items.length > 0 && items.every(i => i.hidden);
     const allLocked = items.length > 0 && items.every(i => i.locked);
+    const tools = opts.tools === false ? '' :
+      `<button class="tree-eye" data-cat-eye="${key}" title="${allHidden ? 'Show' : 'Hide'} all ${title.toLowerCase()}">${allHidden ? '◌' : '◉'}</button>
+      <button class="tree-lock${allLocked ? ' locked' : ''}" data-cat-lock="${key}" title="${allLocked ? 'Unlock' : 'Lock'} all ${title.toLowerCase()}">${allLocked ? '🔒' : '🔓'}</button>`;
     let out = `<div class="tree-cat" data-cat="${key}" title="Click to ${open ? 'collapse' : 'expand'}">
       <span class="tree-caret">${open ? '▾' : '▸'}</span>
-      <button class="tree-eye" data-cat-eye="${key}" title="${allHidden ? 'Show' : 'Hide'} all ${title.toLowerCase()}">${allHidden ? '◌' : '◉'}</button>
-      <button class="tree-lock${allLocked ? ' locked' : ''}" data-cat-lock="${key}" title="${allLocked ? 'Unlock' : 'Lock'} all ${title.toLowerCase()}">${allLocked ? '🔒' : '🔓'}</button>
+      ${tools}
       <span class="ico">${icon}</span> <span class="tree-cat-label">${title}</span>
       <span class="tree-count">${items.length}</span>
     </div>`;
@@ -17072,7 +17094,8 @@ function renderTree() {
   tree.innerHTML =
     catBlock('sketches', '📐', 'Sketches', doc.sketches, sketchHtml) +
     catBlock('bodies', '🧊', 'Bodies', bodyItems, bodyHtml) +
-    catBlock('hardware', '🔩', 'Hardware', hwItems, hwHtml);
+    catBlock('hardware', '🔩', 'Hardware', hwItems, hwHtml) +
+    (jointItems.length ? catBlock('joints', '🔗', 'Joints', jointItems, jointHtml, { tools: false }) : '');
   // Category headers — click to collapse/expand
   tree.querySelectorAll('.tree-cat').forEach(h => {
     h.addEventListener('click', (e) => {
@@ -17083,6 +17106,7 @@ function renderTree() {
   });
   const catItems = (key) =>
     key === 'sketches' ? doc.sketches :
+    key === 'joints'   ? [] :
     key === 'hardware' ? doc.bodies.filter(_isHardwareBody) :
                          doc.bodies.filter(b => !_isHardwareBody(b));
   const catLabel = { sketches: 'sketches', bodies: 'bodies', hardware: 'hardware' };
@@ -17214,6 +17238,8 @@ function renderTree() {
         if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo(); }
         renderTree(); renderProps();
         setStatus('Deleted body');
+      } else if (btn.dataset.action === 'del-joint') {
+        deleteJoint(id); // handles undo, selection cleanup, and re-render
       }
     });
   });
@@ -17224,6 +17250,14 @@ function renderTree() {
         doc.selection = null;
         doc.multiSelectedSketch = [];
         setMode('2d');
+      } else if (n.dataset.kind === 'joint') {
+        // Pick which joint the Properties panel works with
+        doc.selectedJointId = parseInt(n.dataset.id, 10);
+        doc.selection = null;
+        doc.multiSelectedBodies = [];
+        if (doc.mode !== '3d') setMode('3d');
+        viewer?.updateGizmo();
+        renderProps();
       } else {
         const id = parseInt(n.dataset.id);
         const body = doc.bodies.find(b => b.id === id);
@@ -17340,7 +17374,13 @@ function renderProps() {
         if (!b) return '?';
         return b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`;
       };
-      const jointRows = (doc.joints || []).filter(j => j.a && j.b).map(j => {
+      // Multi-joint designs: the Joints list in the project tree picks the
+      // working joint; the panel then shows just that one (with an escape
+      // hatch back to all). A single joint renders exactly as before.
+      const allJoints = (doc.joints || []).filter(j => j.a && j.b);
+      const selJoint = allJoints.find(j => j.id === doc.selectedJointId) || null;
+      const shownJoints = (selJoint && allJoints.length > 1) ? [selJoint] : allJoints;
+      const jointRows = shownJoints.map(j => {
         const zero = j.zero || 0;
         const rel = Math.round((j.angle || 0) - zero);
         const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
@@ -17374,8 +17414,9 @@ function renderProps() {
       }).join('');
       props.innerHTML = `
         <div class="empty" style="margin-bottom:8px">Select a body or use the tools above.</div>
-        <h4 style="margin-top:6px">Joints</h4>
+        <h4 style="margin-top:6px">Joints${allJoints.length > 1 ? ` (${shownJoints.length} of ${allJoints.length})` : ''}</h4>
         ${jointRows || '<div class="hint">No joints yet. Draw a <b>Pivot</b> point (⊕) in a face sketch on each of two parts, then click <b>Joint</b> and pick the two pivots.</div>'}
+        ${(selJoint && allJoints.length > 1) ? '<div class="hint" style="margin-top:4px"><a href="#" id="show-all-joints">Show all joints</a> — or pick a different one in the Joints list on the left.</div>' : ''}
         <h4 style="margin-top:14px">Warnings</h4>
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="warn-ground" style="width:auto;margin:0"${doc.collisionWarnGround !== false ? ' checked' : ''}/>
@@ -17396,6 +17437,11 @@ function renderProps() {
       $('warn-bodies')?.addEventListener('change', (e) => { doc.collisionWarnBodies = e.target.checked; setDirty(true); });
       $('mark-overlap-btn')?.addEventListener('click', () => markCollisionOverlaps());
       $('cut-overlap-btn')?.addEventListener('click', () => cutCollisionOverlaps());
+      $('show-all-joints')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        doc.selectedJointId = null;
+        renderProps(); renderTree();
+      });
       props.querySelectorAll('[data-del-joint]').forEach(btn => {
         btn.onclick = () => deleteJoint(parseInt(btn.dataset.delJoint, 10));
       });
