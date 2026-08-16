@@ -1038,6 +1038,7 @@
     opacity: 0.8;
     user-select: none;
   }
+  .body-outline.ref { opacity: 0.35; }
   .body-outline {
     stroke: #6b7a96;
     stroke-width: 1.2;
@@ -4038,20 +4039,30 @@ class SketchEngine {
         for (const other of doc.bodies) {
           if (other.id === attached.id || other.hidden || !other.mesh) continue;
           if (other.type === 'fastener' || other.type === 'threadShell') continue;
-          const cand = projectBodiesOntoPlane(doc.sketch.plane, other.id).filter(s => {
+          // Two-tier depth policy: inside the tight band = full treatment;
+          // within an extended band = still shown (muted) — students need
+          // neighbouring parts visible for reference while sketching, even
+          // when those parts sit in front of / behind the sketched face.
+          const cand = [];
+          for (const s of projectBodiesOntoPlane(doc.sketch.plane, other.id)) {
             const m = ((s.dz1 || 0) + (s.dz2 || 0)) / 2;
-            return m >= lo && m <= hi;
-          });
+            if (m >= lo && m <= hi) cand.push(s);
+            else if (m >= lo - 60 && m <= hi + 60) { s._ref = true; cand.push(s); }
+          }
           if (!cand.length || !ownBB) continue;
           let ob = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
           for (const s of cand) for (const p of [s.p1, s.p2]) {
             ob.minX = Math.min(ob.minX, p.x); ob.minY = Math.min(ob.minY, p.y);
             ob.maxX = Math.max(ob.maxX, p.x); ob.maxY = Math.max(ob.maxY, p.y);
           }
-          if (ob.minX <= ownBB.maxX + 2 && ob.maxX >= ownBB.minX - 2 &&
-              ob.minY <= ownBB.maxY + 2 && ob.maxY >= ownBB.minY - 2) {
-            for (const s of cand) segs.push(s);
-          }
+          const overlaps = ob.minX <= ownBB.maxX + 2 && ob.maxX >= ownBB.minX - 2 &&
+                           ob.minY <= ownBB.maxY + 2 && ob.maxY >= ownBB.minY - 2;
+          // Neighbours ALWAYS show — students need the other parts as a
+          // visual reference while sketching (and their edges stay
+          // snappable for tracing). Non-overlapping neighbours render
+          // muted; only true interference joins the region graph (that
+          // gate lives in computeSketchRegions, unchanged).
+          for (const s of cand) { if (!overlaps) s._ref = true; segs.push(s); }
         }
       } else {
         segs = projectBodiesOntoPlane(doc.sketch.plane);
@@ -4068,6 +4079,7 @@ class SketchEngine {
         const inPlane = Math.abs(seg.dz1) < onPlaneTol && Math.abs(seg.dz2) < onPlaneTol;
         const cls = ['body-outline'];
         if (inPlane) cls.push('in-plane');
+        if (seg._ref) cls.push('ref'); // muted neighbour reference silhouette
         if (seg._cut) cls.push('cut'); // dashed — shows interior holes/cuts
         if (seg._hidden) cls.push('hidden-line'); // dashed — edges behind the surface
         else if (seg._vis) cls.push('visible-line'); // classified visible → solid
