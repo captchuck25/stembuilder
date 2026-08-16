@@ -9591,8 +9591,20 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
   for (const ent of entities) {
     if (ent.construction) continue;
     const isOpen = ent.type === 'polyline' && !ent.closed;
-    for (const s of entityToSegments(ent)) {
-      if (isOpen) s._openSrc = true; // relief/trim lines — junction-relevant
+    const entSegs = entityToSegments(ent);
+    for (let k = 0; k < entSegs.length; k++) {
+      const s = entSegs[k];
+      if (isOpen) {
+        s._openSrc = true; // relief/trim lines — junction-relevant
+        // Only the entity's two TERMINAL points may split other segments.
+        // An open arc/curve is one polyline of many chords — treating every
+        // internal tessellation vertex as a junction candidate welds the
+        // curve's own chords together and shreds it into chunky facets
+        // (round-44 circle-shredding, re-learned 2026-08-16 on an arm
+        // profile drawn from open lines + an arc).
+        if (k === 0) s._termA = true;
+        if (k === entSegs.length - 1) s._termB = true;
+      }
       segs.push(s);
     }
   }
@@ -9644,11 +9656,13 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
   // segment too, or the face-tracing can't turn the corner there and the
   // enclosed region never forms.
   // T-junctions run in two modes. Full (trim/outline mode, extraSegs
-  // present): every pair, as before. Restricted (open relief lines drawn
-  // in a classic sketch): ONLY pairs involving an open-line segment — a
-  // drawn line ending ON the face perimeter (or a circle) must split it or
-  // the enclosed region never forms, but closed-vs-closed pairs stay
-  // untouched (a circle tangent to an edge would get welded and shredded).
+  // present): every endpoint of every pair, as before. Restricted (open
+  // relief lines drawn in a classic sketch): ONLY an open entity's two
+  // TERMINAL endpoints may split other segments — a drawn line ending ON
+  // the face perimeter (or a circle) must split it or the enclosed region
+  // never forms. Internal vertices of open curves and closed-vs-closed
+  // pairs never split anything (a tangent circle or an arc's own chord fan
+  // would get welded and shredded — round-44 lesson, twice).
   const fullT = Array.isArray(extraSegs) && extraSegs.length > 0;
   const wantTJunctions = fullT || segs.some(s => s._openSrc);
   const T_TOL = 0.5; // mm — matches the node-merge tolerance
@@ -9659,8 +9673,14 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
     if (L2 < 1e-9) continue;
     for (let j = 0; j < segs.length; j++) {
       if (i === j) continue;
-      if (!fullT && !s._openSrc && !segs[j]._openSrc) continue;
-      for (const p of [segs[j].a, segs[j].b]) {
+      const sj = segs[j];
+      const cand = fullT
+        ? [sj.a, sj.b]
+        : (sj._termA || sj._termB)
+          ? [...(sj._termA ? [sj.a] : []), ...(sj._termB ? [sj.b] : [])]
+          : null;
+      if (!cand) continue;
+      for (const p of cand) {
         const t = ((p.x - s.a.x) * dx + (p.y - s.a.y) * dy) / L2;
         if (t <= 1e-6 || t >= 1 - 1e-6) continue;
         const px = s.a.x + t * dx, py = s.a.y + t * dy;
