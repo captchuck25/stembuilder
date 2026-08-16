@@ -15684,6 +15684,35 @@ function _applyRigidToBody(body, R, pivotFrom, pivotTo) {
   body.z = newMesh.z - off.z;
 }
 
+// KINEMATIC CHAIN: everything jointed onto a moving part rides along.
+// Starting from the swinging body, follow every OTHER joint that touches a
+// part already in the moving set and pull the far side in too — a link
+// pinned to the arm moves when the arm swings (two-joint request,
+// issues426 follow-up). Traversal is bidirectional because a chain has no
+// inherent hierarchy; the driving joint's own base part is excluded, which
+// keeps the base still and also breaks user-made cycles.
+function _jointChainBodies(rootBody, baseBodyId) {
+  const ids = new Set([rootBody.id]);
+  const bodies = [rootBody];
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const j of doc.joints || []) {
+      const A = _resolveJointAnchor(j.a);
+      const B = _resolveJointAnchor(j.b);
+      if (!A?.body || !B?.body) continue;
+      for (const [from, to] of [[A, B], [B, A]]) {
+        if (!ids.has(from.body.id)) continue;
+        if (to.body.id === baseBodyId || ids.has(to.body.id)) continue;
+        ids.add(to.body.id);
+        bodies.push(to.body);
+        grew = true;
+      }
+    }
+  }
+  return bodies;
+}
+
 // Pin B onto A: B rotates so its pivot axis faces A's (face-to-face), then
 // translates so the pivot points coincide. Creates the joint record.
 function assembleJoint(refA, refB) {
@@ -15698,7 +15727,8 @@ function assembleJoint(refA, refB) {
   pushUndo();
   const q = new THREE.Quaternion().setFromUnitVectors(B.n, A.n.clone().negate());
   const R = new THREE.Matrix4().makeRotationFromQuaternion(q);
-  _applyRigidToBody(B.body, R, B.P, A.P);
+  // B brings its whole chain with it (anything already jointed onto B)
+  for (const b of _jointChainBodies(B.body, A.body.id)) _applyRigidToBody(b, R, B.P, A.P);
   const j = { id: doc.nextJointId++, a: { ...refA }, b: { ...refB }, angle: 0 };
   doc.joints.push(j);
   doc.selectedJointId = j.id; // a new joint becomes the working joint
@@ -15720,10 +15750,13 @@ function applyJointAngle(j, newAngle) {
   const delta = newAngle - (j.angle || 0);
   if (!delta) return;
   const R = new THREE.Matrix4().makeRotationAxis(A.n, THREE.MathUtils.degToRad(delta));
-  _applyRigidToBody(B.body, R, A.P, A.P);
+  // The swinger carries its whole chain (a link pinned to the arm swings
+  // with the arm); the joint's base part stays put.
+  const moved = _jointChainBodies(B.body, A.body.id);
+  for (const b of moved) _applyRigidToBody(b, R, A.P, A.P);
   j.angle = newAngle;
   if (viewer) { viewer.rebuildBodies(); viewer.updateJointGizmos(); viewer.updateGizmo(); }
-  checkCollisionWarnings([B.body.id]);
+  checkCollisionWarnings(moved.map(b => b.id));
   setDirty(true);
 }
 
