@@ -7658,11 +7658,6 @@ class Viewer3D {
               e.stopPropagation();
               return;
             }
-            if (_jointLockedAmong(ids)) {
-              showHint('🔒 This part is in a locked joint — swing it with the joint slider instead, or unlock the joint in the Joints list.');
-              e.stopPropagation();
-              return;
-            }
             pushUndo();
             rotateState.active = true;
             rotateState.axis = ax;
@@ -7700,11 +7695,6 @@ class Viewer3D {
             const giIds = doc.multiSelectedBodies?.length ? doc.multiSelectedBodies : [doc.selection.id];
             if (giIds.some(id => doc.bodies.find(b => b.id === id)?.locked)) {
               showHint('Body is locked. Unlock it in the tree to move.');
-              e.stopPropagation();
-              return;
-            }
-            if (_jointLockedAmong(giIds)) {
-              showHint('🔒 This part is in a locked joint — it can swing, but not pull apart. Unlock the joint in the Joints list to move it.');
               e.stopPropagation();
               return;
             }
@@ -7838,8 +7828,7 @@ class Viewer3D {
           // Arm a potential direct drag on the body (XZ default, Alt = Y axis)
           // — but only if no locked body is in the selection.
           const dragLocked = doc.multiSelectedBodies.some(id =>
-            doc.bodies.find(b => b.id === id)?.locked) ||
-            _jointLockedAmong(doc.multiSelectedBodies);
+            doc.bodies.find(b => b.id === id)?.locked);
           if (!e.shiftKey && !dragLocked) {
             bodyDrag.armed = true;
             bodyDrag.alt = e.altKey;
@@ -15724,20 +15713,6 @@ function _jointChainBodies(rootBody, baseBodyId) {
   return bodies;
 }
 
-// True when any of the given body ids belongs to a LOCKED joint. A locked
-// joint still articulates via its slider, but its parts refuse to be
-// dragged/rotated apart — unlock in the Joints list (or Properties) to
-// pull a part away for editing, then "Return bodies to joint" re-pins it.
-function _jointLockedAmong(ids) {
-  for (const j of doc.joints || []) {
-    if (!j.locked) continue;
-    const A = _resolveJointAnchor(j.a);
-    const B = _resolveJointAnchor(j.b);
-    if ((A?.body && ids.includes(A.body.id)) || (B?.body && ids.includes(B.body.id))) return true;
-  }
-  return false;
-}
-
 // Shared pin math: rotate B's chain so its pivot axis faces A's, then land
 // B's pivot point on A's. Used by joint creation AND "Return bodies to
 // joint" (re-assembly after a part was pulled away for editing).
@@ -15782,11 +15757,9 @@ function assembleJoint(refA, refB) {
   // linked sketch (and its pivot) behind.
   syncSketchAnchorsToBodies();
   pushUndo();
-  // B brings its whole chain with it (anything already jointed onto B).
-  // New joints start LOCKED — assembled stays assembled until the user
-  // deliberately unlocks to pull parts apart.
+  // B brings its whole chain with it (anything already jointed onto B)
   _pinChainToJoint(A, B);
-  const j = { id: doc.nextJointId++, a: { ...refA }, b: { ...refB }, angle: 0, locked: true };
+  const j = { id: doc.nextJointId++, a: { ...refA }, b: { ...refB }, angle: 0 };
   doc.joints.push(j);
   doc.selectedJointId = j.id; // a new joint becomes the working joint
   doc.selection = null;
@@ -17221,9 +17194,10 @@ function renderTree() {
   let jointHtml = '';
   for (const j of jointItems) {
     const active = doc.selectedJointId === j.id;
+    const jLabel = (j.name && j.name.trim()) ? j.name : `${jointPartName(j.b)} swings on ${jointPartName(j.a)}`;
     jointHtml += `<div class="tree-node ${active ? 'active' : ''}" data-kind="joint" data-id="${j.id}">
-      <button class="tree-lock${j.locked ? ' locked' : ''}" data-action="toggle-lock-joint" data-id="${j.id}" title="${j.locked ? 'Unlock joint (allow pulling the parts apart)' : 'Lock joint (parts swing but never pull apart)'}">${j.locked ? '🔒' : '🔓'}</button>
-      <span class="ico">🔗</span> <span class="tree-label">${jointPartName(j.b)} swings on ${jointPartName(j.a)}</span>
+      <button class="tree-pencil" data-kind="joint" data-id="${j.id}" title="Rename joint">✏️</button>
+      <span class="ico">🔗</span> <span class="tree-label">${jLabel}</span>
       <button class="tree-del" data-action="del-joint" data-id="${j.id}" title="Remove this joint (the parts stay where they are)">×</button></div>`;
   }
   // Compose the collapsible category folders. Each header carries its
@@ -17360,15 +17334,6 @@ function renderTree() {
         renderTree();
         if (viewer) viewer.updateGizmo();
         setStatus(b.locked ? `Body locked` : `Body unlocked`);
-      } else if (btn.dataset.action === 'toggle-lock-joint') {
-        const j = doc.joints.find(x => x.id === id);
-        if (!j) return;
-        j.locked = !j.locked;
-        setDirty(true);
-        renderTree(); renderProps();
-        setStatus(j.locked
-          ? '🔒 Joint locked — the parts can swing, but not pull apart.'
-          : '🔓 Joint unlocked — you can move a part away to edit it, then use ⛓ Return to joint.');
       }
     });
   });
@@ -17470,7 +17435,7 @@ function attachTreeRenameHandler() {
     const node = span.closest('.tree-node');
     if (!node) return;
     const kind = node.dataset.kind;
-    if (kind !== 'sketch' && kind !== 'body') return;
+    if (kind !== 'sketch' && kind !== 'body' && kind !== 'joint') return;
     const sig = `${kind}:${node.dataset.id}`;
     const now = performance.now();
     if (tree._lastClickSig === sig && now - tree._lastClickAt < DBL_MS) {
@@ -17489,7 +17454,9 @@ function startTreeRename(node, kind, id) {
   // falls back to "Cube", "Extrude (0.5 in)", etc.).
   const target = (kind === 'sketch')
     ? doc.sketches.find(s => s.id === id)
-    : doc.bodies.find(b => b.id === id);
+    : (kind === 'joint')
+      ? (doc.joints || []).find(j => j.id === id)
+      : doc.bodies.find(b => b.id === id);
   if (!target) return;
   // After renderTree the span may have been replaced — re-query.
   const liveNode = document.querySelector(
@@ -17513,6 +17480,7 @@ function startTreeRename(node, kind, id) {
       else if (!v && target.name) { pushUndo(); delete target.name; }
     }
     renderTree();
+    if (kind === 'joint') renderProps(); // joint name shows in the panel too
   };
   input.addEventListener('keydown', (e2) => {
     if (e2.key === 'Enter') { e2.preventDefault(); finish(true); }
@@ -17550,11 +17518,13 @@ function renderProps() {
         const rel = Math.round((j.angle || 0) - zero);
         const tMin = (typeof j.travelMin === 'number') ? j.travelMin : -180;
         const tMax = (typeof j.travelMax === 'number') ? j.travelMax : 180;
+        const jTitle = (j.name && j.name.trim())
+          ? `<b>${j.name}</b>`
+          : `<b>${partName(j.b)}</b> swings on ${partName(j.a)}`;
         return `<div style="padding:6px 0;border-bottom:1px solid var(--line)">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="color:#b45309;font-size:14px">🔗</span>
-            <span style="flex:1;font-size:12px"><b>${partName(j.b)}</b> swings on ${partName(j.a)}</span>
-            <button class="action" data-joint-lock="${j.id}" title="${j.locked ? 'Unlock: allow pulling the parts apart (to edit one)' : 'Lock: parts can swing but not pull apart'}" style="padding:2px 8px;font-size:12px">${j.locked ? '🔒' : '🔓'}</button>
+            <span style="flex:1;font-size:12px">${jTitle}</span>
             <button class="action" data-del-joint="${j.id}" title="Remove this joint (the parts stay where they are)" style="padding:2px 8px;font-size:11px">×</button>
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
@@ -17563,7 +17533,6 @@ function renderProps() {
           </div>
           <div style="display:flex;align-items:center;gap:6px;margin-top:6px">
             <button class="action" data-joint-zero="${j.id}" title="Make the current position this joint's 0°" style="padding:4px 10px;font-size:11px;white-space:nowrap">🧭 Set 0° here</button>
-            <button class="action" data-joint-return="${j.id}" title="Pin the parts back together at this joint (after pulling one away to edit it)" style="padding:4px 10px;font-size:11px;white-space:nowrap">⛓ Return to joint</button>
             <select data-joint-speed="${j.id}" title="Play speed" style="margin-left:auto;font-size:11px;padding:2px">
               <option value="0.5"${(j.playSpeed || 1) === 0.5 ? ' selected' : ''}>slow</option>
               <option value="1"${(j.playSpeed || 1) === 1 ? ' selected' : ''}>normal</option>
@@ -17577,6 +17546,7 @@ function renderProps() {
             <span>to</span>
             <input type="number" data-joint-max="${j.id}" value="${tMax}" step="5" min="0" style="width:58px;font-size:11px"/><span>°</span>
           </div>
+          <button class="action" data-joint-return="${j.id}" title="Pin the parts back together at this joint (after pulling one away to edit it)" style="margin-top:6px;width:100%;padding:4px 10px;font-size:11px;white-space:nowrap">⛓ Return bodies to joint</button>
         </div>`;
       }).join('');
       props.innerHTML = `
@@ -17611,18 +17581,6 @@ function renderProps() {
       });
       props.querySelectorAll('[data-del-joint]').forEach(btn => {
         btn.onclick = () => deleteJoint(parseInt(btn.dataset.delJoint, 10));
-      });
-      props.querySelectorAll('[data-joint-lock]').forEach(btn => {
-        btn.onclick = () => {
-          const j = doc.joints.find(x => x.id === parseInt(btn.dataset.jointLock, 10));
-          if (!j) return;
-          j.locked = !j.locked;
-          setDirty(true);
-          renderProps(); renderTree();
-          setStatus(j.locked
-            ? '🔒 Joint locked — the parts can swing, but not pull apart.'
-            : '🔓 Joint unlocked — you can move a part away to edit it, then use ⛓ Return to joint.');
-        };
       });
       props.querySelectorAll('[data-joint-return]').forEach(btn => {
         btn.onclick = () => returnBodiesToJoint(parseInt(btn.dataset.jointReturn, 10));
