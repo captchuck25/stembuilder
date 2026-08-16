@@ -10336,7 +10336,9 @@ function rebuildGroupGeometry(group) {
     // didn't actually intersect the way the original ops needed — that
     // would render as a vanished body without this guard.
     if (baked.attributes?.position?.count > 0) {
-      group.geometry = baked;
+      // Same crumb-drop + fin-collapse polish as the live bake and load
+      // paths, so an edit-propagated rebuild produces the same clean shape.
+      group.geometry = _dropCrumbComponents(baked);
       // Phase 2 — do NOT re-bake thread shells here. Threads live as
       // _mergedShells metadata and render via overlay + export only, so the
       // rebuilt geometry stays shell-free and CSG never re-ingests them.
@@ -15899,6 +15901,30 @@ function _dropCrumbComponents(geo) {
   let m = null;
   try {
     m = _geoToManifoldRepaired(new THREE.Mesh(geo));
+    // FIN COLLAPSE — a cut wall landing EXACTLY on a face (absorbed slivers
+    // cut flush to the edge) can leave a zero-thickness membrane fin welded
+    // to the solid. It renders as a phantom sliver, z-fights, drags the
+    // AABB (false "through the ground" at mid-swing — issues341: fin dipped
+    // −12.6mm while the real solid kissed the ground at exactly 0), and adds
+    // junk edges to face-sketch traces. simplify(0.01) collapses zero-thick
+    // fins at any length while leaving real arc facets alone (their sagitta
+    // is ≥0.02 even at r=50). Adopt only if the volume is unchanged — the
+    // polish must never eat real geometry.
+    if (typeof m.simplify === 'function') {
+      try {
+        const s = m.simplify(0.01);
+        const sg = _manifoldToMesh(s)?.geometry;
+        const v0 = _geoVolume(geo);
+        if (sg && sg.attributes?.position?.count > 0 &&
+            Math.abs(_geoVolume(sg) - v0) <= Math.max(5, v0 * 0.001)) {
+          geo = sg;
+          try { m.delete(); } catch (_) {}
+          m = s;
+        } else {
+          try { s.delete(); } catch (_) {}
+        }
+      } catch (_) {}
+    }
     if (typeof m.decompose !== 'function') return geo;
     const parts = m.decompose();
     if (!parts || parts.length <= 1) {
@@ -15969,9 +15995,14 @@ function _cachedManifoldFor(mesh) {
   _manifoldGeoCache.set(geo, { key, manifold: m });
   return m;
 }
-// World-space intersection volume of two meshes via Manifold. Returns a
-// BufferGeometry or null (engine missing / rejected / empty overlap).
-// Inputs come from the manifold cache — do NOT delete them here.
+// World-space intersection volume of two meshes via Manifold.
+// Returns a BufferGeometry — EMPTY (0 verts) when the engine PROVED the
+// solids don't overlap — or null ONLY when the engine couldn't answer
+// (missing / conversion rejected / threw). Callers must treat an empty
+// geometry as a definitive "clear", not as a failure: conflating the two
+// made the ground check fall back to the bounding-box test on provably
+// clear parts, and a swinging arm's inflated AABB (plus any zero-volume
+// membrane fin) flashed false "through the ground" warnings (issues341).
 function _intersectWorldGeometry(meshA, meshB) {
   if (!window.__manifold || !meshA || !meshB) return null;
   const vertsOf = (m) => m.geometry?.attributes?.position?.count || 0;
@@ -15984,7 +16015,7 @@ function _intersectWorldGeometry(meshA, meshB) {
     r = a.intersect(b);
     const mesh = _manifoldToMesh(r);
     const geo = mesh?.geometry;
-    return (geo && geo.attributes?.position?.count > 0) ? geo : null;
+    return (geo && geo.attributes?.position?.count > 0) ? geo : new THREE.BufferGeometry();
   } catch (_) {
     return null;
   } finally {
@@ -16051,8 +16082,10 @@ function checkCollisionWarnings(bodyIds) {
             real = v.real; gGeo = v.geo;
           } else {
             gGeo = _intersectWorldGeometry(body.mesh, _groundColliderMesh());
-            // Can't compute the volume (mesh defeats the engine) → warn on a
-            // DEEP dip (a real plunge, not boundary-precision noise).
+            // Empty geometry = the engine PROVED clearance (no warning, even
+            // if a membrane fin drags the AABB down). null = engine couldn't
+            // answer → only then warn on a DEEP bbox dip (a real plunge, not
+            // boundary-precision noise).
             real = gGeo ? _geoVolume(gGeo) > 10 : bb.min.y < -3;
             _volGate.verdicts.set(key, { real, geo: gGeo });
           }
@@ -16166,7 +16199,7 @@ function markCollisionOverlaps() {
       : doc.bodies.find(b => b.id === p.otherId)?.mesh;
     if (!body?.mesh || !otherMesh) continue;
     const geo = _intersectWorldGeometry(body.mesh, otherMesh);
-    if (!geo) continue;
+    if (!geo || !(geo.attributes?.position?.count > 0)) continue; // empty = proven clear
     const marker = {
       id: doc.nextBodyId++, type: 'baked', op: 'subtract',
       name: 'overlap cut', x: 0, y: 0, z: 0,
