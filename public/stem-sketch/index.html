@@ -10105,7 +10105,112 @@ function regionToShape(region) {
 
 // Convert a region into a synthetic single-entity sketch (closed) so we can
 // reuse the existing extrude pipeline.
+// SLIVER ABSORPTION — a drawn cut line that lands NEAR an edge (a straight
+// chord across a gently curved outline, or a line a fraction of a mm off
+// the perimeter) pens in a paper-thin region between itself and the edge.
+// Cutting the big region then leaves a knife-blade of material the student
+// can't see, can't click, and never wanted (issues1242: 0.1–0.33mm blades
+// along the arm's tessellated bottom edge, flickering with the camera).
+// When a region is extruded, any neighbouring region that is thin
+// EVERYWHERE (every vertex and edge midpoint within _SLIVER_W of the chosen
+// region's boundary) is absorbed into the cut — "cut to the edge" is always
+// what the designer meant. The area cap keeps real features safe.
+const _SLIVER_W = 0.6;    // mm — max blade thickness worth absorbing
+const _SLIVER_AREA = 40;  // mm² — never absorb a feature-sized region
+function _absorbSliverNeighbors(region, sourceSketch) {
+  if (!region || region.kind === 'circle' || !Array.isArray(region.points)) return null;
+  let regions;
+  try { regions = computeSketchRegions(sourceSketch) || []; } catch (_) { return null; }
+  const main = region.points;
+  const areaOf = (pts) => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      a += p.x * q.y - q.x * p.y;
+    }
+    return a / 2;
+  };
+  const distToPoly = (x, y, pts) => {
+    let best = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const L2 = dx * dx + dy * dy;
+      let t = L2 > 1e-12 ? ((x - a.x) * dx + (y - a.y) * dy) / L2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(x - (a.x + t * dx), y - (a.y + t * dy));
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const mainC = regionCentroidOf(region);
+  const slivers = [];
+  for (const rg of regions) {
+    if (rg.kind === 'circle' || !Array.isArray(rg.points) || rg.points.length < 3) continue;
+    const c = regionCentroidOf(rg);
+    if (mainC && c && Math.hypot(c.x - mainC.x, c.y - mainC.y) < 0.01) continue; // the chosen region itself
+    if (Math.abs(areaOf(rg.points)) > _SLIVER_AREA) continue;
+    let thin = true;
+    for (let i = 0; thin && i < rg.points.length; i++) {
+      const a = rg.points[i], b = rg.points[(i + 1) % rg.points.length];
+      if (distToPoly(a.x, a.y, main) > _SLIVER_W ||
+          distToPoly((a.x + b.x) / 2, (a.y + b.y) / 2, main) > _SLIVER_W) thin = false;
+    }
+    if (thin) slivers.push(rg.points);
+  }
+  if (!slivers.length) return null;
+  // Union by edge cancellation: all polygons forced CCW; shared edges
+  // between adjacent faces of the SAME planar arrangement carry identical
+  // vertex coords in opposite directions, so they annihilate, and what's
+  // left chains into the merged outline. Anything unexpected (pinch
+  // points, split loops, holes) → bail and cut the original region as-is.
+  const ccw = (pts) => areaOf(pts) < 0 ? pts.slice().reverse() : pts;
+  const key = (p) => p.x.toFixed(4) + ',' + p.y.toFixed(4);
+  const dir = new Map();
+  const addEdges = (pts) => {
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const ka = key(a), kb = key(b);
+      if (ka === kb) continue;
+      const k = ka + '|' + kb;
+      const e = dir.get(k);
+      if (e) e.count++;
+      else dir.set(k, { a: { x: a.x, y: a.y }, ka, kb, count: 1 });
+    }
+  };
+  addEdges(ccw(main));
+  for (const s of slivers) addEdges(ccw(s));
+  const next = new Map();
+  let total = 0;
+  for (const e of dir.values()) {
+    const rev = dir.get(e.kb + '|' + e.ka);
+    const net = e.count - (rev ? rev.count : 0);
+    if (net > 0) {
+      if (net > 1 || next.has(e.ka)) return null;
+      next.set(e.ka, e);
+      total++;
+    }
+  }
+  if (total < 3) return null;
+  const start = next.keys().next().value;
+  const out = [];
+  let ka = start;
+  for (let n = 0; n <= total; n++) {
+    const e = next.get(ka);
+    if (!e) return null;
+    out.push({ x: e.a.x, y: e.a.y });
+    ka = e.kb;
+    if (ka === start) break;
+  }
+  if (ka !== start || out.length !== total) return null; // split loops / holes
+  return out;
+}
+
 function regionToSyntheticSketch(region, sourceSketch) {
+  if (region && region.kind !== 'circle' && Array.isArray(region.points)) {
+    const merged = _absorbSliverNeighbors(region, sourceSketch);
+    if (merged) region = Object.assign({}, region, { points: merged });
+  }
   const ent = (region.kind === 'circle' && region.circle)
     ? { id: 1, type: 'circle', cx: region.circle.cx, cy: region.circle.cy, r: region.circle.r }
     : { id: 1, type: 'polyline', closed: true, points: region.points.map(p => ({ x: p.x, y: p.y })) };
@@ -15877,41 +15982,13 @@ function _intersectWorldGeometry(meshA, meshB) {
 let _hiLastKey = '';
 let _hiLastT = 0;
 function _updateCollisionHighlights(pairs) {
-  if (!viewer) return new Set((pairs || []).map(p => p.bodyId));
-  const key = JSON.stringify((pairs || []).map(p => [p.bodyId, p.otherId]));
-  const now = performance.now();
-  if (key === _hiLastKey && (now - _hiLastT) < 150 && _collisionHiGroup?.children.length) {
-    return new Set(); // keep current highlight, no fallback tint
-  }
-  _hiLastKey = key;
-  _hiLastT = now;
-  if (!_collisionHiGroup) {
-    _collisionHiGroup = new THREE.Group();
-    _collisionHiGroup.renderOrder = 50;
-    viewer.scene.add(_collisionHiGroup);
-  }
-  while (_collisionHiGroup.children.length) {
-    const c = _collisionHiGroup.children.pop();
-    c.geometry?.dispose();
-    c.material?.dispose();
-  }
-  const failed = new Set();
-  for (const p of pairs || []) {
-    const body = doc.bodies.find(b => b.id === p.bodyId);
-    const otherMesh = p.otherId === null
-      ? _groundColliderMesh()
-      : doc.bodies.find(b => b.id === p.otherId)?.mesh;
-    const geo = p.geo || ((body?.mesh && otherMesh) ? _intersectWorldGeometry(body.mesh, otherMesh) : null);
-    if (!geo) { failed.add(p.bodyId); continue; }
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      color: 0xef4444, transparent: true, opacity: 0.55,
-      depthTest: false, depthWrite: false, side: THREE.DoubleSide,
-    }));
-    m.renderOrder = 50;
-    m.raycast = () => {}; // never steals clicks
-    _collisionHiGroup.add(m);
-  }
-  return failed;
+  // WHOLE-BODY RED (user request, issues1242): the translucent overlap-zone
+  // mesh read as inaccurate when contact spanned separate patches, and it
+  // z-fought at grazing angles. Colliding parts now tint solid red instead
+  // — unmissable, and honest about what we know (that they touch, not
+  // exactly where). This just clears any old overlay; the caller tints.
+  _clearCollisionHighlights();
+  return new Set((pairs || []).map(p => p.bodyId));
 }
 function _clearCollisionHighlights() {
   if (!_collisionHiGroup) return;
@@ -15922,9 +15999,8 @@ function _clearCollisionHighlights() {
   }
 }
 // Check the given bodies against the ground plane + every other solid.
-// The touching REGION lights up red (exact intersection volume via the
-// boolean engine); parts whose overlap can't be computed tint whole-red as
-// before. Returns true when anything is hitting.
+// Both parts of a colliding pair tint whole-red (ground hits tint just the
+// moving part). Returns true when anything is hitting.
 function checkCollisionWarnings(bodyIds) {
   if (!viewer) return false;
   if (_suppressCollisionChecks) return false; // sweep drives poses itself
@@ -16012,25 +16088,28 @@ function checkCollisionWarnings(bodyIds) {
   }
   const hadCollisions = _activeCollisions.length > 0;
   _activeCollisions = pairs;
-  const failed = _updateCollisionHighlights(pairs);
-  // Whole-part tint only where the overlap volume could not be computed —
-  // and RESTORE the normal color the moment a tinted part stops hitting
-  // (it used to stay red until the next structural rebuild).
+  _updateCollisionHighlights(pairs); // clears any legacy zone overlay
+  // BOTH parties of a hit tint whole-red; ground hits tint the moving part.
+  // RESTORE the normal color the moment a tinted part stops hitting (it
+  // used to stay red until the next structural rebuild).
+  const hitIds = new Set();
+  for (const p of pairs) {
+    hitIds.add(p.bodyId);
+    if (p.otherId !== null && p.otherId !== undefined) hitIds.add(p.otherId);
+  }
   for (const id of Array.from(_tintedRed)) {
-    const stillFailing = pairs.some(p => p.bodyId === id) && failed.has(id);
-    if (stillFailing) continue;
+    if (hitIds.has(id)) continue;
     const body = doc.bodies.find(b => b.id === id);
     if (body?.mesh?.material?.color) {
       body.mesh.material.color.setHex(body.op === 'subtract' ? 0xff7070 : 0x9eb6ff);
     }
     _tintedRed.delete(id);
   }
-  for (const p of pairs) {
-    if (!failed.has(p.bodyId)) continue;
-    const body = doc.bodies.find(b => b.id === p.bodyId);
+  for (const id of hitIds) {
+    const body = doc.bodies.find(b => b.id === id);
     if (body?.mesh?.material?.color) {
       body.mesh.material.color.setHex(0xef4444);
-      _tintedRed.add(p.bodyId);
+      _tintedRed.add(id);
     }
   }
   // Toggle the Mark/Cut buttons WITHOUT re-rendering the whole panel — a
@@ -16042,7 +16121,7 @@ function checkCollisionWarnings(bodyIds) {
   const msg = msgs.join(' · ');
   if (msg) {
     if (msg !== _lastCollisionMsg) {
-      setStatus(`⚠ ${msg} — the red zone is the overlap. Mark it in the Warnings panel to cut it away.`);
+      setStatus(`⚠ ${msg} — red parts are overlapping. Sketch on a face to cut the overlap away, or use Mark overlap in the Warnings panel.`);
     }
     _lastCollisionMsg = msg;
   } else if (_lastCollisionMsg) {
@@ -16055,7 +16134,7 @@ function checkCollisionWarnings(bodyIds) {
 // baked body sitting exactly where the parts overlap. The student can then
 // Group it with the part to cut the interference away — no sketching.
 function markCollisionOverlaps() {
-  if (!_activeCollisions.length) { showHint('Nothing is overlapping right now — swing or move a part until the red zone appears.'); return []; }
+  if (!_activeCollisions.length) { showHint('Nothing is overlapping right now — swing or move a part until it flashes red.'); return []; }
   if (!window.__manifold) { showHint('The precise engine is still loading — try again in a moment.'); return []; }
   viewer && viewer.scene.updateMatrixWorld(true);
   pushUndo();
@@ -17254,7 +17333,7 @@ function renderProps() {
           <label for="warn-bodies" style="margin:0;cursor:pointer">Flash red when parts hit each other</label>
         </div>
         <div id="overlap-actions" style="display:${(typeof _activeCollisions !== 'undefined' && _activeCollisions.length) ? '' : 'none'}">
-          <div class="hint" style="margin-top:6px">The red zone is where parts overlap. Mark it to get a cut-out shape — no sketching needed.</div>
+          <div class="hint" style="margin-top:6px">Red parts are overlapping. Mark overlap captures the overlap as a cut-out shape — no sketching needed.</div>
           <div style="display:flex;gap:6px;margin-top:4px">
             <button type="button" id="mark-overlap-btn" style="flex:1;white-space:nowrap">🔴 Mark overlap</button>
             <button type="button" id="cut-overlap-btn" style="flex:1;white-space:nowrap">✂ Cut overlap away</button>
