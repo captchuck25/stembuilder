@@ -1038,7 +1038,10 @@
     opacity: 0.8;
     user-select: none;
   }
-  .body-outline.ref { opacity: 0.35; }
+  .body-outline.ref { opacity: 0.4; }
+  /* Neighbouring parts draw in red — where red crosses your part's outline
+     is the overlap; the designer decides the relief */
+  .body-outline.other-part { stroke: #ef4444; }
   .body-outline {
     stroke: #6b7a96;
     stroke-width: 1.2;
@@ -4057,12 +4060,13 @@ class SketchEngine {
           }
           const overlaps = ob.minX <= ownBB.maxX + 2 && ob.maxX >= ownBB.minX - 2 &&
                            ob.minY <= ownBB.maxY + 2 && ob.maxY >= ownBB.minY - 2;
-          // Neighbours ALWAYS show — students need the other parts as a
-          // visual reference while sketching (and their edges stay
-          // snappable for tracing). Non-overlapping neighbours render
-          // muted; only true interference joins the region graph (that
-          // gate lives in computeSketchRegions, unchanged).
-          for (const s of cand) { if (!overlaps) s._ref = true; segs.push(s); }
+          // Neighbours ALWAYS show, outlined in RED — the designer reads the
+          // overlap where red crosses their own part's outline and decides
+          // the relief themselves (no computed guide; interpretation is
+          // theirs). Edges stay snappable for tracing. Only true
+          // interference joins the region graph (that gate lives in
+          // computeSketchRegions, unchanged).
+          for (const s of cand) { s._other = true; segs.push(s); }
         }
       } else {
         segs = projectBodiesOntoPlane(doc.sketch.plane);
@@ -4079,7 +4083,8 @@ class SketchEngine {
         const inPlane = Math.abs(seg.dz1) < onPlaneTol && Math.abs(seg.dz2) < onPlaneTol;
         const cls = ['body-outline'];
         if (inPlane) cls.push('in-plane');
-        if (seg._ref) cls.push('ref'); // muted neighbour reference silhouette
+        if (seg._other) cls.push('other-part'); // neighbour = red outline
+        if (seg._ref) cls.push('ref'); // muted (in front of / behind the face)
         if (seg._cut) cls.push('cut'); // dashed — shows interior holes/cuts
         if (seg._hidden) cls.push('hidden-line'); // dashed — edges behind the surface
         else if (seg._vis) cls.push('visible-line'); // classified visible → solid
@@ -4120,60 +4125,6 @@ class SketchEngine {
       }
     }
 
-    // INTERFERENCE GUIDE — while parts are colliding, the overlap volume
-    // projects onto a face sketch as a RED snappable outline: the student
-    // draws their relief cut right against the true problem area (they
-    // design the fix; the tool only shows where). Convex-hull outline of
-    // the projected overlap — a guide, not exact geometry.
-    if (doc.sketch?.plane && doc.sketch.sourceBodyId &&
-        typeof _activeCollisions !== 'undefined' && _activeCollisions.length) {
-      try {
-        const attachedB = (typeof _sketchAttachedBody === 'function') ? _sketchAttachedBody(doc.sketch) : null;
-        if (attachedB) {
-          const planeInv = makePlaneMatrix(doc.sketch.plane).clone().invert();
-          for (const pair of _activeCollisions) {
-            if (pair.bodyId !== attachedB.id && pair.otherId !== attachedB.id) continue;
-            const geo = pair.geo;
-            const posAttr = geo?.attributes?.position;
-            if (!posAttr || posAttr.count < 3) continue;
-            // project the overlap volume's points into sketch coords
-            const pts2 = [];
-            const v = new THREE.Vector3();
-            const step = Math.max(1, Math.floor(posAttr.count / 200));
-            for (let i = 0; i < posAttr.count; i += step) {
-              v.fromBufferAttribute(posAttr, i).applyMatrix4(planeInv);
-              pts2.push({ x: v.x, y: v.y });
-            }
-            if (pts2.length < 3) continue;
-            // 2D convex hull (gift wrap on a small point set)
-            pts2.sort((a, b) => a.x - b.x || a.y - b.y);
-            const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-            const lower = [];
-            for (const p of pts2) {
-              while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-              lower.push(p);
-            }
-            const upper = [];
-            for (let i = pts2.length - 1; i >= 0; i--) {
-              const p = pts2[i];
-              while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-              upper.push(p);
-            }
-            const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
-            if (hull.length < 3) continue;
-            let path = '';
-            for (let i = 0; i < hull.length; i++) {
-              const a = hull[i], b = hull[(i + 1) % hull.length];
-              const [ax, ay] = this.worldToScreen(a.x, a.y);
-              path += (i === 0 ? `M ${ax} ${ay} ` : `L ${ax} ${ay} `);
-              if (!this._projSegs) this._projSegs = [];
-              this._projSegs.push({ p1: { x: a.x, y: a.y }, p2: { x: b.x, y: b.y }, _hot: true });
-            }
-            svg += `<path class="interference-line" d="${path}Z"/>`;
-          }
-        }
-      } catch (_) {}
-    }
 
     // Fillet pick mode — draw a ring around every selectable corner so the
     // student can SEE where they can pick, plus a filled dot at each one
