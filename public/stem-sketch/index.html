@@ -6622,71 +6622,10 @@ function projectBodiesOntoPlane(plane, onlyBodyId) {
           ee.dispose();
         } catch (_) {}
         tmpGeo.dispose();
-        // SILHOUETTE TANGENT LINES for any smooth profile — a cylinder (or
-        // any extrude with a curved profile that gets stored as a many-
-        // segment polyline) has no sharp lateral edges, so EdgesGeometry
-        // catches only the rim circles. Walk the profile and find vertices
-        // where adjacent segment normals straddle the view direction —
-        // those are the silhouette points; draw a line through each along
-        // the extrude axis.
-        const ents = (child.sketch.entities || []).filter(e => !e.construction);
-        let profilePts = null;
-        if (ents.length === 1) {
-          const e = ents[0];
-          if (e.type === 'circle' && e.r > 0) {
-            const Nc = 64;
-            profilePts = [];
-            for (let i = 0; i < Nc; i++) {
-              const t = (i / Nc) * 2 * Math.PI;
-              profilePts.push({ x: e.cx + Math.cos(t) * e.r, y: e.cy + Math.sin(t) * e.r });
-            }
-          } else if (e.type === 'polyline' && e.closed && e.points && e.points.length >= 4) {
-            profilePts = e.points;
-          }
-        }
-        if (profilePts) {
-          const planeUChild = new THREE.Vector3(...child.plane.u);
-          const planeVChild = new THREE.Vector3(...child.plane.v);
-          const depth = child.height || 0;
-          const zEnd = (child.op === 'subtract') ? -depth : depth;
-          const viewN = new THREE.Vector3(...plane.n);
-          const N = profilePts.length;
-          // Outward 2D normal of segment i, dotted with view normal in world.
-          const segDot = new Array(N);
-          for (let i = 0; i < N; i++) {
-            const a = profilePts[i];
-            const b = profilePts[(i + 1) % N];
-            const nx2D = (b.y - a.y);
-            const ny2D = -(b.x - a.x);
-            const len = Math.hypot(nx2D, ny2D) || 1;
-            const nWorld = planeUChild.clone().multiplyScalar(nx2D / len)
-              .add(planeVChild.clone().multiplyScalar(ny2D / len));
-            segDot[i] = nWorld.dot(viewN);
-          }
-          for (let i = 0; i < N; i++) {
-            const prev = segDot[(i - 1 + N) % N];
-            const curr = segDot[i];
-            // Sign change between segments (i-1) and i → vertex i is on the
-            // silhouette. Strict (* < 0) skips zero-crossings exactly on
-            // axis-aligned planes, which is fine: those are face-on views and
-            // don't have a meaningful lateral silhouette.
-            if (prev * curr >= 0) continue;
-            const p = profilePts[i];
-            const sw = new THREE.Vector3(p.x, p.y, 0).applyMatrix4(planeMChild);
-            const ew = new THREE.Vector3(p.x, p.y, zEnd).applyMatrix4(planeMChild);
-            if (parentOffset) {
-              const off = new THREE.Vector3(parentOffset.x || 0, parentOffset.y || 0, parentOffset.z || 0);
-              sw.add(off); ew.add(off);
-            }
-            const sa = sw.applyMatrix4(planeMInv);
-            const sb = ew.applyMatrix4(planeMInv);
-            segments.push({
-              p1: { x: sa.x, y: sa.y, z: sa.z },
-              p2: { x: sb.x, y: sb.y, z: sb.z },
-              dz1: sa.z, dz2: sb.z,
-            });
-          }
-        }
+        // (Silhouette tangent lines for smooth profiles were drawn here —
+        // removed by request: REAL edges only in sketch projections. A
+        // curved surface seen from the side shows no synthetic lateral
+        // lines; only rims, corners, and face boundaries project.)
       }
       return;
     }
@@ -14451,9 +14390,13 @@ function _traceFacePerimeter(sk) {
       area += p.x * q.y - q.x * p.y;
     }
     if (Math.abs(area / 2) < 1) continue;
-    loops.push(pts);
+    loops.push({ pts, area: Math.abs(area / 2) });
   }
-  return loops;
+  // Relative-size guard: keep only loops that matter next to the main
+  // outline (the outer face + real holes). A tiny in-plane facet left by
+  // an old cut used to trace as a stray little shape in a fresh sketch.
+  const maxArea = Math.max(0, ...loops.map(l => l.area));
+  return loops.filter(l => l.area >= maxArea * 0.02).map(l => l.pts);
 }
 
 function createSketchOnPlane(plane, opts = {}) {
