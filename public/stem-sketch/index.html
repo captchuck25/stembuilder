@@ -13968,14 +13968,9 @@ function returnBoltToItsMark(body) {
   const holeAxis = n.clone().negate();
   const depth = (typeof mark._settings?.depth === 'number') ? mark._settings.depth : body.length;
   const markWorld = new THREE.Vector3(mark.cx, mark.cy, 0).applyMatrix4(planeM);
-  let base = markWorld.clone().add(holeAxis.clone().multiplyScalar(depth));
-  // Recessed bolts are shortened + lifted so the tip stays at the hole
-  // bottom — mirror the creation-path math or the return lands too deep.
-  if (body.sinkHead) {
-    const spec = getFastenerSpec(body.size);
-    const headH = ({ hex: 0.65, phillips: 0.65, cap: 1, flat: 0.55 }[body.headType] || 0) * (spec?.d || 0);
-    base.add(n.clone().multiplyScalar(headH + 0.2));
-  }
+  // Same for recessed bolts: body origin at the nominal shaft bottom; the
+  // sinkHead geometry translate does the sinking (mirrors creation math).
+  const base = markWorld.clone().add(holeAxis.clone().multiplyScalar(depth));
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
   const euler = new THREE.Euler().setFromQuaternion(q, 'XYZ');
   pushUndo();
@@ -14381,17 +14376,16 @@ function processThreadMarks(sketch, marks, opts) {
     if (opts.placeBolt) {
       // Matching bolt: head bottom flush on sketch plane at the mark, shaft
       // points into the body along holeAxis = same orientation as the hole
-      // but with a real head (hex by default). Length matches depth —
-      // EXCEPT recessed seats: the whole bolt sinks by headH+0.2, so keep
-      // the tip at the hole bottom by shortening the shaft and lifting the
-      // body by the same amount (otherwise it pokes out the far face and
-      // looks broken).
-      const spec = getFastenerSpec(opts.size);
+      // but with a real head (hex by default). Shaft length = depth for
+      // BOTH seats: a recessed bolt's geometry self-sinks by headH+0.2
+      // (buildFastenerGeometry's sinkHead translate), landing its tip at
+      // the true recessed bore bottom — which the cutter also sinks to.
+      // The old shorten-and-lift math left recessed bolts ~a head-height
+      // short of the far face (issues108: 1.05in socket cap in a 1.25in
+      // stack visually stopped inside the part while the hole went through).
       const headKey = opts.boltHead || 'hex';
-      const headH = ({ hex: 0.65, phillips: 0.65, cap: 1, flat: 0.55 }[headKey] || 0) * spec.d;
-      const sink = recess ? headH + 0.2 : 0;
-      const shaftLen = Math.max(1, opts.depth - sink);
-      const boltBase = shaftBottom.clone().add(n.clone().multiplyScalar(sink));
+      const shaftLen = Math.max(1, opts.depth);
+      const boltBase = shaftBottom.clone();
       // Bolt body origin (shaft bottom) should land at boltBase.
       const bolt = {
         id: doc.nextBodyId++,
