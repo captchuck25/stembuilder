@@ -1307,7 +1307,10 @@
         <button class="tool" data-view="right" title="Look at the part from the right side"><svg class="ico"><use href="#i-view-right"/></svg><span class="tool-label">Right</span></button>
         <button class="tool" data-view="iso" title="Back to the angled home view"><svg class="ico"><use href="#i-view-iso"/></svg><span class="tool-label">Home</span></button>
         <span class="tool-sep"></span>
-        <button class="tool" data-action="extrude" title="Extrude the current sketch"><svg class="ico"><use href="#i-extrude"/></svg><span class="tool-label">Extrude</span></button>
+        <!-- Extrude toolbar button removed (housekeeping, 2026-08-17): sketches
+             extrude via the region click + gizmo / auto-cut flows; the button
+             duplicated that and confused the toolbar. Action 'extrude' is
+             still wired in JS. -->
         <div class="dropdown" id="prim-dropdown">
           <button class="tool has-dropdown" data-action="prim-menu" title="Add a primitive shape"><svg class="ico"><use href="#i-cube"/></svg><span class="tool-label">Primitive</span></button>
           <div class="dropdown-menu">
@@ -1333,7 +1336,9 @@
         <button class="tool" data-action="duplicate" title="Duplicate (Ctrl+D) — copies the selection in place, on top of the original"><svg class="ico"><use href="#i-duplicate"/></svg><span class="tool-label">Duplicate</span></button>
         <button class="tool" data-action="group" title="Group bodies (Ctrl+G) — Shift-click bodies first"><svg class="ico"><use href="#i-group"/></svg><span class="tool-label">Group</span></button>
         <button class="tool" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)"><svg class="ico"><use href="#i-ungroup"/></svg><span class="tool-label">Ungroup</span></button>
-        <button class="tool" data-action="boolean-cut" title="Cut — click a target body, then a tool body to subtract from it"><svg class="ico"><use href="#i-boolean-cut"/></svg><span class="tool-label">Cut</span></button>
+        <!-- Cut toolbar button removed (housekeeping, 2026-08-17): Group with a
+             Negative body covers subtraction; the separate two-click Cut tool
+             was redundant. Action 'boolean-cut' is still wired in JS. -->
         <button class="tool" data-action="joint" title="Joint (J) — click two bodies, then click near an edge to set the hinge axis"><svg class="ico"><use href="#i-joint"/></svg><span class="tool-label">Joint</span></button>
         <button class="tool" data-action="align" title="Align — Shift-click 2+ bodies first, then click a colored axis handle"><svg class="ico"><use href="#i-align"/></svg><span class="tool-label">Align</span></button>
         <button class="tool" data-action="mirror-3d" title="Mirror body across XY/YZ/XZ plane"><svg class="ico"><use href="#i-mirror-3d"/></svg><span class="tool-label">Mirror</span></button>
@@ -1344,7 +1349,11 @@
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
              2D BEFORE Extrude / Revolve. See action 'fillet-3d' (still wired) if you
              want to reach it from the console. -->
-        <button class="tool" data-action="revolve" title="Revolve — spin a drawn profile around the sketch's Y axis, like a lathe"><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
+        <!-- Revolve toolbar button hidden (housekeeping, 2026-08-17): lightly
+             used; parked until it earns a spot (or an advanced-tools row).
+             Action 'revolve' is still wired in JS; existing revolved bodies in
+             saves are unaffected. -->
+
       </div>
     </div>
   </header>
@@ -18181,9 +18190,9 @@ function renderProps() {
       }).join('');
       props.innerHTML = `
         <div class="empty" style="margin-bottom:8px">Select a body or use the tools above.</div>
-        <h4 style="margin-top:6px">Joints${allJoints.length > 1 ? ` (${shownJoints.length} of ${allJoints.length})` : ''}</h4>
-        ${jointRows || '<div class="hint">No joints yet. Draw a <b>Pivot</b> point (⊕) in a face sketch on each of two parts, then click <b>Joint</b> and pick the two pivots.</div>'}
-        ${(selJoint && allJoints.length > 1) ? '<div class="hint" style="margin-top:4px"><a href="#" id="show-all-joints">Show all joints</a> — or pick a different one in the Joints list on the left.</div>' : ''}
+        ${allJoints.length ? `<h4 style="margin-top:6px">Joints${allJoints.length > 1 ? ` (${shownJoints.length} of ${allJoints.length})` : ''}</h4>
+        ${jointRows}
+        ${(selJoint && allJoints.length > 1) ? '<div class="hint" style="margin-top:4px"><a href="#" id="show-all-joints">Show all joints</a> — or pick a different one in the Joints list on the left.</div>' : ''}` : ''}
         <h4 style="margin-top:14px">Warnings</h4>
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="warn-ground" style="width:auto;margin:0"${doc.collisionWarnGround !== false ? ' checked' : ''}/>
