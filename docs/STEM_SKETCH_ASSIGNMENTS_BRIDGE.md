@@ -106,6 +106,10 @@ be submitted (`passed: false`) — they show as attempts on the teacher roster.
 3. **Locked check mode**: a "Check my model" action enters a modal state where
    ALL design/measurement tools are disabled — the student can only see the
    result and return to design. No dimension readouts of the reference, ever.
+   Inside check mode ONLY, the reference IS shown as a translucent green ghost
+   superimposed on the student's model (mapped via the inverse best-fit
+   transform) — scene-only, non-raycastable, removed when check mode closes,
+   so it can be looked at but never measured or manipulated.
 4. **Fit check (stage 1, replicate)**: via Manifold — align student body to the
    reference (snap best of the 24 axis orientations at matching bounding-box
    centers), then `missing = ref − student` and `extra = student − ref`; pass

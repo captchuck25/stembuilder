@@ -36,6 +36,9 @@ export interface SketchChallenge {
   refDocJson: object | null;
   /** Public path of the printable STL for the physical block; null until authored. */
   stlPath: string | null;
+  /** Public path of a rendered image of the block (shown in the teacher picker
+   *  so the on-screen name matches the object being passed around the room). */
+  imagePath: string | null;
   /** Pass tolerance for the fit check. 0.5 mm ≈ 1/50", far below the 1/8" (3.175 mm) design increment. */
   toleranceMm: number;
 }
@@ -49,13 +52,14 @@ export const PRECISION_LABEL: Record<SketchPrecision, string> = {
 
 export const SKETCH_CHALLENGES: SketchChallenge[] = [
   {
+    // id keeps the original slug — stem_sketch_assignments rows reference it.
     id: "s1-01-starter-brick",
     stage: 1,
-    title: "Starter Brick",
+    title: "Step Block",
     description:
       "A 3-inch cube with a staircase cut into it — every dimension is a whole inch. Measure the printed block, draw its three views on paper, then model it exactly.",
     studentInstructions:
-      "1. Get the printed Starter Brick from your teacher.\n" +
+      "1. Get the printed Step Block from your teacher.\n" +
       "2. Measure it with your ruler — every dimension is a whole inch.\n" +
       "3. Draw its front, top, and side views on paper first.\n" +
       "4. Build it here exactly as you measured it.\n" +
@@ -63,16 +67,17 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     precision: "whole",
     refDocJson: refS101,
     stlPath: "/stem-sketch/challenges/s1-01-starter-brick.stl",
+    imagePath: "/stem-sketch/challenges/s1-01-step-block.jpg",
     toleranceMm: 0.5,
   },
   {
     id: "s1-02-step-block",
     stage: 1,
-    title: "Step Block",
+    title: "Ledge Block",
     description:
-      "A block with one rectangular step, dimensioned to the nearest half inch. Two extrudes — or one sketch with an L profile. (Reference geometry coming soon.)",
+      "A block with one rectangular ledge, dimensioned to the nearest half inch. Two extrudes — or one sketch with an L profile. (Reference geometry coming soon.)",
     studentInstructions:
-      "1. Get the printed Step Block from your teacher.\n" +
+      "1. Get the printed Ledge Block from your teacher.\n" +
       "2. Measure it with your ruler — dimensions go to the nearest half inch.\n" +
       "3. Draw its front, top, and side views on paper first.\n" +
       "4. Build it here exactly as you measured it.\n" +
@@ -80,6 +85,7 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     precision: "half",
     refDocJson: null,
     stlPath: null,
+    imagePath: null,
     toleranceMm: 0.5,
   },
   {
@@ -97,6 +103,7 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     precision: "quarter",
     refDocJson: null,
     stlPath: null,
+    imagePath: null,
     toleranceMm: 0.5,
   },
 ];

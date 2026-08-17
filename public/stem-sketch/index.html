@@ -333,7 +333,9 @@
      is position:fixed over EVERYTHING, which is what makes check mode "locked":
      no toolbar button, tree node, or canvas click can be reached under it. */
   .assignment-panel {
-    position: absolute; top: 12px; left: 12px; z-index: 60; width: 300px;
+    /* Far RIGHT so it never covers the toolbar dropdowns (Primitive, Shape…)
+       that open on the left/center (user feedback 2026-08-17). */
+    position: absolute; top: 12px; right: 12px; z-index: 60; width: 300px;
     background: #fff; border: 2px solid #0891b2; border-radius: 12px;
     box-shadow: 0 8px 24px rgba(2, 60, 80, 0.18); font-size: 13px; overflow: hidden;
   }
@@ -354,8 +356,11 @@
   .assignment-panel .ap-check:hover { background: #0e7490; }
   .assignment-panel .ap-preview-note { margin-top: 8px; font-size: 11px; font-weight: 700; color: #b45309; }
   .assign-check-overlay {
-    position: fixed; inset: 0; z-index: 4000; background: rgba(15, 23, 42, 0.62);
-    display: flex; align-items: center; justify-content: center;
+    /* Light scrim + card parked at the bottom: the 3D view (student model +
+       green reference ghost) stays visible behind it. Still position:fixed
+       over everything, so check mode stays fully locked. */
+    position: fixed; inset: 0; z-index: 4000; background: rgba(15, 23, 42, 0.22);
+    display: flex; align-items: flex-end; justify-content: center; padding-bottom: 26px;
   }
   .assign-check-card {
     background: #fff; border-radius: 16px; padding: 26px 30px;
@@ -20908,14 +20913,18 @@ function _computeFit(a) {
   // the reference; orientations whose bounding box can't match are tried
   // last. Score = missing + extra volume; best orientation wins.
   const candidates = _axisOrientations().map(R => {
+    // Full student→reference transform for this orientation. Kept so the
+    // ghost can be mapped BACK into the student's frame after the check.
+    const M = new THREE.Matrix4()
+      .makeTranslation(cr.x, cr.y, cr.z)
+      .multiply(R)
+      .multiply(new THREE.Matrix4().makeTranslation(-cs.x, -cs.y, -cs.z));
     const g = stuGeo.clone();
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(-cs.x, -cs.y, -cs.z));
-    g.applyMatrix4(R);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(cr.x, cr.y, cr.z));
+    g.applyMatrix4(M);
     g.computeBoundingBox();
     const d = g.boundingBox.getSize(new THREE.Vector3());
     const mismatch = Math.abs(d.x - refDims.x) + Math.abs(d.y - refDims.y) + Math.abs(d.z - refDims.z);
-    return { g, mismatch };
+    return { g, M, mismatch };
   }).sort((p, q) => p.mismatch - q.mismatch);
 
   let best = null;
@@ -20934,7 +20943,7 @@ function _computeFit(a) {
         const missVol = _manVolume(missing);
         const extraVol = _manVolume(extra);
         const score = missVol + extraVol;
-        if (!best || score < best.score) best = { score, missVol, extraVol };
+        if (!best || score < best.score) best = { score, missVol, extraVol, M: cand.M };
         if (score <= volTol) break; // found a fit — stop early
       } catch (err) {
         console.warn('Fit-check orientation failed:', err?.message || err);
@@ -20955,6 +20964,7 @@ function _computeFit(a) {
   return {
     passed,
     matchPct,
+    bestMatrix: best.M || null,
     metrics: {
       refVolumeMm3: Math.round(ref.volume),
       studentVolumeMm3: Math.round(stuVol),
@@ -20980,7 +20990,47 @@ function _openCheckOverlay(html) {
   return ov;
 }
 
+// Reference GHOST — shown ONLY while the locked check overlay is up, so
+// students see what the block should look like superimposed on their model.
+// It's scene-only (never in doc.bodies), non-raycastable, and removed the
+// moment check mode closes — it can't be measured, selected, or exported.
+let _assignGhost = null;
+function _showAssignGhost(res) {
+  _removeAssignGhost();
+  const ref = _assignRefCache;
+  if (!ref || !viewer) return;
+  try {
+    const g = ref.geo.clone();
+    // Map the reference back into the STUDENT's frame (inverse of the best
+    // student→reference fit), so the ghost drapes over their model and any
+    // mismatch is visible in place.
+    if (res && res.bestMatrix) {
+      g.applyMatrix4(new THREE.Matrix4().copy(res.bestMatrix).invert());
+    }
+    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+      color: 0x16a34a, transparent: true, opacity: 0.35,
+      depthWrite: false, roughness: 0.6, side: THREE.DoubleSide,
+    }));
+    mesh.raycast = () => {};
+    viewer.scene.add(mesh);
+    _assignGhost = mesh;
+    try { viewer.renderer.render(viewer.scene, viewer.camera); } catch (_) {}
+  } catch (err) {
+    console.warn('Assignment ghost failed:', err);
+  }
+}
+function _removeAssignGhost() {
+  if (!_assignGhost) return;
+  try {
+    viewer.scene.remove(_assignGhost);
+    _assignGhost.geometry.dispose();
+    _assignGhost.material.dispose();
+  } catch (_) {}
+  _assignGhost = null;
+}
+
 function _closeCheckOverlay() {
+  _removeAssignGhost();
   document.getElementById('assign-check-overlay')?.remove();
 }
 
@@ -21021,10 +21071,14 @@ function runAssignmentCheck() {
         return;
       }
       _assignLastCheck = res;
+      // Show the answer as a green ghost draped over the student's model —
+      // visible through the light overlay scrim, gone when check mode closes.
+      setMode('3d');
+      _showAssignGhost(res);
       const inCubed = (mm3) => (mm3 / 16387.064).toFixed(2);
       const detail = res.passed
-        ? `Your model matches the block — ${res.matchPct.toFixed(1)}% match.`
-        : `${res.matchPct.toFixed(1)}% match so far. Missing material: ${inCubed(res.metrics.missingVolumeMm3)} in³ · extra material: ${inCubed(res.metrics.extraVolumeMm3)} in³.<br/>Grab the block and re-check your measurements — then fix the model and try again.`;
+        ? `Your model matches the block — ${res.matchPct.toFixed(1)}% match. The green ghost is the real block, right on top of yours.`
+        : `${res.matchPct.toFixed(1)}% match so far. The green ghost shows the real block — look for where your model sticks out or falls short. Missing: ${inCubed(res.metrics.missingVolumeMm3)} in³ · extra: ${inCubed(res.metrics.extraVolumeMm3)} in³.<br/>Re-measure, fix your model, and check again.`;
       const submitBtn = a.preview
         ? ''
         : `<button class="acc-submit" id="acc-submit">${res.passed ? '📨 Submit to your teacher' : '📨 Submit anyway'}</button>`;

@@ -156,6 +156,12 @@ export default function StemSketchTab({ classId }: { classId: string }) {
             {selected && (
               <div style={{ fontSize: 12, color: "#555", background: "#fff", border: "2px solid #cffafe",
                 borderRadius: 10, padding: "10px 14px", lineHeight: 1.5 }}>
+                {selected.imagePath && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={selected.imagePath} alt={`${selected.title} — the printed challenge block`}
+                    style={{ display: "block", width: "100%", maxHeight: 150, objectFit: "contain",
+                      background: "#fff", borderRadius: 8, border: "1px solid #e0f2fe", marginBottom: 8 }} />
+                )}
                 {selected.description}
                 <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
                   <Link href={`/tools/stem-sketch?challenge=${encodeURIComponent(selected.id)}`}
