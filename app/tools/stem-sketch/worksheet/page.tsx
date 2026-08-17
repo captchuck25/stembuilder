@@ -84,7 +84,14 @@ export default async function WorksheetPage({
           boxShadow: "0 6px 30px rgba(0,0,0,0.25)", padding: "0.35in",
           boxSizing: "border-box", color: "#333",
         }}>
-        {/* Header — wordmark left, title center, 3D visual tight top-right */}
+        {/* Name strip — top of the page */}
+        <div style={{ display: "flex", gap: "0.35in", marginBottom: "0.25in", fontSize: "10.5pt", color: "#666" }}>
+          <div style={{ flex: 2, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Name:</div>
+          <div style={{ flex: 1.2, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Class:</div>
+          <div style={{ flex: 1, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Date:</div>
+        </div>
+
+        {/* Header — wordmark left, title center */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: "0.25in", marginBottom: "0.15in" }}>
           <div style={{ flexShrink: 0 }}>
             <div style={{ fontSize: "15pt", fontWeight: 900, letterSpacing: "1.5px", color: "#9ca3af" }}>
@@ -100,38 +107,27 @@ export default async function WorksheetPage({
               {precisionLine} · draw all three views, then build it in STEM Sketch
             </div>
           </div>
-          {challenge.imagePath && (
+        </div>
+
+        {/* Third-angle projection: TOP above FRONT; RIGHT SIDE beside FRONT.
+            The cell beside TOP holds the 3D visual, filling the whole void. */}
+        <div style={{ display: "grid", gridTemplateColumns: `${BOX} ${BOX}`, gap: "0.18in 0.35in", justifyContent: "center" }}>
+          <ViewBox label="Top View" sub="edges line up with the front view below" />
+          {challenge.imagePath ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={challenge.imagePath}
               alt={`${challenge.title} reference`}
               style={{
-                width: "1.85in", height: "1.15in", objectFit: "cover", objectPosition: "center",
-                filter: "grayscale(1) brightness(1.12)", border: "1px solid #ddd",
-                borderRadius: "0.06in", flexShrink: 0,
+                width: "100%", height: "100%", objectFit: "cover", objectPosition: "center",
+                filter: "grayscale(1) brightness(1.1)", alignSelf: "stretch",
               }}
             />
-          )}
-        </div>
-
-        {/* Third-angle projection: TOP above FRONT; RIGHT SIDE beside FRONT */}
-        <div style={{ display: "grid", gridTemplateColumns: `${BOX} ${BOX}`, gap: "0.18in 0.35in", justifyContent: "center" }}>
-          <ViewBox label="Top View" sub="edges line up with the front view below" />
-          <div style={{ alignSelf: "end", paddingBottom: "0.1in", fontSize: "8.5pt", color: "#999", lineHeight: 1.5 }}>
-            <b style={{ color: "#777" }}>How it works:</b> the top view sits directly
-            above the front view, and the right side sits directly beside it —
-            matching edges stay lined up. Label each measurement on your drawing.
-          </div>
+          ) : <div />}
           <ViewBox label="Front View" sub="the face with the word FRONT" />
           <ViewBox label="Right Side View" />
         </div>
 
-        {/* Name strip */}
-        <div style={{ display: "flex", gap: "0.35in", marginTop: "0.28in", fontSize: "10.5pt", color: "#666" }}>
-          <div style={{ flex: 2, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Name:</div>
-          <div style={{ flex: 1.2, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Class:</div>
-          <div style={{ flex: 1, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Date:</div>
-        </div>
       </div>
     </div>
   );
