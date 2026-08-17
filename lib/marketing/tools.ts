@@ -281,7 +281,7 @@ export const TOOLS: MarketingTool[] = [
         src: "/marketing/measurement-lab/gallery-3.png",
       },
     ],
-    demoVideo: "Demo video — a narrated tour of the Measurement Lab (50 sec)",
+    demoVideo: "Demo video — a narrated tour of the Measurement Lab (45 sec)",
     demoVideoSrc: "/marketing/measurement-lab/demo.mp4",
     seoDescription:
       "Measurement Lab builds measuring fluency with instant feedback, timed sprints, and class leaderboards — hands-on practice with rulers, scale, and precision.",
