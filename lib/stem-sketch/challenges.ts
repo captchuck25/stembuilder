@@ -83,13 +83,15 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
       "Three stacked steps that shrink in BOTH directions — a front view alone can't describe it, so students need the right-side view too. Every dimension is still a whole inch: the step up from the Step Block is seeing in two views, not smaller fractions.",
     studentInstructions:
       "1. Get the printed Double Steps block from your teacher.\n" +
-      "2. Measure it with your ruler — every dimension is a whole inch.\n" +
-      "3. Draw its front, top, AND right-side views on paper — one view isn't enough for this block!\n" +
-      "4. Build it here exactly as you measured it.\n" +
-      "5. Click Check My Model — if it matches, hit Submit!",
+      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "3. Measure it with your ruler — every dimension is a whole inch.\n" +
+      "4. Draw its front, top, AND right-side views on paper — one view isn't enough for this block!\n" +
+      "5. Build it here exactly as you measured it.\n" +
+      "6. Click Check My Model — if it matches, hit Submit!",
     precision: "whole",
     refDocJson: refS102,
-    stlPath: "/stem-sketch/challenges/s1-02-double-steps.stl",
+    // Teacher print carries an engraved FRONT label; refDocJson stays clean.
+    stlPath: "/stem-sketch/challenges/s1-02-double-steps-teacher-print.stl",
     imagePath: "/stem-sketch/challenges/s1-02-double-steps.jpg",
     toleranceMm: 0.5,
   },
