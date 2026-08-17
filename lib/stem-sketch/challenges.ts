@@ -18,6 +18,8 @@
 // until the geometry lands, which happens before the feature is announced).
 // Printable STLs live under public/stem-sketch/challenges/.
 
+import refS101 from "./challenges/s1-01-starter-brick.json";
+
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
 
 export interface SketchChallenge {
@@ -49,10 +51,10 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     stage: 1,
     title: "Starter Brick",
     description:
-      "A simple rectangular block in whole inches. Measure the printed block, draw its three views on paper, then model it exactly. (Reference geometry coming soon.)",
+      "A 3-inch cube with a staircase cut into it — every dimension is a whole inch. Measure the printed block, draw its three views on paper, then model it exactly.",
     precision: "whole",
-    refDocJson: null,
-    stlPath: null,
+    refDocJson: refS101,
+    stlPath: "/stem-sketch/challenges/s1-01-starter-brick.stl",
     toleranceMm: 0.5,
   },
   {

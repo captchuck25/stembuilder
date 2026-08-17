@@ -1,0 +1,198 @@
+solid Group_2_
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -38.099998 0.000002 -38.099998
+      vertex -38.099998 25.400000 -38.099998
+      vertex -12.700000 25.400000 -38.099998
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -38.099998 0.000002 -38.099998
+      vertex -38.099998 25.400000 12.699999
+      vertex -38.099998 25.400000 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -38.099998 25.400000 -38.099998
+      vertex -12.700000 25.400000 12.699999
+      vertex -12.700000 25.400000 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -38.099998 0.000002 -38.099998
+      vertex -12.700000 25.400000 -38.099998
+      vertex 38.099998 0.000002 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -38.099998 0.000002 -38.099998
+      vertex 38.099998 0.000002 -38.099998
+      vertex -38.099998 0.000002 12.699999
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -38.099998 0.000002 -38.099998
+      vertex -38.099998 0.000002 12.699999
+      vertex -38.099998 25.400000 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -38.099998 25.400000 12.699999
+      vertex -38.099998 0.000002 12.699999
+      vertex -12.700000 25.400000 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -38.099998 25.400000 -38.099998
+      vertex -38.099998 25.400000 12.699999
+      vertex -12.700000 25.400000 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -38.099998 0.000002 12.699999
+      vertex 38.099998 0.000002 12.699999
+      vertex -12.700000 25.400000 12.699999
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -12.700000 25.400000 -38.099998
+      vertex -12.700000 25.400000 12.699999
+      vertex -12.700000 50.799999 12.699999
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -12.700000 25.400000 -38.099998
+      vertex -12.700000 50.799999 12.699999
+      vertex -12.700000 50.799999 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -12.700000 50.799999 -38.099998
+      vertex -12.700000 50.799999 12.699999
+      vertex 12.700000 50.799999 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -12.700000 50.799999 12.699999
+      vertex -12.700000 25.400000 12.699999
+      vertex 12.700000 50.799999 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -12.700000 25.400000 -38.099998
+      vertex -12.700000 50.799999 -38.099998
+      vertex 38.099998 0.000002 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -12.700000 50.799999 -38.099998
+      vertex 12.700000 50.799999 -38.099998
+      vertex 38.099998 0.000002 -38.099998
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 38.099998 0.000002 -38.099998
+      vertex 38.099998 76.199997 -38.099998
+      vertex 38.099998 0.000002 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex 38.099998 0.000002 -38.099998
+      vertex 38.099998 0.000002 12.699999
+      vertex -38.099998 0.000002 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -12.700000 25.400000 12.699999
+      vertex 38.099998 0.000002 12.699999
+      vertex 12.700000 50.799999 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -12.700000 50.799999 -38.099998
+      vertex 12.700000 50.799999 12.699999
+      vertex 12.700000 50.799999 -38.099998
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 12.700000 50.799999 -38.099998
+      vertex 12.700000 76.199997 12.699999
+      vertex 12.700000 76.199997 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 38.099998 0.000002 -38.099998
+      vertex 12.700000 50.799999 -38.099998
+      vertex 38.099998 76.199997 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex 12.700000 50.799999 -38.099998
+      vertex 12.700000 76.199997 -38.099998
+      vertex 38.099998 76.199997 -38.099998
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 12.700000 76.199997 -38.099998
+      vertex 38.099998 76.199997 12.699999
+      vertex 38.099998 76.199997 -38.099998
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex 12.700000 50.799999 -38.099998
+      vertex 12.700000 50.799999 12.699999
+      vertex 12.700000 76.199997 12.699999
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 38.099998 76.199997 -38.099998
+      vertex 38.099998 76.199997 12.699999
+      vertex 38.099998 0.000002 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 12.700000 76.199997 12.699999
+      vertex 12.700000 50.799999 12.699999
+      vertex 38.099998 0.000002 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex 38.099998 0.000002 12.699999
+      vertex 38.099998 76.199997 12.699999
+      vertex 12.700000 76.199997 12.699999
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex 12.700000 76.199997 -38.099998
+      vertex 12.700000 76.199997 12.699999
+      vertex 38.099998 76.199997 12.699999
+    endloop
+  endfacet
+endsolid Group_2_
