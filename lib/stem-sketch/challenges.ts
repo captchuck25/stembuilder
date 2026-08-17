@@ -19,6 +19,7 @@
 // Printable STLs live under public/stem-sketch/challenges/.
 
 import refS101 from "./challenges/s1-01-starter-brick.json";
+import refS102 from "./challenges/s1-02-double-steps.json";
 
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
 
@@ -71,21 +72,21 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     toleranceMm: 0.5,
   },
   {
-    id: "s1-02-step-block",
+    id: "s1-02-double-steps",
     stage: 1,
-    title: "Ledge Block",
+    title: "Double Steps",
     description:
-      "A block with one rectangular ledge, dimensioned to the nearest half inch. Two extrudes — or one sketch with an L profile. (Reference geometry coming soon.)",
+      "Three stacked steps that shrink in BOTH directions — a front view alone can't describe it, so students need the right-side view too. Every dimension is still a whole inch: the step up from the Step Block is seeing in two views, not smaller fractions.",
     studentInstructions:
-      "1. Get the printed Ledge Block from your teacher.\n" +
-      "2. Measure it with your ruler — dimensions go to the nearest half inch.\n" +
-      "3. Draw its front, top, and side views on paper first.\n" +
+      "1. Get the printed Double Steps block from your teacher.\n" +
+      "2. Measure it with your ruler — every dimension is a whole inch.\n" +
+      "3. Draw its front, top, AND right-side views on paper — one view isn't enough for this block!\n" +
       "4. Build it here exactly as you measured it.\n" +
       "5. Click Check My Model — if it matches, hit Submit!",
-    precision: "half",
-    refDocJson: null,
-    stlPath: null,
-    imagePath: null,
+    precision: "whole",
+    refDocJson: refS102,
+    stlPath: "/stem-sketch/challenges/s1-02-double-steps.stl",
+    imagePath: "/stem-sketch/challenges/s1-02-double-steps.jpg",
     toleranceMm: 0.5,
   },
   {
