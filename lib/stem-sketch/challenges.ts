@@ -103,13 +103,15 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
       "A base with two towers of different heights and a hollow pocket in the middle — front, right-side, AND top views are all required to capture it, and dimensions go to the nearest quarter inch. The capstone of the measuring ladder.",
     studentInstructions:
       "1. Get the printed Triple View Block from your teacher.\n" +
-      "2. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
-      "3. Draw its front, right-side, AND top views on paper — this block needs all three!\n" +
-      "4. Build it here exactly as you measured it.\n" +
-      "5. Click Check My Model — if it matches, hit Submit!",
+      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
+      "4. Draw its front, right-side, AND top views on paper — this block needs all three!\n" +
+      "5. Build it here exactly as you measured it.\n" +
+      "6. Click Check My Model — if it matches, hit Submit!",
     precision: "quarter",
     refDocJson: refS103,
-    stlPath: "/stem-sketch/challenges/s1-03-triple-view.stl",
+    // Teacher print carries an engraved FRONT label; refDocJson stays clean.
+    stlPath: "/stem-sketch/challenges/s1-03-triple-view-teacher-print.stl",
     imagePath: "/stem-sketch/challenges/s1-03-triple-view.jpg",
     toleranceMm: 0.5,
   },
