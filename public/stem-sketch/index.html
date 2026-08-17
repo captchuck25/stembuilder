@@ -13624,13 +13624,13 @@ function syncSketchAnchorsToBodies() {
   }
 }
 
-function _stripMarkHoleFromTree(mark) {
-  if (mark._holeBodyId == null) return null;
+function _stripHoleIdFromTree(holeId) {
+  if (holeId == null) return null;
   const visit = (group) => {
     if (!Array.isArray(group.children)) return false;
     for (let i = 0; i < group.children.length; i++) {
       const c = group.children[i];
-      if (c.id === mark._holeBodyId) {
+      if (c.id === holeId) {
         group.children.splice(i, 1);
         group.geometry = null;
         return true;
@@ -13646,6 +13646,17 @@ function _stripMarkHoleFromTree(mark) {
     if ((b.type === 'group' || b.type === 'combined') && visit(b)) return b;
   }
   return null;
+}
+
+// Strip the mark's cut from EVERY tree it touched: its own part, plus any
+// far parts the shaft was cut through (issues1142). Returns the list of
+// top-level bodies whose geometry chains need re-deriving.
+function _stripMarkHoleFromTree(mark) {
+  const roots = [];
+  const add = (r) => { if (r && !roots.includes(r)) roots.push(r); };
+  add(_stripHoleIdFromTree(mark._holeBodyId));
+  for (const id of (mark._farHoleBodyIds || [])) add(_stripHoleIdFromTree(id));
+  return roots;
 }
 
 function deleteMaterialisedThreadMark(mark, opts = {}) {
@@ -13678,15 +13689,31 @@ function deleteMaterialisedThreadMark(mark, opts = {}) {
   // used to be skipped — re-cutting relied on the new cutter enveloping
   // the old hole, which broke once recessed heads and different hole
   // shapes arrived: stale voids and half-recesses were left behind.)
-  const strippedRoot = _stripMarkHoleFromTree(mark);
-  if (strippedRoot) {
+  for (const strippedRoot of _stripMarkHoleFromTree(mark)) {
     try { _ensureGroupGeometry(strippedRoot); }
     catch (err) { console.error('Un-cut rebuild failed for mark', mark.id, err); }
+  }
+  // A pivot created from this bolt hole goes with it (issues1142 #2) —
+  // they were made together, they leave together. The far part's hidden
+  // auto pivot sketch is cleaned up too.
+  const ownerSk = doc.sketches.find(s => s.entities?.some(e => e === mark));
+  if (ownerSk && doc.joints?.length) {
+    const dead = doc.joints.filter(j => j.a?.markId === mark.id && j.a?.sketchId === ownerSk.id);
+    if (dead.length) {
+      doc.joints = doc.joints.filter(j => !dead.includes(j));
+      for (const j of dead) {
+        doc.sketches = doc.sketches.filter(s =>
+          !(s.id === j.b?.sketchId && / \(auto\)$/.test(s.name || '')));
+        if (doc.selectedJointId === j.id) doc.selectedJointId = null;
+      }
+      if (viewer) viewer.updateJointGizmos();
+    }
   }
   delete mark._materialised;
   delete mark._boltBodyId;
   delete mark._nutBodyId;
   delete mark._holeBodyId;
+  delete mark._farHoleBodyIds;
   delete mark._threadShellBodyId;
   delete mark._mergedShellInBodyId;
   delete mark._settings;
@@ -13748,8 +13775,9 @@ function openThreadedHolesDialog() {
         const touchedRoots = new Set();
         const strippedRootIds = new Set();
         for (const m of doneMarks) {
-          const root = _stripMarkHoleFromTree(m);
-          if (root) { touchedRoots.add(root); strippedRootIds.add(root.id); }
+          for (const root of _stripMarkHoleFromTree(m)) {
+            touchedRoots.add(root); strippedRootIds.add(root.id);
+          }
           // skipRender — we'll do ONE rebuild at the end. Without this,
           // every iteration tries to render bodies whose group geometry
           // is currently null (just stripped, not yet re-derived) and
@@ -14132,6 +14160,47 @@ function processThreadMarks(sketch, marks, opts) {
     } else if (hasParent && parentNow == null) {
       groupedFail++;
       console.warn(`Thread mark could not find parent body id=${sketch.sourceBodyId} (the previous group consumed it but sourceBodyId wasn't repointed).`);
+    }
+    // FAR-BODY HOLES (issues1142 #1): when the shaft reaches beyond the
+    // mark's own part into other parts, each of those gets the SAME cutter
+    // too — position-identical, so the smooth shank and threaded sections
+    // land in whichever part they physically pass through (in a bolt-pivot
+    // stack the threads bite the far part, exactly like real hardware).
+    // The deepest part inherits the nut pocket when one was asked for.
+    m._farHoleBodyIds = [];
+    {
+      const rcF = new THREE.Raycaster(
+        markWorld.clone().add(n.clone().multiplyScalar(2)), holeAxis, 0, opts.depth + 2);
+      const farBodies = [];
+      for (const b of doc.bodies) {
+        if (!b.mesh || b.hidden) continue;
+        if (b.id === sketch.sourceBodyId) continue;
+        if (b.type === 'fastener' || b.type === 'threadShell' || b.type === 'baked') continue;
+        const hs = rcF.intersectObject(b.mesh, true);
+        if (hs.length && hs[0].distance < opts.depth + 1.5) farBodies.push({ b, d: hs[0].distance });
+      }
+      farBodies.sort((x, y) => x.d - y.d);
+      for (let fi = 0; fi < farBodies.length; fi++) {
+        const fb = farBodies[fi].b;
+        const deepest = fi === farBodies.length - 1;
+        const farHole = {
+          ...hole,
+          id: doc.nextBodyId++,
+          headType: 'none', sinkHead: false, sinkExtra: 0,
+          part: (deepest && isClearance && opts.nutPocket) ? 'both' : 'bolt',
+          nutWasher: !!(deepest && isClearance && opts.nutPocket && opts.nutWasher),
+        };
+        doc.bodies.push(farHole);
+        doc.multiSelectedBodies = [fb.id, farHole.id];
+        groupSelected(true);
+        if (doc.bodies.some(b2 => b2.id === farHole.id)) {
+          // group failed — drop the stray negative rather than leaving junk
+          doc.bodies = doc.bodies.filter(b2 => b2.id !== farHole.id);
+          console.warn(`Far-body hole failed to group (CSG) for mark ${m.id} into body ${fb.id}.`);
+        } else {
+          m._farHoleBodyIds.push(farHole.id);
+        }
+      }
     }
     // Thread shell visualisation. The shell is a hollow sleeve with a
     // helical thread profile on its inner surface — sits inside the cleanly-
@@ -17815,6 +17884,10 @@ function renderTree() {
       } else if (btn.dataset.action === 'del-body') {
         const b = doc.bodies.find(x => x.id === id);
         if (!b) return;
+        if (b.type === 'fastener' && b._threadMarkRef) {
+          showHint('🔩 That bolt belongs to a bolt hole — hide it with the eye, or use 🔧 Adjust bolt → Remove this hole to take the bolt and hole away together.');
+          return;
+        }
         pushUndo();
         doc.bodies = doc.bodies.filter(x => x.id !== id);
         if (doc.selection?.kind === 'body' && doc.selection.id === id) doc.selection = null;
@@ -21516,12 +21589,21 @@ function init() {
         doc.multiSelectedSketch = [];
         sketchEng.render(); renderTree(); renderProps();
       } else if (doc.selection?.kind === 'body') {
-        pushUndo();
         const ids = doc.multiSelectedBodies?.length ? new Set(doc.multiSelectedBodies) : new Set([doc.selection.id]);
-        doc.bodies = doc.bodies.filter(x => !ids.has(x.id));
-        doc.selection = null;
-        doc.multiSelectedBodies = [];
-        viewer.rebuildBodies(); renderTree(); renderProps();
+        // Hole-companion hardware can't be deleted outright — the hole
+        // would be orphaned with no way to get its bolt back (issues1142).
+        const blocked = doc.bodies.filter(b => ids.has(b.id) && b.type === 'fastener' && b._threadMarkRef);
+        for (const b of blocked) ids.delete(b.id);
+        if (blocked.length) {
+          showHint('🔩 That bolt belongs to a bolt hole — hide it with the eye in the tree, or use 🔧 Adjust bolt → Remove this hole to take the bolt and hole away together.');
+        }
+        if (ids.size) {
+          pushUndo();
+          doc.bodies = doc.bodies.filter(x => !ids.has(x.id));
+          doc.selection = null;
+          doc.multiSelectedBodies = [];
+          viewer.rebuildBodies(); renderTree(); renderProps();
+        }
       }
     }
   });
