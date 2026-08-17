@@ -28,6 +28,8 @@ export interface SketchChallenge {
   title: string;
   /** Teacher-facing summary shown in the challenge picker. */
   description: string;
+  /** Student-facing steps shown in the tool's assignment panel (see bridge doc). */
+  studentInstructions: string;
   /** Smallest inch fraction a student must measure to. */
   precision: SketchPrecision;
   /** STEM Sketch doc_json of the reference solid; null = geometry not yet authored. */
@@ -52,6 +54,12 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     title: "Starter Brick",
     description:
       "A 3-inch cube with a staircase cut into it — every dimension is a whole inch. Measure the printed block, draw its three views on paper, then model it exactly.",
+    studentInstructions:
+      "1. Get the printed Starter Brick from your teacher.\n" +
+      "2. Measure it with your ruler — every dimension is a whole inch.\n" +
+      "3. Draw its front, top, and side views on paper first.\n" +
+      "4. Build it here exactly as you measured it.\n" +
+      "5. Click Check My Model — if it matches, hit Submit!",
     precision: "whole",
     refDocJson: refS101,
     stlPath: "/stem-sketch/challenges/s1-01-starter-brick.stl",
@@ -63,6 +71,12 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     title: "Step Block",
     description:
       "A block with one rectangular step, dimensioned to the nearest half inch. Two extrudes — or one sketch with an L profile. (Reference geometry coming soon.)",
+    studentInstructions:
+      "1. Get the printed Step Block from your teacher.\n" +
+      "2. Measure it with your ruler — dimensions go to the nearest half inch.\n" +
+      "3. Draw its front, top, and side views on paper first.\n" +
+      "4. Build it here exactly as you measured it.\n" +
+      "5. Click Check My Model — if it matches, hit Submit!",
     precision: "half",
     refDocJson: null,
     stlPath: null,
@@ -74,6 +88,12 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     title: "Notched Block",
     description:
       "A block with a notch cut from one edge, dimensioned to the nearest quarter inch. First challenge that needs a cut. (Reference geometry coming soon.)",
+    studentInstructions:
+      "1. Get the printed Notched Block from your teacher.\n" +
+      "2. Measure it with your ruler — dimensions go to the nearest quarter inch.\n" +
+      "3. Draw its front, top, and side views on paper first.\n" +
+      "4. Build it here exactly as you measured it.\n" +
+      "5. Click Check My Model — if it matches, hit Submit!",
     precision: "quarter",
     refDocJson: null,
     stlPath: null,

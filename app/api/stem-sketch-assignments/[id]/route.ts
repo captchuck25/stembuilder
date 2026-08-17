@@ -50,6 +50,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       stage: challenge.stage,
       title: challenge.title,
       precision: challenge.precision,
+      studentInstructions: challenge.studentInstructions,
       refDocJson: challenge.refDocJson,
       toleranceMm: challenge.toleranceMm,
     },

@@ -18,11 +18,14 @@ type DemoDesign = {
 type AssignmentInfo = {
   id: string;
   title: string;
+  /** Teacher challenge preview (?challenge=): fit check runs, nothing is recorded. */
+  preview?: boolean;
   challenge: {
     id: string;
     stage: number;
     title: string;
     precision: string;
+    studentInstructions: string;
     refDocJson: object | null;
     toleranceMm: number;
   };
@@ -39,6 +42,8 @@ export default function StemSketchClient() {
   const isDemoMode = !!viewAsStudent && !!(demoDesignId || demoSubmissionId);
   // Student (or teacher trying it) launched from an assignment card.
   const assignmentId = searchParams.get("assignment");
+  // Teacher previewing a challenge BEFORE assigning it (from the picker).
+  const challengeId = searchParams.get("challenge");
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const dirtyRef = useRef(false);
@@ -117,6 +122,28 @@ export default function StemSketchClient() {
     return () => { cancelled = true; };
   }, [assignmentId, isDemoMode]);
 
+  // Teacher challenge preview (?challenge=) — same in-tool experience as an
+  // assignment, but nothing is recorded on submit.
+  useEffect(() => {
+    if (!challengeId || assignmentId || isDemoMode) return;
+    let cancelled = false;
+    fetch(`/api/stem-sketch-challenges/${encodeURIComponent(challengeId)}`)
+      .then(async r => {
+        if (!r.ok) {
+          if (!cancelled) setAssignmentError(`Could not load challenge (status ${r.status})`);
+          return null;
+        }
+        return r.json() as Promise<{ challenge: AssignmentInfo["challenge"] }>;
+      })
+      .then(data => {
+        if (!data || cancelled) return;
+        setAssignment({ id: "", title: data.challenge.title, preview: true, challenge: data.challenge });
+        setAssignmentError(null);
+      })
+      .catch(err => { if (!cancelled) setAssignmentError(err instanceof Error ? err.message : String(err)); });
+    return () => { cancelled = true; };
+  }, [challengeId, assignmentId, isDemoMode]);
+
   const postAssignment = useCallback(() => {
     if (!assignment || !iframeLoadedRef.current) return;
     postToSketch({
@@ -124,6 +151,7 @@ export default function StemSketchClient() {
       assignment: {
         id: assignment.id,
         title: assignment.title,
+        preview: !!assignment.preview,
         challenge: assignment.challenge,
       },
     });
@@ -177,6 +205,10 @@ export default function StemSketchClient() {
       } else if (type === "STEMSKETCH_SUBMIT") {
         // Assignment submission: frozen model snapshot + the in-tool fit-check
         // verdict. Append-only server-side; the iframe shows OK/ERR.
+        if (assignment?.preview) {
+          postToSketch({ type: "STEMSKETCH_SUBMIT_ERR", message: "Preview mode — submissions aren't recorded. Assign the challenge to a class to collect student work." });
+          return;
+        }
         if (!assignmentId || isDemoMode) {
           postToSketch({ type: "STEMSKETCH_SUBMIT_ERR", message: "No assignment is open." });
           return;
@@ -349,21 +381,21 @@ export default function StemSketchClient() {
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [session, postToSketch, postUser, postAssignment, isDemoMode, demoDesign, assignmentId]);
+  }, [session, postToSketch, postUser, postAssignment, isDemoMode, demoDesign, assignmentId, assignment]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
       {/* The former 120px SiteHeader is gone — the SB logo, Home, and account
           menu now live inside the iframe's own single toolbar row (see
           public/stem-sketch/index.html), so the canvas gets the full height. */}
-      {assignmentId && !isDemoMode && (
+      {(assignmentId || challengeId) && !isDemoMode && (
         <div style={{
           background: "#ecfeff", borderBottom: "3px solid #0891b2", color: "#155e75",
           padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
           gap: 16, flexWrap: "wrap", flexShrink: 0,
         }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>
-            ✏️ Assignment: {assignment?.title ?? "loading…"}
+            ✏️ {assignment?.preview ? "Previewing challenge" : "Assignment"}: {assignment?.title ?? "loading…"}
             {assignment && (
               <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: "#0e7490" }}>
                 {assignment.challenge.title}
@@ -434,9 +466,9 @@ export default function StemSketchClient() {
           // to seed the canvas. Skipped in demo mode and when a draft
           // exists (iframe's own restore handles that path).
           if (isDemoMode) return;
-          // Assignment mode: the canvas starts per the iframe's assignment
-          // flow — don't pull in unrelated saved work.
-          if (assignmentId) return;
+          // Assignment/preview mode: the canvas starts per the iframe's
+          // assignment flow — don't pull in unrelated saved work.
+          if (assignmentId || challengeId) return;
           if (!session?.user?.id) return;
           // If the URL specifies a design id (e.g. opened from My Work), load
           // THAT design directly — overrides both the localStorage-draft check

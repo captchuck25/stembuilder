@@ -157,15 +157,20 @@ export default function StemSketchTab({ classId }: { classId: string }) {
               <div style={{ fontSize: 12, color: "#555", background: "#fff", border: "2px solid #cffafe",
                 borderRadius: 10, padding: "10px 14px", lineHeight: 1.5 }}>
                 {selected.description}
-                {selected.stlPath && (
-                  <>
-                    {" "}
+                <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                  <Link href={`/tools/stem-sketch?challenge=${encodeURIComponent(selected.id)}`}
+                    target="_blank"
+                    title="Open this challenge in STEM Sketch to try it yourself before assigning — nothing is recorded"
+                    style={{ color: "#0e7490", fontWeight: 800, textDecoration: "none" }}>
+                    ▶ Try it first
+                  </Link>
+                  {selected.stlPath && (
                     <a href={selected.stlPath} download
                       style={{ color: "#0e7490", fontWeight: 800, textDecoration: "none" }}>
                       ⬇ Download printable STL
                     </a>
-                  </>
-                )}
+                  )}
+                </div>
               </div>
             )}
             <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>

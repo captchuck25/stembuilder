@@ -24,17 +24,25 @@ Sent on iframe `load` and whenever the assignment fetch resolves (and again in
 reply to `STEMSKETCH_REQUEST_ASSIGNMENT`). Entering assignment mode is the
 iframe's cue to start a fresh canvas (no localStorage draft restore into it).
 
+Also sent for TEACHER PREVIEW (`/tools/stem-sketch?challenge=<id>` — the
+"Try it first" link in the picker): identical payload with `preview: true`
+and an empty `id`. The iframe should behave exactly like an assignment
+(instructions panel, locked window, fit check) but hide/disable Submit —
+the shell refuses preview submissions anyway.
+
 ```jsonc
 {
   "type": "STEMSKETCH_ASSIGNMENT",
   "assignment": {
-    "id": "…uuid…",
+    "id": "…uuid…",                  // "" when preview
     "title": "Starter Brick — Period 3",
+    "preview": false,
     "challenge": {
       "id": "s1-01-starter-brick",
       "stage": 1,                    // 1 = replicate, 2 = complete-the-cube (future)
       "title": "Starter Brick",
       "precision": "whole",          // whole | half | quarter | eighth (inch fractions)
+      "studentInstructions": "1. Get the printed block…\n2. Measure it…", // newline-separated steps
       "refDocJson": { /* STEM Sketch doc of the reference solid, or null */ },
       "toleranceMm": 0.5
     }
@@ -83,6 +91,15 @@ be submitted (`passed: false`) — they show as attempts on the teacher roster.
 
 1. **Assignment mode state**: on `STEMSKETCH_ASSIGNMENT`, enter assignment mode —
    fresh canvas, assignment title shown, normal modeling tools available.
+   1. **Locked, assignment-specific window** (user requirement 2026-08-17):
+      the project IS the assignment. Hide/disable **+ New**, **Open** (folder),
+      the cloud design list, and the project-name field (name is fixed to the
+      assignment title — not editable). No loading old drawings into an
+      assignment session and no renaming it.
+   2. **Instructions panel**: a collapsible dropdown (open by default on
+      entry) showing `challenge.studentInstructions` — the "get the printed
+      block from your teacher, measure it, rebuild it, submit" steps — plus
+      the assignment title. Reopenable from the banner/toolbar at any time.
 2. **Reference stays hidden during design**: `refDocJson` must NOT be rendered,
    listed, or measurable while the student designs. The physical printed block
    is the only source of dimensional truth.
