@@ -14236,9 +14236,18 @@ function openFastenerDialog() {
      </label>`
   ).join('');
   const defLen = doc.units === 'in' ? 1 : 25;
+  // Nominal store-buyable lengths (bolt idea phase 3) — pick off the shelf,
+  // or Custom for a 3D-printed one-off.
+  const nominals = doc.units === 'in'
+    ? [[0.5, '½ in'], [0.75, '¾ in'], [1, '1 in'], [1.25, '1¼ in'], [1.5, '1½ in'], [2, '2 in'], [2.5, '2½ in'], [3, '3 in']]
+    : [[10, '10 mm'], [12, '12 mm'], [16, '16 mm'], [20, '20 mm'], [25, '25 mm'], [30, '30 mm'], [40, '40 mm'], [50, '50 mm'], [60, '60 mm'], [80, '80 mm']];
+  const nominalOpts = nominals.map(([v, label]) =>
+    `<option value="${v}"${v === defLen ? ' selected' : ''}>${label}</option>`
+  ).join('') + `<option value="custom">Custom…</option>`;
   openModal({
     title: 'Bolt library',
     body: `<canvas id="fastener-preview" width="230" height="170" style="display:block;margin:0 auto 10px;border-radius:8px;border:1px solid var(--line, #dfe3ec)"></canvas>
+           <div id="fastener-spec-note" style="text-align:center;color:var(--ink-soft);font-size:12px;margin:-4px 0 8px"></div>
            <div class="field">
              <label>Part</label>
              <select id="fastener-part">
@@ -14261,8 +14270,9 @@ function openFastenerDialog() {
              <select id="fastener-size">${sizeOpts}</select>
            </div>
            <div class="field" id="fastener-length-row">
-             <label>Length (${u})</label>
-             <input id="fastener-length" type="number" value="${defLen}" min="0.1" step="0.5"/>
+             <label>Length</label>
+             <select id="fastener-length-sel">${nominalOpts}</select>
+             <input id="fastener-length" type="number" value="${defLen}" min="0.1" step="0.5" style="display:none;margin-top:4px" placeholder="${u}"/>
            </div>
            <div class="field" id="fastener-shank-row">
              <label>Smooth shank (${u}) — 0 = threads the whole way</label>
@@ -14278,22 +14288,57 @@ function openFastenerDialog() {
            </div>
            <div class="hint">The part drops in as a solid — 📌 Place it on a face, then position it. To cut it OUT of a body instead: set its <b>Operation</b> to Negative and <b>Group</b> them. A threaded part cuts real threads; smooth cuts a plain hole; a nut cuts a hex pocket.</div>`,
     custom: () => {
+      // Effective length: the nominal dropdown, or the free input on Custom.
+      const readLenUL = () => {
+        const sel = document.getElementById('fastener-length-sel');
+        if (sel && sel.value !== 'custom') return parseFloat(sel.value);
+        return parseFloat(document.getElementById('fastener-length')?.value);
+      };
       const updatePreview = () => {
         const cv = document.getElementById('fastener-preview');
         if (!cv) return;
-        const lenVal = parseFloat(document.getElementById('fastener-length')?.value);
+        const lenVal = readLenUL();
         const shankVal = parseFloat(document.getElementById('fastener-shank')?.value);
+        const part = document.getElementById('fastener-part')?.value || 'bolt';
+        const thread = document.getElementById('fastener-thread')?.value || 'threaded';
+        const size = document.getElementById('fastener-size')?.value || 'M5';
         renderFastenerPreviewInto(cv, {
           headType: document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex',
-          size: document.getElementById('fastener-size')?.value || 'M5',
+          size,
           length: lenVal > 0 ? fromUnit(lenVal) : null,
           shank: shankVal > 0 ? fromUnit(shankVal) : 0,
           fit: document.getElementById('fastener-fit')?.value || 'normal',
-          part: document.getElementById('fastener-part')?.value || 'bolt',
-          thread: document.getElementById('fastener-thread')?.value || 'threaded',
+          part, thread,
           op: 'add',
         });
+        // "Show me the details" — spec line under the preview.
+        const note = document.getElementById('fastener-spec-note');
+        if (note) {
+          const spec = getFastenerSpec(size);
+          if (part === 'nut') {
+            note.textContent = `${spec.label} nut`;
+          } else {
+            const L = lenVal > 0 ? lenVal : 0;
+            const sh = (thread === 'threaded' && shankVal > 0) ? Math.min(shankVal, L) : 0;
+            const dims = `${spec.label} × ${fmtUL(fromUnit(L))}`;
+            note.textContent = thread === 'smooth'
+              ? `${dims} — smooth (real-hardware stand-in)`
+              : sh > 0
+                ? `${dims} — smooth shank ${fmtUL(fromUnit(sh))} + threads ${fmtUL(fromUnit(Math.max(0, L - sh)))}`
+                : `${dims} — fully threaded`;
+          }
+        }
       };
+      const syncLen = () => {
+        const sel = document.getElementById('fastener-length-sel');
+        const inp = document.getElementById('fastener-length');
+        if (!sel || !inp) return;
+        const isCustom = sel.value === 'custom';
+        inp.style.display = isCustom ? '' : 'none';
+        if (isCustom && !(parseFloat(inp.value) > 0)) inp.value = String(doc.units === 'in' ? 1 : 25);
+      };
+      document.getElementById('fastener-length-sel')?.addEventListener('change', () => { syncLen(); updatePreview(); });
+      syncLen();
       const syncPart = () => {
         const part = document.getElementById('fastener-part')?.value || 'bolt';
         const thread = document.getElementById('fastener-thread')?.value || 'threaded';
@@ -14326,7 +14371,10 @@ function openFastenerDialog() {
     onConfirm: () => {
       const head = document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex';
       const size = $('fastener-size').value;
-      const lenVal = parseFloat($('fastener-length').value);
+      const sel = $('fastener-length-sel');
+      const lenVal = (sel && sel.value !== 'custom')
+        ? parseFloat(sel.value)
+        : parseFloat($('fastener-length').value);
       const len = lenVal > 0 ? fromUnit(lenVal) : null;
       const fit = $('fastener-fit').value || 'tight';
       const shankVal = parseFloat($('fastener-shank')?.value);
