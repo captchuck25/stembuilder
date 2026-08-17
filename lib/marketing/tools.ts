@@ -203,7 +203,7 @@ export const TOOLS: MarketingTool[] = [
         src: "/marketing/code-lab/gallery-3.png",
       },
     ],
-    demoVideo: "Demo video — solving a maze in typed Python (60 sec)",
+    demoVideo: "Demo video — a narrated tour of Code Lab (50 sec)",
     demoVideoSrc: "/marketing/code-lab/demo.mp4",
     seoDescription:
       "Code Lab teaches students to code in the browser — maze puzzles and game design with blocks, then a graduation path to real Python logic and turtle graphics, with teacher progress tracking.",
