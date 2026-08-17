@@ -36,13 +36,24 @@ export default async function WorksheetPage({
     );
   }
 
-  const dotSpacing = challenge.precision === "eighth" ? "0.125in" : "0.25in";
-  const DOTS: React.CSSProperties = {
-    backgroundImage: "radial-gradient(circle, #8f8f8f 1px, transparent 1.5px)",
-    backgroundSize: `${dotSpacing} ${dotSpacing}`,
-    backgroundPosition: "0.02in 0.02in",
-    position: "relative",
-  };
+  // Dot fields are INLINE SVG patterns, not CSS background tiles: backgrounds
+  // get rasterized at screen resolution before printing (tiny black circles
+  // smear into gray), while inline SVG stays vector all the way to the
+  // printer — tiny but SOLID BLACK dots, like real drafting dot-grid paper.
+  // 96 SVG user units = 1in. Spacing: quarter-inch (24u), eighth for
+  // eighth-precision challenges (12u). r=0.8u ≈ 0.42 mm dot diameter.
+  const dotStep = challenge.precision === "eighth" ? 12 : 24;
+  const DotField = ({ id }: { id: string }) => (
+    <svg width="100%" height="100%" style={{ display: "block", position: "absolute", inset: 0 }}>
+      <defs>
+        <pattern id={id} patternUnits="userSpaceOnUse" width={dotStep} height={dotStep}>
+          <circle cx={dotStep / 2} cy={dotStep / 2} r="0.8" fill="#000" />
+        </pattern>
+      </defs>
+      <rect width="100%" height="100%" fill={`url(#${id})`} />
+    </svg>
+  );
+  const DOTS: React.CSSProperties = { position: "relative" };
   const FIELD_LABEL: React.CSSProperties = {
     position: "absolute", top: "-0.22in", left: 0,
     fontSize: "8pt", fontWeight: 800, letterSpacing: "0.6px",
@@ -81,6 +92,7 @@ export default async function WorksheetPage({
           width: "11in", height: "8.5in", margin: "0 auto 30px", background: "#fff",
           boxShadow: "0 6px 30px rgba(0,0,0,0.25)", padding: "0.3in",
           boxSizing: "border-box", color: "#333",
+          WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
         }}>
         {/* Single continuous border around the whole sheet */}
         <div style={{
@@ -96,9 +108,11 @@ export default async function WorksheetPage({
             {/* TOP view field */}
             <div style={DOTS}>
               <span style={FIELD_LABEL}>Top view</span>
+              <DotField id="dots-top" />
             </div>
-            {/* 3D visual fills the top-right void — zoomed so the block itself
-                reads large (the source renders carry a lot of whitespace). */}
+            {/* 3D visual fills the top-right void. The capture thumbnails are
+                already framed tight (home view, user-zoomed at save time), so
+                contain — never crop or clip the block. */}
             <div style={{ overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
               {challenge.imagePath && (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -106,8 +120,7 @@ export default async function WorksheetPage({
                   src={challenge.imagePath}
                   alt={`${challenge.title} reference`}
                   style={{
-                    width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 58%",
-                    transform: "scale(1.55)",
+                    width: "100%", height: "100%", objectFit: "contain", objectPosition: "center",
                     filter: "grayscale(1) brightness(1.08)",
                   }}
                 />
@@ -116,10 +129,12 @@ export default async function WorksheetPage({
             {/* FRONT view field */}
             <div style={DOTS}>
               <span style={FIELD_LABEL}>Front view — the face with the word FRONT</span>
+              <DotField id="dots-front" />
             </div>
             {/* RIGHT SIDE view field */}
             <div style={DOTS}>
               <span style={FIELD_LABEL}>Right side view</span>
+              <DotField id="dots-right" />
             </div>
           </div>
 
