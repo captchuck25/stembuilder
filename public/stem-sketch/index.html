@@ -328,6 +328,51 @@
     border-color: rgba(46, 204, 113, 0.7);
     animation: cloud-save-pop 0.45s ease-out;
   }
+  /* ── Assignment mode (platform assignments) ───────────────────────────────
+     The floating steps panel + the full-screen fit-check overlay. The overlay
+     is position:fixed over EVERYTHING, which is what makes check mode "locked":
+     no toolbar button, tree node, or canvas click can be reached under it. */
+  .assignment-panel {
+    position: absolute; top: 12px; left: 12px; z-index: 60; width: 300px;
+    background: #fff; border: 2px solid #0891b2; border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(2, 60, 80, 0.18); font-size: 13px; overflow: hidden;
+  }
+  .assignment-panel .ap-head {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+    background: #ecfeff; cursor: pointer; user-select: none;
+  }
+  .assignment-panel .ap-title { font-weight: 800; color: #155e75; flex: 1; font-size: 13px; }
+  .assignment-panel .ap-toggle { border: none; background: none; font-size: 14px; cursor: pointer; color: #155e75; }
+  .assignment-panel.collapsed .ap-body { display: none; }
+  .assignment-panel .ap-body { padding: 10px 12px; }
+  .assignment-panel .ap-step { margin: 0 0 6px; color: #333c4d; line-height: 1.4; }
+  .assignment-panel .ap-check {
+    display: block; width: 100%; margin-top: 8px; padding: 9px 0; border: none;
+    border-radius: 9px; background: #0891b2; color: #fff; font-weight: 800;
+    font-size: 13px; cursor: pointer;
+  }
+  .assignment-panel .ap-check:hover { background: #0e7490; }
+  .assignment-panel .ap-preview-note { margin-top: 8px; font-size: 11px; font-weight: 700; color: #b45309; }
+  .assign-check-overlay {
+    position: fixed; inset: 0; z-index: 4000; background: rgba(15, 23, 42, 0.62);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .assign-check-card {
+    background: #fff; border-radius: 16px; padding: 26px 30px;
+    width: min(440px, 92vw); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+    text-align: center; font-size: 14px; color: #1f2937;
+  }
+  .assign-check-card .acc-big { font-size: 44px; margin-bottom: 6px; }
+  .assign-check-card .acc-title { font-size: 19px; font-weight: 900; margin-bottom: 8px; }
+  .assign-check-card .acc-detail { font-size: 13px; color: #556; line-height: 1.5; margin-bottom: 16px; }
+  .assign-check-card .acc-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .assign-check-card button {
+    padding: 10px 18px; border-radius: 10px; font-weight: 800; font-size: 13px; cursor: pointer;
+  }
+  .assign-check-card .acc-back { border: 2px solid #cbd5e1; background: #fff; color: #334155; }
+  .assign-check-card .acc-submit { border: none; background: #16a34a; color: #fff; }
+  .assign-check-card .acc-submit:disabled { background: #86efac; cursor: default; }
+
   #cloud-save-btn.failed {
     background: rgba(229, 62, 62, 0.20);
     color: #c0392b;
@@ -11104,6 +11149,11 @@ let _autosaveTimer = null;
 function flushAutosave() {
   clearTimeout(_autosaveTimer);
   _autosaveTimer = null;
+  // ASSIGNMENT MODE: never write the personal draft. The assignment session
+  // is its own world (work leaves via STEMSKETCH_SUBMIT) — writing here
+  // would clobber the student's own in-progress design draft with
+  // assignment scratch work.
+  if (window.__assignment) return;
   // Same guard as cloudSave's pre-save validation: refuse to autosave a
   // corrupt state (orphan threadShells, top-level group with no rebuildable
   // geometry). Without this, the cloud save validation could block but the
@@ -13714,6 +13764,7 @@ function deleteMaterialisedThreadMark(mark, opts = {}) {
   delete mark._nutBodyId;
   delete mark._holeBodyId;
   delete mark._farHoleBodyIds;
+  delete mark._pivotFarTopIds;
   delete mark._threadShellBodyId;
   delete mark._mergedShellInBodyId;
   delete mark._settings;
@@ -13933,6 +13984,39 @@ function returnBoltToItsMark(body) {
   return true;
 }
 
+// Scan for OTHER bodies along a bolt axis. A bolt seated in through-holes
+// has open air on its exact axis, so besides the center ray we probe a
+// ring of rays offset just PAST the bore radius — where the surrounding
+// material actually is (issues1201: the post-cut axis ray found nothing).
+function _bodiesAlongBoltAxis(origin, axisDir, range, excludeId, radialOffset) {
+  const seed = Math.abs(axisDir.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const u = new THREE.Vector3().crossVectors(axisDir, seed).normalize();
+  const v = new THREE.Vector3().crossVectors(axisDir, u).normalize();
+  const offsets = [[0, 0]];
+  if (radialOffset > 0) {
+    offsets.push([radialOffset, 0], [-radialOffset, 0], [0, radialOffset], [0, -radialOffset]);
+  }
+  const found = new Map(); // body id -> nearest hit distance
+  for (const [du, dv] of offsets) {
+    const o = origin.clone()
+      .add(u.clone().multiplyScalar(du))
+      .add(v.clone().multiplyScalar(dv));
+    const rc = new THREE.Raycaster(o, axisDir, 0, range);
+    for (const b of doc.bodies) {
+      if (b.id === excludeId || !b.mesh || b.hidden) continue;
+      if (b.type === 'fastener' || b.type === 'threadShell' || b.type === 'baked') continue;
+      const hits = rc.intersectObject(b.mesh, true);
+      if (hits.length) {
+        const d = hits[0].distance;
+        if (!(found.has(b.id)) || d < found.get(b.id)) found.set(b.id, d);
+      }
+    }
+  }
+  return [...found.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .map(([id, d]) => ({ b: doc.bodies.find(x => x.id === id), d }));
+}
+
 // BOLT-AS-JOINT (bolt idea phase 4): after a hole with a smooth bearing is
 // cut, the bolt's axis can BE the pivot. Base = the part the mark's sketch
 // is on (the head side); swinger = the first other part the axis passes
@@ -13946,14 +14030,20 @@ function _createBoltJointForMark(sketch, mark, opts) {
   if (!A?.body) { showHint('🔗 Pivot not created — could not resolve the bolt hole.'); return; }
   if (viewer) viewer.scene.updateMatrixWorld(true);
   const axis = A.n.clone().negate(); // into the assembly
-  const rc = new THREE.Raycaster(
-    A.P.clone().add(axis.clone().multiplyScalar(-2)), axis, 0, (opts.depth || 20) + 42);
-  let far = null, farDist = Infinity;
-  for (const b of doc.bodies) {
-    if (b.id === A.body.id || !b.mesh || b.hidden) continue;
-    if (b.type === 'fastener' || b.type === 'threadShell' || b.type === 'baked') continue;
-    const hits = rc.intersectObject(b.mesh, true);
-    if (hits.length && hits[0].distance < farDist) { farDist = hits[0].distance; far = b; }
+  // First choice: the far part recorded when its hole was cut (exact —
+  // pre-cut detection, immune to the axis now being open air).
+  let far = null;
+  for (const fid of (mark._pivotFarTopIds || [])) {
+    const b = doc.bodies.find(x => x.id === fid);
+    if (b && b.id !== A.body.id && b.mesh) { far = b; break; }
+  }
+  if (!far) {
+    const spec = getFastenerSpec(opts.size);
+    const ring = (spec ? spec.d / 2 : 3) + 1.5;
+    const along = _bodiesAlongBoltAxis(
+      A.P.clone().add(axis.clone().multiplyScalar(-2)), axis,
+      (opts.depth || 20) + 42, A.body.id, ring);
+    far = along.length ? along[0].b : null;
   }
   if (!far) {
     showHint('🔗 No second part found on the bolt axis — pivot not created. Line the parts up on the bolt and re-cut, or add a Joint by hand.');
@@ -14003,16 +14093,11 @@ function makeInstalledBoltAPivot(body) {
   const spec = getFastenerSpec(body.size);
   const L = body.length || (spec ? spec.d * 4 : 20);
   const headPos = tip.clone().add(up.clone().multiplyScalar(L));
-  const rc = new THREE.Raycaster(
-    headPos.clone().add(up.clone().multiplyScalar(2)), up.clone().negate(), 0, L + 6);
-  const hits = [];
-  for (const b of doc.bodies) {
-    if (b.id === body.id || !b.mesh || b.hidden) continue;
-    if (b.type === 'fastener' || b.type === 'threadShell' || b.type === 'baked') continue;
-    const hs = rc.intersectObject(b.mesh, true);
-    if (hs.length) hits.push({ b, d: hs[0].distance });
-  }
-  hits.sort((x, y) => x.d - y.d);
+  // Ring-offset scan: a bolt seated in through-holes has open air on its
+  // exact axis — probe just past the bore radius where the material is.
+  const ring = (spec ? spec.d / 2 : 3) + 1.5;
+  const hits = _bodiesAlongBoltAxis(
+    headPos.clone().add(up.clone().multiplyScalar(2)), up.clone().negate(), L + 6, body.id, ring);
   if (hits.length < 2) {
     showHint('🔗 The bolt needs to pass through TWO parts to become a pivot — seat it through both, then try again.');
     return;
@@ -14199,6 +14284,14 @@ function processThreadMarks(sketch, marks, opts) {
           console.warn(`Far-body hole failed to group (CSG) for mark ${m.id} into body ${fb.id}.`);
         } else {
           m._farHoleBodyIds.push(farHole.id);
+          // Remember which TOP-LEVEL body owns this far cut. The pivot hook
+          // needs it: after a through-cut, the bolt axis is open air, so
+          // raycasting down the bore post-cut finds nothing (issues1201).
+          const owner = doc.bodies.find(g =>
+            (g.type === 'group' || g.type === 'combined') &&
+            g.children?.some(c => c.id === farHole.id));
+          m._pivotFarTopIds = m._pivotFarTopIds || [];
+          m._pivotFarTopIds.push((owner || fb).id);
         }
       }
     }
@@ -20588,6 +20681,386 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 
+// ---------- 8. Assignment mode ----------
+// Contract: docs/STEM_SKETCH_ASSIGNMENTS_BRIDGE.md. The wrapper posts
+// STEMSKETCH_ASSIGNMENT (assignment/preview payload with the challenge's
+// reference doc); this iframe becomes a locked, assignment-specific window:
+// fresh canvas, no New/Open/rename, steps panel, and a Manifold fit check
+// that compares the student's model against the (never-shown) reference.
+window.__assignment = null;   // active payload; null = normal session
+let _assignRefCache = null;   // { challengeId, geo, volume, box } — world-baked reference solid
+let _assignLastCheck = null;  // last fit result (drives the Submit button)
+
+function _apEsc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, ch =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function enterAssignmentMode(a) {
+  if (!a || !a.challenge) return;
+  const same = window.__assignment &&
+    window.__assignment.id === a.id &&
+    window.__assignment.challenge?.id === a.challenge.id;
+  window.__assignment = a;
+  // The shell re-posts on iframe load AND when its fetch resolves — a repeat
+  // for the same assignment must not wipe work in progress.
+  if (same) { _renderAssignmentPanel(); return; }
+  _assignRefCache = null;
+  _assignLastCheck = null;
+  // Fresh canvas — same reset as startNewDesign but with NO confirm, NO
+  // draft clearing (the student's own draft survives; flushAutosave is
+  // suppressed for the whole session), and NO undo back into prior work
+  // (the undo stack is emptied so Ctrl+Z can't smuggle an old design in).
+  doc.sketches = []; doc.activeSketchId = null; doc.nextSketchId = 1;
+  doc.bodies = []; doc.nextBodyId = 1;
+  doc.selection = null; doc.multiSelectedSketch = []; doc.multiSelectedBodies = [];
+  doc.selectedRegions = []; doc.joints = []; doc.nextJointId = 1;
+  undoStack.length = 0; redoStack.length = 0;
+  updateUndoRedoButtons();
+  setDirty(false);
+  // The window IS the assignment: name pinned, no new/open/save-elsewhere.
+  const nameInp = document.getElementById('project-filename');
+  if (nameInp) { nameInp.value = a.title || a.challenge.title || 'Assignment'; nameInp.disabled = true; }
+  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  if (viewer) {
+    viewer.rebuildBodies();
+    viewer.updateSketchOverlay && viewer.updateSketchOverlay();
+    viewer.updateRegions && viewer.updateRegions();
+    viewer.updateExtrudeGizmo && viewer.updateExtrudeGizmo();
+    viewer.updateGizmo && viewer.updateGizmo();
+  }
+  if (sketchEng) sketchEng.render();
+  renderTree(); renderProps();
+  setMode('3d');
+  _renderAssignmentPanel();
+  setStatus(a.preview
+    ? `Previewing challenge: ${a.challenge.title} — nothing is recorded`
+    : `Assignment: ${a.title || a.challenge.title} — read the steps, then build!`);
+}
+
+function _renderAssignmentPanel() {
+  const a = window.__assignment;
+  if (!a) return;
+  let panel = document.getElementById('assignment-panel');
+  const host = document.querySelector('.canvas-area') || document.body;
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'assignment-panel';
+    panel.className = 'assignment-panel';
+    host.appendChild(panel);
+  }
+  const steps = String(a.challenge.studentInstructions || '')
+    .split('\n').map(s => s.trim()).filter(Boolean);
+  panel.innerHTML = `
+    <div class="ap-head" id="ap-head" title="Show / hide the steps">
+      <span class="ap-title">📋 ${a.preview ? 'Challenge preview' : 'Assignment'}: ${_apEsc(a.title || a.challenge.title)}</span>
+      <button class="ap-toggle" id="ap-toggle">▾</button>
+    </div>
+    <div class="ap-body" id="ap-body">
+      ${steps.map(s => `<div class="ap-step">${_apEsc(s)}</div>`).join('')}
+      <button class="ap-check" id="ap-check">📐 Check My Model</button>
+      ${a.preview ? '<div class="ap-preview-note">Teacher preview — submissions are not recorded.</div>' : ''}
+    </div>`;
+  document.getElementById('ap-head').onclick = () => panel.classList.toggle('collapsed');
+  const check = document.getElementById('ap-check');
+  check.onclick = (ev) => { ev.stopPropagation(); runAssignmentCheck(); };
+}
+
+// ── Fit check ────────────────────────────────────────────────────────────────
+
+// Signed-tetrahedron volume of a world-space BufferGeometry (mm³).
+function _geoVolume(geo) {
+  const pos = geo.attributes.position;
+  if (!pos) return 0;
+  const idx = geo.index;
+  const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+  const x = new THREE.Vector3();
+  let six = 0;
+  const tri = (i, j, k) => {
+    va.fromBufferAttribute(pos, i);
+    vb.fromBufferAttribute(pos, j);
+    vc.fromBufferAttribute(pos, k);
+    six += va.dot(x.crossVectors(vb, vc));
+  };
+  if (idx) { for (let i = 0; i < idx.count; i += 3) tri(idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)); }
+  else { for (let i = 0; i < pos.count; i += 3) tri(i, i + 1, i + 2); }
+  return Math.abs(six / 6);
+}
+
+function _manVolume(man) {
+  try { if (typeof man.volume === 'function') return Math.abs(man.volume()); } catch (_) {}
+  try {
+    const p = man.getProperties?.();
+    if (p && typeof p.volume === 'number') return Math.abs(p.volume);
+  } catch (_) {}
+  const m = _manifoldToMesh(man);
+  const v = _geoVolume(m.geometry);
+  m.geometry.dispose();
+  return v;
+}
+
+// The 24 axis-aligned orientations (proper rotations only): every way the
+// student could have modeled the block "turned" relative to the reference.
+function _axisOrientations() {
+  const dirs = [
+    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+  ];
+  const out = [];
+  for (const xd of dirs) {
+    for (const yd of dirs) {
+      if (Math.abs(xd[0] * yd[0] + xd[1] * yd[1] + xd[2] * yd[2]) > 1e-9) continue; // not orthogonal
+      const zd = [
+        xd[1] * yd[2] - xd[2] * yd[1],
+        xd[2] * yd[0] - xd[0] * yd[2],
+        xd[0] * yd[1] - xd[1] * yd[0],
+      ];
+      const m = new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(...xd), new THREE.Vector3(...yd), new THREE.Vector3(...zd));
+      out.push(m);
+    }
+  }
+  return out; // 6 × 4 = 24
+}
+
+// Build (and cache) the reference solid from the challenge's refDocJson:
+// world-baked, all positive top-level bodies unioned into one geometry.
+// The reference is NEVER added to doc/scene — students can't see or measure it.
+function _ensureAssignRef(a) {
+  if (_assignRefCache && _assignRefCache.challengeId === a.challenge.id) return _assignRefCache;
+  const refDoc = a.challenge.refDocJson;
+  if (!refDoc || !Array.isArray(refDoc.bodies)) throw new Error('reference doc missing bodies');
+  const bodies = JSON.parse(JSON.stringify(refDoc.bodies))
+    .filter(b => b.op !== 'subtract' && !b.hidden);
+  if (!bodies.length) throw new Error('reference doc has no solid bodies');
+  let man = null;
+  const scratch = [];
+  try {
+    for (const b of bodies) {
+      if ((b.type === 'group' || b.type === 'combined') &&
+          !(b.geometry instanceof THREE.BufferGeometry)) {
+        if (!_ensureGroupGeometry(b)) throw new Error(`could not rebuild reference body id=${b.id}`);
+      }
+      const mesh = buildBodyMesh(b);
+      if (!mesh) continue;
+      mesh.updateMatrixWorld(true);
+      const m = _geoToManifoldRepaired(mesh);
+      scratch.push(m);
+      if (!man) { man = m; }
+      else { const u = man.add(m); scratch.push(u); man = u; }
+    }
+    if (!man) throw new Error('reference produced no geometry');
+    const refMesh = _manifoldToMesh(man);
+    const geo = refMesh.geometry;
+    geo.computeBoundingBox();
+    _assignRefCache = {
+      challengeId: a.challenge.id,
+      geo,
+      volume: _geoVolume(geo),
+      box: geo.boundingBox.clone(),
+    };
+    return _assignRefCache;
+  } finally {
+    for (const s of scratch) { try { s.delete(); } catch (_) {} }
+  }
+}
+
+function _computeFit(a) {
+  const ref = _ensureAssignRef(a);
+  // Student solid: every visible positive body, unioned world-space.
+  if (viewer) viewer.rebuildBodies();
+  const stuBodies = doc.bodies.filter(b => b.op !== 'subtract' && !b.hidden && b.mesh);
+  if (!stuBodies.length) throw new Error('NOTHING_TO_CHECK');
+  let stuGeo = null;
+  {
+    let man = null;
+    const scratch = [];
+    try {
+      for (const b of stuBodies) {
+        const m = _geoToManifoldRepaired(b.mesh);
+        scratch.push(m);
+        if (!man) { man = m; }
+        else { const u = man.add(m); scratch.push(u); man = u; }
+      }
+      const mesh = _manifoldToMesh(man);
+      stuGeo = mesh.geometry;
+    } finally {
+      for (const s of scratch) { try { s.delete(); } catch (_) {} }
+    }
+  }
+  stuGeo.computeBoundingBox();
+  const stuVol = _geoVolume(stuGeo);
+  const stuBox = stuGeo.boundingBox.clone();
+  const cs = stuBox.getCenter(new THREE.Vector3());
+  const cr = ref.box.getCenter(new THREE.Vector3());
+  const refDims = ref.box.getSize(new THREE.Vector3());
+
+  // Pass threshold: dimensions are quantized to 1/8" (3.175 mm), so a real
+  // student error produces ≥ hundreds of mm³ of mismatch on even the smallest
+  // half-inch feature (12.7 × 12.7 × 3.175 ≈ 512 mm³), while a correct model
+  // — students type exact values — lands at ~0 after orientation snap. The
+  // 0.2%-of-volume band (floor 25 mm³) sits comfortably between the two.
+  const volTol = Math.max(25, ref.volume * 0.002);
+
+  // Try the student solid in each axis orientation, bbox-center-aligned to
+  // the reference; orientations whose bounding box can't match are tried
+  // last. Score = missing + extra volume; best orientation wins.
+  const candidates = _axisOrientations().map(R => {
+    const g = stuGeo.clone();
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(-cs.x, -cs.y, -cs.z));
+    g.applyMatrix4(R);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(cr.x, cr.y, cr.z));
+    g.computeBoundingBox();
+    const d = g.boundingBox.getSize(new THREE.Vector3());
+    const mismatch = Math.abs(d.x - refDims.x) + Math.abs(d.y - refDims.y) + Math.abs(d.z - refDims.z);
+    return { g, mismatch };
+  }).sort((p, q) => p.mismatch - q.mismatch);
+
+  let best = null;
+  const MAX_TRIES = 8; // bbox sort puts plausible orientations first
+  const refWrap = new THREE.Mesh(ref.geo.clone());
+  let refMan = null;
+  try {
+    refMan = _geoToManifoldRepaired(refWrap);
+    for (let i = 0; i < Math.min(MAX_TRIES, candidates.length); i++) {
+      const cand = candidates[i];
+      let cMan = null, missing = null, extra = null;
+      try {
+        cMan = _geoToManifoldRepaired(new THREE.Mesh(cand.g));
+        missing = refMan.subtract(cMan);
+        extra = cMan.subtract(refMan);
+        const missVol = _manVolume(missing);
+        const extraVol = _manVolume(extra);
+        const score = missVol + extraVol;
+        if (!best || score < best.score) best = { score, missVol, extraVol };
+        if (score <= volTol) break; // found a fit — stop early
+      } catch (err) {
+        console.warn('Fit-check orientation failed:', err?.message || err);
+      } finally {
+        for (const s of [cMan, missing, extra]) { try { s && s.delete(); } catch (_) {} }
+      }
+    }
+  } finally {
+    try { refMan && refMan.delete(); } catch (_) {}
+    refWrap.geometry.dispose();
+  }
+  for (const c of candidates) c.g.dispose();
+  stuGeo.dispose();
+  if (!best) throw new Error('fit check could not evaluate any orientation');
+
+  const passed = best.score <= volTol;
+  const matchPct = ref.volume > 0 ? Math.max(0, 100 * (1 - best.score / ref.volume)) : 0;
+  return {
+    passed,
+    matchPct,
+    metrics: {
+      refVolumeMm3: Math.round(ref.volume),
+      studentVolumeMm3: Math.round(stuVol),
+      missingVolumeMm3: Math.round(best.missVol),
+      extraVolumeMm3: Math.round(best.extraVol),
+      thresholdMm3: Math.round(volTol),
+      toleranceMm: a.challenge.toleranceMm ?? 0.5,
+    },
+  };
+}
+
+// ── Check overlay (locked mode) ─────────────────────────────────────────────
+
+function _openCheckOverlay(html) {
+  let ov = document.getElementById('assign-check-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'assign-check-overlay';
+    ov.className = 'assign-check-overlay';
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `<div class="assign-check-card">${html}</div>`;
+  return ov;
+}
+
+function _closeCheckOverlay() {
+  document.getElementById('assign-check-overlay')?.remove();
+}
+
+function runAssignmentCheck() {
+  const a = window.__assignment;
+  if (!a) return;
+  if (!a.challenge.refDocJson) {
+    showHint("This challenge's reference shape isn't installed yet — ask your teacher to check the assignment.");
+    return;
+  }
+  if (!doc.bodies.some(b => b.op !== 'subtract' && !b.hidden)) {
+    showHint('Nothing to check yet — build your model first (add a shape or extrude a sketch).');
+    return;
+  }
+  whenBooleanEngineReady(() => {
+    if (!window.__manifold) {
+      showHint('The precise engine is still loading — try again in a moment.');
+      return;
+    }
+    // Overlay first: from here until "Back to design", every tool is locked.
+    _openCheckOverlay(`
+      <div class="acc-big">📐</div>
+      <div class="acc-title">Checking your model…</div>
+      <div class="acc-detail">Comparing it with the real block, every direction it could be turned.</div>`);
+    setTimeout(() => {
+      let res;
+      try {
+        res = _computeFit(a);
+      } catch (err) {
+        console.error('Assignment fit check failed:', err);
+        _openCheckOverlay(`
+          <div class="acc-big">⚠️</div>
+          <div class="acc-title">Couldn't finish the check</div>
+          <div class="acc-detail">${_apEsc(err?.message === 'NOTHING_TO_CHECK'
+            ? 'Nothing to check yet — build your model first.'
+            : 'Something went wrong comparing the shapes. Go back and try again.')}</div>
+          <div class="acc-buttons"><button class="acc-back" onclick="_closeCheckOverlay()">← Back to design</button></div>`);
+        return;
+      }
+      _assignLastCheck = res;
+      const inCubed = (mm3) => (mm3 / 16387.064).toFixed(2);
+      const detail = res.passed
+        ? `Your model matches the block — ${res.matchPct.toFixed(1)}% match.`
+        : `${res.matchPct.toFixed(1)}% match so far. Missing material: ${inCubed(res.metrics.missingVolumeMm3)} in³ · extra material: ${inCubed(res.metrics.extraVolumeMm3)} in³.<br/>Grab the block and re-check your measurements — then fix the model and try again.`;
+      const submitBtn = a.preview
+        ? ''
+        : `<button class="acc-submit" id="acc-submit">${res.passed ? '📨 Submit to your teacher' : '📨 Submit anyway'}</button>`;
+      _openCheckOverlay(`
+        <div class="acc-big">${res.passed ? '🎉' : '🔍'}</div>
+        <div class="acc-title">${res.passed ? 'It fits!' : 'Not yet…'}</div>
+        <div class="acc-detail">${detail}</div>
+        <div class="acc-buttons">
+          <button class="acc-back" onclick="_closeCheckOverlay()">← Back to design</button>
+          ${submitBtn}
+        </div>`);
+      const sb = document.getElementById('acc-submit');
+      if (sb) sb.onclick = submitAssignment;
+    }, 30);
+  });
+}
+
+async function submitAssignment() {
+  const a = window.__assignment, res = _assignLastCheck;
+  if (!a || !res || a.preview) return;
+  const sb = document.getElementById('acc-submit');
+  if (sb) { sb.disabled = true; sb.textContent = 'Sending…'; }
+  try {
+    if (viewer) viewer.rebuildBodies();
+    const thumbnail = await captureThumbnailAsync();
+    const docJson = snapshotDoc();
+    const docJsonGz = await gzipJsonToBase64(docJson);
+    const base = { type: 'STEMSKETCH_SUBMIT', units: doc.units, thumbnail, passed: res.passed, metrics: res.metrics };
+    notifyParent(docJsonGz ? { ...base, docJsonGz } : { ...base, docJson });
+  } catch (err) {
+    console.error('Assignment submit failed:', err);
+    if (sb) { sb.disabled = false; sb.textContent = '📨 Try submitting again'; }
+    setStatus('⚠ Could not send your submission — try again.');
+  }
+}
+
 window.addEventListener('message', (e) => {
   const data = e.data || {};
   if (data.type === 'STEMSKETCH_LOAD') {
@@ -20626,6 +21099,16 @@ window.addEventListener('message', (e) => {
     cloudSaveFlash(false, data.message);
   } else if (data.type === 'STEMSKETCH_USER') {
     applyUser(data.user);
+  } else if (data.type === 'STEMSKETCH_ASSIGNMENT') {
+    enterAssignmentMode(data.assignment);
+  } else if (data.type === 'STEMSKETCH_SUBMIT_OK') {
+    const sb = document.getElementById('acc-submit');
+    if (sb) { sb.disabled = true; sb.textContent = '✓ Submitted!'; }
+    setStatus('✓ Submitted — your teacher can see it now.');
+  } else if (data.type === 'STEMSKETCH_SUBMIT_ERR') {
+    const sb = document.getElementById('acc-submit');
+    if (sb) { sb.disabled = false; sb.textContent = '📨 Try submitting again'; }
+    setStatus('⚠ Submit failed: ' + (data.message || 'unknown error'));
   }
 });
 
@@ -20667,6 +21150,9 @@ function initUserMenu() {
   // Ask the wrapper for the current session (covers the case where the parent
   // posted STEMSKETCH_USER before this iframe finished wiring up).
   notifyParent({ type: 'STEMSKETCH_REQUEST_USER' });
+  // Same handshake for assignment mode — harmless when no assignment is open
+  // (the wrapper simply doesn't reply).
+  notifyParent({ type: 'STEMSKETCH_REQUEST_ASSIGNMENT' });
 }
 
 // ---------- Auto-dimension ----------
@@ -21625,7 +22111,12 @@ function init() {
   // geometry rebuilds on csg.js and bake membranes/slivers into the design.
   whenBooleanEngineReady(() => {
     try {
-      if (restoreLocalDraft()) setDirty(true);
+      // Assignment mode wins over the draft: if the wrapper has already
+      // posted STEMSKETCH_ASSIGNMENT by the time the engine is ready, the
+      // fresh locked canvas must NOT be replaced by last session's work
+      // (this exact bug — "bolt idea" restored under an assignment banner —
+      // is what shipped the guard).
+      if (!window.__assignment && restoreLocalDraft()) setDirty(true);
     } catch (err) { console.warn('Local draft restore failed:', err); }
   });
 
