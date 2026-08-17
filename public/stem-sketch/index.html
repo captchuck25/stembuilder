@@ -13266,6 +13266,10 @@ function boltHoleMenuHTML(p, seed) {
            <label class="field" id="${p}-nut-row" style="display:none;margin-top:6px">
              <input type="checkbox" id="${p}-nut"${curNut ? ' checked' : ''}/>
              <span>Show matching nut at the far end</span>
+           </label>
+           <label class="field" id="${p}-joint-row" style="display:none;margin-top:6px;padding:8px;background:var(--panel-2, #f3f5fa);border-radius:8px">
+             <input type="checkbox" id="${p}-joint"${seed.makeJoint ? ' checked' : ''}/>
+             <span>🔗 <b>Make this bolt a pivot</b> — the far part it passes through swings on this one</span>
            </label>`;
 }
 
@@ -13290,6 +13294,10 @@ function readBoltHoleMenu(p) {
     nutPocket,
     nutWasher: nutPocket && !!$(p + '-nutwasher')?.checked,
     headSeat: $(p + '-seat')?.value || 'rest',
+    // Pivot needs a smooth bearing: a clearance bore, or a threaded hole
+    // with a smooth shank section.
+    makeJoint: !!$(p + '-joint')?.checked &&
+      (isClr || (shankVal > 0)),
   };
 }
 
@@ -13305,16 +13313,13 @@ function wireBoltHoleMenu(p) {
     const o = readBoltHoleMenu(p);
     // Preview the actual fastener pair the hole accepts (the user asked
     // for "a visual of the actual bolt"), not the red cutter void.
-    renderFastenerPreviewInto(cv, {
+    drawFastener2DInto(cv, {
       headType: o.boltHead,
       size: o.size,
       length: o.depth > 0 ? o.depth : null,
       shank: o.shank || 0,
-      fit: o.fit,
       part: o.nutPocket ? 'both' : 'bolt',
       thread: o.holeType === 'clearance' ? 'smooth' : 'threaded',
-      op: 'add',
-      _dims: true,
     });
     // Plain-words readout of what this hole is, mirroring the library's
     // spec line — lengths are the thing users struggle to read off a render.
@@ -13339,6 +13344,12 @@ function wireBoltHoleMenu(p) {
     if (nrow) nrow.style.display = isClr ? '' : 'none';
     const shrow = $(p + '-shank-row');
     if (shrow) shrow.style.display = isClr ? 'none' : '';
+    // Pivot offer: clearance hole, or threaded hole with a smooth shank.
+    const jrow = $(p + '-joint-row');
+    if (jrow) {
+      const shankVal = parseFloat($(p + '-shank')?.value);
+      jrow.style.display = (isClr || shankVal > 0) ? '' : 'none';
+    }
   };
   const syncSeat = () => {
     // Tapered machine-screw heads can only sit flush — force recess.
@@ -13360,7 +13371,7 @@ function wireBoltHoleMenu(p) {
     document.querySelectorAll(`input[name="${p}-head"]`).forEach(r => { r.disabled = !headNeeded; });
   };
   const onAny = () => { syncType(); syncSeat(); syncBolt(); updatePreview(); };
-  for (const el of [typeSel, partSel, seatSel, boltCb, $(p + '-nut'), $(p + '-nutwasher'), $(p + '-size'), $(p + '-fit')]) {
+  for (const el of [typeSel, partSel, seatSel, boltCb, $(p + '-nut'), $(p + '-nutwasher'), $(p + '-size'), $(p + '-fit'), $(p + '-joint')]) {
     el?.addEventListener('change', onAny);
   }
   $(p + '-depth')?.addEventListener('input', onAny);
@@ -13875,6 +13886,62 @@ function returnBoltToItsMark(body) {
   return true;
 }
 
+// BOLT-AS-JOINT (bolt idea phase 4): after a hole with a smooth bearing is
+// cut, the bolt's axis can BE the pivot. Base = the part the mark's sketch
+// is on (the head side); swinger = the first other part the axis passes
+// through. The far part gets a hidden auto pivot sketch whose plane sits
+// at the SAME world point with the opposite normal, so creating the joint
+// moves nothing — the parts are already assembled around the bolt.
+function _createBoltJointForMark(sketch, mark, opts) {
+  // Re-cutting an existing hole must not stack a second joint on the mark.
+  if ((doc.joints || []).some(j => j.a?.sketchId === sketch.id && j.a?.markId === mark.id)) return;
+  const A = _resolveJointAnchor({ sketchId: sketch.id, markId: mark.id });
+  if (!A?.body) { showHint('🔗 Pivot not created — could not resolve the bolt hole.'); return; }
+  if (viewer) viewer.scene.updateMatrixWorld(true);
+  const axis = A.n.clone().negate(); // into the assembly
+  const rc = new THREE.Raycaster(
+    A.P.clone().add(axis.clone().multiplyScalar(-2)), axis, 0, (opts.depth || 20) + 42);
+  let far = null, farDist = Infinity;
+  for (const b of doc.bodies) {
+    if (b.id === A.body.id || !b.mesh || b.hidden) continue;
+    if (b.type === 'fastener' || b.type === 'threadShell' || b.type === 'baked') continue;
+    const hits = rc.intersectObject(b.mesh, true);
+    if (hits.length && hits[0].distance < farDist) { farDist = hits[0].distance; far = b; }
+  }
+  if (!far) {
+    showHint('🔗 No second part found on the bolt axis — pivot not created. Line the parts up on the bolt and re-cut, or add a Joint by hand.');
+    return;
+  }
+  // Orthonormal basis for the far part's auto pivot plane (normal = −axis
+  // plane normal, so the joint's pin transform is exactly identity).
+  const n = A.n.clone();
+  const seed = Math.abs(n.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const v = new THREE.Vector3().crossVectors(n, seed).normalize();
+  const u = new THREE.Vector3().crossVectors(v, n).normalize();
+  const farName = far.name?.trim() || `${far.type === 'group' ? 'Part' : far.type} ${far.id}`;
+  const skB = {
+    id: doc.nextSketchId++,
+    name: `pivot on ${farName} (auto)`,
+    nextId: 2, sourceBodyId: far.id, hidden: true,
+    plane: { kind: 'face', origin: [A.P.x, A.P.y, A.P.z],
+             u: [u.x, u.y, u.z], v: [-v.x, -v.y, -v.z], n: [-n.x, -n.y, -n.z] },
+    entities: [{ id: 1, type: 'pivotMark', cx: 0, cy: 0 }],
+  };
+  doc.sketches.push(skB);
+  const baseName = A.body.name?.trim() || `${A.body.type === 'group' ? 'Part' : A.body.type} ${A.body.id}`;
+  const j = {
+    id: doc.nextJointId++,
+    a: { sketchId: sketch.id, markId: mark.id },
+    b: { sketchId: skB.id, markId: 1 },
+    angle: 0,
+    name: `${farName} on ${baseName} (bolt)`,
+  };
+  doc.joints.push(j);
+  doc.selectedJointId = j.id;
+  if (viewer) viewer.updateJointGizmos();
+  setStatus(`🔗 Bolt pivot created: ${farName} swings on ${baseName} — drive it from the Joints list.`);
+}
+
 function processThreadMarks(sketch, marks, opts) {
   pushUndo();
   const planeM = makePlaneMatrix(sketch.plane);
@@ -14136,6 +14203,7 @@ function processThreadMarks(sketch, marks, opts) {
       nutPocket: !!opts.nutPocket,
       nutWasher: !!(opts.nutPocket && opts.nutWasher),
       headSeat: opts.headSeat || 'rest',
+      makeJoint: !!opts.makeJoint,
     };
   }
   // After the loop, the active group (if any) IS the new parent. Select
@@ -14148,6 +14216,11 @@ function processThreadMarks(sketch, marks, opts) {
     }
   }
   viewer.rebuildBodies();
+  // Bolt-as-joint — after the rebuild so raycasts see the final meshes.
+  if (opts.makeJoint) {
+    if (viewer) viewer.scene.updateMatrixWorld(true);
+    for (const m of marks) _createBoltJointForMark(sketch, m, opts);
+  }
   renderTree(); renderProps();
   let summary;
   const holeWord = opts.holeType === 'clearance'
@@ -14241,6 +14314,142 @@ function renderFastenerPreviewInto(canvas, bodySpec) {
     if (bodySpec._dims) _drawFastenerDims(ctx, W, H, bodySpec);
   } catch (err) {
     console.warn('Fastener preview render failed:', err?.message || err);
+  }
+}
+
+// 2D CATALOG DRAWING (user request 2026-08-17): a side-on schematic of the
+// fastener lying HORIZONTAL — head left, tip right — with real dimension
+// lines underneath, like a hardware catalog. Far easier for the average
+// user to read than a perspective render. Pure canvas 2D, deterministic.
+function drawFastener2DInto(canvas, spec0) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#f4f6fa';
+  ctx.fillRect(0, 0, W, H);
+  const spec = getFastenerSpec(spec0.size);
+  if (!spec) return;
+  const part = spec0.part || 'bolt';
+  const thread = spec0.thread || 'threaded';
+  const d = spec.d;
+  const STEEL = '#aeb9cf', EDGE = '#3a4459', DIM = '#2e3850';
+  ctx.lineWidth = 1;
+  const label = (txt, x, y) => {
+    ctx.font = '11px system-ui, sans-serif';
+    const w = ctx.measureText(txt).width;
+    ctx.fillStyle = '#f4f6fa';
+    ctx.fillRect(x - w / 2 - 3, y - 7, w + 6, 14);
+    ctx.fillStyle = DIM;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(txt, x, y);
+  };
+  // Horizontal dimension line with end ticks + centered label.
+  const dimLine = (xA, xB, y, txt) => {
+    if (xB - xA < 6) return;
+    ctx.strokeStyle = DIM;
+    ctx.beginPath();
+    ctx.moveTo(xA, y); ctx.lineTo(xB, y);
+    ctx.moveTo(xA, y - 4); ctx.lineTo(xA, y + 4);
+    ctx.moveTo(xB, y - 4); ctx.lineTo(xB, y + 4);
+    ctx.stroke();
+    label(txt, (xA + xB) / 2, y);
+  };
+  if (part === 'nut') {
+    // Front-on hex nut with across-flats + height dims.
+    const nutH = d * 0.8, af = spec.af;
+    const scale = Math.min((W - 90) / af, (H - 70) / af);
+    const cx = W / 2, cy = (H - 40) / 2 + 8;
+    const R = (af / 2) * scale / Math.cos(Math.PI / 6);
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 6 + i * Math.PI / 3;
+      const px = cx + R * Math.cos(a), py = cy + R * Math.sin(a);
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = STEEL; ctx.fill();
+    ctx.strokeStyle = EDGE; ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy, (d / 2) * scale * 0.82, 0, Math.PI * 2);
+    ctx.fillStyle = '#f4f6fa'; ctx.fill();
+    ctx.strokeStyle = EDGE; ctx.stroke();
+    dimLine(cx - (af / 2) * scale, cx + (af / 2) * scale, cy + R + 16, fmtUL(af));
+    label(`${spec.label} nut — ${fmtUL(nutH)} tall`, W / 2, H - 12);
+    return;
+  }
+  const L = spec0.length || d * 4;
+  const shank = (thread === 'threaded') ? Math.max(0, Math.min(spec0.shank || 0, L)) : 0;
+  const threadLen = L - shank;
+  const headType = spec0.headType || 'hex';
+  const headL = ({ hex: d * 0.65, phillips: d * 0.65, cap: d, flat: d * 0.55 })[headType] || 0;
+  const headD = ({ hex: 2 * spec.af / Math.sqrt(3), phillips: d * 1.9, cap: d * 1.7, flat: d * 1.9 })[headType] || d * 1.8;
+  const nutH = (part === 'both') ? d * 0.8 : 0;
+  const totalMm = headL + L;
+  const topBand = 20, dimBand = shank > 0.05 ? 46 : 30;
+  const scale = Math.min((W - 36) / totalMm, (H - topBand - dimBand - 10) / Math.max(headD, d * 2.4));
+  const x0 = (W - totalMm * scale) / 2;
+  const cy = topBand + (H - topBand - dimBand) / 2;
+  const shaftX = x0 + headL * scale, tipX = shaftX + L * scale;
+  const rS = (d / 2) * scale;
+  ctx.strokeStyle = EDGE;
+  ctx.fillStyle = STEEL;
+  // Head profile (left)
+  if (headType === 'flat') {
+    ctx.beginPath();
+    ctx.moveTo(x0, cy - (headD / 2) * scale);
+    ctx.lineTo(shaftX, cy - rS);
+    ctx.lineTo(shaftX, cy + rS);
+    ctx.lineTo(x0, cy + (headD / 2) * scale);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  } else {
+    ctx.fillRect(x0, cy - (headD / 2) * scale, headL * scale, headD * scale);
+    ctx.strokeRect(x0, cy - (headD / 2) * scale, headL * scale, headD * scale);
+  }
+  const shankPx = shank * scale;
+  if (thread === 'smooth') {
+    ctx.fillRect(shaftX, cy - rS, L * scale, rS * 2);
+    ctx.strokeRect(shaftX, cy - rS, L * scale, rS * 2);
+  } else {
+    // Shank (plain) next to the head, threads to the tip.
+    if (shankPx > 1) {
+      ctx.fillRect(shaftX, cy - rS, shankPx, rS * 2);
+      ctx.strokeRect(shaftX, cy - rS, shankPx, rS * 2);
+    }
+    const tX = shaftX + shankPx, tW = threadLen * scale;
+    const rMin = rS * 0.72;
+    ctx.fillRect(tX, cy - rMin, tW, rMin * 2);
+    ctx.strokeRect(tX, cy - rMin, tW, rMin * 2);
+    // Thread teeth — triangles on both edges at the real pitch (min 3px).
+    const tooth = Math.max(3, spec.p * scale);
+    ctx.beginPath();
+    for (let x = tX; x + tooth <= tX + tW + 0.5; x += tooth) {
+      ctx.moveTo(x, cy - rMin);
+      ctx.lineTo(x + tooth / 2, cy - rS);
+      ctx.lineTo(Math.min(x + tooth, tX + tW), cy - rMin);
+      ctx.moveTo(x, cy + rMin);
+      ctx.lineTo(x + tooth / 2, cy + rS);
+      ctx.lineTo(Math.min(x + tooth, tX + tW), cy + rMin);
+    }
+    ctx.fill(); ctx.stroke();
+  }
+  // Nut riding the tip (part 'both')
+  if (nutH > 0) {
+    const nX = tipX - nutH * scale;
+    const nR = (spec.af / Math.sqrt(3)) * scale;
+    ctx.fillRect(nX, cy - nR, nutH * scale, nR * 2);
+    ctx.strokeRect(nX, cy - nR, nutH * scale, nR * 2);
+  }
+  // Size + diameter, top center
+  label(`${spec.label} · Ø ${d} mm`, W / 2, 10);
+  // Dimensions below: overall shaft length, then the shank/thread split.
+  const dimY1 = H - (shank > 0.05 ? 34 : 16);
+  dimLine(shaftX, tipX, dimY1, fmtUL(L));
+  if (shank > 0.05 && threadLen > 0.05) {
+    const splitX = shaftX + shankPx;
+    dimLine(shaftX, splitX, H - 14, `smooth ${fmtUL(shank)}`);
+    dimLine(splitX, tipX, H - 14, `threads ${fmtUL(threadLen)}`);
   }
 }
 
@@ -14370,15 +14579,12 @@ function openFastenerDialog() {
         const part = document.getElementById('fastener-part')?.value || 'bolt';
         const thread = document.getElementById('fastener-thread')?.value || 'threaded';
         const size = document.getElementById('fastener-size')?.value || 'M5';
-        renderFastenerPreviewInto(cv, {
+        drawFastener2DInto(cv, {
           headType: document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex',
           size,
           length: lenVal > 0 ? fromUnit(lenVal) : null,
           shank: shankVal > 0 ? fromUnit(shankVal) : 0,
-          fit: document.getElementById('fastener-fit')?.value || 'normal',
           part, thread,
-          op: 'add',
-          _dims: true,
         });
         // "Show me the details" — spec line under the preview.
         const note = document.getElementById('fastener-spec-note');
@@ -15793,7 +15999,10 @@ function _sketchAttachedBody(sk) {
 // so grouping / re-pointing / legacy drawing-sketches all keep working.
 function _resolveJointAnchor(ref) {
   const sk = doc.sketches.find(s => s.id === ref.sketchId);
-  const mark = sk?.entities?.find(e => e.id === ref.markId && e.type === 'pivotMark');
+  // A bolt-hole thread mark can anchor a joint too (bolt-as-pivot): it has
+  // the same cx/cy-on-a-face-plane shape as a pivot mark.
+  const mark = sk?.entities?.find(e => e.id === ref.markId &&
+    (e.type === 'pivotMark' || e.type === 'threadMark'));
   if (!sk || !mark) return null;
   const body = _sketchAttachedBody(sk);
   if (!body) return null;
@@ -16085,7 +16294,8 @@ function pruneOrphanJoints() {
   const ok = (r) => {
     if (!r) return false;
     const sk = doc.sketches.find(s => s.id === r.sketchId);
-    if (!sk || !sk.entities?.some(e => e.id === r.markId && e.type === 'pivotMark')) return false;
+    if (!sk || !sk.entities?.some(e => e.id === r.markId &&
+        (e.type === 'pivotMark' || e.type === 'threadMark'))) return false;
     // Keep the joint as long as the sketch still resolves to SOME part —
     // healing covers drawing-sketches and regrouped bodies. Only prune
     // when the pivot or its part is genuinely gone.
