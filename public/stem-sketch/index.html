@@ -13394,11 +13394,13 @@ function wireBoltHoleMenu(p) {
     if (note) {
       const spec2 = getFastenerSpec(o.size);
       const d = o.depth > 0 ? o.depth : 0;
-      note.textContent = o.holeType === 'clearance'
+      const headHmm = ({ hex: 0.65, phillips: 0.65, cap: 1, flat: 0.55 }[o.boltHead] || 0) * spec2.d;
+      const headTxt = headHmm > 0 ? ` · head ${fmtUL(headHmm)} tall` : '';
+      note.textContent = (o.holeType === 'clearance'
         ? `${spec2.label} clearance hole — ${fmtUL(d)} deep, smooth${o.nutPocket ? ' + nut pocket' : ''}`
         : (o.shank > 0
           ? `${spec2.label} hole — ${fmtUL(d)} deep: smooth ${fmtUL(Math.min(o.shank, d))} + threads ${fmtUL(Math.max(0, d - o.shank))}`
-          : `${spec2.label} hole — ${fmtUL(d)} deep, threads the whole way`);
+          : `${spec2.label} hole — ${fmtUL(d)} deep, threads the whole way`)) + headTxt;
     }
   };
   const syncType = () => {
@@ -14698,6 +14700,12 @@ function drawFastener2DInto(canvas, spec0) {
   }
   // Size + diameter, top center
   label(`${spec.label} · Ø ${d} mm`, W / 2, 10);
+  // Head thickness (user request issues1201): dimension the head's height
+  // along the axis so a recess can be planned to the real number.
+  if (headL > 0) {
+    const headTopY = cy - Math.max((headD / 2) * scale, rS) - 9;
+    dimLine(x0, shaftX, Math.max(22, headTopY), fmtUL(headL));
+  }
   // Dimensions below: overall shaft length, then the shank/thread split.
   const dimY1 = H - (shank > 0.05 ? 34 : 16);
   dimLine(shaftX, tipX, dimY1, fmtUL(L));
@@ -14850,12 +14858,15 @@ function openFastenerDialog() {
           } else {
             const L = lenVal > 0 ? lenVal : 0;
             const sh = (thread === 'threaded' && shankVal > 0) ? Math.min(shankVal, L) : 0;
+            const headKey = document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex';
+            const headHmm = ({ hex: 0.65, phillips: 0.65, cap: 1, flat: 0.55 }[headKey] || 0) * spec.d;
+            const headTxt = headHmm > 0 ? ` · head ${fmtUL(headHmm)} tall` : '';
             const dims = `${spec.label} × ${fmtUL(fromUnit(L))}`;
-            note.textContent = thread === 'smooth'
+            note.textContent = (thread === 'smooth'
               ? `${dims} — smooth (real-hardware stand-in)`
               : sh > 0
                 ? `${dims} — smooth shank ${fmtUL(fromUnit(sh))} + threads ${fmtUL(fromUnit(Math.max(0, L - sh)))}`
-                : `${dims} — fully threaded`;
+                : `${dims} — fully threaded`) + headTxt;
           }
         }
       };
