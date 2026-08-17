@@ -20,6 +20,7 @@
 
 import refS101 from "./challenges/s1-01-starter-brick.json";
 import refS102 from "./challenges/s1-02-double-steps.json";
+import refS103 from "./challenges/s1-03-triple-view.json";
 
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
 
@@ -90,21 +91,21 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     toleranceMm: 0.5,
   },
   {
-    id: "s1-03-notched-block",
+    id: "s1-03-triple-view",
     stage: 1,
-    title: "Notched Block",
+    title: "Triple View Block",
     description:
-      "A block with a notch cut from one edge, dimensioned to the nearest quarter inch. First challenge that needs a cut. (Reference geometry coming soon.)",
+      "A base with two towers of different heights and a hollow pocket in the middle — front, right-side, AND top views are all required to capture it, and dimensions go to the nearest quarter inch. The capstone of the measuring ladder.",
     studentInstructions:
-      "1. Get the printed Notched Block from your teacher.\n" +
-      "2. Measure it with your ruler — dimensions go to the nearest quarter inch.\n" +
-      "3. Draw its front, top, and side views on paper first.\n" +
+      "1. Get the printed Triple View Block from your teacher.\n" +
+      "2. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
+      "3. Draw its front, right-side, AND top views on paper — this block needs all three!\n" +
       "4. Build it here exactly as you measured it.\n" +
       "5. Click Check My Model — if it matches, hit Submit!",
     precision: "quarter",
-    refDocJson: null,
-    stlPath: null,
-    imagePath: null,
+    refDocJson: refS103,
+    stlPath: "/stem-sketch/challenges/s1-03-triple-view.stl",
+    imagePath: "/stem-sketch/challenges/s1-03-triple-view.jpg",
     toleranceMm: 0.5,
   },
 ];
