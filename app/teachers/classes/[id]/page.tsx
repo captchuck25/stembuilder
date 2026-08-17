@@ -15,6 +15,7 @@ import { renderBotPortrait } from "@/app/tools/arcade-lab/engine/render";
 import { defaultBot, sanitizeBot } from "@/app/tools/arcade-lab/engine/bot";
 import SiteHeader from "@/app/components/SiteHeader";
 import QuizzesTab from "./QuizzesTab";
+import StemSketchTab from "./StemSketchTab";
 import { TOOL_META, LeaderboardBoards, type LeaderboardData as MeasLeaderboardData, type MeasTool } from "@/app/tools/measurement-lab/shared";
 import { type AssignmentConfig as MeasAssignmentConfig } from "@/app/tools/measurement-lab/constants";
 
@@ -148,6 +149,9 @@ export default function ClassDetailPage() {
   // Quiz Builder is pro/trial/district only: free teachers get NO tab (not a
   // locked teaser). The API routes independently re-check the plan.
   const [quizBuilderAllowed, setQuizBuilderAllowed] = useState(false);
+  // STEM Sketch assignments follow the same policy: free teachers see the
+  // designs gallery only, no Assignments section (API routes re-check).
+  const [sketchAssignmentsAllowed, setSketchAssignmentsAllowed] = useState(false);
   const [turtleSubs, setTurtleSubs] = useState<TurtleSubmission[]>([]);
   const [turtleAssigned, setTurtleAssigned] = useState<Set<string>>(new Set());
   const [turtleAssignSaving, setTurtleAssignSaving] = useState<string | null>(null);
@@ -264,7 +268,10 @@ export default function ClassDetailPage() {
   useEffect(() => {
     fetch("/api/teacher/plan")
       .then(r => (r.ok ? r.json() : null))
-      .then(usage => { if (usage?.includesQuizBuilder) setQuizBuilderAllowed(true); })
+      .then(usage => {
+        if (usage?.includesQuizBuilder) setQuizBuilderAllowed(true);
+        if (usage?.includesStemSketchAssignments) setSketchAssignmentsAllowed(true);
+      })
       .catch(() => {});
   }, []);
 
@@ -3100,6 +3107,12 @@ export default function ClassDetailPage() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {selectedTool === "stem-sketch" && sketchAssignmentsAllowed && (
+            <div style={{ ...CARD, padding: "28px 28px", marginBottom: 24 }}>
+              <StemSketchTab classId={classId} />
             </div>
           )}
 

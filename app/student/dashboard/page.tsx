@@ -51,6 +51,19 @@ interface MeasurementAssignment {
   passed: boolean;
 }
 
+interface SketchAssignmentRow {
+  id: string;
+  class_id: string;
+  class_name: string;
+  title: string;
+  challenge_id: string;
+  challenge_title: string;
+  precision: string;
+  precision_label: string;
+  passed: boolean;
+  attemptCount: number;
+}
+
 interface QuizAssignmentRow {
   id: string;
   class_id: string;
@@ -88,6 +101,7 @@ export default function StudentDashboard() {
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [measAssignments, setMeasAssignments] = useState<MeasurementAssignment[]>([]);
+  const [sketchAssignments, setSketchAssignments] = useState<SketchAssignmentRow[]>([]);
   const [quizAssignments, setQuizAssignments] = useState<QuizAssignmentRow[]>([]);
   const [progressMap, setProgressMap] = useState<ProgressMap>({});
   // challenge_ids the student has a turtle_submissions row for — used to show
@@ -113,10 +127,11 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes, measRes, quizRes, progressRes, turtleRes] = await Promise.all([
+    const [classRes, bridgeRes, measRes, sketchRes, quizRes, progressRes, turtleRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
       fetch("/api/student/measurement-assignments"),
+      fetch("/api/student/stem-sketch-assignments"),
       fetch("/api/student/quiz-assignments"),
       fetch("/api/student/my-progress"),
       fetch("/api/turtle"),
@@ -124,6 +139,7 @@ export default function StudentDashboard() {
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
     setMeasAssignments(measRes.ok ? await measRes.json() : []);
+    setSketchAssignments(sketchRes.ok ? await sketchRes.json() : []);
     setQuizAssignments(quizRes.ok ? await quizRes.json() : []);
     if (turtleRes.ok) {
       const subs: Array<{ challenge_id: string }> = await turtleRes.json();
@@ -264,9 +280,10 @@ export default function StudentDashboard() {
               {enrolledClasses.map(({ class: cls, assignments, turtleAssignedIds }) => {
                 const classBridgeAssignments = bridgeAssignments.filter(b => b.class_id === cls.id);
                 const classMeasAssignments = measAssignments.filter(m => m.class_id === cls.id);
+                const classSketchAssignments = sketchAssignments.filter(s => s.class_id === cls.id);
                 const classQuizAssignments = quizAssignments.filter(q => q.class_id === cls.id);
                 const turtleIds = turtleAssignedIds ?? [];
-                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + classQuizAssignments.length + turtleIds.length;
+                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + classSketchAssignments.length + classQuizAssignments.length + turtleIds.length;
                 return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
@@ -470,6 +487,44 @@ export default function StudentDashboard() {
                                     ) : m.attemptCount > 0 ? (
                                       <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 2 }}>
                                         Best {m.bestCorrect}/{m.config.questionCount} · {m.attemptCount} {m.attemptCount === 1 ? "try" : "tries"}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* STEM Sketch Assignments */}
+                      {classSketchAssignments.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#0891b2",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            ✏️ STEM Sketch
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {classSketchAssignments.map(s => (
+                              <Link key={s.id} href={`/tools/stem-sketch?assignment=${s.id}`} style={{ textDecoration: "none" }}>
+                                <div style={{ padding: "14px 20px", borderRadius: 14,
+                                  background: s.passed ? "linear-gradient(135deg, #dcfce722, #dcfce744)" : "linear-gradient(135deg, #cffafe22, #a5f3fc44)",
+                                  border: `2px solid ${s.passed ? "#16a34a" : "#0891b2"}`,
+                                  display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ fontSize: 22 }}>✏️</div>
+                                  <div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                      {s.title || s.challenge_title || "STEM Sketch Assignment"}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: "#555" }}>
+                                      {s.challenge_title} · measure to {s.precision_label.toLowerCase()}
+                                    </div>
+                                    {s.passed ? (
+                                      <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>
+                                        ✓ Fit check passed
+                                      </div>
+                                    ) : s.attemptCount > 0 ? (
+                                      <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 2 }}>
+                                        {s.attemptCount} {s.attemptCount === 1 ? "try" : "tries"} — not passed yet
                                       </div>
                                     ) : null}
                                   </div>

@@ -13,12 +13,32 @@ type DemoDesign = {
   updated_at: string;
 };
 
+// Assignment context pushed into the iframe (see
+// docs/STEM_SKETCH_ASSIGNMENTS_BRIDGE.md for the full contract).
+type AssignmentInfo = {
+  id: string;
+  title: string;
+  challenge: {
+    id: string;
+    stage: number;
+    title: string;
+    precision: string;
+    refDocJson: object | null;
+    toleranceMm: number;
+  };
+};
+
 export default function StemSketchClient() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
   const viewAsStudent = searchParams.get("asStudent");
   const demoDesignId = searchParams.get("id");
-  const isDemoMode = !!viewAsStudent && !!demoDesignId;
+  // Teacher viewer can open either a saved design (?id=) or a frozen
+  // assignment submission (?submissionId=) — same read-only demo mode.
+  const demoSubmissionId = searchParams.get("submissionId");
+  const isDemoMode = !!viewAsStudent && !!(demoDesignId || demoSubmissionId);
+  // Student (or teacher trying it) launched from an assignment card.
+  const assignmentId = searchParams.get("assignment");
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const dirtyRef = useRef(false);
@@ -26,6 +46,8 @@ export default function StemSketchClient() {
   const [demoDesign, setDemoDesign] = useState<DemoDesign | null>(null);
   const [viewingStudent, setViewingStudent] = useState<{ name: string; email: string } | null>(null);
   const [demoError, setDemoError] = useState<string | null>(null);
+  const [assignment, setAssignment] = useState<AssignmentInfo | null>(null);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
 
   const postToSketch = useCallback((msg: object) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
@@ -51,10 +73,13 @@ export default function StemSketchClient() {
     if (iframeLoadedRef.current) postUser();
   }, [postUser]);
 
-  // Fetch the student's design via the teacher endpoint
+  // Fetch the student's design (or frozen submission) via the teacher endpoint
   useEffect(() => {
     if (!isDemoMode) return;
-    fetch(`/api/teacher/student-work/stem-sketch?designId=${encodeURIComponent(demoDesignId!)}`)
+    const query = demoSubmissionId
+      ? `submissionId=${encodeURIComponent(demoSubmissionId)}`
+      : `designId=${encodeURIComponent(demoDesignId!)}`;
+    fetch(`/api/teacher/student-work/stem-sketch?${query}`)
       .then(async r => {
         if (!r.ok) {
           setDemoError(`Could not load design (status ${r.status})`);
@@ -70,7 +95,43 @@ export default function StemSketchClient() {
       .catch(err => {
         setDemoError(err instanceof Error ? err.message : String(err));
       });
-  }, [isDemoMode, demoDesignId]);
+  }, [isDemoMode, demoDesignId, demoSubmissionId]);
+
+  // ── Assignment mode ──
+  // Fetch the assignment (with its resolved challenge) and push it into the
+  // iframe. The current iframe build ignores STEMSKETCH_ASSIGNMENT — that's
+  // fine, the platform side ships first (see docs/STEM_SKETCH_ASSIGNMENTS_BRIDGE.md).
+  useEffect(() => {
+    if (!assignmentId || isDemoMode) return;
+    let cancelled = false;
+    fetch(`/api/stem-sketch-assignments/${encodeURIComponent(assignmentId)}`)
+      .then(async r => {
+        if (!r.ok) {
+          if (!cancelled) setAssignmentError(`Could not load assignment (status ${r.status})`);
+          return null;
+        }
+        return r.json() as Promise<AssignmentInfo>;
+      })
+      .then(a => { if (a && !cancelled) { setAssignment(a); setAssignmentError(null); } })
+      .catch(err => { if (!cancelled) setAssignmentError(err instanceof Error ? err.message : String(err)); });
+    return () => { cancelled = true; };
+  }, [assignmentId, isDemoMode]);
+
+  const postAssignment = useCallback(() => {
+    if (!assignment || !iframeLoadedRef.current) return;
+    postToSketch({
+      type: "STEMSKETCH_ASSIGNMENT",
+      assignment: {
+        id: assignment.id,
+        title: assignment.title,
+        challenge: assignment.challenge,
+      },
+    });
+  }, [assignment, postToSketch]);
+
+  useEffect(() => {
+    if (assignment) postAssignment();
+  }, [assignment, postAssignment]);
 
   // Push the design into the iframe once BOTH the iframe is loaded AND the design has arrived
   const pushDemoDesign = useCallback(() => {
@@ -109,6 +170,66 @@ export default function StemSketchClient() {
 
       } else if (type === "STEMSKETCH_REQUEST_USER") {
         postUser();
+
+      } else if (type === "STEMSKETCH_REQUEST_ASSIGNMENT") {
+        postAssignment();
+
+      } else if (type === "STEMSKETCH_SUBMIT") {
+        // Assignment submission: frozen model snapshot + the in-tool fit-check
+        // verdict. Append-only server-side; the iframe shows OK/ERR.
+        if (!assignmentId || isDemoMode) {
+          postToSketch({ type: "STEMSKETCH_SUBMIT_ERR", message: "No assignment is open." });
+          return;
+        }
+        if (!session?.user?.id) {
+          postToSketch({ type: "STEMSKETCH_SUBMIT_ERR", message: "Sign in to submit" });
+          return;
+        }
+        const { docJson, docJsonGz, units, thumbnail, passed, metrics } = e.data as {
+          docJson?: object;
+          docJsonGz?: string;
+          units?: string;
+          thumbnail?: string | null;
+          passed: boolean;
+          metrics?: object;
+        };
+        const body = docJsonGz
+          ? { docJsonGz, units, thumbnail, passed, metrics }
+          : { docJson, units, thumbnail, passed, metrics };
+        const payloadJson = JSON.stringify(body);
+        const payloadKB = Math.round(payloadJson.length / 1024);
+        let res: Response;
+        try {
+          res = await fetch(`/api/stem-sketch-assignments/${encodeURIComponent(assignmentId)}/submissions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payloadJson,
+          });
+        } catch (netErr) {
+          postToSketch({
+            type: "STEMSKETCH_SUBMIT_ERR",
+            message: `network error (${(netErr as Error).message}) at ${payloadKB} KB payload`,
+          });
+          return;
+        }
+        if (res.ok) {
+          postToSketch({ type: "STEMSKETCH_SUBMIT_OK", passed });
+        } else {
+          let msg = `HTTP ${res.status}`;
+          try {
+            const txt = await res.text();
+            try {
+              const parsed = JSON.parse(txt);
+              msg = parsed?.error ? `${parsed.error} (HTTP ${res.status})` : `${txt.slice(0, 160)} (HTTP ${res.status})`;
+            } catch {
+              msg = `${txt.slice(0, 160) || res.statusText} (HTTP ${res.status}, payload ${payloadKB} KB)`;
+            }
+          } catch { /* response body wasn't readable */ }
+          if (res.status === 413 || (res.status === 0 && payloadKB > 4000)) {
+            msg = `Design too large for the server (${payloadKB} KB — Vercel limit ~4500 KB). Try simpler geometry, or undo a recent CSG step.`;
+          }
+          postToSketch({ type: "STEMSKETCH_SUBMIT_ERR", message: msg });
+        }
 
       } else if (type === "STEMSKETCH_SIGNOUT") {
         signOut({ callbackUrl: "/" });
@@ -228,13 +349,45 @@ export default function StemSketchClient() {
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [session, postToSketch, postUser, isDemoMode, demoDesign]);
+  }, [session, postToSketch, postUser, postAssignment, isDemoMode, demoDesign, assignmentId]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
       {/* The former 120px SiteHeader is gone — the SB logo, Home, and account
           menu now live inside the iframe's own single toolbar row (see
           public/stem-sketch/index.html), so the canvas gets the full height. */}
+      {assignmentId && !isDemoMode && (
+        <div style={{
+          background: "#ecfeff", borderBottom: "3px solid #0891b2", color: "#155e75",
+          padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 16, flexWrap: "wrap", flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>
+            ✏️ Assignment: {assignment?.title ?? "loading…"}
+            {assignment && (
+              <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 600, color: "#0e7490" }}>
+                {assignment.challenge.title}
+              </span>
+            )}
+            {assignmentError && (
+              <span style={{ marginLeft: 12, padding: "2px 10px", borderRadius: 999,
+                background: "#fecaca", color: "#7f1d1d", fontSize: 12, fontWeight: 800 }}>
+                {assignmentError}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              try { window.close(); } catch {}
+              setTimeout(() => { window.location.href = "/student/dashboard"; }, 50);
+            }}
+            style={{ padding: "6px 14px", borderRadius: 8, border: "2px solid #0e7490",
+              background: "#fff", color: "#155e75", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            ← Close
+          </button>
+        </div>
+      )}
+
       {isDemoMode && (
         <div style={{
           background: "#fef3c7", borderBottom: "3px solid #f59e0b", color: "#78350f",
@@ -270,6 +423,7 @@ export default function StemSketchClient() {
           iframeLoadedRef.current = true;
           postUser();
           pushDemoDesign();
+          postAssignment();
           // Cloud-backed fallback. If the iframe's localStorage draft is
           // missing or corrupt, restoreLocalDraft inside the iframe leaves
           // a blank canvas. That's surprising right after a successful
@@ -280,6 +434,9 @@ export default function StemSketchClient() {
           // to seed the canvas. Skipped in demo mode and when a draft
           // exists (iframe's own restore handles that path).
           if (isDemoMode) return;
+          // Assignment mode: the canvas starts per the iframe's assignment
+          // flow — don't pull in unrelated saved work.
+          if (assignmentId) return;
           if (!session?.user?.id) return;
           // If the URL specifies a design id (e.g. opened from My Work), load
           // THAT design directly — overrides both the localStorage-draft check

@@ -192,6 +192,47 @@ describe("quiz builder access — Pro, institutional, AND the trial", () => {
   });
 });
 
+describe("STEM Sketch assignments access — same policy as quiz builder", () => {
+  const base = {
+    plan: "free" as const,
+    proTrialStartedAt: null,
+    proTrialEndsAt: null,
+    overageBlocks: 0,
+    institutional: false,
+    count: 0,
+    now: NOW,
+  };
+
+  it("free has no sketch assignments", () => {
+    expect(buildUsage(base).includesStemSketchAssignments).toBe(false);
+  });
+  it("the free Pro TRIAL includes sketch assignments (unlike curriculum)", () => {
+    const u = buildUsage({
+      ...base,
+      plan: "pro_trial",
+      proTrialStartedAt: "2026-08-01T00:00:00Z",
+      proTrialEndsAt: "2027-06-30T23:59:59Z",
+    });
+    expect(u.includesStemSketchAssignments).toBe(true);
+    expect(u.includesCurriculum).toBe(false);
+  });
+  it("an EXPIRED trial loses sketch assignments", () => {
+    const u = buildUsage({
+      ...base,
+      plan: "pro_trial",
+      proTrialStartedAt: "2026-01-10T00:00:00Z",
+      proTrialEndsAt: "2026-06-30T23:59:59Z",
+    });
+    expect(u.includesStemSketchAssignments).toBe(false);
+  });
+  it("paid Pro includes sketch assignments", () => {
+    expect(buildUsage({ ...base, plan: "pro" }).includesStemSketchAssignments).toBe(true);
+  });
+  it("institutional includes sketch assignments", () => {
+    expect(buildUsage({ ...base, institutional: true }).includesStemSketchAssignments).toBe(true);
+  });
+});
+
 describe("cap error plumbing", () => {
   it("the student-facing refusal is the spec'd message", () => {
     expect(STUDENT_JOIN_BLOCKED_MESSAGE).toBe("This class is full — ask your teacher.");

@@ -86,6 +86,14 @@ export interface PlanUsage {
    * Free teachers see no Quizzes tab at all; API routes 403 on this flag.
    */
   includesQuizBuilder: boolean;
+  /**
+   * STEM Sketch assignments (replication / puzzle challenges): same policy as
+   * Quiz Builder — paid Pro, institutional, AND the free Pro trial (the trial
+   * deliberately includes it; running the measure→model→verify workflow with a
+   * real class is the conversion pressure). Free teachers see no Assignments
+   * section in the STEM Sketch tab; API routes 403 on this flag.
+   */
+  includesStemSketchAssignments: boolean;
 }
 
 export function buildUsage(args: {
@@ -111,5 +119,6 @@ export function buildUsage(args: {
     overageBlocks: args.overageBlocks,
     includesCurriculum: args.institutional || effective === "pro",
     includesQuizBuilder: args.institutional || effective === "pro" || effective === "pro_trial",
+    includesStemSketchAssignments: args.institutional || effective === "pro" || effective === "pro_trial",
   };
 }
