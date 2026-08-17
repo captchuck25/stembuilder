@@ -62,13 +62,16 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
       "A 3-inch cube with a staircase cut into it — every dimension is a whole inch. Measure the printed block, draw its three views on paper, then model it exactly.",
     studentInstructions:
       "1. Get the printed Step Block from your teacher.\n" +
-      "2. Measure it with your ruler — every dimension is a whole inch.\n" +
-      "3. Draw its front, top, and side views on paper first.\n" +
-      "4. Build it here exactly as you measured it.\n" +
-      "5. Click Check My Model — if it matches, hit Submit!",
+      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "3. Measure it with your ruler — every dimension is a whole inch.\n" +
+      "4. Draw its front, top, and side views on paper first.\n" +
+      "5. Build it here exactly as you measured it.\n" +
+      "6. Click Check My Model — if it matches, hit Submit!",
     precision: "whole",
     refDocJson: refS101,
-    stlPath: "/stem-sketch/challenges/s1-01-starter-brick.stl",
+    // Teacher print carries an engraved FRONT label; refDocJson stays the
+    // CLEAN geometry — the engraving must never reach the fit check.
+    stlPath: "/stem-sketch/challenges/s1-01-step-block-teacher-print.stl",
     imagePath: "/stem-sketch/challenges/s1-01-step-block.jpg",
     toleranceMm: 0.5,
   },
