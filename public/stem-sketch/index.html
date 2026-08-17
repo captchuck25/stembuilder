@@ -13214,6 +13214,7 @@ function boltHoleMenuHTML(p, seed) {
     ['loose',  'Loose — +0.4 mm (easy)'],
   ].map(([k, label]) => `<option value="${k}"${k === curFit ? ' selected' : ''}>${label}</option>`).join('');
   return `<canvas id="${p}-preview" width="230" height="170" style="display:block;margin:0 auto 10px;border-radius:8px;border:1px solid var(--line, #dfe3ec)"></canvas>
+           <div id="${p}-spec-note" style="text-align:center;color:var(--ink-soft);font-size:12px;margin:-4px 0 8px"></div>
            <div class="field" id="${p}-part-row" style="display:none">
              <label>Part</label>
              <select id="${p}-part">
@@ -13313,7 +13314,20 @@ function wireBoltHoleMenu(p) {
       part: o.nutPocket ? 'both' : 'bolt',
       thread: o.holeType === 'clearance' ? 'smooth' : 'threaded',
       op: 'add',
+      _dims: true,
     });
+    // Plain-words readout of what this hole is, mirroring the library's
+    // spec line — lengths are the thing users struggle to read off a render.
+    const note = $(p + '-spec-note');
+    if (note) {
+      const spec2 = getFastenerSpec(o.size);
+      const d = o.depth > 0 ? o.depth : 0;
+      note.textContent = o.holeType === 'clearance'
+        ? `${spec2.label} clearance hole — ${fmtUL(d)} deep, smooth${o.nutPocket ? ' + nut pocket' : ''}`
+        : (o.shank > 0
+          ? `${spec2.label} hole — ${fmtUL(d)} deep: smooth ${fmtUL(Math.min(o.shank, d))} + threads ${fmtUL(Math.max(0, d - o.shank))}`
+          : `${spec2.label} hole — ${fmtUL(d)} deep, threads the whole way`);
+    }
   };
   const syncType = () => {
     const isClr = typeSel?.value === 'clearance';
@@ -14219,9 +14233,63 @@ function renderFastenerPreviewInto(canvas, bodySpec) {
       img.data.set(px.subarray(src, src + W * 4), y * W * 4);
     }
     ctx.putImageData(img, 0, 0);
+    // DIMENSION CALLOUTS (user request 2026-08-17): the average user can't
+    // read lengths off a bare render — project the bolt's key stations
+    // (tip, thread/shank split, under-head) through the SAME camera and
+    // draw measured brackets beside the part. Opt-in via _dims so other
+    // preview users are untouched.
+    if (bodySpec._dims) _drawFastenerDims(ctx, W, H, bodySpec);
   } catch (err) {
     console.warn('Fastener preview render failed:', err?.message || err);
   }
+}
+
+// Dimension brackets over a just-rendered fastener preview. Uses the live
+// preview camera, so labels track the rendered part exactly.
+function _drawFastenerDims(ctx, W, H, bodySpec) {
+  const spec = getFastenerSpec(bodySpec.size);
+  if (!spec || !_fastPreview.camera) return;
+  const part = bodySpec.part || 'bolt';
+  const thread = bodySpec.thread || 'threaded';
+  const length = bodySpec.length || (spec.d * 4);
+  const shank = (part !== 'nut' && thread === 'threaded')
+    ? Math.max(0, Math.min(bodySpec.shank || 0, length)) : 0;
+  const threadLen = length - shank;
+  _fastPreview.camera.updateMatrixWorld(true);
+  const proj = (y) => {
+    const v = new THREE.Vector3(0, y, 0).project(_fastPreview.camera);
+    return (1 - (v.y * 0.5 + 0.5)) * H;
+  };
+  ctx.save();
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(46,56,80,0.85)';
+  ctx.fillStyle = '#2e3850';
+  const bracket = (x, yA, yB, label, side) => {
+    const y0 = Math.min(yA, yB), y1 = Math.max(yA, yB);
+    if (y1 - y0 < 7) return; // too short to annotate legibly
+    ctx.beginPath();
+    ctx.moveTo(x, y0); ctx.lineTo(x, y1);
+    ctx.moveTo(x - 3, y0); ctx.lineTo(x + 3, y0);
+    ctx.moveTo(x - 3, y1); ctx.lineTo(x + 3, y1);
+    ctx.stroke();
+    ctx.textAlign = side === 'right' ? 'left' : 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, side === 'right' ? x + 6 : x - 6, (y0 + y1) / 2);
+  };
+  if (part === 'nut') {
+    const nutH = spec.d * 0.8;
+    bracket(W - 44, proj(0), proj(nutH), fmtUL(nutH), 'right');
+    ctx.restore();
+    return;
+  }
+  // Overall shaft length on the right; shank/thread split on the left.
+  bracket(W - 44, proj(0), proj(length), fmtUL(length), 'right');
+  if (shank > 0.05 && threadLen > 0.05) {
+    bracket(46, proj(0), proj(threadLen), fmtUL(threadLen), 'left');
+    bracket(46, proj(threadLen), proj(length), fmtUL(shank), 'left');
+  }
+  ctx.restore();
 }
 
 function openFastenerDialog() {
@@ -14310,6 +14378,7 @@ function openFastenerDialog() {
           fit: document.getElementById('fastener-fit')?.value || 'normal',
           part, thread,
           op: 'add',
+          _dims: true,
         });
         // "Show me the details" — spec line under the preview.
         const note = document.getElementById('fastener-spec-note');
