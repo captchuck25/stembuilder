@@ -2536,8 +2536,11 @@ class SketchEngine {
     // on a grid intersection.
     if (snapOn) {
       const step = doc.grid.spacing;
-      const gx = Math.round(wx / step) * step;
-      const gy = Math.round(wy / step) * step;
+      // Same face-corner phase as the rendered grid (sk.gridAnchor) — snap
+      // points must land exactly on the lines the user sees.
+      const ga = doc.sketch?.gridAnchor || { x: 0, y: 0 };
+      const gx = ga.x + Math.round((wx - ga.x) / step) * step;
+      const gy = ga.y + Math.round((wy - ga.y) / step) * step;
       candidates.push({ x: gx, y: gy, kind: 'grid', strength: 1.0 });
     }
 
@@ -3677,8 +3680,10 @@ class SketchEngine {
         if (snapHit) { gx = snapHit.x; gy = snapHit.y; this.snap = snapHit; }
         else if (doc.grid?.snap && doc.grid.spacing > 0) {
           const step = doc.grid.spacing;
-          gx = Math.round(wx / step) * step;
-          gy = Math.round(wy / step) * step;
+          // Honour the face-corner grid phase (sk.gridAnchor), like computeSnap.
+          const ga = doc.sketch?.gridAnchor || { x: 0, y: 0 };
+          gx = ga.x + Math.round((wx - ga.x) / step) * step;
+          gy = ga.y + Math.round((wy - ga.y) / step) * step;
           this.snap = { x: gx, y: gy, kind: 'grid' };
         } else {
           this.snap = null;
@@ -3974,20 +3979,26 @@ class SketchEngine {
     const wpHalf = doc.grid.size / 2;
     const halfX = Math.min(visHalfX, wpHalf);
     const halfY = Math.min(visHalfY, wpHalf);
+    // Grid phase: face sketches anchor the grid to the face's bbox corner
+    // (sk.gridAnchor, set in createSketchOnPlane) so block edges land ON grid
+    // lines even though the plane origin is at the face center. No anchor
+    // (plane sketches, older saves) → phase 0, the original origin grid.
+    const anch = doc.sketch.gridAnchor || { x: 0, y: 0 };
+    const phase = (a) => ((a % visStep) + visStep) % visStep;
     // Y-extent of grid lines along the X-grid (vertical lines): clamp to [-halfY, halfY] in world coords
     const [, gyTop] = this.worldToScreen(0, halfY);
     const [, gyBot] = this.worldToScreen(0, -halfY);
     const [gxL] = this.worldToScreen(-halfX, 0);
     const [gxR] = this.worldToScreen(halfX, 0);
-    for (let x = -halfX; x <= halfX + 1e-6; x += visStep) {
+    for (let x = -halfX + phase(anch.x + halfX); x <= halfX + 1e-6; x += visStep) {
       const [sx] = this.worldToScreen(x, 0);
-      const idx = Math.round(x / visStep);
+      const idx = Math.round((x - anch.x) / visStep);
       const major = idx % majorN === 0;
       svg += `<line class="grid-line ${major ? 'major' : ''}" x1="${sx}" y1="${gyTop}" x2="${sx}" y2="${gyBot}"/>`;
     }
-    for (let y = -halfY; y <= halfY + 1e-6; y += visStep) {
+    for (let y = -halfY + phase(anch.y + halfY); y <= halfY + 1e-6; y += visStep) {
       const [, sy] = this.worldToScreen(0, y);
-      const idx = Math.round(y / visStep);
+      const idx = Math.round((y - anch.y) / visStep);
       const major = idx % majorN === 0;
       svg += `<line class="grid-line ${major ? 'major' : ''}" x1="${gxL}" y1="${sy}" x2="${gxR}" y2="${sy}"/>`;
     }
@@ -13267,9 +13278,10 @@ function boltHoleMenuHTML(p, seed) {
              <input type="checkbox" id="${p}-nut"${curNut ? ' checked' : ''}/>
              <span>Show matching nut at the far end</span>
            </label>
-           <label class="field" id="${p}-joint-row" style="display:none;margin-top:6px;padding:8px;background:var(--panel-2, #f3f5fa);border-radius:8px">
+           <label class="field" id="${p}-joint-row" style="margin-top:6px;padding:8px;background:var(--panel-2, #f3f5fa);border-radius:8px">
              <input type="checkbox" id="${p}-joint"${seed.makeJoint ? ' checked' : ''}/>
              <span>🔗 <b>Make this bolt a pivot</b> — the far part it passes through swings on this one</span>
+             <span id="${p}-joint-note" style="display:none;font-size:11px;color:var(--ink-soft)">needs a smooth bearing — choose a Smooth shaft, or give a threaded bolt a Smooth shank</span>
            </label>`;
 }
 
@@ -13344,11 +13356,18 @@ function wireBoltHoleMenu(p) {
     if (nrow) nrow.style.display = isClr ? '' : 'none';
     const shrow = $(p + '-shank-row');
     if (shrow) shrow.style.display = isClr ? 'none' : '';
-    // Pivot offer: clearance hole, or threaded hole with a smooth shank.
-    const jrow = $(p + '-joint-row');
-    if (jrow) {
+    // Pivot offer — ALWAYS visible (users never found a row that appears
+    // conditionally); enabled only when the hole has a smooth bearing:
+    // clearance, or threaded with a smooth shank. Otherwise the checkbox
+    // greys out with a note saying exactly what to change.
+    const jrow = $(p + '-joint-row'), jcb = $(p + '-joint'), jnote = $(p + '-joint-note');
+    if (jrow && jcb) {
       const shankVal = parseFloat($(p + '-shank')?.value);
-      jrow.style.display = (isClr || shankVal > 0) ? '' : 'none';
+      const canPivot = isClr || shankVal > 0;
+      jcb.disabled = !canPivot;
+      if (!canPivot) jcb.checked = false;
+      jrow.style.opacity = canPivot ? '1' : '0.6';
+      if (jnote) jnote.style.display = canPivot ? 'none' : '';
     }
   };
   const syncSeat = () => {
@@ -13940,6 +13959,75 @@ function _createBoltJointForMark(sketch, mark, opts) {
   doc.selectedJointId = j.id;
   if (viewer) viewer.updateJointGizmos();
   setStatus(`🔗 Bolt pivot created: ${farName} swings on ${baseName} — drive it from the Joints list.`);
+}
+
+// "Make this bolt a pivot" from an INSTALLED bolt (user request,
+// issues1115): the bolt's shaft axis becomes the joint. The part under the
+// head is the base; the next part the shaft passes through is the swinger.
+// Both get hidden auto pivot sketches anchored at the SAME world point with
+// opposite normals, so creating the joint moves nothing.
+function makeInstalledBoltAPivot(body) {
+  if (!body?.mesh) return;
+  if (viewer) viewer.scene.updateMatrixWorld(true);
+  const q = body.mesh.getWorldQuaternion(new THREE.Quaternion());
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize(); // tip → head
+  const tip = body.mesh.position.clone();
+  const spec = getFastenerSpec(body.size);
+  const L = body.length || (spec ? spec.d * 4 : 20);
+  const headPos = tip.clone().add(up.clone().multiplyScalar(L));
+  const rc = new THREE.Raycaster(
+    headPos.clone().add(up.clone().multiplyScalar(2)), up.clone().negate(), 0, L + 6);
+  const hits = [];
+  for (const b of doc.bodies) {
+    if (b.id === body.id || !b.mesh || b.hidden) continue;
+    if (b.type === 'fastener' || b.type === 'threadShell' || b.type === 'baked') continue;
+    const hs = rc.intersectObject(b.mesh, true);
+    if (hs.length) hits.push({ b, d: hs[0].distance });
+  }
+  hits.sort((x, y) => x.d - y.d);
+  if (hits.length < 2) {
+    showHint('🔗 The bolt needs to pass through TWO parts to become a pivot — seat it through both, then try again.');
+    return;
+  }
+  const baseB = hits[0].b, farB = hits[1].b;
+  const nameOf = (b) => b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`;
+  // One pivot per bolt.
+  if ((doc.joints || []).some(j => j._boltBodyId === body.id)) {
+    showHint('🔗 This bolt is already a pivot — drive it from the Joints list.');
+    return;
+  }
+  pushUndo();
+  const mkAuto = (bodyRef, n) => {
+    const seed = Math.abs(n.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    const v = new THREE.Vector3().crossVectors(n, seed).normalize();
+    const u = new THREE.Vector3().crossVectors(v, n).normalize();
+    const sk = {
+      id: doc.nextSketchId++,
+      name: `pivot on ${nameOf(bodyRef)} (auto)`,
+      nextId: 2, sourceBodyId: bodyRef.id, hidden: true,
+      plane: { kind: 'face', origin: [tip.x, tip.y, tip.z],
+               u: [u.x, u.y, u.z], v: [v.x, v.y, v.z], n: [n.x, n.y, n.z] },
+      entities: [{ id: 1, type: 'pivotMark', cx: 0, cy: 0 }],
+    };
+    doc.sketches.push(sk);
+    return sk;
+  };
+  const skA = mkAuto(baseB, up.clone());
+  const skB = mkAuto(farB, up.clone().negate());
+  const j = {
+    id: doc.nextJointId++,
+    a: { sketchId: skA.id, markId: 1 },
+    b: { sketchId: skB.id, markId: 1 },
+    angle: 0,
+    name: `${nameOf(farB)} on ${nameOf(baseB)} (bolt)`,
+    _boltBodyId: body.id,
+  };
+  doc.joints.push(j);
+  doc.selectedJointId = j.id;
+  if (viewer) viewer.updateJointGizmos();
+  renderTree(); renderProps();
+  setDirty(true);
+  setStatus(`🔗 Bolt pivot created: ${nameOf(farB)} swings on ${nameOf(baseB)} — drive it from the Joints list.`);
 }
 
 function processThreadMarks(sketch, marks, opts) {
@@ -14982,6 +15070,18 @@ function createSketchOnPlane(plane, opts = {}) {
           points: pts, facePerimeter: true,
         });
       }
+      // GRID ANCHOR: the sketch-plane origin sits at the face CENTER, so a
+      // whole-unit face (e.g. a 3" cube) spans ±1.5" and every edge lands
+      // mid-cell on an origin-anchored grid. Phase the grid to the face's
+      // bounding-box corner instead: render() and the grid snap offset their
+      // lines/candidates by this anchor. Plane sketches and older saved docs
+      // have no gridAnchor and keep the origin-anchored grid unchanged.
+      let ax = Infinity, ay = Infinity;
+      for (const e of sk.entities) {
+        if (!e.facePerimeter || !Array.isArray(e.points)) continue;
+        for (const p of e.points) { if (p.x < ax) ax = p.x; if (p.y < ay) ay = p.y; }
+      }
+      if (isFinite(ax) && isFinite(ay)) sk.gridAnchor = { x: ax, y: ay };
     } catch (_) {}
   }
   doc.sketches.push(sk);
@@ -18278,6 +18378,9 @@ function renderProps() {
         <div class="field"><label></label>
           <button class="action" id="fastener-place-btn" title="Click any body face — the part seats flush on that face, perpendicular to it">📌 Place on face</button>
         </div>
+        ${isNutOnly ? '' : `<div class="field"><label></label>
+          <button class="action" id="fastener-pivot-btn" title="The far part the shaft passes through will swing on the part under the head">🔗 Make this bolt a pivot</button>
+        </div>`}
         <div class="hint">As a solid it prints as part of the design. Set <b>Operation</b> to Negative + <b>Group</b> to cut it out instead: threaded cuts real threads, smooth cuts a plain hole, a nut cuts a hex pocket.</div>`;
       }
     } else if (body.type === 'group') {
@@ -18372,6 +18475,8 @@ function renderProps() {
       setStatus('Move over a face — the part follows (green = centered on a hole). Click to place, Esc to cancel.');
       if (viewer) viewer.canvas.style.cursor = 'crosshair';
     };
+    const pivotBtn = $('fastener-pivot-btn');
+    if (pivotBtn) pivotBtn.onclick = () => makeInstalledBoltAPivot(body);
     // Fastener option toggles
     for (const [elId, key] of [
       ['fastener-sink-prop', 'sinkHead'],
