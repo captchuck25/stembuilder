@@ -12309,9 +12309,25 @@ function buildFastenerGeometry(body) {
       shaft.translate(0, length / 2, 0);
       parts.push(shaft);
     } else {
-      // Threaded shaft — single closed-manifold mesh built by hand.
-      const threadedGeo = buildThreadedShaftGeo(rMinor, rMajor, pitch, length);
-      parts.push(threadedGeo);
+      // Threaded shaft, optionally with a SMOOTH SHANK under the head the
+      // way real bolts are made (bolt idea phase 2): threads bite only the
+      // tip section, the shank is a plain cylinder at the major diameter —
+      // the bearing surface a pivoting part rides on. shank = 0/absent =
+      // fully threaded (every existing save).
+      const shank = Math.max(0, Math.min(body.shank || 0, length));
+      const threadLen = length - shank;
+      if (threadLen < 0.5) {
+        const shaft = new THREE.CylinderGeometry(rMajor, rMajor, length, 32);
+        shaft.translate(0, length / 2, 0);
+        parts.push(shaft);
+      } else {
+        parts.push(buildThreadedShaftGeo(rMinor, rMajor, pitch, threadLen));
+        if (shank > 0.05) {
+          const sh = new THREE.CylinderGeometry(rMajor, rMajor, shank, 32);
+          sh.translate(0, threadLen + shank / 2, 0);
+          parts.push(sh);
+        }
+      }
     }
   }
   // Hex nut — standalone part, or riding the shaft tip for 'bolt + nut'.
@@ -12468,10 +12484,25 @@ function buildFastenerCSGMesh(body) {
     if (body.op === 'subtract' && thread === 'threaded' && window.__manifold) {
       // REAL helical threads in the cut — Manifold handles the helix that
       // used to blow up csg.js. Hole thread = bolt profile offset outward
-      // by the fit clearance (mating printed threads).
+      // by the fit clearance (mating printed threads). With a smooth shank
+      // (bolt idea phase 2), the helix covers only the tip section and the
+      // shank region gets a plain clearance bore — the pivot surface.
       const rMinorCut = Math.max(0.4, (spec.d / 2) - 0.5413 * pitch + clearance);
-      parts.push(buildThreadedShaftGeo(rMinorCut, rMajor, pitch, length));
-      usedHelix = true;
+      const shank = Math.max(0, Math.min(body.shank || 0, length));
+      const threadLen = length - shank;
+      if (threadLen < 0.5) {
+        const shaft = new THREE.CylinderGeometry(rMajor, rMajor, length, SHAFT_SEG);
+        shaft.translate(0, length / 2, 0);
+        parts.push(shaft);
+      } else {
+        parts.push(buildThreadedShaftGeo(rMinorCut, rMajor, pitch, threadLen));
+        usedHelix = true;
+        if (shank > 0.05) {
+          const sh = new THREE.CylinderGeometry(rMajor, rMajor, shank, SHAFT_SEG);
+          sh.translate(0, threadLen + shank / 2, 0);
+          parts.push(sh);
+        }
+      }
     } else {
       // Smooth-cylinder envelope — for smooth/clearance holes, for positive
       // unions, and as the csg.js-safe fallback (its BSP can't survive the
@@ -13113,6 +13144,9 @@ function addFastener(headType, size, length, fit, part, thread, extras) {
     fit: fit || 'tight',
     sinkHead: !!(p !== 'nut' && extras?.sinkHead),
     washerPocket: !!(p !== 'nut' && extras?.washerPocket),
+    // Smooth shank under the head (mm); threads occupy the remaining tip.
+    shank: (p !== 'nut' && th === 'threaded' && extras?.shank > 0)
+      ? Math.min(extras.shank, len) : 0,
     x: 0, y: 0, z: 0,
     op: 'add',
   };
@@ -13208,6 +13242,10 @@ function boltHoleMenuHTML(p, seed) {
              <label>Depth (${u})</label>
              <input id="${p}-depth" type="number" value="${defDepthUL}" min="0.1" step="0.5"/>
            </div>
+           <div class="field" id="${p}-shank-row">
+             <label>Smooth shank (${u}) — 0 = threads the whole way</label>
+             <input id="${p}-shank" type="number" value="${(typeof seed.shank === 'number' && seed.shank > 0) ? toUnit(seed.shank) : 0}" min="0" step="0.25"/>
+           </div>
            <div class="field">
              <label>Fit (when cutting)</label>
              <select id="${p}-fit">${fitOpts}</select>
@@ -13236,9 +13274,13 @@ function readBoltHoleMenu(p) {
   const holeType = $(p + '-type')?.value || 'threaded';
   const isClr = holeType === 'clearance';
   const nutPocket = isClr && $(p + '-part')?.value === 'both';
+  const shankVal = parseFloat($(p + '-shank')?.value);
   return {
     size: $(p + '-size')?.value || 'M5',
     depth: depthVal > 0 ? fromUnit(depthVal) : 0,
+    // Smooth shank only applies to THREADED holes (a clearance hole is all
+    // smooth already); processThreadMarks clamps it below the depth.
+    shank: (!isClr && shankVal > 0) ? fromUnit(shankVal) : 0,
     fit: $(p + '-fit')?.value || 'normal',
     placeBolt: !!$(p + '-bolt')?.checked,
     placeNut: isClr && !!$(p + '-nut')?.checked,
@@ -13266,6 +13308,7 @@ function wireBoltHoleMenu(p) {
       headType: o.boltHead,
       size: o.size,
       length: o.depth > 0 ? o.depth : null,
+      shank: o.shank || 0,
       fit: o.fit,
       part: o.nutPocket ? 'both' : 'bolt',
       thread: o.holeType === 'clearance' ? 'smooth' : 'threaded',
@@ -13280,6 +13323,8 @@ function wireBoltHoleMenu(p) {
     if (wrow) wrow.style.display = (isClr && partSel?.value === 'both') ? 'flex' : 'none';
     const nrow = $(p + '-nut-row');
     if (nrow) nrow.style.display = isClr ? '' : 'none';
+    const shrow = $(p + '-shank-row');
+    if (shrow) shrow.style.display = isClr ? 'none' : '';
   };
   const syncSeat = () => {
     // Tapered machine-screw heads can only sit flush — force recess.
@@ -13305,6 +13350,7 @@ function wireBoltHoleMenu(p) {
     el?.addEventListener('change', onAny);
   }
   $(p + '-depth')?.addEventListener('input', onAny);
+  $(p + '-shank')?.addEventListener('input', onAny);
   document.querySelectorAll(`input[name="${p}-head"]`).forEach(r => r.addEventListener('change', onAny));
   onAny();
 }
@@ -13865,6 +13911,13 @@ function processThreadMarks(sketch, marks, opts) {
     // Recessed head seat: the cutter includes the head-shaped counterbore
     // and sinks so the seated bolt's head lands flush below the surface.
     const recess = opts.headSeat === 'recess';
+    // Smooth shank (bolt idea phase 2): threads bite only the tip section;
+    // the shank region gets a plain clearance bore. Clamp so at least 2 mm
+    // of threads always remain. The cutter's shank grows by the top-side
+    // reach so its threaded section lands exactly on the functional region
+    // (plus the bottom overshoot, which is air/exit anyway).
+    const shank = isClearance ? 0
+      : Math.max(0, Math.min(opts.shank || 0, Math.max(0, opts.depth - 2)));
     const hole = {
       id: doc.nextBodyId++,
       type: 'fastener',
@@ -13874,6 +13927,7 @@ function processThreadMarks(sketch, marks, opts) {
       size: opts.size,
       length: opts.depth + 2 * CUT_OVERSHOOT,
       fit: opts.fit,
+      shank: shank > 0 ? shank + CUT_OVERSHOOT : 0,
       thread: isClearance ? 'smooth' : 'threaded',
       part: (isClearance && opts.nutPocket) ? 'both' : 'bolt',
       nutWasher: !!(isClearance && opts.nutPocket && opts.nutWasher),
@@ -13947,7 +14001,9 @@ function processThreadMarks(sketch, marks, opts) {
       const le = new THREE.Euler().setFromQuaternion(lquat, 'XYZ');
       const shellSpec = {
         size: opts.size,
-        length: opts.depth,
+        // Thread overlay covers only the threaded tip section — the shank
+        // region above it is a plain bore with no thread visual.
+        length: Math.max(0, opts.depth - shank),
         fit: opts.fit,
         x: lpos.x, y: lpos.y, z: lpos.z,
         rotation: {
@@ -13974,7 +14030,7 @@ function processThreadMarks(sketch, marks, opts) {
         id: doc.nextBodyId++,
         type: 'threadShell',
         size: opts.size,
-        length: opts.depth,
+        length: Math.max(0, opts.depth - shank),
         fit: opts.fit,
         x: shaftBottom.x, y: shaftBottom.y, z: shaftBottom.z,
         rotation: { ...rotDeg },
@@ -14006,6 +14062,7 @@ function processThreadMarks(sketch, marks, opts) {
         size: opts.size,
         length: shaftLen,
         fit: 'tight',
+        shank: shank > 0 ? Math.min(shank, Math.max(0, shaftLen - 2)) : 0,
         // Clearance holes get a smooth "real bolt" ghost, not fake threads.
         thread: isClearance ? 'smooth' : 'threaded',
         part: 'bolt',
@@ -14056,6 +14113,7 @@ function processThreadMarks(sketch, marks, opts) {
     m._settings = {
       size: opts.size,
       depth: opts.depth,
+      shank,
       fit: opts.fit,
       placeBolt: !!opts.placeBolt,
       placeNut: !!(opts.placeNut && opts.holeType === 'clearance'),
@@ -14206,6 +14264,10 @@ function openFastenerDialog() {
              <label>Length (${u})</label>
              <input id="fastener-length" type="number" value="${defLen}" min="0.1" step="0.5"/>
            </div>
+           <div class="field" id="fastener-shank-row">
+             <label>Smooth shank (${u}) — 0 = threads the whole way</label>
+             <input id="fastener-shank" type="number" value="0" min="0" step="0.25"/>
+           </div>
            <div class="field">
              <label>Fit (when cutting)</label>
              <select id="fastener-fit">
@@ -14220,10 +14282,12 @@ function openFastenerDialog() {
         const cv = document.getElementById('fastener-preview');
         if (!cv) return;
         const lenVal = parseFloat(document.getElementById('fastener-length')?.value);
+        const shankVal = parseFloat(document.getElementById('fastener-shank')?.value);
         renderFastenerPreviewInto(cv, {
           headType: document.querySelector('input[name="fastener-head"]:checked')?.value || 'hex',
           size: document.getElementById('fastener-size')?.value || 'M5',
           length: lenVal > 0 ? fromUnit(lenVal) : null,
+          shank: shankVal > 0 ? fromUnit(shankVal) : 0,
           fit: document.getElementById('fastener-fit')?.value || 'normal',
           part: document.getElementById('fastener-part')?.value || 'bolt',
           thread: document.getElementById('fastener-thread')?.value || 'threaded',
@@ -14232,10 +14296,13 @@ function openFastenerDialog() {
       };
       const syncPart = () => {
         const part = document.getElementById('fastener-part')?.value || 'bolt';
+        const thread = document.getElementById('fastener-thread')?.value || 'threaded';
         const isNut = part === 'nut';
         for (const [id, show] of [
           ['fastener-head-grid', !isNut], ['fastener-head-title', !isNut],
           ['fastener-length-row', !isNut],
+          // Shank only means something on a threaded bolt (smooth = all shank)
+          ['fastener-shank-row', !isNut && thread === 'threaded'],
         ]) {
           const el = document.getElementById(id);
           if (el) el.style.display = show ? '' : 'none';
@@ -14249,6 +14316,8 @@ function openFastenerDialog() {
         }
       }
       document.getElementById('fastener-part')?.addEventListener('change', syncPart);
+      document.getElementById('fastener-thread')?.addEventListener('change', syncPart);
+      document.getElementById('fastener-shank')?.addEventListener('input', updatePreview);
       document.querySelectorAll('input[name="fastener-head"]').forEach(r =>
         r.addEventListener('change', updatePreview));
       syncPart();
@@ -14260,9 +14329,11 @@ function openFastenerDialog() {
       const lenVal = parseFloat($('fastener-length').value);
       const len = lenVal > 0 ? fromUnit(lenVal) : null;
       const fit = $('fastener-fit').value || 'tight';
+      const shankVal = parseFloat($('fastener-shank')?.value);
       addFastener(head, size, len, fit,
         document.getElementById('fastener-part')?.value || 'bolt',
-        document.getElementById('fastener-thread')?.value || 'threaded');
+        document.getElementById('fastener-thread')?.value || 'threaded',
+        { shank: shankVal > 0 ? fromUnit(shankVal) : 0 });
     },
   });
 }
