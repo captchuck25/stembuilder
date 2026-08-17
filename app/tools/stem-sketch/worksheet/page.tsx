@@ -2,46 +2,22 @@
 // /tools/stem-sketch/worksheet?challenge=<id>
 //
 // Server component on purpose: the page emits only the challenge's title,
-// precision, and image — refDocJson never reaches the client here. Teachers
-// open it from the challenge picker and hit Print (US Letter, portrait).
+// precision, and image — refDocJson never reaches the client here.
 //
-// Layout: THIRD-ANGLE projection — TOP directly above FRONT, RIGHT SIDE
-// beside FRONT, so aligned edges teach why the views sit where they do.
-// Boxes are TRUE 1:1 scale (every challenge block is ≤3in; CSS physical
-// units print at real size), so a student can stand the block on the paper.
-// Grid is eighth-inch (the platform's precision floor) in very light gray
-// with whole inches slightly darker — all grayscale, photocopier-safe.
+// Layout modeled on a classic drafting sheet (user's reference, 2026-08-17):
+// LANDSCAPE letter, one continuous outer border, THIRD-ANGLE dot fields —
+// TOP view field above the FRONT view field (left column), RIGHT SIDE field
+// beside FRONT (bottom-right), the 3D visual floating top-right — and a
+// drafting-style title block strip along the bottom (brand · name · class ·
+// date). No boxes around the drawing areas: the dots ARE the drawing areas,
+// so the page feels continuous.
+//
+// Dots are true physical size (CSS inches print 1:1 at 100% scale):
+// quarter-inch spacing normally, eighth-inch for eighth-precision
+// challenges — never finer than eighths, the platform's floor.
 
 import { getChallenge, PRECISION_LABEL } from "@/lib/stem-sketch/challenges";
 import PrintButton from "./PrintButton";
-
-const BOX = "3.7in";
-const GRID_BG: React.CSSProperties = {
-  backgroundImage: [
-    "linear-gradient(to right, #bfbfbf 1px, transparent 1px)",
-    "linear-gradient(to bottom, #bfbfbf 1px, transparent 1px)",
-    "linear-gradient(to right, #e6e6e6 1px, transparent 1px)",
-    "linear-gradient(to bottom, #e6e6e6 1px, transparent 1px)",
-  ].join(", "),
-  backgroundSize: "1in 1in, 1in 1in, 0.125in 0.125in, 0.125in 0.125in",
-};
-
-const CAPTION: React.CSSProperties = {
-  fontSize: "10pt", fontWeight: 800, color: "#555", letterSpacing: "0.5px",
-  margin: "0 0 0.06in", textTransform: "uppercase",
-};
-
-function ViewBox({ label, sub }: { label: string; sub?: string }) {
-  return (
-    <div>
-      <div style={CAPTION}>
-        {label}
-        {sub && <span style={{ fontWeight: 600, textTransform: "none", letterSpacing: 0, color: "#888" }}> — {sub}</span>}
-      </div>
-      <div style={{ width: BOX, height: BOX, border: "1.5px solid #999", ...GRID_BG }} />
-    </div>
-  );
-}
 
 export default async function WorksheetPage({
   searchParams,
@@ -60,12 +36,34 @@ export default async function WorksheetPage({
     );
   }
 
-  const precisionLine = `Measure to the nearest ${PRECISION_LABEL[challenge.precision].toLowerCase().replace("whole inches", "whole inch")}`;
+  const dotSpacing = challenge.precision === "eighth" ? "0.125in" : "0.25in";
+  const DOTS: React.CSSProperties = {
+    backgroundImage: "radial-gradient(circle, #8f8f8f 1px, transparent 1.5px)",
+    backgroundSize: `${dotSpacing} ${dotSpacing}`,
+    backgroundPosition: "0.02in 0.02in",
+    position: "relative",
+  };
+  const FIELD_LABEL: React.CSSProperties = {
+    position: "absolute", top: "-0.22in", left: 0,
+    fontSize: "8pt", fontWeight: 800, letterSpacing: "0.6px",
+    color: "#9a9a9a", textTransform: "uppercase", whiteSpace: "nowrap",
+  };
+  const TITLE_CELL: React.CSSProperties = {
+    borderLeft: "1.5px solid #444", padding: "0.05in 0.12in",
+    display: "flex", flexDirection: "column", justifyContent: "flex-start",
+  };
+  const CELL_LABEL: React.CSSProperties = {
+    fontSize: "7.5pt", color: "#999", fontWeight: 700,
+    textTransform: "uppercase", letterSpacing: "0.5px",
+  };
+
+  const precisionLine = `measure to the nearest ${PRECISION_LABEL[challenge.precision]
+    .toLowerCase().replace("whole inches", "whole inch")}`;
 
   return (
     <div style={{ background: "#e5e7eb", minHeight: "100vh", fontFamily: "system-ui,sans-serif" }}>
       <style>{`
-        @page { size: letter portrait; margin: 0; }
+        @page { size: letter landscape; margin: 0; }
         @media print {
           body { margin: 0; background: #fff !important; }
           .no-print { display: none !important; }
@@ -80,54 +78,72 @@ export default async function WorksheetPage({
       <div
         className="sheet"
         style={{
-          width: "8.5in", minHeight: "11in", margin: "0 auto 30px", background: "#fff",
-          boxShadow: "0 6px 30px rgba(0,0,0,0.25)", padding: "0.35in",
+          width: "11in", height: "8.5in", margin: "0 auto 30px", background: "#fff",
+          boxShadow: "0 6px 30px rgba(0,0,0,0.25)", padding: "0.3in",
           boxSizing: "border-box", color: "#333",
         }}>
-        {/* Name strip — top of the page */}
-        <div style={{ display: "flex", gap: "0.35in", marginBottom: "0.25in", fontSize: "10.5pt", color: "#666" }}>
-          <div style={{ flex: 2, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Name:</div>
-          <div style={{ flex: 1.2, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Class:</div>
-          <div style={{ flex: 1, borderBottom: "1px solid #999", paddingBottom: "0.02in" }}>Date:</div>
-        </div>
-
-        {/* Header — wordmark left, title center */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "0.25in", marginBottom: "0.15in" }}>
-          <div style={{ flexShrink: 0 }}>
-            <div style={{ fontSize: "15pt", fontWeight: 900, letterSpacing: "1.5px", color: "#9ca3af" }}>
-              STEM<span style={{ color: "#c4c9d1" }}>BUILDER</span>
+        {/* Single continuous border around the whole sheet */}
+        <div style={{
+          border: "1.5px solid #444", height: "100%", boxSizing: "border-box",
+          display: "flex", flexDirection: "column",
+        }}>
+          {/* Drawing area — third-angle dot fields + 3D visual */}
+          <div style={{
+            flex: 1, display: "grid",
+            gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr",
+            gap: "0.5in 0.5in", padding: "0.42in 0.35in 0.3in",
+          }}>
+            {/* TOP view field */}
+            <div style={DOTS}>
+              <span style={FIELD_LABEL}>Top view</span>
             </div>
-            <div style={{ fontSize: "8pt", color: "#b0b5bd", letterSpacing: "0.5px" }}>stembuilder.io · STEM Sketch</div>
+            {/* 3D visual fills the top-right void — zoomed so the block itself
+                reads large (the source renders carry a lot of whitespace). */}
+            <div style={{ overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {challenge.imagePath && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={challenge.imagePath}
+                  alt={`${challenge.title} reference`}
+                  style={{
+                    width: "100%", height: "100%", objectFit: "cover", objectPosition: "50% 58%",
+                    transform: "scale(1.55)",
+                    filter: "grayscale(1) brightness(1.08)",
+                  }}
+                />
+              )}
+            </div>
+            {/* FRONT view field */}
+            <div style={DOTS}>
+              <span style={FIELD_LABEL}>Front view — the face with the word FRONT</span>
+            </div>
+            {/* RIGHT SIDE view field */}
+            <div style={DOTS}>
+              <span style={FIELD_LABEL}>Right side view</span>
+            </div>
           </div>
-          <div style={{ flex: 1, paddingTop: "0.02in" }}>
-            <div style={{ fontSize: "16pt", fontWeight: 900, color: "#444" }}>
-              Recreate: {challenge.title}
+
+          {/* Drafting title block */}
+          <div style={{ borderTop: "1.5px solid #444", display: "flex", height: "0.62in", flexShrink: 0 }}>
+            <div style={{ ...TITLE_CELL, borderLeft: "none", flex: 1.7, justifyContent: "center" }}>
+              <div style={{ fontSize: "11pt", fontWeight: 900, letterSpacing: "1px", color: "#9ca3af" }}>
+                STEM<span style={{ color: "#c4c9d1" }}>BUILDER</span><span style={{ color: "#8b93a0" }}>.IO</span>
+              </div>
+              <div style={{ fontSize: "8.5pt", color: "#777" }}>
+                Recreate: <b>{challenge.title}</b> · {precisionLine}
+              </div>
             </div>
-            <div style={{ fontSize: "10pt", color: "#777", marginTop: "0.03in" }}>
-              {precisionLine} · draw all three views, then build it in STEM Sketch
+            <div style={{ ...TITLE_CELL, flex: 1.6 }}>
+              <span style={CELL_LABEL}>Name</span>
+            </div>
+            <div style={{ ...TITLE_CELL, flex: 1 }}>
+              <span style={CELL_LABEL}>Class</span>
+            </div>
+            <div style={{ ...TITLE_CELL, flex: 0.8 }}>
+              <span style={CELL_LABEL}>Date</span>
             </div>
           </div>
         </div>
-
-        {/* Third-angle projection: TOP above FRONT; RIGHT SIDE beside FRONT.
-            The cell beside TOP holds the 3D visual, filling the whole void. */}
-        <div style={{ display: "grid", gridTemplateColumns: `${BOX} ${BOX}`, gap: "0.18in 0.35in", justifyContent: "center" }}>
-          <ViewBox label="Top View" sub="edges line up with the front view below" />
-          {challenge.imagePath ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={challenge.imagePath}
-              alt={`${challenge.title} reference`}
-              style={{
-                width: "100%", height: "100%", objectFit: "cover", objectPosition: "center",
-                filter: "grayscale(1) brightness(1.1)", alignSelf: "stretch",
-              }}
-            />
-          ) : <div />}
-          <ViewBox label="Front View" sub="the face with the word FRONT" />
-          <ViewBox label="Right Side View" />
-        </div>
-
       </div>
     </div>
   );

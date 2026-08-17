@@ -7095,8 +7095,9 @@ class Viewer3D {
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; this.scene.add(ground);
     this.rebuildWorkplane();
 
-    // axes hint
+    // axes hint (kept on `this` so thumbnail capture can hide it)
     const ax = new THREE.AxesHelper(20); this.scene.add(ax);
+    this.axesHelper = ax;
 
     this.bodyGroup = new THREE.Group();
     this.scene.add(this.bodyGroup);
@@ -20424,13 +20425,29 @@ function notifyParent(msg) {
 
 function captureThumbnailAsync() {
   return new Promise((resolve) => {
-    // 3D snapshot — render a fresh frame then read the WebGL canvas directly
+    // 3D snapshot — render a fresh frame then read the WebGL canvas directly.
+    // The workplane grid + axes hint are hidden for the capture frame (and
+    // restored right after): thumbnails show just the model on its soft
+    // shadow — cleaner in My Work, the teacher gallery, and the worksheet
+    // visuals that reuse these captures.
     if (viewer && doc.bodies.length > 0) {
       try {
-        viewer.renderer.render(viewer.scene, viewer.camera);
-        const glCanvas = document.getElementById('three-canvas');
-        resolve(glCanvas.toDataURL('image/jpeg', 0.7));
-        return;
+        const wp = viewer.workplaneGroup, ax = viewer.axesHelper;
+        const wpVis = wp ? wp.visible : true;
+        const axVis = ax ? ax.visible : true;
+        if (wp) wp.visible = false;
+        if (ax) ax.visible = false;
+        let dataUrl = null;
+        try {
+          viewer.renderer.render(viewer.scene, viewer.camera);
+          const glCanvas = document.getElementById('three-canvas');
+          dataUrl = glCanvas.toDataURL('image/jpeg', 0.7);
+        } finally {
+          if (wp) wp.visible = wpVis;
+          if (ax) ax.visible = axVis;
+          try { viewer.renderer.render(viewer.scene, viewer.camera); } catch (_) {}
+        }
+        if (dataUrl) { resolve(dataUrl); return; }
       } catch (_) {}
     }
     // 2D fallback — rasterise the live SVG via an Image → offscreen canvas
