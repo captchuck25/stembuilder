@@ -20931,6 +20931,34 @@ function _ensureAssignRef(a) {
       else { const u = man.add(m); scratch.push(u); man = u; }
     }
     if (!man) throw new Error('reference produced no geometry');
+    // STAGE 2 — Fill the Void: refDocJson is the printed VOID BLOCK, but the
+    // reference the student's piece must match is the COMPLEMENT: target
+    // cube MINUS block. Build the cube on the block's bounding-box corner
+    // (the void block spans the full cube footprint by construction) and
+    // subtract. Everything downstream — orientation snap, symmetric
+    // difference, ghost — then works exactly like stage 1 against the
+    // complement solid.
+    if (a.challenge.stage === 2) {
+      const sMm = (a.challenge.targetCubeIn || 3) * 25.4;
+      const blockMesh = _manifoldToMesh(man);
+      blockMesh.geometry.computeBoundingBox();
+      const bb = blockMesh.geometry.boundingBox;
+      const dims = bb.getSize(new THREE.Vector3());
+      if (Math.abs(dims.x - sMm) > 1 || Math.abs(dims.y - sMm) > 1 || Math.abs(dims.z - sMm) > 1) {
+        console.warn(`Fill-the-Void: block bbox ${dims.x.toFixed(1)}×${dims.y.toFixed(1)}×${dims.z.toFixed(1)}mm doesn't span the ${sMm}mm target cube — anchoring cube at bbox min anyway.`);
+      }
+      const cubeGeo = new THREE.BoxGeometry(sMm, sMm, sMm);
+      cubeGeo.translate(bb.min.x + sMm / 2, bb.min.y + sMm / 2, bb.min.z + sMm / 2);
+      const cubeMesh = new THREE.Mesh(cubeGeo);
+      cubeMesh.updateMatrixWorld(true);
+      const cubeMan = _geoToManifoldRepaired(cubeMesh);
+      scratch.push(cubeMan);
+      const compl = cubeMan.subtract(man);
+      scratch.push(compl);
+      man = compl;
+      blockMesh.geometry.dispose();
+      cubeGeo.dispose();
+    }
     const refMesh = _manifoldToMesh(man);
     const geo = refMesh.geometry;
     geo.computeBoundingBox();

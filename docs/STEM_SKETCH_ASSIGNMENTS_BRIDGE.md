@@ -122,6 +122,17 @@ be submitted (`passed: false`) — they show as attempts on the teacher roster.
    Server-side re-verification against `refDocJson` is planned future work —
    don't design anything that depends on the verdict being unverifiable.
 
+## Stage 2 — Fill the Void (complete the cube)
+
+Same message contract, same fit pipeline, one twist: `refDocJson` is the
+printed VOID BLOCK (what the teacher prints and hands out), and the payload
+carries `targetCubeIn` (edge length of the target cube, inches). The iframe
+builds the student's true reference as the COMPLEMENT — a `targetCubeIn`
+cube anchored on the block's bounding box, MINUS the block solid — and then
+runs the identical stage 1 machinery (24-orientation snap, symmetric
+difference, tolerance band, green ghost) against that complement. The
+student models ONLY the missing piece; block + piece = the full cube.
+
 ## Tolerance rationale
 
 Challenge dimensions are quantized to eighths of an inch (1/8" = 3.175 mm).

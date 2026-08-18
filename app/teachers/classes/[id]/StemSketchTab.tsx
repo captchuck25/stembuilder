@@ -13,10 +13,12 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
-  SKETCH_CHALLENGES,
   PRECISION_LABEL,
+  STAGE_META,
+  challengesForStage,
   getChallenge,
   challengeReady,
+  type SketchStage,
 } from "@/lib/stem-sketch/challenges";
 
 interface SketchAssignment {
@@ -49,7 +51,10 @@ export default function StemSketchTab({ classId }: { classId: string }) {
   const [assignments, setAssignments] = useState<SketchAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", challengeId: SKETCH_CHALLENGES[0]?.id ?? "" });
+  // Which assignment type (level) the teacher is creating — picking a level
+  // box filters the challenge list to that stage.
+  const [createStage, setCreateStage] = useState<SketchStage | null>(null);
+  const [form, setForm] = useState({ title: "", challengeId: "" });
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -126,7 +131,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
           </p>
         </div>
         <button
-          onClick={() => { setShowForm(v => !v); setFormError(""); }}
+          onClick={() => { setShowForm(v => !v); setCreateStage(null); setFormError(""); }}
           style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #0891b2",
             background: showForm ? "#cffafe" : "#fff", color: "#155e75",
             fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
@@ -137,7 +142,41 @@ export default function StemSketchTab({ classId }: { classId: string }) {
       {showForm && (
         <div style={{ background: "#ecfeff", border: "2px solid #a5f3fc", borderRadius: 14,
           padding: "20px 22px", marginBottom: 24 }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#155e75", marginBottom: 14 }}>Create STEM Sketch Assignment</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#155e75", marginBottom: 14 }}>
+            Create STEM Sketch Assignment — pick a level
+          </div>
+          {/* Level boxes: the three assignment types */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            {([1, 2, 3] as const).map(lvl => {
+              const meta = STAGE_META[lvl];
+              const comingSoon = lvl === 3;
+              const active = createStage === lvl;
+              return (
+                <div key={lvl}
+                  onClick={() => {
+                    if (comingSoon) return;
+                    setCreateStage(lvl);
+                    const first = challengesForStage(lvl)[0];
+                    setForm(f => ({ ...f, challengeId: first?.id ?? "" }));
+                  }}
+                  style={{ flex: "1 1 200px", minWidth: 200, padding: "12px 14px", borderRadius: 12,
+                    border: `2px solid ${active ? "#0891b2" : comingSoon ? "#e5e7eb" : "#a5f3fc"}`,
+                    background: active ? "#fff" : comingSoon ? "#f9fafb" : "#f0fdff",
+                    cursor: comingSoon ? "default" : "pointer", opacity: comingSoon ? 0.65 : 1,
+                    userSelect: "none" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: comingSoon ? "#9ca3af" : "#155e75" }}>
+                    {meta.icon} Level {lvl} · {meta.name}
+                    {comingSoon && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700,
+                      background: "#e5e7eb", color: "#6b7280", borderRadius: 999, padding: "2px 8px" }}>coming soon</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: comingSoon ? "#b0b5bd" : "#557", marginTop: 4, lineHeight: 1.4 }}>
+                    {meta.blurb}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {createStage && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 520 }}>
             <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
               Challenge
@@ -146,7 +185,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                 onChange={e => setForm(f => ({ ...f, challengeId: e.target.value }))}
                 style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
                   borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
-                {SKETCH_CHALLENGES.map(c => (
+                {challengesForStage(createStage).map(c => (
                   <option key={c.id} value={c.id}>
                     {c.title} — {PRECISION_LABEL[c.precision]}{challengeReady(c) ? "" : " (geometry pending)"}
                   </option>
@@ -208,6 +247,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
               {saving ? "Creating…" : "Create Assignment"}
             </button>
           </div>
+          )}
         </div>
       )}
 
@@ -236,7 +276,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                     <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                       {challenge ? (
                         <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>
-                          {challenge.title} · {PRECISION_LABEL[challenge.precision]}
+                          {STAGE_META[challenge.stage].icon} Level {challenge.stage} · {STAGE_META[challenge.stage].name} · {challenge.title} · {PRECISION_LABEL[challenge.precision]}
                           {challengeReady(challenge) ? "" : " · geometry pending"}
                         </span>
                       ) : (

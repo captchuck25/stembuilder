@@ -28,6 +28,8 @@ type AssignmentInfo = {
     studentInstructions: string;
     refDocJson: object | null;
     toleranceMm: number;
+    /** Stage 2 (Fill the Void): edge length of the target cube in inches. */
+    targetCubeIn?: number | null;
   };
 };
 

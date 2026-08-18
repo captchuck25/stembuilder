@@ -29,6 +29,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       studentInstructions: challenge.studentInstructions,
       refDocJson: challenge.refDocJson,
       toleranceMm: challenge.toleranceMm,
+      targetCubeIn: challenge.targetCubeIn ?? null,
     },
   })
 }

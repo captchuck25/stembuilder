@@ -16,7 +16,7 @@
 // quarter-inch spacing normally, eighth-inch for eighth-precision
 // challenges — never finer than eighths, the platform's floor.
 
-import { getChallenge, PRECISION_LABEL } from "@/lib/stem-sketch/challenges";
+import { getChallenge, PRECISION_LABEL, STAGE_META } from "@/lib/stem-sketch/challenges";
 import PrintButton from "./PrintButton";
 
 export default async function WorksheetPage({
@@ -145,7 +145,7 @@ export default async function WorksheetPage({
                 STEM<span style={{ color: "#c4c9d1" }}>BUILDER</span><span style={{ color: "#8b93a0" }}>.IO</span>
               </div>
               <div style={{ fontSize: "8.5pt", color: "#777" }}>
-                Recreate: <b>{challenge.title}</b> · {precisionLine}
+                {STAGE_META[challenge.stage].name}: <b>{challenge.title}</b> · {precisionLine}
               </div>
             </div>
             <div style={{ ...TITLE_CELL, flex: 1.6 }}>
