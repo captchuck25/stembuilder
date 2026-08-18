@@ -221,6 +221,13 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                       ⬇ Download printable STL
                     </a>
                   )}
+                  {selected.solutionStlPath && (
+                    <a href={selected.solutionStlPath} download
+                      title="The missing piece — print it to demo the completed cube (teachers only!)"
+                      style={{ color: "#b45309", fontWeight: 800, textDecoration: "none" }}>
+                      🔑 Solution piece STL
+                    </a>
+                  )}
                 </div>
               </div>
             )}

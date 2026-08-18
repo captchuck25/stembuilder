@@ -23,6 +23,7 @@ import refS102 from "./challenges/s1-02-double-steps.json";
 import refS103 from "./challenges/s1-03-triple-view.json";
 import refS201 from "./challenges/s2-01-reverse-step.json";
 import refS202 from "./challenges/s2-02-double-take.json";
+import refS203 from "./challenges/s2-03-funky-towers.json";
 
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
 
@@ -70,6 +71,10 @@ export interface SketchChallenge {
    *  block + the student's piece must complete. The in-tool check builds the
    *  student's true reference as cube − block (the complement). */
   targetCubeIn?: number;
+  /** Stage 2 only: printable STL of the SOLUTION piece (teacher demo — snaps
+   *  into the printed void block to complete the cube). Never shown to
+   *  students; null until authored. */
+  solutionStlPath?: string | null;
 }
 
 export const PRECISION_LABEL: Record<SketchPrecision, string> = {
@@ -164,6 +169,7 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     imagePath: "/stem-sketch/challenges/s2-01-reverse-step.jpg",
     toleranceMm: 0.5,
     targetCubeIn: 3,
+    solutionStlPath: null,
   },
   {
     id: "s2-02-double-take",
@@ -184,6 +190,28 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     imagePath: "/stem-sketch/challenges/s2-02-double-take.jpg",
     toleranceMm: 0.5,
     targetCubeIn: 3,
+    solutionStlPath: null,
+  },
+  {
+    id: "s2-03-funky-towers",
+    stage: 2,
+    title: "Funky Towers",
+    description:
+      "Four towers of different heights on a base — the missing piece has four pockets that slide down over them to finish the 3-inch cube. The FIRST eighth-inch challenge (its worksheet prints with an eighth-inch dot grid automatically). The Fill the Void capstone.",
+    studentInstructions:
+      "1. Get the printed Funky Towers block from your teacher.\n" +
+      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "3. Measure it with your ruler — dimensions go to the nearest EIGHTH of an inch (⅛ = .125, ¼ = .25, ⅜ = .375, ½ = .5, ⅝ = .625, ¾ = .75, ⅞ = .875).\n" +
+      "4. Picture the missing piece: block + your piece = a perfect 3-inch cube.\n" +
+      "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block!\n" +
+      "6. Click Check My Model — if your piece completes the cube, hit Submit!",
+    precision: "eighth",
+    refDocJson: refS203,
+    stlPath: "/stem-sketch/challenges/s2-03-funky-towers-teacher-print.stl",
+    imagePath: "/stem-sketch/challenges/s2-03-funky-towers.jpg",
+    toleranceMm: 0.5,
+    targetCubeIn: 3,
+    solutionStlPath: null,
   },
 ];
 
