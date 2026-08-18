@@ -604,6 +604,27 @@
     cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'><g fill='none' stroke='white' stroke-width='3' stroke-linecap='round'><line x1='16' y1='2' x2='16' y2='11'/><line x1='16' y1='21' x2='16' y2='30'/><line x1='2' y1='16' x2='11' y2='16'/><line x1='21' y1='16' x2='30' y2='16'/><circle cx='16' cy='16' r='5'/></g><g fill='none' stroke='%231a2a4a' stroke-width='1.4' stroke-linecap='round'><line x1='16' y1='2' x2='16' y2='11'/><line x1='16' y1='21' x2='16' y2='30'/><line x1='2' y1='16' x2='11' y2='16'/><line x1='21' y1='16' x2='30' y2='16'/><circle cx='16' cy='16' r='5'/></g></svg>") 16 16, crosshair;
   }
   #sketch-svg.tool-select { cursor: default; }
+  /* On-screen zoom cluster — Chromebook/touch friendly (44px targets) */
+  .zoom-ctls {
+    position: absolute;
+    right: 14px; bottom: 18px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 30;
+  }
+  .zoom-ctls button {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1px solid var(--line, #dfe3ec);
+    background: rgba(255, 255, 255, 0.95);
+    color: #2e3850;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(31, 37, 64, 0.14);
+    touch-action: manipulation;
+  }
+  .zoom-ctls button:hover { background: #ffffff; border-color: #b9c2d6; }
+  .zoom-ctls button:active { transform: scale(0.94); }
   .overlay-hint {
     position: absolute;
     left: 50%; bottom: 16px;
@@ -1373,6 +1394,13 @@
     <svg id="sketch-svg" class="active tool-select"></svg>
     <canvas id="three-canvas"></canvas>
     <div class="overlay-hint" id="hint"></div>
+    <!-- On-screen zoom (Chromebooks / touch — no mouse wheel needed).
+         Mode-aware: drives the 2D sketch view or the 3D camera. -->
+    <div class="zoom-ctls" id="zoom-ctls">
+      <button type="button" id="zoom-in-btn" title="Zoom in">＋</button>
+      <button type="button" id="zoom-out-btn" title="Zoom out">－</button>
+      <button type="button" id="zoom-fit-btn" title="Fit the whole design in view">⤢</button>
+    </div>
     <div class="box-select" id="box-select"></div>
     <div class="dim-tag" id="dim-tag"></div>
     <div class="dim-overlay" id="dim-overlay"></div>
@@ -22176,6 +22204,48 @@ function init() {
           viewer.rebuildBodies(); renderTree(); renderProps();
         }
       }
+    }
+  });
+
+  // On-screen zoom cluster (Chromebooks/touch — trackpads have no wheel
+  // button and kids don't know two-finger scroll). Mode-aware: drives the
+  // 2D sketch view or the 3D camera, whichever is active.
+  const zoomActiveView = (factor) => {
+    if (doc.mode === '2d') {
+      if (!sketchEng) return;
+      const v = sketchEng.view;
+      v.pxPerMm = clamp(v.pxPerMm * factor, 0.5, 80);
+      const zd = $('zoom-display');
+      if (zd) zd.textContent = Math.round(v.pxPerMm * 25) + '%';
+      sketchEng.render();
+    } else if (viewer) {
+      viewer.spherical.radius = clamp(viewer.spherical.radius / factor, 20, 2000);
+      viewer.updateCamera();
+    }
+  };
+  $('zoom-in-btn')?.addEventListener('click', () => zoomActiveView(1.3));
+  $('zoom-out-btn')?.addEventListener('click', () => zoomActiveView(1 / 1.3));
+  $('zoom-fit-btn')?.addEventListener('click', () => {
+    if (doc.mode === '2d') {
+      fitSketchViewToBodies();
+    } else if (viewer) {
+      // Frame every visible body; empty scene falls back to the home framing
+      viewer.scene.updateMatrixWorld(true);
+      const bb = new THREE.Box3();
+      let any = false;
+      for (const b of doc.bodies) {
+        if (!b.mesh || b.hidden) continue;
+        bb.expandByObject(b.mesh);
+        any = true;
+      }
+      if (any && !bb.isEmpty()) {
+        bb.getCenter(viewer.target);
+        viewer.spherical.radius = clamp(bb.getSize(new THREE.Vector3()).length() * 1.4 + 20, 20, 2000);
+      } else {
+        viewer.target.set(0, 20, 0);
+        viewer.spherical.radius = 260;
+      }
+      viewer.updateCamera();
     }
   });
 
