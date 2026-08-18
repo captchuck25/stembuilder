@@ -357,12 +357,17 @@
   .assignment-panel .ap-preview-note { margin-top: 8px; font-size: 11px; font-weight: 700; color: #b45309; }
   .assign-check-overlay {
     /* Light scrim + card parked at the bottom: the 3D view (student model +
-       green reference ghost) stays visible behind it. Still position:fixed
-       over everything, so check mode stays fully locked. */
-    position: fixed; inset: 0; z-index: 4000; background: rgba(15, 23, 42, 0.22);
+       green reference ghost) stays visible behind it. pointer-events:none
+       lets orbit/zoom drags reach the canvas (which is view-locked via
+       __assignViewLock); the card and the UI blocker patches re-enable
+       pointer-events on themselves. */
+    position: fixed; inset: 0; z-index: 4000; background: rgba(15, 23, 42, 0.18);
     display: flex; align-items: flex-end; justify-content: center; padding-bottom: 26px;
+    pointer-events: none;
   }
+  .assign-check-overlay .ui-blocker { position: fixed; pointer-events: auto; }
   .assign-check-card {
+    pointer-events: auto;
     background: #fff; border-radius: 16px; padding: 26px 30px;
     width: min(440px, 92vw); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
     text-align: center; font-size: 14px; color: #1f2937;
@@ -7353,6 +7358,17 @@ class Viewer3D {
           return;
         }
         if (touch3.size > 2 || pinch3) return;
+      }
+      // ASSIGNMENT CHECK LOCK: while the fit-check overlay is up, the canvas
+      // is look-but-don't-touch — every drag becomes orbit (middle = pan),
+      // so students can move around the ghost/model comparison but can't
+      // select, drag, resize, or measure anything. Wheel zoom + touch pinch
+      // stay live through their own handlers.
+      if (window.__assignViewLock) {
+        dragKind = (e.button === 1) ? 'pan' : 'orbit';
+        lastX = e.clientX; lastY = e.clientY;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
       }
       // Thread mark — click a mark in 3D to open the per-mark thread
       // dialog. The hit-disc is invisible but raycastable; tagged with
@@ -21046,6 +21062,23 @@ function _openCheckOverlay(html) {
     document.body.appendChild(ov);
   }
   ov.innerHTML = `<div class="assign-check-card">${html}</div>`;
+  // View-lock the canvas (pointerdown handler forces orbit/pan; keydown
+  // handler goes dead) and patch invisible blockers over every UI region so
+  // only the 3D viewport underneath stays reachable.
+  window.__assignViewLock = true;
+  for (const sel of ['.topbar', '.left', '.statusbar', '#assignment-panel']) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) continue;
+    const b = document.createElement('div');
+    b.className = 'ui-blocker';
+    b.style.left = r.left + 'px';
+    b.style.top = r.top + 'px';
+    b.style.width = r.width + 'px';
+    b.style.height = r.height + 'px';
+    ov.appendChild(b);
+  }
   return ov;
 }
 
@@ -21089,6 +21122,7 @@ function _removeAssignGhost() {
 }
 
 function _closeCheckOverlay() {
+  window.__assignViewLock = false;
   _removeAssignGhost();
   document.getElementById('assign-check-overlay')?.remove();
 }
@@ -21145,6 +21179,9 @@ function runAssignmentCheck() {
         <div class="acc-big">${res.passed ? '🎉' : '🔍'}</div>
         <div class="acc-title">${res.passed ? 'It fits!' : 'Not yet…'}</div>
         <div class="acc-detail">${detail}</div>
+        <div class="acc-detail" style="color:#0e7490;font-weight:700;margin-top:-8px">
+          🖱 Drag to spin around and zoom — compare your model with the green ghost.
+        </div>
         <div class="acc-buttons">
           <button class="acc-back" onclick="_closeCheckOverlay()">← Back to design</button>
           ${submitBtn}
@@ -21904,6 +21941,9 @@ function init() {
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {
+    // ASSIGNMENT CHECK LOCK: no shortcuts while the fit-check overlay is up
+    // (no delete/undo/copy/tool keys — the canvas is view-only).
+    if (window.__assignViewLock) return;
     // Auto-focus the length input when typing digits during line drawing —
     // but ONLY if no other input field is already focused. Otherwise we'd
     // hijack the user's keystrokes after they Tab into the angle field.
