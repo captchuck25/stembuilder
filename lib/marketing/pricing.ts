@@ -36,7 +36,7 @@ export interface PricingPlan {
 
 export const PRICING_HERO = {
   h1: "Simple pricing.",
-  sub: "Teachers start free — and every new account includes a free Teacher Pro trial for the 2026–27 school year. Schools & districts: reach out for a free trial.",
+  sub: "Teachers start free — and every new account includes a free Teacher Pro trial for the 2026–27 school year. Districts contact us for a free trial.",
 };
 
 export const PLANS: PricingPlan[] = [
