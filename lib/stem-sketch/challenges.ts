@@ -22,6 +22,7 @@ import refS101 from "./challenges/s1-01-starter-brick.json";
 import refS102 from "./challenges/s1-02-double-steps.json";
 import refS103 from "./challenges/s1-03-triple-view.json";
 import refS201 from "./challenges/s2-01-reverse-step.json";
+import refS202 from "./challenges/s2-02-double-take.json";
 
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
 
@@ -161,6 +162,26 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     refDocJson: refS201,
     stlPath: "/stem-sketch/challenges/s2-01-reverse-step-teacher-print.stl",
     imagePath: "/stem-sketch/challenges/s2-01-reverse-step.jpg",
+    toleranceMm: 0.5,
+    targetCubeIn: 3,
+  },
+  {
+    id: "s2-02-double-take",
+    stage: 2,
+    title: "Double Take",
+    description:
+      "A thick base with a tall tower in one corner — the missing piece is the L-shaped lid that sits on the base and wraps around the tower to finish the 3-inch cube. Quarter-inch dimensions; worth a second look before you draw.",
+    studentInstructions:
+      "1. Get the printed Double Take block from your teacher.\n" +
+      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
+      "4. Picture the missing piece: block + your piece = a perfect 3-inch cube.\n" +
+      "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block!\n" +
+      "6. Click Check My Model — if your piece completes the cube, hit Submit!",
+    precision: "quarter",
+    refDocJson: refS202,
+    stlPath: "/stem-sketch/challenges/s2-02-double-take-teacher-print.stl",
+    imagePath: "/stem-sketch/challenges/s2-02-double-take.jpg",
     toleranceMm: 0.5,
     targetCubeIn: 3,
   },
