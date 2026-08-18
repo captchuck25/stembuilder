@@ -33,16 +33,6 @@ export default function PricingPage() {
           <p className={styles.lede} style={{ maxWidth: 720, margin: "0 auto 8px" }}>
             {PRICING_HERO.sub}
           </p>
-          <div
-            className={styles.cardSoft}
-            style={{ maxWidth: 720, margin: "20px auto 0", textAlign: "center" }}
-          >
-            <p className={styles.body} style={{ margin: 0, fontWeight: 600 }}>
-              🎉 Through the 2026–27 school year, STEM Builder is free for
-              everyone — every teacher, every student, every tool. No credit
-              card, no pressure.
-            </p>
-          </div>
         </div>
       </section>
 

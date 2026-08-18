@@ -35,8 +35,8 @@ export interface PricingPlan {
 }
 
 export const PRICING_HERO = {
-  h1: "Simple pricing. Free for teachers to start.",
-  sub: "Try it and run a class free. Upgrade when you grow — or bring your school on board. Curriculum is included with every paid plan.",
+  h1: "Simple pricing.",
+  sub: "Teachers start free — and every new account includes a free Teacher Pro trial for the 2026–27 school year. Schools & districts: reach out for a free trial.",
 };
 
 export const PLANS: PricingPlan[] = [
@@ -65,8 +65,6 @@ export const PLANS: PricingPlan[] = [
       "Access to our growing library of ready-to-teach projects & units",
     ],
     ctas: [{ label: "Go Pro", href: "/teachers/upgrade", primary: true }],
-    footnote:
-      "Teaching a full load already? Start a free Pro trial for the rest of the school year — everything in Pro except the curriculum library.",
   },
   {
     id: "school",
