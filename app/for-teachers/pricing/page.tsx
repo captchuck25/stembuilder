@@ -3,7 +3,6 @@ import Link from "next/link";
 import {
   PRICING_HERO,
   PLANS,
-  ENROLLMENT_TIERS,
   PD_ADDON,
   PRICING_FOOTER_ITEMS,
   PRICING_SUPPORT_LINE,
@@ -34,6 +33,16 @@ export default function PricingPage() {
           <p className={styles.lede} style={{ maxWidth: 720, margin: "0 auto 8px" }}>
             {PRICING_HERO.sub}
           </p>
+          <div
+            className={styles.cardSoft}
+            style={{ maxWidth: 720, margin: "20px auto 0", textAlign: "center" }}
+          >
+            <p className={styles.body} style={{ margin: 0, fontWeight: 600 }}>
+              🎉 Through the 2026–27 school year, STEM Builder is free for
+              everyone — every teacher, every student, every tool. No credit
+              card, no pressure.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -72,32 +81,22 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {/* Enrollment tiers */}
+      {/* School & district quotes */}
       <section className={`${styles.grayBg} ${styles.section}`} aria-labelledby="by-enrollment">
         <div className={styles.container} style={{ maxWidth: 760 }}>
-          <h2 id="by-enrollment" className={styles.h2}>Pricing by enrollment</h2>
-          <p className={styles.body} style={{ marginBottom: 20 }}>
-            School &amp; District plans are flat by total enrollment — every teacher and
-            student included.
+          <h2 id="by-enrollment" className={styles.h2}>School &amp; district pricing</h2>
+          <p className={styles.body} style={{ marginBottom: 0 }}>
+            School &amp; District plans are flat by total enrollment — every
+            teacher and student included. Reach out for a quote for your school
+            or district:{" "}
+            <a
+              href="mailto:info@stembuilder.io?subject=School%2FDistrict%20pricing"
+              className={styles.textLink}
+            >
+              info@stembuilder.io
+            </a>
+            .
           </p>
-          <div className={styles.demoTableWrap}>
-            <table className={styles.demoTable} style={{ background: "#fff", borderRadius: 12 }}>
-              <thead>
-                <tr>
-                  <th scope="col">Enrollment</th>
-                  <th scope="col">Price</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ENROLLMENT_TIERS.map((t) => (
-                  <tr key={t.range}>
-                    <td>{t.range}</td>
-                    <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{t.price}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       </section>
 
