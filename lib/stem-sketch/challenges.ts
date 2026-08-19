@@ -169,7 +169,7 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     imagePath: "/stem-sketch/challenges/s2-01-reverse-step.jpg",
     toleranceMm: 0.5,
     targetCubeIn: 3,
-    solutionStlPath: null,
+    solutionStlPath: "/stem-sketch/challenges/s2-01-reverse-step-solution.stl",
   },
   {
     id: "s2-02-double-take",
@@ -190,7 +190,7 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     imagePath: "/stem-sketch/challenges/s2-02-double-take.jpg",
     toleranceMm: 0.5,
     targetCubeIn: 3,
-    solutionStlPath: null,
+    solutionStlPath: "/stem-sketch/challenges/s2-02-double-take-solution.stl",
   },
   {
     id: "s2-03-funky-towers",
@@ -211,7 +211,7 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     imagePath: "/stem-sketch/challenges/s2-03-funky-towers.jpg",
     toleranceMm: 0.5,
     targetCubeIn: 3,
-    solutionStlPath: null,
+    solutionStlPath: "/stem-sketch/challenges/s2-03-funky-towers-solution.stl",
   },
 ];
 
