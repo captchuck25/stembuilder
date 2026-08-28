@@ -145,7 +145,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch" | "measurement" | "quizzes">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch" | "blueprint" | "measurement" | "quizzes">("code-lab");
   // Quiz Builder is pro/trial/district only: free teachers get NO tab (not a
   // locked teaser). The API routes independently re-check the plan.
   const [quizBuilderAllowed, setQuizBuilderAllowed] = useState(false);
@@ -210,6 +210,11 @@ export default function ClassDetailPage() {
   const [stemSketchDesigns, setStemSketchDesigns] = useState<StemSketchRow[]>([]);
   const [loadingStemSketch, setLoadingStemSketch] = useState(false);
   const stemSketchLoadedRef = useRef(false);
+
+  // Blueprint Lab (same row shape as STEM Sketch designs)
+  const [blueprintDesigns, setBlueprintDesigns] = useState<StemSketchRow[]>([]);
+  const [loadingBlueprint, setLoadingBlueprint] = useState(false);
+  const blueprintLoadedRef = useRef(false);
 
   // Arcade Lab
   interface ArcadeStudentRow { id: string; name: string; email: string | null; username?: string | null; missionsDone: number; missionsTotal: number; quizScore: number | null; quizTotal: number; certified: boolean; freeBuildBeaten: boolean; gameId: string | null; }
@@ -380,6 +385,16 @@ export default function ClassDetailPage() {
       .then(r => r.ok ? r.json() : [])
       .then(setStemSketchDesigns)
       .finally(() => setLoadingStemSketch(false));
+  }, [selectedTool, cls]);
+
+  useEffect(() => {
+    if (!cls || selectedTool !== "blueprint" || blueprintLoadedRef.current) return;
+    blueprintLoadedRef.current = true;
+    setLoadingBlueprint(true);
+    fetch(`/api/teacher/blueprint-designs?classId=${classId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setBlueprintDesigns)
+      .finally(() => setLoadingBlueprint(false));
   }, [selectedTool, cls]);
 
   // Measurement Lab: lazy-load assignments + class leaderboard on first tab open
@@ -1879,6 +1894,7 @@ export default function ClassDetailPage() {
               { id: "bridge"     as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
               { id: "turtle"     as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
               { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
+              { id: "blueprint"   as const, label: "Blueprint Lab",    icon: "📐", color: "#4f46e5", desc: "Floor plan design" },
               { id: "measurement" as const, label: "Measurement Lab",  icon: "📏", color: "#0d9488", desc: "Precision measuring games" },
               { id: "quizzes"     as const, label: "Quizzes",          icon: "📝", color: "#9333ea", desc: "Build & assign quizzes" },
             ] as const).filter(tool => tool.id !== "quizzes" || quizBuilderAllowed).map(tool => {
@@ -3162,6 +3178,63 @@ export default function ClassDetailPage() {
                             color: "#0e7490", textDecoration: "none",
                             padding: "5px 10px", borderRadius: 999,
                             border: "2px solid #0891b2", background: "#ecfeff" }}>
+                          👁 Open
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Blueprint Lab panel ────────────────────────────────────────────────── */}
+          {selectedTool === "blueprint" && (
+            <div style={{ ...CARD, padding: "26px 28px" }}>
+              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#4f46e5", marginBottom: 6 }}>Blueprint Lab Designs</h2>
+              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                All floor plans saved by students in this class. Assignments with briefs and rubrics are coming next.
+              </p>
+              {loadingBlueprint ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
+              ) : blueprintDesigns.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
+                  No floor plans saved yet.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                  {blueprintDesigns.map(d => (
+                    <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e0e7ff",
+                      background: "#eef2ff", overflow: "hidden", width: 190, flexShrink: 0 }}>
+                      {/* Thumbnail */}
+                      <div style={{ width: "100%", height: 120, background: "#c7d2fe", overflow: "hidden",
+                        display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        {d.thumbnail ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={d.thumbnail} alt={d.name}
+                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                        ) : (
+                          <span style={{ fontSize: 32, opacity: 0.3 }}>📐</span>
+                        )}
+                      </div>
+                      {/* Info */}
+                      <div style={{ padding: "10px 12px" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#4f46e5", marginTop: 2 }}>
+                          {d.student_name}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 2, marginBottom: 8 }}>
+                          {d.units} · {new Date(d.updated_at).toLocaleDateString()}
+                        </div>
+                        <Link
+                          href={`/tools/blueprint-lab?asStudent=${d.user_id}&id=${d.id}`}
+                          target="_blank"
+                          title={`Open ${d.student_name}'s floor plan (read-only)`}
+                          style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
+                            color: "#4338ca", textDecoration: "none",
+                            padding: "5px 10px", borderRadius: 999,
+                            border: "2px solid #4f46e5", background: "#eef2ff" }}>
                           👁 Open
                         </Link>
                       </div>

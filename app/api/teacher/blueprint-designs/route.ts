@@ -1,0 +1,60 @@
+import { roleAtLeast } from '@/lib/roles'
+import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/auth'
+import { adminDb } from '@/lib/db.server'
+
+// GET /api/teacher/blueprint-designs?classId=X
+// Returns Blueprint Lab designs for all students enrolled in the class.
+// Mirrors /api/teacher/stem-sketch-designs.
+export async function GET(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const classId = req.nextUrl.searchParams.get('classId')
+  if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
+
+  const db = adminDb()
+
+  const { data: cls } = await db
+    .from('classes')
+    .select('id')
+    .eq('id', classId)
+    .eq('teacher_id', session.user.id)
+    .is('deleted_at', null)
+    .single()
+  if (!cls) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { data: enrollments } = await db
+    .from('enrollments')
+    .select('student_id, profiles(id, name, email)')
+    .eq('class_id', classId)
+    .is('deleted_at', null)
+
+  if (!enrollments?.length) return NextResponse.json([])
+
+  const studentIds = enrollments.map((e: { student_id: string }) => e.student_id)
+
+  const { data: designs } = await db
+    .from('blueprint_lab_designs')
+    .select('id, user_id, name, units, thumbnail, updated_at')
+    .in('user_id', studentIds)
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false })
+
+  type EnrollmentRow = { student_id: string; profiles: { name: string; email: string }[] | { name: string; email: string } | null }
+  const profileMap: Record<string, { name: string; email: string }> = {}
+  for (const e of enrollments as EnrollmentRow[]) {
+    const p = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles
+    profileMap[e.student_id] = p ?? { name: 'Unknown', email: '' }
+  }
+
+  type DesignRow = { id: string; user_id: string; name: string; units: string; thumbnail: string | null; updated_at: string }
+  return NextResponse.json(
+    (designs ?? [] as DesignRow[]).map((d: DesignRow) => ({
+      ...d,
+      student_name: profileMap[d.user_id]?.name ?? 'Unknown',
+      student_email: profileMap[d.user_id]?.email ?? '',
+    }))
+  )
+}

@@ -161,6 +161,13 @@ export default function BlueprintLabClient() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
   const urlDesignId = searchParams.get('id');
+  // Teacher read-only view: ?asStudent=<uid>&id=<designId> loads the named
+  // student's design via the teacher endpoint (which checks the shared-class
+  // relationship). Nothing persists in this mode: cloud save UI is hidden and
+  // the localStorage draft is untouched so the teacher's own work survives.
+  const viewAsStudent = searchParams.get('asStudent');
+  const isTeacherView = !!viewAsStudent && !!urlDesignId;
+  const [viewingStudent, setViewingStudent] = useState<string | null>(null);
 
   type SaveStatus = 'idle' | 'saving' | 'saved' | 'unsaved' | 'error';
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -193,6 +200,32 @@ export default function BlueprintLabClient() {
     restoredOnceRef.current = true;
 
     (async () => {
+      if (isTeacherView) {
+        // Teacher read-only load — never falls back to the localStorage draft
+        // (that's the teacher's own work, not this student's).
+        try {
+          const res = await fetch(`/api/teacher/student-work/blueprint-lab?designId=${encodeURIComponent(urlDesignId!)}`);
+          if (res.ok) {
+            const payload = await res.json() as {
+              design: { id: string; name: string; doc_json: Project };
+              student: { name: string; email: string };
+            };
+            suppressNextHistoryRef.current = true;
+            justRestoredRef.current = true;
+            setProject(migrateProject({ ...payload.design.doc_json, name: payload.design.name }));
+            setViewingStudent(payload.student?.name || payload.student?.email || 'student');
+            setSaveStatus('saved');
+          } else {
+            setViewingStudent(null);
+            setSaveError(`Could not load student design (${res.status})`);
+            setSaveStatus('error');
+          }
+        } catch {
+          setSaveError('Could not load student design');
+          setSaveStatus('error');
+        }
+        return;
+      }
       if (urlDesignId) {
         try {
           const res = await fetch(`/api/blueprint-lab/designs/${urlDesignId}`);
@@ -221,12 +254,15 @@ export default function BlueprintLabClient() {
         else setSaveStatus('unsaved');
       } catch { /* corrupt draft — ignore */ }
     })();
-  }, [urlDesignId]);
+  }, [urlDesignId, isTeacherView]);
 
   // localStorage autosave on project change (debounced ~500ms). Also flips
   // status to 'unsaved' so the user sees that the cloud copy is stale.
   useEffect(() => {
     if (!restoredOnceRef.current) return;
+    // Teacher read-only view: never overwrite the teacher's own local draft
+    // with the student's project, and don't track save status.
+    if (isTeacherView) return;
     // The project change that the restore-on-mount load triggers isn't a user
     // edit — don't mark it unsaved (but still let it persist to localStorage).
     if (justRestoredRef.current) {
@@ -246,6 +282,7 @@ export default function BlueprintLabClient() {
   }, [project]);
 
   const saveToCloud = useCallback(async () => {
+    if (isTeacherView) return; // read-only student view — nothing to save
     if (!session?.user?.id) { setSaveStatus('error'); setSaveError('Sign in to save to My Work'); return; }
     setSaveStatus('saving');
     setSaveError(null);
@@ -279,7 +316,7 @@ export default function BlueprintLabClient() {
       setSaveStatus('error');
       setSaveError(e instanceof Error ? e.message : String(e));
     }
-  }, [project, session?.user?.id]);
+  }, [project, session?.user?.id, isTeacherView]);
 
   // Expose the latest save fn to the Ctrl+S handler without re-binding it.
   useEffect(() => { saveRef.current = saveToCloud; }, [saveToCloud]);
@@ -1433,22 +1470,35 @@ export default function BlueprintLabClient() {
           onBlur={e => { e.currentTarget.style.borderColor = T.line; e.currentTarget.style.background = T.bg; }}
         />
 
-        <NewButton onNew={handleNewProject} />
+        {isTeacherView ? (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, height: 30,
+            padding: '0 12px', borderRadius: 6, whiteSpace: 'nowrap',
+            background: T.accentSoft, border: `1px solid ${T.accent}`,
+            color: T.accentInk, fontSize: 12, fontWeight: 600,
+          }}>
+            👁 {viewingStudent ? `Viewing ${viewingStudent}'s design (read-only)` : 'Student design view'}
+          </span>
+        ) : (
+          <>
+            <NewButton onNew={handleNewProject} />
 
-        <OpenMenu
-          currentId={cloudIdRef.current}
-          hasUnsavedChanges={saveStatus === 'unsaved'}
-          signedIn={!!session?.user?.id}
-          onOpen={openDesign}
-        />
+            <OpenMenu
+              currentId={cloudIdRef.current}
+              hasUnsavedChanges={saveStatus === 'unsaved'}
+              signedIn={!!session?.user?.id}
+              onOpen={openDesign}
+            />
 
-        <SaveButton
-          status={saveStatus}
-          error={saveError}
-          lastSavedAt={lastSavedAt}
-          signedIn={!!session?.user?.id}
-          onSave={saveToCloud}
-        />
+            <SaveButton
+              status={saveStatus}
+              error={saveError}
+              lastSavedAt={lastSavedAt}
+              signedIn={!!session?.user?.id}
+              onSave={saveToCloud}
+            />
+          </>
+        )}
 
         <FloorPicker
           levels={project.levels}

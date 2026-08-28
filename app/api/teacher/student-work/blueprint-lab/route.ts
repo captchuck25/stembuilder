@@ -1,0 +1,51 @@
+import { roleAtLeast } from '@/lib/roles'
+import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/auth'
+import { adminDb } from '@/lib/db.server'
+import { teacherSharesClassWithStudent } from '@/lib/teacher-access'
+
+// GET /api/teacher/student-work/blueprint-lab?designId=X
+// Returns a student's saved Blueprint Lab design for the read-only teacher
+// view. Permission: the teacher must share a class with the design's owner.
+// Mirrors /api/teacher/student-work/stem-sketch (design branch).
+export async function GET(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const designId = req.nextUrl.searchParams.get('designId')
+  if (!designId) return NextResponse.json({ error: 'Missing designId' }, { status: 400 })
+
+  const db = adminDb()
+
+  const { data: design } = await db
+    .from('blueprint_lab_designs')
+    .select('id, user_id, name, units, doc_json, thumbnail, updated_at')
+    .eq('id', designId)
+    .is('deleted_at', null)
+    .maybeSingle()
+
+  if (!design) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  if (!(await teacherSharesClassWithStudent(db, session.user.id, design.user_id)))
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { data: profile } = await db
+    .from('profiles')
+    .select('id, name, email')
+    .eq('id', design.user_id)
+    .is('deleted_at', null)
+    .single()
+
+  return NextResponse.json({
+    design: {
+      id: design.id,
+      name: design.name,
+      units: design.units,
+      doc_json: design.doc_json,
+      thumbnail: design.thumbnail,
+      updated_at: design.updated_at,
+    },
+    student: profile ?? { id: design.user_id, name: '', email: '' },
+  })
+}
