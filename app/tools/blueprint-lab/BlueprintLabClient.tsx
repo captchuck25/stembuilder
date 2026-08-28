@@ -19,7 +19,8 @@ import RoofPlanView from './components/RoofPlanView';
 import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
 import RequirementsPanel from './components/RequirementsPanel';
-import { BRIEFS } from './engine/rubric';
+import { Brief, BRIEFS } from './engine/rubric';
+import { SHELLS, buildShellWalls } from './engine/shells';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
 // switches to the 3D tab.
@@ -169,6 +170,21 @@ export default function BlueprintLabClient() {
   const viewAsStudent = searchParams.get('asStudent');
   const isTeacherView = !!viewAsStudent && !!urlDesignId;
   const [viewingStudent, setViewingStudent] = useState<string | null>(null);
+  // Assignment mode: ?assignment=<id> — a saved teacher assignment (edited
+  // brief + shell settings). Opens on a fresh sheet (no draft restore, no
+  // draft autosave), seeds the shell, and pins the Requirements panel to the
+  // assignment's rubric.
+  const assignmentId = searchParams.get('assignment');
+  const isAssignmentMode = !!assignmentId && !isTeacherView;
+  interface AssignmentInfo {
+    id: string; title: string; brief: Brief;
+    shellMode: 'scratch' | 'choice' | 'fixed'; shellIds: string[];
+  }
+  const [assignment, setAssignment] = useState<AssignmentInfo | null>(null);
+  const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  // Choice-mode shell picker overlay: open until the student picks (or the
+  // sheet already has walls).
+  const [shellPickerOpen, setShellPickerOpen] = useState(false);
 
   type SaveStatus = 'idle' | 'saving' | 'saved' | 'unsaved' | 'error';
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -227,6 +243,9 @@ export default function BlueprintLabClient() {
         }
         return;
       }
+      // Assignment mode starts on a fresh sheet — the shell-seeding effect
+      // and Requirements panel take it from here.
+      if (isAssignmentMode) return;
       if (urlDesignId) {
         try {
           const res = await fetch(`/api/blueprint-lab/designs/${urlDesignId}`);
@@ -255,7 +274,29 @@ export default function BlueprintLabClient() {
         else setSaveStatus('unsaved');
       } catch { /* corrupt draft — ignore */ }
     })();
-  }, [urlDesignId, isTeacherView]);
+  }, [urlDesignId, isTeacherView, isAssignmentMode]);
+
+  // Assignment mode: fetch the assignment, merge its teacher-edited config
+  // over the base brief, and open the Requirements panel on it.
+  useEffect(() => {
+    if (!assignmentId) return;
+    fetch(`/api/blueprint-assignments/${assignmentId}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('load failed')))
+      .then((a: { id: string; title: string; briefId: string; config: Partial<Brief> | null;
+                  shellMode: 'scratch' | 'choice' | 'fixed'; shellIds: string[] }) => {
+        const base = BRIEFS.find(b => b.id === a.briefId) ?? BRIEFS[0];
+        const brief: Brief = a.config && Array.isArray(a.config.rooms)
+          ? { ...base, ...a.config, id: base.id, title: a.title || base.title }
+          : { ...base, title: a.title || base.title };
+        setAssignment({ id: a.id, title: a.title, brief, shellMode: a.shellMode, shellIds: a.shellIds ?? [] });
+        setRequirementsOpen(true);
+        // Show the assignment name in the toolbar without marking unsaved.
+        suppressNextHistoryRef.current = true;
+        justRestoredRef.current = true;
+        setProject(p => ({ ...p, name: a.title || p.name }));
+      })
+      .catch(() => setAssignmentError('Could not load the assignment'));
+  }, [assignmentId]);
 
   // localStorage autosave on project change (debounced ~500ms). Also flips
   // status to 'unsaved' so the user sees that the cloud copy is stale.
@@ -271,6 +312,9 @@ export default function BlueprintLabClient() {
     } else {
       setSaveStatus(s => (s === 'saved' || s === 'idle') ? 'unsaved' : s);
     }
+    // Assignment mode never writes the local draft — that slot belongs to the
+    // user's own free-play plan.
+    if (isAssignmentMode) return;
     const t = setTimeout(() => {
       try {
         const draft: Draft = { project, cloudId: cloudIdRef.current, savedAt: lastSavedAt };
@@ -569,6 +613,30 @@ export default function BlueprintLabClient() {
       levels: p.levels.map(l => l.id === p.activeLevelId ? mut(l) : l),
     }));
   }, []);
+
+  // Assignment shells: 'fixed' seeds the teacher's shell as soon as the
+  // assignment loads (empty sheet only); 'choice' opens the picker overlay
+  // instead. Runs once per mount.
+  const shellSeededRef = useRef(false);
+  const seedShell = useCallback((shellId: string) => {
+    if (!assignment) return;
+    const sf = assignment.brief.totalSqFt
+      ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
+      : 1000;
+    updateLevel(l => l.walls.length > 0 ? l : { ...l, walls: buildShellWalls(shellId, sf, l.id) });
+    setShellPickerOpen(false);
+  }, [assignment, updateLevel]);
+
+  useEffect(() => {
+    if (!assignment || !isAssignmentMode || shellSeededRef.current) return;
+    shellSeededRef.current = true;
+    if (activeLevel.walls.length > 0) return;
+    if (assignment.shellMode === 'fixed' && assignment.shellIds[0]) {
+      seedShell(assignment.shellIds[0]);
+    } else if (assignment.shellMode === 'choice' && assignment.shellIds.length > 0) {
+      setShellPickerOpen(true);
+    }
+  }, [assignment, isAssignmentMode, activeLevel.walls.length, seedShell]);
 
   // Keep cross-floor stair mirrors in sync whenever the floor count changes
   // (covers loading an existing multi-story project AND adding a floor).
@@ -1558,7 +1626,62 @@ export default function BlueprintLabClient() {
               briefId={requirementsBriefId}
               onChangeBrief={setRequirementsBriefId}
               onClose={() => setRequirementsOpen(false)}
+              briefOverride={assignment?.brief}
             />
+          )}
+          {assignmentError && (
+            <div style={{
+              position: 'absolute', top: 12, left: 12, zIndex: 20,
+              background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b',
+              borderRadius: 8, padding: '8px 14px', fontSize: 12, fontWeight: 600,
+            }}>{assignmentError}</div>
+          )}
+          {shellPickerOpen && assignment && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 30, background: 'rgba(20,28,65,0.35)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <div style={{
+                background: T.panel, borderRadius: 12, boxShadow: T.shadow,
+                padding: '20px 24px', maxWidth: 620, margin: 16,
+              }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: T.ink, marginBottom: 4 }}>
+                  Choose your perimeter
+                </div>
+                <div style={{ fontSize: 12, color: T.inkSoft, marginBottom: 16 }}>
+                  Pick the shape of your building shell for “{assignment.title}”. You’ll design everything inside it.
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                  {assignment.shellIds.map(id => {
+                    const s = SHELLS.find(x => x.id === id);
+                    if (!s) return null;
+                    const sf = assignment.brief.totalSqFt
+                      ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
+                      : 1000;
+                    const pts = s.outline(sf);
+                    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+                    const minX = Math.min(...xs), maxX = Math.max(...xs);
+                    const minY = Math.min(...ys), maxY = Math.max(...ys);
+                    const pad = Math.max(maxX - minX, maxY - minY) * 0.08;
+                    return (
+                      <button key={id} onClick={() => seedShell(id)} title={s.describe}
+                        style={{
+                          width: 150, padding: '12px 10px 10px', borderRadius: 10, cursor: 'pointer',
+                          border: `2px solid ${T.lineStrong}`, background: T.panel2, textAlign: 'center',
+                        }}>
+                        <svg
+                          viewBox={`${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`}
+                          style={{ width: 96, height: 72, display: 'block', margin: '0 auto' }}>
+                          <polygon points={pts.map(p => `${p.x},${p.y}`).join(' ')}
+                            fill={T.accentSoft} stroke={T.accent} strokeWidth={(maxX - minX) * 0.02} />
+                        </svg>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 8 }}>{s.label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           )}
           {view === '3d' ? (
             <Scene3D project={project} />

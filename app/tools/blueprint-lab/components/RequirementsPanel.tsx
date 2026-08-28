@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from 'react';
 import { Level } from '../engine/types';
-import { BRIEFS, evaluateBrief, RubricCheck } from '../engine/rubric';
+import { Brief, BRIEFS, evaluateBrief, RubricCheck } from '../engine/rubric';
 import { T } from '../engine/theme';
 
 const DELIVERABLE_LABELS: Record<string, string> = {
@@ -16,13 +16,16 @@ const DELIVERABLE_LABELS: Record<string, string> = {
   'elevations': 'Elevations',
 };
 
-export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose }: {
+export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose, briefOverride }: {
   level: Level;
   briefId: string;
   onChangeBrief: (id: string) => void;
   onClose: () => void;
+  // Assignment mode: check against this exact (teacher-edited) brief and hide
+  // the built-in brief picker.
+  briefOverride?: Brief;
 }) {
-  const brief = BRIEFS.find(b => b.id === briefId) ?? BRIEFS[0];
+  const brief = briefOverride ?? BRIEFS.find(b => b.id === briefId) ?? BRIEFS[0];
   const checks = useMemo(() => evaluateBrief(level, brief), [level, brief]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -62,18 +65,22 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
         >✕</button>
       </div>
 
-      {/* Brief picker */}
+      {/* Brief picker (fixed title in assignment mode) */}
       <div style={{ padding: '8px 12px', borderBottom: `1px solid ${T.line}`, background: T.panel2 }}>
-        <select
-          value={brief.id}
-          onChange={e => onChangeBrief(e.target.value)}
-          style={{
-            width: '100%', fontSize: 12, padding: '5px 6px', color: T.ink,
-            border: `1px solid ${T.lineStrong}`, borderRadius: 6, background: T.panel,
-          }}
-        >
-          {BRIEFS.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
-        </select>
+        {briefOverride ? (
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: T.ink }}>{brief.title}</div>
+        ) : (
+          <select
+            value={brief.id}
+            onChange={e => onChangeBrief(e.target.value)}
+            style={{
+              width: '100%', fontSize: 12, padding: '5px 6px', color: T.ink,
+              border: `1px solid ${T.lineStrong}`, borderRadius: 6, background: T.panel,
+            }}
+          >
+            {BRIEFS.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
+          </select>
+        )}
         <div style={{ fontSize: 11, color: T.inkSoft, marginTop: 6, lineHeight: 1.45 }}>
           {brief.description}
         </div>

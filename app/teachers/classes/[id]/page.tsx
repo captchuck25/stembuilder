@@ -17,7 +17,7 @@ import SiteHeader from "@/app/components/SiteHeader";
 import QuizzesTab from "./QuizzesTab";
 import StemSketchTab from "./StemSketchTab";
 import { TOOL_META, LeaderboardBoards, type LeaderboardData as MeasLeaderboardData, type MeasTool } from "@/app/tools/measurement-lab/shared";
-import { BRIEFS as BLUEPRINT_BRIEFS } from "@/app/tools/blueprint-lab/engine/rubric";
+import BlueprintTab from "./BlueprintTab";
 import { type AssignmentConfig as MeasAssignmentConfig } from "@/app/tools/measurement-lab/constants";
 
 const CARD: React.CSSProperties = {
@@ -212,10 +212,6 @@ export default function ClassDetailPage() {
   const [loadingStemSketch, setLoadingStemSketch] = useState(false);
   const stemSketchLoadedRef = useRef(false);
 
-  // Blueprint Lab (same row shape as STEM Sketch designs)
-  const [blueprintDesigns, setBlueprintDesigns] = useState<StemSketchRow[]>([]);
-  const [loadingBlueprint, setLoadingBlueprint] = useState(false);
-  const blueprintLoadedRef = useRef(false);
 
   // Arcade Lab
   interface ArcadeStudentRow { id: string; name: string; email: string | null; username?: string | null; missionsDone: number; missionsTotal: number; quizScore: number | null; quizTotal: number; certified: boolean; freeBuildBeaten: boolean; gameId: string | null; }
@@ -388,15 +384,6 @@ export default function ClassDetailPage() {
       .finally(() => setLoadingStemSketch(false));
   }, [selectedTool, cls]);
 
-  useEffect(() => {
-    if (!cls || selectedTool !== "blueprint" || blueprintLoadedRef.current) return;
-    blueprintLoadedRef.current = true;
-    setLoadingBlueprint(true);
-    fetch(`/api/teacher/blueprint-designs?classId=${classId}`)
-      .then(r => r.ok ? r.json() : [])
-      .then(setBlueprintDesigns)
-      .finally(() => setLoadingBlueprint(false));
-  }, [selectedTool, cls]);
 
   // Measurement Lab: lazy-load assignments + class leaderboard on first tab open
   useEffect(() => {
@@ -3191,94 +3178,8 @@ export default function ClassDetailPage() {
 
           {/* ── Blueprint Lab panel ────────────────────────────────────────────────── */}
           {selectedTool === "blueprint" && (
-            <div style={{ ...CARD, padding: "26px 28px", marginBottom: 24 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#4f46e5", marginBottom: 6 }}>Design Briefs</h2>
-              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                Three project briefs with live auto-checked requirements (room counts, minimum sizes,
-                windows &amp; doors, fixtures). Open one to try the checklist yourself — assigning them
-                to students with adjustable rubrics is coming next.
-              </p>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-                {BLUEPRINT_BRIEFS.map(b => (
-                  <div key={b.id} style={{ borderRadius: 12, border: "2px solid #e0e7ff",
-                    background: "#eef2ff", padding: "16px 18px", width: 280, flexShrink: 0,
-                    display: "flex", flexDirection: "column" }}>
-                    <div style={{ fontWeight: 800, fontSize: 14, color: "#312e81" }}>{b.title}</div>
-                    <div style={{ fontSize: 12, color: "#555", marginTop: 6, lineHeight: 1.5, flex: 1 }}>
-                      {b.description}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#6b7280", margin: "10px 0 12px", fontWeight: 600 }}>
-                      Deliverables: {b.deliverables.map(d =>
-                        d === "floor-plan" ? "Floor plan" : d === "roof-plan" ? "Roof plan" : "Elevations"
-                      ).join(" → ")}
-                    </div>
-                    <Link
-                      href={`/tools/blueprint-lab?brief=${b.id}`}
-                      target="_blank"
-                      style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
-                        color: "#fff", textDecoration: "none",
-                        padding: "7px 10px", borderRadius: 999, background: "#4f46e5" }}>
-                      Open with checklist →
-                    </Link>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {selectedTool === "blueprint" && (
             <div style={{ ...CARD, padding: "26px 28px" }}>
-              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#4f46e5", marginBottom: 6 }}>Blueprint Lab Designs</h2>
-              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                All floor plans saved by students in this class.
-              </p>
-              {loadingBlueprint ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
-              ) : blueprintDesigns.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
-                  No floor plans saved yet.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-                  {blueprintDesigns.map(d => (
-                    <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e0e7ff",
-                      background: "#eef2ff", overflow: "hidden", width: 190, flexShrink: 0 }}>
-                      {/* Thumbnail */}
-                      <div style={{ width: "100%", height: 120, background: "#c7d2fe", overflow: "hidden",
-                        display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {d.thumbnail ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={d.thumbnail} alt={d.name}
-                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                        ) : (
-                          <span style={{ fontSize: 32, opacity: 0.3 }}>📐</span>
-                        )}
-                      </div>
-                      {/* Info */}
-                      <div style={{ padding: "10px 12px" }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#4f46e5", marginTop: 2 }}>
-                          {d.student_name}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#888", marginTop: 2, marginBottom: 8 }}>
-                          {d.units} · {new Date(d.updated_at).toLocaleDateString()}
-                        </div>
-                        <Link
-                          href={`/tools/blueprint-lab?asStudent=${d.user_id}&id=${d.id}`}
-                          target="_blank"
-                          title={`Open ${d.student_name}'s floor plan (read-only)`}
-                          style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
-                            color: "#4338ca", textDecoration: "none",
-                            padding: "5px 10px", borderRadius: 999,
-                            border: "2px solid #4f46e5", background: "#eef2ff" }}>
-                          👁 Open
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <BlueprintTab classId={classId} />
             </div>
           )}
 
