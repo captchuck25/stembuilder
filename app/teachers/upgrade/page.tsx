@@ -120,31 +120,50 @@ function UpgradeInner() {
                   <p style={{ fontSize: 14, fontWeight: 800, color: "#111", margin: "0 0 10px" }}>
                     Need room for more students?
                   </p>
-                  <OverageBuy onDone={setUsage} />
+                  {usage.checkoutEnabled ? (
+                    <OverageBuy onDone={setUsage} />
+                  ) : (
+                    <p style={{ fontSize: 14, color: "#374151", margin: 0 }}>
+                      Email us and we&apos;ll set you up —{" "}
+                      <a href="mailto:info@stembuilder.io?subject=Add%20students%20to%20Teacher%20Pro"
+                        style={{ color: "#2563eb", fontWeight: 700 }}>
+                        info@stembuilder.io
+                      </a>
+                    </p>
+                  )}
                 </div>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
-                  How many students do you teach?
-                  <select value={checkoutBlocks} onChange={(e) => setCheckoutBlocks(Number(e.target.value))}
-                    style={{ display: "block", width: "100%", marginTop: 6, padding: "10px 12px",
-                      borderRadius: 10, border: "2px solid #e5e7eb", fontSize: 14, color: "#111" }}>
-                    <option value={0}>Up to 125 — included</option>
-                    <option value={1}>126–150 (+$10/year)</option>
-                    <option value={2}>151–175 (+$20/year)</option>
-                    <option value={3}>176–200 (+$30/year)</option>
-                    <option value={4}>201–225 (+$40/year)</option>
-                  </select>
-                </label>
-                <button type="button" onClick={startCheckout} disabled={busy !== ""}
-                  style={{ padding: "14px 24px", borderRadius: 999, background: "#1f1f1f", color: "#fff",
-                    border: "2px solid #1f1f1f", fontWeight: 800, fontSize: 16, cursor: "pointer",
-                    opacity: busy ? 0.6 : 1 }}>
-                  {busy === "checkout"
-                    ? "Opening checkout…"
-                    : `Upgrade now — $${PRO_PRICE_PER_YEAR + checkoutBlocks * 10}/year`}
-                </button>
+                {usage.checkoutEnabled ? (
+                  <>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+                      How many students do you teach?
+                      <select value={checkoutBlocks} onChange={(e) => setCheckoutBlocks(Number(e.target.value))}
+                        style={{ display: "block", width: "100%", marginTop: 6, padding: "10px 12px",
+                          borderRadius: 10, border: "2px solid #e5e7eb", fontSize: 14, color: "#111" }}>
+                        <option value={0}>Up to 125 — included</option>
+                        <option value={1}>126–150 (+$10/year)</option>
+                        <option value={2}>151–175 (+$20/year)</option>
+                        <option value={3}>176–200 (+$30/year)</option>
+                        <option value={4}>201–225 (+$40/year)</option>
+                      </select>
+                    </label>
+                    <button type="button" onClick={startCheckout} disabled={busy !== ""}
+                      style={{ padding: "14px 24px", borderRadius: 999, background: "#1f1f1f", color: "#fff",
+                        border: "2px solid #1f1f1f", fontWeight: 800, fontSize: 16, cursor: "pointer",
+                        opacity: busy ? 0.6 : 1 }}>
+                      {busy === "checkout"
+                        ? "Opening checkout…"
+                        : `Upgrade now — $${PRO_PRICE_PER_YEAR + checkoutBlocks * 10}/year`}
+                    </button>
+                  </>
+                ) : (
+                  <p style={{ fontSize: 14, color: "#374151", margin: 0 }}>
+                    Paid checkout isn&apos;t open yet — every account includes a
+                    free Teacher Pro trial for the 2026–27 school year.
+                  </p>
+                )}
                 {!usage.trialUsed && usage.effective === "free" && !showTrialForm && (
                   <button type="button" onClick={() => setShowTrialForm(true)} disabled={busy !== ""}
                     style={{ padding: "12px 24px", borderRadius: 999, background: "#fff", color: "#1f1f1f",
@@ -164,10 +183,12 @@ function UpgradeInner() {
                     Upgrading adds the curriculum library and keeps Pro after the trial ends.
                   </p>
                 )}
-                <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>
-                  Secure checkout by Stripe. Cancel anytime — your plan stays active through the
-                  period you paid for.
-                </p>
+                {usage.checkoutEnabled && (
+                  <p style={{ fontSize: 12, color: "#9ca3af", margin: 0 }}>
+                    Secure checkout by Stripe. Cancel anytime — your plan stays active through the
+                    period you paid for.
+                  </p>
+                )}
               </div>
             )}
           </div>

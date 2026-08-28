@@ -125,7 +125,17 @@ export default function PlanMeter() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {usage.effective === "pro" ? (
-                <OverageBuy onDone={(next) => { setUsage(next); dialogRef.current?.close(); }} />
+                usage.checkoutEnabled ? (
+                  <OverageBuy onDone={(next) => { setUsage(next); dialogRef.current?.close(); }} />
+                ) : (
+                  <p style={{ fontSize: 14, color: "#374151", margin: 0 }}>
+                    Email us and we&apos;ll add room for more students —{" "}
+                    <a href="mailto:info@stembuilder.io?subject=Add%20students%20to%20Teacher%20Pro"
+                      style={{ color: "#2563eb", fontWeight: 700 }}>
+                      info@stembuilder.io
+                    </a>
+                  </p>
+                )
               ) : (
                 <>
                   {!usage.trialUsed && (

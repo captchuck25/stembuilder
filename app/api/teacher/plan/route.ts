@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { adminDb } from "@/lib/db.server";
 import { roleAtLeast } from "@/lib/roles";
 import { getTeacherPlanUsage } from "@/lib/plan.server";
+import { isCheckoutEnabled } from "@/lib/billing.server";
 
 // GET /api/teacher/plan — the signed-in teacher's plan + usage for the
 // dashboard meter. Everything is derived server-side from the session and
@@ -23,5 +24,5 @@ export async function GET() {
 
   const usage = await getTeacherPlanUsage(session.user.id);
   if (!usage) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json(usage);
+  return NextResponse.json({ ...usage, checkoutEnabled: isCheckoutEnabled() });
 }

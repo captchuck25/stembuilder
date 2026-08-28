@@ -94,6 +94,12 @@ export interface PlanUsage {
    * section in the STEM Sketch tab; API routes 403 on this flag.
    */
   includesStemSketchAssignments: boolean;
+  /**
+   * Whether Stripe checkout is currently open (BILLING_ENABLED kill switch).
+   * Stamped onto the payload by the API route — buildUsage doesn't set it.
+   * Treat absent as false: purchase UI must stay hidden unless explicitly on.
+   */
+  checkoutEnabled?: boolean;
 }
 
 export function buildUsage(args: {
