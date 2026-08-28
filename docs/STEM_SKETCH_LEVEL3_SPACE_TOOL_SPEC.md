@@ -52,9 +52,8 @@ photo** (user's purple board):
 | Intergalactic Release Pin | 1/4" hair pin clip | pull, thumb-secured |
 | Space Continuum Plug | 3/4" tapered plug | lift, thumb-secured |
 
-**[CONFIRM]** the planet-name → hardware mapping above (guessed
-Sun = smallest … Jupiter = biggest; the rubric lists Sun, Jupiter, Saturn,
-Orion, Neptune, Pin, Plug).
+Planet-name → hardware mapping CONFIRMED by user 2026-08-28
+(Sun = 1/4", Saturn = 3/8", Jupiter = 1/2" — sized like the planets).
 
 Note: hex across-flats dims match STEM Sketch's fastener library specs —
 the same data that generates bolts in-tool generates the wrench gauges, so
@@ -64,8 +63,9 @@ the digital check and the real board agree by construction.
 
 Row model: `{ id, label, description, kind: auto | assisted | teacher,
 bands: [10, 8, 6, 4] with band descriptors, check? }`. Total 10 rows ×
-10 pts = **100 points**. **[CONFIRM]** passing bar / how it reports to the
-roster (suggest: show score out of 100, "graded" state; no pass/fail).
+10 pts = **100 points**. CONFIRMED 2026-08-28: students see the TOTAL
+only ("86/100 — graded") on their dashboard card; row-by-row stays
+teacher-side. No pass/fail — the score is the outcome.
 
 | Row | Kind | How it's scored |
 |---|---|---|
@@ -122,8 +122,8 @@ The green ghost machinery is unused here.
   button per submission → panel with the rubric rows, auto rows pre-scored,
   assisted rows pre-suggested, teacher rows blank; save → PATCH route
   (`/api/teacher/stem-sketch-results` grows a POST/PATCH for scores).
-  Student dashboard card shows score once graded. **[CONFIRM]** whether
-  students see per-row scores or just the total.
+  Student dashboard card shows the TOTAL once graded (per-row stays
+  teacher-side — confirmed 2026-08-28).
 - **Level 3 box** in the create flow flips from "coming soon" to active,
   listing stage 3 challenges.
 - **Student check panel** (iframe): for stage 3, "Check My Model" runs the
@@ -131,8 +131,9 @@ The green ghost machinery is unused here.
   band + area, per-wrench gauge results, thickness advisory). Submit
   allowed regardless of results (design work is always submittable — the
   rubric is the judgment, not a gate).
-- **Worksheet**: level 3 sheet variant = brief + sketch/brainstorm space
-  rather than three-view dots. **[CONFIRM]** — or skip a printable for v1.
+- **Worksheet**: CONFIRMED for v1 — a level 3 BRAINSTORM sheet: Neil brief
+  summary + task checklist + open dot-grid sketch space (same print
+  pipeline, new layout branch by stage).
 
 ## 6. Build order
 
@@ -148,8 +149,10 @@ The green ghost machinery is unused here.
 
 ## 7. Open questions (need user)
 
-1. Planet-name → bolt-size mapping (§2 table).
-2. Passing bar / score display (out of 100? students see rows or total?).
-3. Neil brief image — supply the composite image file for the brief page.
-4. Final brief wording sign-off (§1).
-5. Level 3 printable worksheet: brainstorm sheet, or none for v1?
+1. Neil brief image — supply the composite image file for the brief page
+   (drop in Downloads or marketing shots folder).
+2. Final brief wording sign-off (§1) — near-verbatim adaptation approved
+   in discussion; flag any line to change.
+
+(Planet mapping, total-only score display, and brainstorm worksheet all
+CONFIRMED 2026-08-28.)
