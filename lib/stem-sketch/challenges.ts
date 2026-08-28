@@ -364,7 +364,10 @@ export function getChallenge(id: string): SketchChallenge | undefined {
 }
 
 /** True once the challenge's reference geometry has been authored (drives the
- *  "geometry pending" badge in the teacher picker; not an assignment gate). */
+ *  "geometry pending" badge in the teacher picker; not an assignment gate).
+ *  Stage 3 design briefs have no reference geometry by design — they're
+ *  ready when they have a brief + rubric. */
 export function challengeReady(c: SketchChallenge): boolean {
+  if (c.stage === 3) return !!(c.brief && c.rubric?.length);
   return c.refDocJson !== null;
 }

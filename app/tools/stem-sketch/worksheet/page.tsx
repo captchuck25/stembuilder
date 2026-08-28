@@ -83,7 +83,10 @@ export default async function WorksheetPage({
   // chrome as the orthographic sheet.
   const isBrainstorm = challenge.stage === 3;
   const briefLines = (challenge.brief ?? "").split("\n").map(s => s.trim()).filter(Boolean);
-  const kitTasks = (challenge.kit ?? []).filter(k => k.includes("("));
+  // Task checklist = only the actual challenge items (skip board/mounting
+  // hardware lines) — keeps the left column short enough to fit the page.
+  const kitTasks = (challenge.kit ?? []).filter(k =>
+    k.includes("(") && !/^(challenge board|mounting)/i.test(k));
 
   return (
     <div style={{ background: "#e5e7eb", minHeight: "100vh", fontFamily: "system-ui,sans-serif" }}>
@@ -120,20 +123,20 @@ export default async function WorksheetPage({
             gridTemplateColumns: "3.4in 1fr", gap: "0.35in",
             padding: "0.42in 0.35in 0.3in",
           }}>
-            <div style={{ fontSize: "9pt", color: "#444", lineHeight: 1.5, overflow: "hidden" }}>
-              <div style={{ fontSize: "10.5pt", fontWeight: 800, color: "#555", marginBottom: "0.08in" }}>The mission</div>
+            <div style={{ fontSize: "8pt", color: "#444", lineHeight: 1.35, overflow: "hidden" }}>
+              <div style={{ fontSize: "9.5pt", fontWeight: 800, color: "#555", marginBottom: "0.05in" }}>The mission</div>
               {briefLines.map((line, i) =>
                 line.startsWith("- ")
-                  ? <div key={i} style={{ margin: "0.03in 0 0.03in 0.15in" }}>• {line.slice(2)}</div>
-                  : <p key={i} style={{ margin: "0.05in 0" }}>{line}</p>
+                  ? <div key={i} style={{ margin: "0.02in 0 0.02in 0.12in" }}>• {line.slice(2)}</div>
+                  : <p key={i} style={{ margin: "0.035in 0" }}>{line}</p>
               )}
               {kitTasks.length > 0 && (
                 <>
-                  <div style={{ fontSize: "10.5pt", fontWeight: 800, color: "#555", margin: "0.12in 0 0.05in" }}>
-                    Tasks — check them off as your design covers each
+                  <div style={{ fontSize: "9.5pt", fontWeight: 800, color: "#555", margin: "0.08in 0 0.03in" }}>
+                    Tasks — check off as your design covers each
                   </div>
                   {kitTasks.map((k, i) => (
-                    <div key={i} style={{ margin: "0.04in 0" }}>☐ {k}</div>
+                    <div key={i} style={{ margin: "0.025in 0" }}>☐ {k}</div>
                   ))}
                 </>
               )}
