@@ -27,18 +27,21 @@ export async function GET() {
       .in('class_id', classIds)
       .order('created_at', { ascending: false }),
     db.from('stem_sketch_submissions')
-      .select('assignment_id, passed')
+      .select('assignment_id, passed, rubric_scores, created_at')
       .eq('student_id', session.user.id)
-      .is('deleted_at', null),
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true }),
   ])
 
-  const mine = new Map<string, { passed: boolean; attemptCount: number }>()
+  const mine = new Map<string, { passed: boolean; attemptCount: number; rubricScores: Record<string, { score: number }> | null }>()
   for (const s of submissions ?? []) {
     const prev = mine.get(s.assignment_id)
-    if (!prev) mine.set(s.assignment_id, { passed: s.passed, attemptCount: 1 })
+    if (!prev) mine.set(s.assignment_id, { passed: s.passed, attemptCount: 1, rubricScores: s.rubric_scores ?? null })
     else {
       prev.attemptCount += 1
       prev.passed = prev.passed || s.passed
+      // Latest submission's grade wins (rows are created_at ascending)
+      prev.rubricScores = s.rubric_scores ?? prev.rubricScores
     }
   }
 
@@ -47,6 +50,12 @@ export async function GET() {
       const challenge = getChallenge(a.challenge_id as string)
       if (!challenge) return null // challenge retired from the library
       const m = mine.get(a.id as string)
+      // Level 3: graded total (students see the total only — per-row stays
+      // teacher-side).
+      const rubricMax = (challenge.rubric ?? []).reduce((s, r) => s + r.bandScores[0], 0)
+      const gradedTotal = m?.rubricScores
+        ? Object.values(m.rubricScores).reduce((s, r) => s + (r?.score ?? 0), 0)
+        : null
       return {
         id: a.id,
         class_id: a.class_id,
@@ -54,10 +63,13 @@ export async function GET() {
         title: a.title,
         challenge_id: challenge.id,
         challenge_title: challenge.title,
+        stage: challenge.stage,
         precision: challenge.precision,
         precision_label: PRECISION_LABEL[challenge.precision],
         passed: m?.passed ?? false,
         attemptCount: m?.attemptCount ?? 0,
+        gradedTotal,
+        rubricMax: rubricMax || null,
       }
     })
     .filter(Boolean)

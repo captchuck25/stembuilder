@@ -30,6 +30,11 @@ type AssignmentInfo = {
     toleranceMm: number;
     /** Stage 2 (Fill the Void): edge length of the target cube in inches. */
     targetCubeIn?: number | null;
+    /** Stage 3 (design briefs): brief text, requirement gates, check params. */
+    brief?: string | null;
+    briefImagePath?: string | null;
+    requirements?: { singleBody?: boolean; minThicknessIn?: number } | null;
+    checks?: object | null;
   };
 };
 

@@ -36,6 +36,18 @@ interface ResultRow {
   attempts: number;
   last_submission_id: number;
   last_at: string;
+  // Level 3 grading context (null for levels 1-2)
+  last_metrics: { rubricAuto?: RubricAuto } | null;
+  rubric_scores: Record<string, { score: number }> | null;
+  graded_at: string | null;
+}
+
+// Auto-check results the iframe stores on level 3 submissions.
+interface RubricAuto {
+  footprintSqIn?: number;
+  footprintScore?: number;
+  singleBody?: boolean;
+  wrench?: { label: string; acrossFlatsIn: number; found: boolean; widthIn: number | null; score: number }[];
 }
 
 const TH: React.CSSProperties = {
@@ -61,6 +73,57 @@ export default function StemSketchTab({ classId }: { classId: string }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ResultRow[]>>({});
   const [loadingResultsId, setLoadingResultsId] = useState<string | null>(null);
+  // Level 3 grading panel state
+  const [grading, setGrading] = useState<{ assignmentId: string; row: ResultRow } | null>(null);
+  const [gradeScores, setGradeScores] = useState<Record<string, number>>({});
+  const [gradeSaving, setGradeSaving] = useState(false);
+  const [gradeError, setGradeError] = useState("");
+
+  function openGradePanel(assignmentId: string, challengeId: string, row: ResultRow) {
+    const rubric = getChallenge(challengeId)?.rubric ?? [];
+    const auto = row.last_metrics?.rubricAuto;
+    const pre: Record<string, number> = {};
+    for (const r of rubric) {
+      // Priority: saved scores > auto/assisted suggestion > (teacher rows blank)
+      const saved = row.rubric_scores?.[r.id]?.score;
+      if (typeof saved === "number") { pre[r.id] = saved; continue; }
+      if (r.check?.type === "footprintArea" && typeof auto?.footprintScore === "number") {
+        pre[r.id] = auto.footprintScore;
+      } else if (r.check?.type === "wrenchOpening" && auto?.wrench) {
+        const w = auto.wrench.find(x => Math.abs(x.acrossFlatsIn - (r.check as { acrossFlatsIn: number }).acrossFlatsIn) < 1e-6);
+        if (w) pre[r.id] = w.score;
+      }
+    }
+    setGradeScores(pre);
+    setGradeError("");
+    setGrading({ assignmentId, row });
+  }
+
+  async function saveGrades(_challengeId: string) {
+    if (!grading) return;
+    setGradeSaving(true);
+    setGradeError("");
+    try {
+      const res = await fetch("/api/teacher/stem-sketch-grade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId: grading.row.last_submission_id, scores: gradeScores }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        setGradeError(d?.error || `Save failed (HTTP ${res.status})`);
+        return;
+      }
+      // Refresh this assignment's roster so the graded badge/total shows.
+      const rr = await fetch(`/api/teacher/stem-sketch-results?assignmentId=${encodeURIComponent(grading.assignmentId)}`);
+      if (rr.ok) setResults(prev => ({ ...prev, [grading.assignmentId]: [] }));
+      const rows = rr.ok ? await rr.json() : null;
+      if (rows) setResults(prev => ({ ...prev, [grading.assignmentId]: rows }));
+      setGrading(null);
+    } finally {
+      setGradeSaving(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/teacher/stem-sketch-assignments?classId=${encodeURIComponent(classId)}`);
@@ -321,6 +384,71 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                   </div>
                 </div>
 
+                {isExpanded && grading?.assignmentId === a.id && challenge?.rubric && (
+                  <div style={{ borderTop: "2px solid #f59e0b", background: "#fffbeb", padding: "18px" }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#92400e", marginBottom: 4 }}>
+                      🎯 Grading: {grading.row.name}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#a16207", marginBottom: 12 }}>
+                      Auto rows are scored by the tool; suggested rows come from the design checks — click any band to override. Blank rows aren&apos;t counted until you score them.
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {challenge.rubric.map(r => {
+                        const sel = gradeScores[r.id];
+                        return (
+                          <div key={r.id} style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 10, padding: "8px 12px" }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "baseline", marginBottom: 6 }}>
+                              <span style={{ fontSize: 13, fontWeight: 800, color: "#111" }}>{r.label}</span>
+                              <span style={{ fontSize: 10, fontWeight: 800, borderRadius: 999, padding: "1px 8px",
+                                background: r.kind === "auto" ? "#dcfce7" : r.kind === "assisted" ? "#e0f2fe" : "#f3f4f6",
+                                color: r.kind === "auto" ? "#166534" : r.kind === "assisted" ? "#075985" : "#4b5563" }}>
+                                {r.kind}
+                              </span>
+                              {r.description && <span style={{ fontSize: 11, color: "#777" }}>{r.description}</span>}
+                            </div>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {r.bandScores.map((score, bi) => (
+                                <button key={score}
+                                  onClick={() => setGradeScores(s => ({ ...s, [r.id]: score }))}
+                                  title={r.bandLabels[bi]}
+                                  style={{ fontSize: 11.5, fontWeight: 700, padding: "5px 10px", borderRadius: 8,
+                                    cursor: "pointer", maxWidth: 220, textAlign: "left",
+                                    border: `2px solid ${sel === score ? "#b45309" : "#e5e7eb"}`,
+                                    background: sel === score ? "#fef3c7" : "#fff",
+                                    color: sel === score ? "#92400e" : "#555" }}>
+                                  <b>{score}</b> · {r.bandLabels[bi]}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 14 }}>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: "#92400e" }}>
+                        Total: {Object.values(gradeScores).reduce((s, v) => s + v, 0)} / {challenge.rubric.reduce((s, r) => s + r.bandScores[0], 0)}
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#a16207", marginLeft: 8 }}>
+                          ({Object.keys(gradeScores).length}/{challenge.rubric.length} rows scored)
+                        </span>
+                      </div>
+                      {gradeError && <span style={{ fontSize: 12, color: "#dc2626", fontWeight: 700 }}>{gradeError}</span>}
+                      <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                        <button onClick={() => setGrading(null)} disabled={gradeSaving}
+                          style={{ padding: "8px 16px", borderRadius: 9, border: "2px solid #d1d5db",
+                            background: "#fff", color: "#374151", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+                          Cancel
+                        </button>
+                        <button onClick={() => saveGrades(challenge.id)} disabled={gradeSaving}
+                          style={{ padding: "8px 16px", borderRadius: 9, border: "none",
+                            background: gradeSaving ? "#fcd34d" : "#b45309", color: "#fff",
+                            fontWeight: 800, fontSize: 12, cursor: gradeSaving ? "not-allowed" : "pointer" }}>
+                          {gradeSaving ? "Saving…" : "💾 Save grades"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {isExpanded && (
                   <div style={{ borderTop: "2px solid #a5f3fc", padding: "20px 18px" }}>
                     {isLoadingResults ? (
@@ -352,14 +480,27 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                                   {new Date(row.last_at).toLocaleDateString()}
                                 </td>
                                 <td style={{ ...TD }}>
-                                  <Link
-                                    href={`/tools/stem-sketch?asStudent=${encodeURIComponent(row.student_id)}&submissionId=${row.last_submission_id}`}
-                                    target="_blank"
-                                    title={`Open ${row.name}'s submission (read-only)`}
-                                    style={{ fontSize: 12, fontWeight: 800, color: "#0e7490",
-                                      textDecoration: "none", whiteSpace: "nowrap" }}>
-                                    👁 Open
-                                  </Link>
+                                  <div style={{ display: "flex", gap: 10, alignItems: "center", whiteSpace: "nowrap" }}>
+                                    <Link
+                                      href={`/tools/stem-sketch?asStudent=${encodeURIComponent(row.student_id)}&submissionId=${row.last_submission_id}`}
+                                      target="_blank"
+                                      title={`Open ${row.name}'s submission (read-only)`}
+                                      style={{ fontSize: 12, fontWeight: 800, color: "#0e7490", textDecoration: "none" }}>
+                                      👁 Open
+                                    </Link>
+                                    {challenge?.stage === 3 && (
+                                      <button
+                                        onClick={() => openGradePanel(a.id, challenge.id, row)}
+                                        style={{ fontSize: 12, fontWeight: 800, padding: "4px 10px",
+                                          borderRadius: 8, cursor: "pointer",
+                                          border: `2px solid ${row.graded_at ? "#16a34a" : "#b45309"}`,
+                                          background: "#fff", color: row.graded_at ? "#16a34a" : "#b45309" }}>
+                                        {row.graded_at
+                                          ? `✓ ${Object.values(row.rubric_scores ?? {}).reduce((s, r) => s + r.score, 0)}/${(challenge.rubric ?? []).reduce((s, r) => s + r.bandScores[0], 0)}`
+                                          : "🎯 Grade"}
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}

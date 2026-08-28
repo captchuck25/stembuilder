@@ -58,10 +58,13 @@ interface SketchAssignmentRow {
   title: string;
   challenge_id: string;
   challenge_title: string;
+  stage?: number;
   precision: string;
   precision_label: string;
   passed: boolean;
   attemptCount: number;
+  gradedTotal?: number | null;
+  rubricMax?: number | null;
 }
 
 interface QuizAssignmentRow {
@@ -518,7 +521,17 @@ export default function StudentDashboard() {
                                     <div style={{ fontSize: 12, color: "#555" }}>
                                       {s.challenge_title} · measure to {s.precision_label.toLowerCase()}
                                     </div>
-                                    {s.passed ? (
+                                    {s.stage === 3 ? (
+                                      s.gradedTotal != null ? (
+                                        <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>
+                                          🎯 Graded: {s.gradedTotal}/{s.rubricMax ?? 100}
+                                        </div>
+                                      ) : s.attemptCount > 0 ? (
+                                        <div style={{ fontSize: 11, color: "#0e7490", fontWeight: 700, marginTop: 2 }}>
+                                          ✓ Submitted — awaiting grade
+                                        </div>
+                                      ) : null
+                                    ) : s.passed ? (
                                       <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>
                                         ✓ Fit check passed
                                       </div>

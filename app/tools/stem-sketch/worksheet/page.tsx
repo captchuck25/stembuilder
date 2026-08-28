@@ -54,6 +54,13 @@ export default async function WorksheetPage({
     </svg>
   );
   const DOTS: React.CSSProperties = { position: "relative" };
+  // Labeled free-sketch dot field (stage 3 brainstorm ideas).
+  const ViewBoxFree = ({ label }: { label: string }) => (
+    <div style={DOTS}>
+      <span style={FIELD_LABEL}>{label}</span>
+      <DotField id={`dots-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} />
+    </div>
+  );
   const FIELD_LABEL: React.CSSProperties = {
     position: "absolute", top: "-0.22in", left: 0,
     fontSize: "8pt", fontWeight: 800, letterSpacing: "0.6px",
@@ -70,6 +77,13 @@ export default async function WorksheetPage({
 
   const precisionLine = `measure to the nearest ${PRECISION_LABEL[challenge.precision]
     .toLowerCase().replace("whole inches", "whole inch")}`;
+
+  // Stage 3 — BRAINSTORM sheet: brief summary + task checklist on the left,
+  // two open idea-sketch dot fields on the right. Same border/title-block
+  // chrome as the orthographic sheet.
+  const isBrainstorm = challenge.stage === 3;
+  const briefLines = (challenge.brief ?? "").split("\n").map(s => s.trim()).filter(Boolean);
+  const kitTasks = (challenge.kit ?? []).filter(k => k.includes("("));
 
   return (
     <div style={{ background: "#e5e7eb", minHeight: "100vh", fontFamily: "system-ui,sans-serif" }}>
@@ -99,7 +113,38 @@ export default async function WorksheetPage({
           border: "1.5px solid #444", height: "100%", boxSizing: "border-box",
           display: "flex", flexDirection: "column",
         }}>
-          {/* Drawing area — third-angle dot fields + 3D visual */}
+          {isBrainstorm ? (
+          /* Stage 3 brainstorm layout: brief + checklist left, idea fields right */
+          <div style={{
+            flex: 1, display: "grid",
+            gridTemplateColumns: "3.4in 1fr", gap: "0.35in",
+            padding: "0.42in 0.35in 0.3in",
+          }}>
+            <div style={{ fontSize: "9pt", color: "#444", lineHeight: 1.5, overflow: "hidden" }}>
+              <div style={{ fontSize: "10.5pt", fontWeight: 800, color: "#555", marginBottom: "0.08in" }}>The mission</div>
+              {briefLines.map((line, i) =>
+                line.startsWith("- ")
+                  ? <div key={i} style={{ margin: "0.03in 0 0.03in 0.15in" }}>• {line.slice(2)}</div>
+                  : <p key={i} style={{ margin: "0.05in 0" }}>{line}</p>
+              )}
+              {kitTasks.length > 0 && (
+                <>
+                  <div style={{ fontSize: "10.5pt", fontWeight: 800, color: "#555", margin: "0.12in 0 0.05in" }}>
+                    Tasks — check them off as your design covers each
+                  </div>
+                  {kitTasks.map((k, i) => (
+                    <div key={i} style={{ margin: "0.04in 0" }}>☐ {k}</div>
+                  ))}
+                </>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateRows: "1fr 1fr", gap: "0.45in" }}>
+              <ViewBoxFree label="Idea 1" />
+              <ViewBoxFree label="Idea 2" />
+            </div>
+          </div>
+          ) : (
+          /* Levels 1-2: third-angle dot fields + 3D visual */
           <div style={{
             flex: 1, display: "grid",
             gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr",
@@ -137,6 +182,7 @@ export default async function WorksheetPage({
               <DotField id="dots-right" />
             </div>
           </div>
+          )}
 
           {/* Drafting title block */}
           <div style={{ borderTop: "1.5px solid #444", display: "flex", height: "0.62in", flexShrink: 0 }}>

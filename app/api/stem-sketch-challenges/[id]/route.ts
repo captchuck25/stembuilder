@@ -2,7 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { stemSketchAssignmentsAllowed } from '@/lib/stem-sketch.server'
-import { getChallenge } from '@/lib/stem-sketch/challenges'
+import { getChallenge, challengeCheckParams } from '@/lib/stem-sketch/challenges'
 
 // GET /api/stem-sketch-challenges/[id]
 // Challenge payload for TEACHER PREVIEW — lets a teacher try a challenge in
@@ -30,6 +30,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       refDocJson: challenge.refDocJson,
       toleranceMm: challenge.toleranceMm,
       targetCubeIn: challenge.targetCubeIn ?? null,
+      brief: challenge.brief ?? null,
+      briefImagePath: challenge.briefImagePath ?? null,
+      requirements: challenge.requirements ?? null,
+      checks: challenge.stage === 3 ? challengeCheckParams(challenge) : null,
     },
   })
 }

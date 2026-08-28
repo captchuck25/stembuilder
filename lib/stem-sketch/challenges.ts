@@ -342,6 +342,23 @@ export function challengesForStage(stage: SketchStage): SketchChallenge[] {
   return ALL_CHALLENGES.filter(c => c.stage === stage);
 }
 
+/** Distilled auto-check parameters for the iframe's stage 3 requirements
+ *  checklist — derived from the rubric so the checks and the grading can
+ *  never drift apart. */
+export function challengeCheckParams(c: SketchChallenge): {
+  footprintBandsSqIn?: number[];
+  wrenchOpeningsIn?: { label: string; acrossFlatsIn: number }[];
+} {
+  const out: ReturnType<typeof challengeCheckParams> = {};
+  for (const row of c.rubric ?? []) {
+    if (row.check?.type === "footprintArea") out.footprintBandsSqIn = row.check.bandsSqIn;
+    if (row.check?.type === "wrenchOpening") {
+      (out.wrenchOpeningsIn ??= []).push({ label: row.label, acrossFlatsIn: row.check.acrossFlatsIn });
+    }
+  }
+  return out;
+}
+
 export function getChallenge(id: string): SketchChallenge | undefined {
   return ALL_CHALLENGES.find(c => c.id === id);
 }

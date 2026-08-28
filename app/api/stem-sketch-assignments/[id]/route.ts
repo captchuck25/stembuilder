@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
-import { getChallenge } from '@/lib/stem-sketch/challenges'
+import { getChallenge, challengeCheckParams } from '@/lib/stem-sketch/challenges'
 
 // GET /api/stem-sketch-assignments/[id]
 // Returns the assignment plus its resolved challenge (reference geometry,
@@ -54,6 +54,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       refDocJson: challenge.refDocJson,
       toleranceMm: challenge.toleranceMm,
       targetCubeIn: challenge.targetCubeIn ?? null,
+      // Stage 3 (design briefs): brief text, requirement gates, and the
+      // distilled auto-check params for the in-tool requirements checklist.
+      brief: challenge.brief ?? null,
+      briefImagePath: challenge.briefImagePath ?? null,
+      requirements: challenge.requirements ?? null,
+      checks: challenge.stage === 3 ? challengeCheckParams(challenge) : null,
     },
   })
 }

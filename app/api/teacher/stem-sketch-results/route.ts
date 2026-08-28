@@ -29,14 +29,16 @@ export async function GET(req: NextRequest) {
 
   const { data: subs } = await db
     .from('stem_sketch_submissions')
-    .select('id, student_id, passed, created_at')
+    .select('id, student_id, passed, created_at, metrics, rubric_scores, graded_at')
     .eq('assignment_id', assignmentId)
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
 
   interface Row {
     student_id: string; passed: boolean; attempts: number;
-    last_submission_id: number; last_at: string
+    last_submission_id: number; last_at: string;
+    // Level 3 grading context for the LAST submission (null on levels 1-2)
+    last_metrics: object | null; rubric_scores: object | null; graded_at: string | null
   }
   const byStudent = new Map<string, Row>()
   for (const s of subs ?? []) {
@@ -45,12 +47,17 @@ export async function GET(req: NextRequest) {
       byStudent.set(s.student_id, {
         student_id: s.student_id, passed: s.passed, attempts: 1,
         last_submission_id: s.id, last_at: s.created_at,
+        last_metrics: s.metrics ?? null, rubric_scores: s.rubric_scores ?? null,
+        graded_at: s.graded_at ?? null,
       })
     } else {
       prev.attempts += 1
       prev.passed = prev.passed || s.passed
       prev.last_submission_id = s.id
       prev.last_at = s.created_at
+      prev.last_metrics = s.metrics ?? null
+      prev.rubric_scores = s.rubric_scores ?? null
+      prev.graded_at = s.graded_at ?? null
     }
   }
 

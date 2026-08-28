@@ -20839,6 +20839,7 @@ function _renderAssignmentPanel() {
       <button class="ap-toggle" id="ap-toggle">▾</button>
     </div>
     <div class="ap-body" id="ap-body">
+      ${a.challenge.brief ? '<button class="ap-check" id="ap-brief" style="background:#475569;margin:0 0 8px">📖 Read the brief</button>' : ''}
       ${steps.map(s => `<div class="ap-step">${_apEsc(s)}</div>`).join('')}
       <button class="ap-check" id="ap-check">📐 Check My Model</button>
       ${a.preview ? '<div class="ap-preview-note">Teacher preview — submissions are not recorded.</div>' : ''}
@@ -20846,6 +20847,28 @@ function _renderAssignmentPanel() {
   document.getElementById('ap-head').onclick = () => panel.classList.toggle('collapsed');
   const check = document.getElementById('ap-check');
   check.onclick = (ev) => { ev.stopPropagation(); runAssignmentCheck(); };
+  const briefBtn = document.getElementById('ap-brief');
+  if (briefBtn) briefBtn.onclick = (ev) => { ev.stopPropagation(); _showAssignmentBrief(); };
+}
+
+// Stage 3 design briefs — long-form story + constraints, shown in a modal.
+// Lines starting with "- " render as bullets.
+function _showAssignmentBrief() {
+  const a = window.__assignment;
+  if (!a?.challenge?.brief) return;
+  const html = String(a.challenge.brief).split('\n').map(line => {
+    const t = line.trim();
+    if (!t) return '';
+    if (t.startsWith('- ')) return `<li style="margin:4px 0">${_apEsc(t.slice(2))}</li>`;
+    return `<p style="margin:8px 0">${_apEsc(t)}</p>`;
+  }).join('');
+  openModal({
+    title: `📖 ${a.challenge.title} — the brief`,
+    body: `<div style="font-size:13.5px;line-height:1.55;color:#333;max-height:340px;overflow-y:auto">
+      ${a.challenge.briefImagePath ? `<img src="${_apEsc(a.challenge.briefImagePath)}" style="width:100%;border-radius:8px;margin-bottom:10px" alt=""/>` : ''}
+      ${html}</div>`,
+    hideOk: true,
+  });
 }
 
 // ── Fit check ────────────────────────────────────────────────────────────────
@@ -21168,9 +21191,231 @@ function _closeCheckOverlay() {
   document.getElementById('assign-check-overlay')?.remove();
 }
 
+// ── Stage 3 design checks ───────────────────────────────────────────────────
+// No reference geometry — instead a requirements checklist: single component,
+// footprint-area banding, and wrench-opening gauges found by rasterizing the
+// tool's footprint and scanning gap widths. Results ride to the platform as
+// metrics.rubricAuto and pre-fill the teacher's grading panel.
+
+// Rasterize the world-baked geometry onto its flattest plane and measure
+// opening widths (holes + boundary notches) via a chamfer distance transform.
+// Returns [{label, acrossFlatsIn, found, widthIn, score}].
+function _wrenchOpeningScan(geo, targets) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const size = bb.getSize(new THREE.Vector3());
+  const axes = [['x', size.x], ['y', size.y], ['z', size.z]].sort((p, q) => q[1] - p[1]);
+  const aU = axes[0][0], aV = axes[1][0];
+  const RES = 0.25; // mm per cell
+  const PAD = 8;    // empty border so boundary notches read as openings
+  const W = Math.min(1600, Math.ceil(size[aU] / RES) + PAD * 2);
+  const H = Math.min(1600, Math.ceil(size[aV] / RES) + PAD * 2);
+  const grid = new Uint8Array(W * H); // 1 = material
+  const pos = geo.attributes.position;
+  const idx = geo.index;
+  const u0 = bb.min[aU], v0 = bb.min[aV];
+  const toCol = (u) => (u - u0) / RES + PAD;
+  const toRow = (v) => (v - v0) / RES + PAD;
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+  const tri = (i, j, k) => {
+    A.fromBufferAttribute(pos, i); B.fromBufferAttribute(pos, j); C.fromBufferAttribute(pos, k);
+    const ax = toCol(A[aU]), ay = toRow(A[aV]);
+    const bx = toCol(B[aU]), by = toRow(B[aV]);
+    const cx = toCol(C[aU]), cy = toRow(C[aV]);
+    const minX = Math.max(0, Math.floor(Math.min(ax, bx, cx)));
+    const maxX = Math.min(W - 1, Math.ceil(Math.max(ax, bx, cx)));
+    const minY = Math.max(0, Math.floor(Math.min(ay, by, cy)));
+    const maxY = Math.min(H - 1, Math.ceil(Math.max(ay, by, cy)));
+    const d = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+    if (Math.abs(d) < 1e-9) return;
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const w0 = ((bx - x) * (cy - y) - (cx - x) * (by - y)) / d;
+        const w1 = ((cx - x) * (ay - y) - (ax - x) * (cy - y)) / d;
+        const w2 = 1 - w0 - w1;
+        if (w0 >= -0.001 && w1 >= -0.001 && w2 >= -0.001) grid[y * W + x] = 1;
+      }
+    }
+  };
+  if (idx) { for (let i = 0; i < idx.count; i += 3) tri(idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)); }
+  else { for (let i = 0; i < pos.count; i += 3) tri(i, i + 1, i + 2); }
+
+  // Two-pass chamfer distance transform: distance (in cells) from each empty
+  // cell to the nearest material cell. 3-4 chamfer ≈ Euclidean.
+  const INF = 1e9;
+  const dist = new Float32Array(W * H).fill(INF);
+  for (let i = 0; i < W * H; i++) if (grid[i]) dist[i] = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (x > 0) dist[i] = Math.min(dist[i], dist[i - 1] + 1);
+      if (y > 0) dist[i] = Math.min(dist[i], dist[i - W] + 1);
+      if (x > 0 && y > 0) dist[i] = Math.min(dist[i], dist[i - W - 1] + 1.333);
+      if (x < W - 1 && y > 0) dist[i] = Math.min(dist[i], dist[i - W + 1] + 1.333);
+    }
+  }
+  for (let y = H - 1; y >= 0; y--) {
+    for (let x = W - 1; x >= 0; x--) {
+      const i = y * W + x;
+      if (x < W - 1) dist[i] = Math.min(dist[i], dist[i + 1] + 1);
+      if (y < H - 1) dist[i] = Math.min(dist[i], dist[i + W] + 1);
+      if (x < W - 1 && y < H - 1) dist[i] = Math.min(dist[i], dist[i + W + 1] + 1.333);
+      if (x > 0 && y < H - 1) dist[i] = Math.min(dist[i], dist[i + W - 1] + 1.333);
+    }
+  }
+  // Opening widths = 2×dist at LOCAL MAXIMA of the distance field (slot
+  // centerlines). The far outside field has huge dist — bands filter it.
+  const widths = [];
+  for (let y = 1; y < H - 1; y++) {
+    for (let x = 1; x < W - 1; x++) {
+      const i = y * W + x;
+      const d0 = dist[i];
+      if (d0 <= 0 || d0 >= INF) continue;
+      if (d0 >= dist[i - 1] && d0 >= dist[i + 1] && d0 >= dist[i - W] && d0 >= dist[i + W]) {
+        widths.push(d0 * 2 * RES); // mm
+      }
+    }
+  }
+  return targets.map(t => {
+    const afMm = t.acrossFlatsIn * 25.4;
+    // Fits the bolt head without being sloppy: AF+0.13mm … AF+1.6mm (1/16")
+    const lo = afMm + 0.13, hi = afMm + 1.6;
+    let best = null;
+    for (const w of widths) {
+      if (best === null || Math.abs(w - (afMm + 0.8)) < Math.abs(best - (afMm + 0.8))) best = w;
+    }
+    const inBand = widths.some(w => w >= lo && w <= hi);
+    const near = best !== null && Math.abs(best - afMm) <= 3;   // present but off
+    const rough = best !== null && Math.abs(best - afMm) <= 6;  // won't quite work
+    const score = inBand ? 10 : near ? 8 : rough ? 6 : 4;
+    return {
+      label: t.label,
+      acrossFlatsIn: t.acrossFlatsIn,
+      found: inBand,
+      widthIn: best !== null && Math.abs(best - afMm) <= 6 ? +(best / 25.4).toFixed(3) : null,
+      score,
+    };
+  });
+}
+
+function _runDesignChecks(a) {
+  // Union of visible positive bodies (same as the fit-check path).
+  if (viewer) viewer.rebuildBodies();
+  const stuBodies = doc.bodies.filter(b => b.op !== 'subtract' && !b.hidden && b.mesh);
+  if (!stuBodies.length) throw new Error('NOTHING_TO_CHECK');
+  let geo = null;
+  {
+    let man = null;
+    const scratch = [];
+    try {
+      for (const b of stuBodies) {
+        const m = _geoToManifoldRepaired(b.mesh);
+        scratch.push(m);
+        if (!man) { man = m; }
+        else { const u = man.add(m); scratch.push(u); man = u; }
+      }
+      geo = _manifoldToMesh(man).geometry;
+    } finally {
+      for (const s of scratch) { try { s.delete(); } catch (_) {} }
+    }
+  }
+  geo.computeBoundingBox();
+  const size = geo.boundingBox.getSize(new THREE.Vector3());
+  const dims = [size.x, size.y, size.z].sort((p, q) => q - p);
+  const footprintSqIn = +((dims[0] / 25.4) * (dims[1] / 25.4)).toFixed(2);
+  const bands = a.challenge.checks?.footprintBandsSqIn || [15, 17, 19];
+  const bandScores = [10, 8, 6, 4];
+  let footprintScore = bandScores[bands.length];
+  for (let i = 0; i < bands.length; i++) {
+    if (footprintSqIn < bands[i]) { footprintScore = bandScores[i]; break; }
+  }
+  const singleBody = stuBodies.length === 1 && !(doc.joints || []).length;
+  const wrench = a.challenge.checks?.wrenchOpeningsIn?.length
+    ? _wrenchOpeningScan(geo, a.challenge.checks.wrenchOpeningsIn)
+    : [];
+  geo.dispose();
+  return {
+    singleBody,
+    bodyCount: stuBodies.length,
+    jointCount: (doc.joints || []).length,
+    footprintSqIn,
+    footprintScore,
+    minThicknessIn: a.challenge.requirements?.minThicknessIn ?? null,
+    wrench,
+  };
+}
+
 function runAssignmentCheck() {
   const a = window.__assignment;
   if (!a) return;
+  // Stage 3 (design briefs): requirements checklist instead of a fit check.
+  if (a.challenge.stage === 3) {
+    if (!doc.bodies.some(b => b.op !== 'subtract' && !b.hidden)) {
+      showHint('Nothing to check yet — build your tool first (add a shape or extrude a sketch).');
+      return;
+    }
+    whenBooleanEngineReady(() => {
+      if (!window.__manifold) {
+        showHint('The precise engine is still loading — try again in a moment.');
+        return;
+      }
+      _openCheckOverlay(`
+        <div class="acc-big">📋</div>
+        <div class="acc-title">Checking requirements…</div>
+        <div class="acc-detail">Footprint, single part, and wrench sizes.</div>`);
+      setTimeout(() => {
+        let r;
+        try {
+          r = _runDesignChecks(a);
+        } catch (err) {
+          console.error('Design check failed:', err);
+          _openCheckOverlay(`
+            <div class="acc-big">⚠️</div>
+            <div class="acc-title">Couldn't finish the check</div>
+            <div class="acc-detail">Something went wrong — go back and try again.</div>
+            <div class="acc-buttons"><button class="acc-back" onclick="_closeCheckOverlay()">← Back to design</button></div>`);
+          return;
+        }
+        _assignLastCheck = {
+          passed: r.singleBody,
+          metrics: {
+            rubricAuto: {
+              footprintSqIn: r.footprintSqIn,
+              footprintScore: r.footprintScore,
+              singleBody: r.singleBody,
+              wrench: r.wrench,
+            },
+          },
+        };
+        const li = (ok, text) =>
+          `<div style="text-align:left;font-size:12px;margin:3px 0;color:${ok ? '#166534' : '#b45309'}">${ok ? '✓' : '✗'} ${text}</div>`;
+        const rows = [
+          li(r.singleBody, r.singleBody
+            ? 'One single part — no moving pieces'
+            : `Must be ONE part (found ${r.bodyCount} parts${r.jointCount ? ` + ${r.jointCount} joint${r.jointCount === 1 ? '' : 's'}` : ''}) — use Group or redesign`),
+          li(r.footprintScore >= 10, `Footprint: ${r.footprintSqIn} in² (${r.footprintScore}/10 on the size bands)`),
+          ...r.wrench.map(w => li(w.found,
+            `${_apEsc(w.label)} wrench: ${w.found ? `opening found (${w.widthIn}")` : w.widthIn ? `closest opening ${w.widthIn}" — re-measure!` : 'no opening found'}`)),
+          r.minThicknessIn ? `<div style="text-align:left;font-size:11px;margin:6px 0 0;color:#64748b">ℹ Remember: at least ${r.minThicknessIn}" thick everywhere except tool ends — your teacher checks this.</div>` : '',
+        ].join('');
+        const submitBtn = a.preview
+          ? ''
+          : `<button class="acc-submit" id="acc-submit">📨 Submit to your teacher</button>`;
+        _openCheckOverlay(`
+          <div class="acc-big">📋</div>
+          <div class="acc-title">Requirements check</div>
+          <div class="acc-detail" style="margin-bottom:8px">${rows}</div>
+          <div class="acc-detail" style="color:#0e7490;font-weight:700;margin-top:0">🖱 Drag to spin · scroll to zoom</div>
+          <div class="acc-buttons">
+            <button class="acc-back" onclick="_closeCheckOverlay()">← Back to design</button>
+            ${submitBtn}
+          </div>`);
+        const sb = document.getElementById('acc-submit');
+        if (sb) sb.onclick = submitAssignment;
+      }, 30);
+    });
+    return;
+  }
   if (!a.challenge.refDocJson) {
     showHint("This challenge's reference shape isn't installed yet — ask your teacher to check the assignment.");
     return;
