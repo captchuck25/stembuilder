@@ -27,7 +27,26 @@ import refS203 from "./challenges/s2-03-funky-towers.json";
 
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
 
-export type SketchStage = 1 | 2;
+export type SketchStage = 1 | 2 | 3;
+
+/** Level 3 rubric row. kind: 'auto' scores itself from the in-tool checks;
+ *  'assisted' pre-suggests from a check but the teacher confirms;
+ *  'teacher' is judged entirely by the teacher. Bands are the four score
+ *  levels (highest first) with kid/teacher-facing descriptors. */
+export interface RubricRow {
+  id: string;
+  label: string;
+  description?: string;
+  kind: "auto" | "assisted" | "teacher";
+  /** Score values for the four bands, highest first (e.g. [10, 8, 6, 4]). */
+  bandScores: number[];
+  /** Descriptor per band, same order as bandScores. */
+  bandLabels: string[];
+  /** For auto/assisted rows: which in-tool check feeds it. */
+  check?:
+    | { type: "footprintArea"; bandsSqIn: number[] } // area < bandsSqIn[i] → bandScores[i]
+    | { type: "wrenchOpening"; acrossFlatsIn: number };
+}
 
 /** The three assignment types teachers see (level 3 is a coming-soon card). */
 export const STAGE_META = {
@@ -75,6 +94,19 @@ export interface SketchChallenge {
    *  into the printed void block to complete the cube). Never shown to
    *  students; null until authored. */
   solutionStlPath?: string | null;
+  /** Stage 3 only: long-form student brief (newline-separated paragraphs;
+   *  lines starting with "- " render as bullets). */
+  brief?: string;
+  /** Stage 3 only: image shown with the brief (e.g. Neil the astronaut). */
+  briefImagePath?: string | null;
+  /** Stage 3 only: the grading rubric (see RubricRow). */
+  rubric?: RubricRow[];
+  /** Stage 3 only: teacher kit — real-hardware parts list / build notes. */
+  kit?: string[];
+  /** Stage 3 only: non-scored requirement gates surfaced in the student's
+   *  check panel. Currently understood keys: singleBody, minThicknessIn
+   *  (advisory). */
+  requirements?: { singleBody?: boolean; minThicknessIn?: number };
 }
 
 export const PRECISION_LABEL: Record<SketchPrecision, string> = {
@@ -215,8 +247,96 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
   },
 ];
 
+// Level 3 — Brainstorm & Design Your Own. Design briefs: no reference
+// geometry, no fit check — a requirements checklist in-tool + a teacher
+// rubric on the platform. Spec: docs/STEM_SKETCH_LEVEL3_SPACE_TOOL_SPEC.md
+const TASK_BANDS = {
+  bandScores: [10, 8, 6, 4],
+  bandLabels: [
+    "Solution is accurate in measurements & concept",
+    "Solution is present but measurements or concept is off",
+    "Solution is present but will not work",
+    "Solution not incorporated",
+  ],
+};
+
+export const SKETCH_CHALLENGES_S3: SketchChallenge[] = [
+  {
+    id: "s3-01-space-tool",
+    stage: 3,
+    title: "Space Tool",
+    description:
+      "The classic: Neil the astronaut needs ONE pocket-sized tool that handles all 7 tasks on his maintenance rounds — three hex bolts, a screw, a ring, a release pin, and a plug. Single component, no moving parts. Students measure real hardware on the challenge board, research the rest, and design. Auto-checks: footprint size, single-part, wrench openings; you grade the rest with the rubric.",
+    studentInstructions:
+      "1. Read Neil's brief (📋 panel) — one tool, seven jobs, no moving parts.\n" +
+      "2. Measure the hardware on the challenge board — the listed sizes need research!\n" +
+      "3. Brainstorm on your worksheet first: sketch at least two ideas.\n" +
+      "4. Build your tool here as ONE single part, at least ⅜\" thick (ends can narrow).\n" +
+      "5. Click Check My Model to see the requirements checklist.\n" +
+      "6. Submit when it's your best work — your teacher grades it with the rubric.",
+    brief:
+      "This is Neil. He is consistently having a hard time making repairs on the outside of his space station. His biggest issue: way too many tools — he is always losing them in space as he fumbles through his toolbox.\n" +
+      "For his next mission he wants to carry a SINGLE TOOL when he leaves the shelter of the station. It must handle all 7 tasks on his normal maintenance rounds and fit in his pocket — no toolbox.\n" +
+      "Your challenge: design Neil's tool.\n" +
+      "- The tool must be a single component — no moving parts, no add-ons.\n" +
+      "- The pin must be PULLED, not pried — and Neil keeps his thumb on it while pulling so it doesn't float away!\n" +
+      "- The plug must be LIFTED, not pried — thumb on it while lifting!\n" +
+      "- Everything should be at least 3/8\" thick so it isn't delicate (tool ends will obviously narrow).\n" +
+      "- Neil wears astro skinny jeans — an ideal design slips in and out of his pocket and is comfortable in his hand.\n" +
+      "- The measurements listed won't help without research — measure the items on the challenge board in class!",
+    briefImagePath: null, // Neil composite image — pending from user
+    kit: [
+      "Challenge board (build from parts below — see reference photo)",
+      "1/4\"-20 hex head bolt (Sun Bolt)",
+      "3/8\"-16 hex head bolt (Saturn Bolt)",
+      "1/2\"-13 hex head bolt (Jupiter Bolt)",
+      "1/4\"-20 flat/Phillips machine screw (Orion's Screw)",
+      "1\" ring / eye bolt (Ring of Neptune)",
+      "1/4\" hair pin clip (Intergalactic Release Pin)",
+      "3/4\" tapered plug (Space Continuum Plug)",
+      "Mounting board + nuts to seat the hardware",
+    ],
+    rubric: [
+      {
+        id: "dimensions", label: "Overall Dimensions", kind: "auto",
+        bandScores: [10, 8, 6, 4],
+        bandLabels: ["Under 15 square inches", "Under 17 square inches", "Under 19 square inches", "Any size"],
+        check: { type: "footprintArea", bandsSqIn: [15, 17, 19] },
+      },
+      {
+        id: "creativity", label: "Creativity", kind: "teacher",
+        description: "Design shows true individual design and innovation.",
+        bandScores: [10, 8, 6, 4],
+        bandLabels: ["Outstanding", "Strong", "Developing", "Minimal"],
+      },
+      {
+        id: "functionality", label: "Functionality", kind: "teacher",
+        description: "Components work well together and in the human hand; each fulfills its task without interfering with another. Has a comfy pocket fit!",
+        bandScores: [10, 8, 6, 4],
+        bandLabels: ["Outstanding", "Strong", "Developing", "Minimal"],
+      },
+      { id: "sun-bolt", label: "Sun Bolt (1/4\")", kind: "assisted",
+        check: { type: "wrenchOpening", acrossFlatsIn: 0.4375 }, ...TASK_BANDS },
+      { id: "saturn-bolt", label: "Saturn Bolt (3/8\")", kind: "assisted",
+        check: { type: "wrenchOpening", acrossFlatsIn: 0.5625 }, ...TASK_BANDS },
+      { id: "jupiter-bolt", label: "Jupiter Bolt (1/2\")", kind: "assisted",
+        check: { type: "wrenchOpening", acrossFlatsIn: 0.75 }, ...TASK_BANDS },
+      { id: "orions-screw", label: "Orion's Screw", kind: "teacher", ...TASK_BANDS },
+      { id: "ring-of-neptune", label: "Ring of Neptune", kind: "teacher", ...TASK_BANDS },
+      { id: "release-pin", label: "Intergalactic Release Pin", kind: "teacher", ...TASK_BANDS },
+      { id: "continuum-plug", label: "Space Continuum Plug", kind: "teacher", ...TASK_BANDS },
+    ],
+    requirements: { singleBody: true, minThicknessIn: 0.375 },
+    precision: "eighth",
+    refDocJson: null,
+    stlPath: null,
+    imagePath: null, // filled once the user models a sample/hero image
+    toleranceMm: 0.5,
+  },
+];
+
 /** Every challenge across stages — single lookup space (ids are globally unique). */
-const ALL_CHALLENGES: SketchChallenge[] = [...SKETCH_CHALLENGES, ...SKETCH_CHALLENGES_S2];
+const ALL_CHALLENGES: SketchChallenge[] = [...SKETCH_CHALLENGES, ...SKETCH_CHALLENGES_S2, ...SKETCH_CHALLENGES_S3];
 
 export function challengesForStage(stage: SketchStage): SketchChallenge[] {
   return ALL_CHALLENGES.filter(c => c.stage === stage);
