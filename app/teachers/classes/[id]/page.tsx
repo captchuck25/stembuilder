@@ -17,6 +17,7 @@ import SiteHeader from "@/app/components/SiteHeader";
 import QuizzesTab from "./QuizzesTab";
 import StemSketchTab from "./StemSketchTab";
 import { TOOL_META, LeaderboardBoards, type LeaderboardData as MeasLeaderboardData, type MeasTool } from "@/app/tools/measurement-lab/shared";
+import { BRIEFS as BLUEPRINT_BRIEFS } from "@/app/tools/blueprint-lab/engine/rubric";
 import { type AssignmentConfig as MeasAssignmentConfig } from "@/app/tools/measurement-lab/constants";
 
 const CARD: React.CSSProperties = {
@@ -3190,10 +3191,46 @@ export default function ClassDetailPage() {
 
           {/* ── Blueprint Lab panel ────────────────────────────────────────────────── */}
           {selectedTool === "blueprint" && (
+            <div style={{ ...CARD, padding: "26px 28px", marginBottom: 24 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#4f46e5", marginBottom: 6 }}>Design Briefs</h2>
+              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                Three project briefs with live auto-checked requirements (room counts, minimum sizes,
+                windows &amp; doors, fixtures). Open one to try the checklist yourself — assigning them
+                to students with adjustable rubrics is coming next.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                {BLUEPRINT_BRIEFS.map(b => (
+                  <div key={b.id} style={{ borderRadius: 12, border: "2px solid #e0e7ff",
+                    background: "#eef2ff", padding: "16px 18px", width: 280, flexShrink: 0,
+                    display: "flex", flexDirection: "column" }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: "#312e81" }}>{b.title}</div>
+                    <div style={{ fontSize: 12, color: "#555", marginTop: 6, lineHeight: 1.5, flex: 1 }}>
+                      {b.description}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6b7280", margin: "10px 0 12px", fontWeight: 600 }}>
+                      Deliverables: {b.deliverables.map(d =>
+                        d === "floor-plan" ? "Floor plan" : d === "roof-plan" ? "Roof plan" : "Elevations"
+                      ).join(" → ")}
+                    </div>
+                    <Link
+                      href={`/tools/blueprint-lab?brief=${b.id}`}
+                      target="_blank"
+                      style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
+                        color: "#fff", textDecoration: "none",
+                        padding: "7px 10px", borderRadius: 999, background: "#4f46e5" }}>
+                      Open with checklist →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedTool === "blueprint" && (
             <div style={{ ...CARD, padding: "26px 28px" }}>
               <h2 style={{ fontSize: 18, fontWeight: 900, color: "#4f46e5", marginBottom: 6 }}>Blueprint Lab Designs</h2>
               <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                All floor plans saved by students in this class. Assignments with briefs and rubrics are coming next.
+                All floor plans saved by students in this class.
               </p>
               {loadingBlueprint ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>

@@ -19,6 +19,7 @@ import RoofPlanView from './components/RoofPlanView';
 import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
 import RequirementsPanel from './components/RequirementsPanel';
+import { BRIEFS } from './engine/rubric';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
 // switches to the 3D tab.
@@ -325,9 +326,12 @@ export default function BlueprintLabClient() {
   const [selections, setSelections] = useState<Selection[]>([]);
   const [view, setView] = useState<ViewId>('2d');
   // Requirements checklist overlay (rubric guide mode) — open/closed + which
-  // built-in brief it checks against.
-  const [requirementsOpen, setRequirementsOpen] = useState(false);
-  const [requirementsBriefId, setRequirementsBriefId] = useState('studio');
+  // built-in brief it checks against. ?brief=<id> (from the teacher dashboard
+  // brief cards) opens the panel on that brief immediately.
+  const urlBrief = searchParams.get('brief');
+  const urlBriefValid = urlBrief != null && BRIEFS.some(b => b.id === urlBrief);
+  const [requirementsOpen, setRequirementsOpen] = useState(urlBriefValid);
+  const [requirementsBriefId, setRequirementsBriefId] = useState(urlBriefValid ? urlBrief! : 'studio');
 
   // Keep the user on whatever tab they were viewing across refreshes. Restore
   // once on mount (a UI preference, so localStorage not the cloud doc), then
