@@ -212,7 +212,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
             {([1, 2, 3] as const).map(lvl => {
               const meta = STAGE_META[lvl];
-              const comingSoon = lvl === 3;
+              const comingSoon = false as boolean;
               const active = createStage === lvl;
               return (
                 <div key={lvl}
