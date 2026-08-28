@@ -18,6 +18,7 @@ import ElevationsView from './components/ElevationsView';
 import RoofPlanView from './components/RoofPlanView';
 import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
+import RequirementsPanel from './components/RequirementsPanel';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
 // switches to the 3D tab.
@@ -286,6 +287,10 @@ export default function BlueprintLabClient() {
   const [tool, setTool] = useState<ToolId>('select');
   const [selections, setSelections] = useState<Selection[]>([]);
   const [view, setView] = useState<ViewId>('2d');
+  // Requirements checklist overlay (rubric guide mode) — open/closed + which
+  // built-in brief it checks against.
+  const [requirementsOpen, setRequirementsOpen] = useState(false);
+  const [requirementsBriefId, setRequirementsBriefId] = useState('studio');
 
   // Keep the user on whatever tab they were viewing across refreshes. Restore
   // once on mount (a UI preference, so localStorage not the cloud doc), then
@@ -1458,6 +1463,19 @@ export default function BlueprintLabClient() {
 
         <span style={{ flex: 1 }} />
 
+        <button
+          onClick={() => setRequirementsOpen(o => !o)}
+          title="Show design requirements checklist"
+          style={{
+            display: 'inline-flex', alignItems: 'center', height: 30, boxSizing: 'border-box',
+            border: `1px solid ${requirementsOpen ? T.accent : T.lineStrong}`,
+            background: requirementsOpen ? T.accentSoft : T.panel,
+            color: requirementsOpen ? T.accentInk : T.ink,
+            padding: '0 12px', borderRadius: 6, cursor: 'pointer',
+            fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap',
+          }}
+        >Requirements</button>
+
         <ViewTabs view={view} onChange={setView} />
 
         <div style={{ width: 1, height: 22, background: T.line }} />
@@ -1479,7 +1497,15 @@ export default function BlueprintLabClient() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <ToolPalette tool={tool} onChange={setTool} view={view} />
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+          {requirementsOpen && (
+            <RequirementsPanel
+              level={activeLevel}
+              briefId={requirementsBriefId}
+              onChangeBrief={setRequirementsBriefId}
+              onClose={() => setRequirementsOpen(false)}
+            />
+          )}
           {view === '3d' ? (
             <Scene3D project={project} />
           ) : view === 'specs' ? (
