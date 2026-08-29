@@ -872,7 +872,8 @@ export default function BlueprintLabClient() {
     if (walls.length === 0) return;
     updateLevel(l => ({
       ...l,
-      walls: [...l.walls, ...walls.map(w => ({ ...w, levelId: l.id }))],
+      // Copies (mirror, etc.) never inherit the shell lock.
+      walls: [...l.walls, ...walls.map(w => ({ ...w, levelId: l.id, locked: undefined }))],
     }));
   }, [updateLevel]);
 
@@ -880,7 +881,8 @@ export default function BlueprintLabClient() {
     const idSet = new Set(ids);
     updateLevel(l => ({
       ...l,
-      walls: l.walls.map(w => idSet.has(w.id) ? { ...w, ...patch } : w),
+      // Locked shell walls are immutable — skip them entirely.
+      walls: l.walls.map(w => idSet.has(w.id) && !w.locked ? { ...w, ...patch } : w),
     }));
     if (patch.thickness != null) setDefaultWallThickness(patch.thickness);
     if (patch.height != null) setDefaultWallHeight(patch.height);
@@ -890,7 +892,9 @@ export default function BlueprintLabClient() {
 
   const handleDeleteSelections = useCallback(() => {
     if (selections.length === 0) return;
-    const wallIds  = new Set(selections.filter(s => s.kind === 'wall').map(s => s.id));
+    // Locked shell walls can't be deleted (erase tool, Delete key, panel).
+    const lockedIds = new Set(activeLevel.walls.filter(w => w.locked).map(w => w.id));
+    const wallIds  = new Set(selections.filter(s => s.kind === 'wall' && !lockedIds.has(s.id)).map(s => s.id));
     const doorIds  = new Set(selections.filter(s => s.kind === 'door').map(s => s.id));
     const winIds   = new Set(selections.filter(s => s.kind === 'window').map(s => s.id));
     const dimIds   = new Set(selections.filter(s => s.kind === 'dimension').map(s => s.id));
@@ -931,7 +935,7 @@ export default function BlueprintLabClient() {
       });
     }
     setSelections([]);
-  }, [selections, updateLevel]);
+  }, [selections, updateLevel, activeLevel.walls]);
 
   const handleAddDoor = useCallback((d: Door) => {
     updateLevel(l => ({ ...l, doors: [...l.doors, d] }));
@@ -1211,7 +1215,7 @@ export default function BlueprintLabClient() {
   const handleTrimWall = useCallback((wallId: string, clickPoint: Vec2) => {
     updateLevel(l => {
       const w = l.walls.find(x => x.id === wallId);
-      if (!w) return l;
+      if (!w || w.locked) return l; // shell walls can't be trimmed
       const wDx = w.end.x - w.start.x, wDy = w.end.y - w.start.y;
       const wL = Math.hypot(wDx, wDy);
       if (wL === 0) return l;

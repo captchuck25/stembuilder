@@ -46,6 +46,9 @@ export interface Wall {
   height: number;      // inches — default 96 (8')
   type: WallType;      // 'wall' | 'partition'; exterior is derived from geometry
   status?: WallStatus; // optional; treated as 'proposed' when missing
+  // Assignment shell wall: geometry is immutable (no move/stretch/delete/trim)
+  // but doors, windows and interior walls may still attach to it.
+  locked?: boolean;
 }
 
 // Openings live on a wall in v2; for v1 they're free-floating 2D symbols

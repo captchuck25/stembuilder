@@ -139,5 +139,6 @@ export function buildShellWalls(shellId: string, targetSqFt: number, levelId: st
     height: 108,
     type: 'wall' as const,
     status: 'proposed' as const,
+    locked: true,
   }));
 }

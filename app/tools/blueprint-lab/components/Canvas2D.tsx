@@ -2012,7 +2012,7 @@ export default function Canvas2D({
         for (const sel of selections) {
           if (sel.kind === 'wall') {
             const w = level.walls.find(x => x.id === sel.id);
-            if (w) originals.walls.set(w.id, {
+            if (w && !w.locked) originals.walls.set(w.id, {
               start: { ...w.start }, end: { ...w.end },
               moveStart: true, moveEnd: true, stretch: false,
             });
@@ -2086,6 +2086,7 @@ export default function Canvas2D({
           selectedWallEndpoints.some(q => Math.hypot(p.x - q.x, p.y - q.y) < EPS);
         for (const w of level.walls) {
           if (selectedWallIds.has(w.id)) continue;
+          if (w.locked) continue; // shell walls never ride along with a move
           const moveStart = coincides(w.start);
           const moveEnd = coincides(w.end);
           if (!moveStart && !moveEnd) continue;
@@ -2159,9 +2160,10 @@ export default function Canvas2D({
 
     // Move tool falls through to Select-tool behavior when nothing is selected.
     if (tool === 'select' || (tool === 'move' && selections.length === 0)) {
-      // Handles (grips) on selected walls take priority.
+      // Handles (grips) on selected walls take priority. Locked shell walls
+      // don't stretch — ignore their grips.
       const handle = hitHandle(level.walls, selectedWallIds, world, 8 / vp.pxPerInch);
-      if (handle) {
+      if (handle && !level.walls.find(w => w.id === handle.wallId)?.locked) {
         onBeginLiveOp();
         setHandleDrag({ wallId: handle.wallId, end: handle.end });
         return;
@@ -2640,7 +2642,7 @@ export default function Canvas2D({
           for (const s of sel) {
             if (s.kind === 'wall') {
               const w = level.walls.find(x => x.id === s.id);
-              if (w) originals.walls.set(w.id, { start: { ...w.start }, end: { ...w.end } });
+              if (w && !w.locked) originals.walls.set(w.id, { start: { ...w.start }, end: { ...w.end } });
             } else if (s.kind === 'furniture') {
               const f = level.furniture.find(x => x.id === s.id);
               if (f) originals.furniture.set(f.id, { ...f.position });

@@ -566,6 +566,21 @@ export default function PropertiesPanel({
 
   // 1+ wall selected
   if (wallSelCount > 0) {
+    // Assignment shell walls are read-only: no editor, no delete.
+    if (selectedWalls.every(w => w.locked)) {
+      return (
+        <aside style={PANEL}>
+          <div style={HEADER}>
+            {wallSelCount === 1 ? 'Shell wall' : `${wallSelCount} shell walls`}
+          </div>
+          <div style={{ padding: '14px 16px', fontSize: 12.5, color: T.inkSoft, lineHeight: 1.65 }}>
+            🔒 Part of the assignment’s building shell — it can’t be moved,
+            resized or deleted. You can still place doors and windows on it
+            and attach interior walls to it.
+          </div>
+        </aside>
+      );
+    }
     return (
       <aside style={PANEL}>
         <div style={HEADER}>
