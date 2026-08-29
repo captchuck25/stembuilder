@@ -15,6 +15,9 @@ export interface ShellDef {
   label: string;
   // Rough proportions at 1,000 sqft — actual size scales to the brief target.
   describe: string;
+  // Below this target area the shape stops making sense (wings become
+  // hallway-width). Used to filter the shape choices offered per brief.
+  minSqFt: number;
   // Returns the perimeter polygon (clockwise, closed implicitly) for a target
   // interior area in square feet.
   outline: (targetSqFt: number) => Vec2[];
@@ -34,6 +37,7 @@ const half = (v: number) => Math.round(v / 12) * 6; // half, snapped to 6"
 export const SHELLS: ShellDef[] = [
   {
     id: 'ranch',
+    minSqFt: 300,
     label: 'Ranch (rectangle)',
     describe: 'Simple full-width rectangle — the classic single-story ranch.',
     outline: (sf) => {
@@ -46,6 +50,7 @@ export const SHELLS: ShellDef[] = [
   },
   {
     id: 'square',
+    minSqFt: 300,
     label: 'Square',
     describe: 'Compact near-square footprint — shortest exterior walls for the area.',
     outline: (sf) => {
@@ -58,6 +63,7 @@ export const SHELLS: ShellDef[] = [
   },
   {
     id: 'l-shape',
+    minSqFt: 650,
     label: 'L-shape',
     describe: 'Two wings meeting at a corner — makes a natural front porch nook.',
     outline: (sf) => {
@@ -73,6 +79,7 @@ export const SHELLS: ShellDef[] = [
   },
   {
     id: 't-shape',
+    minSqFt: 1000,
     label: 'T-shape',
     describe: 'Center wing off a long bar — good for separating bedrooms from living space.',
     outline: (sf) => {
@@ -90,6 +97,7 @@ export const SHELLS: ShellDef[] = [
   },
   {
     id: 'u-shape',
+    minSqFt: 1200,
     label: 'U-shape (courtyard)',
     describe: 'Two wings around a recessed entry courtyard.',
     outline: (sf) => {
@@ -107,6 +115,7 @@ export const SHELLS: ShellDef[] = [
   },
   {
     id: 'wide-l',
+    minSqFt: 1000,
     label: 'Wide L (split wings)',
     describe: 'Long shallow bar with a deep garage-side wing.',
     outline: (sf) => {
@@ -123,6 +132,30 @@ export const SHELLS: ShellDef[] = [
 ];
 
 export const shellById = (id: string) => SHELLS.find(s => s.id === id) ?? null;
+
+// Actual built stats for a shell at a target area: overall bounding width ×
+// depth (inches) and true enclosed square footage. Shown to teachers when
+// picking shapes and to students in the shell chooser, so nobody has to
+// measure the plan to learn what they're getting.
+export function shellStats(shellId: string, targetSqFt: number): { widthIn: number; depthIn: number; sqFt: number } | null {
+  const def = shellById(shellId);
+  if (!def) return null;
+  const pts = def.outline(targetSqFt);
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    area += p.x * q.y - q.x * p.y;
+  }
+  return {
+    widthIn: Math.max(...xs) - Math.min(...xs),
+    depthIn: Math.max(...ys) - Math.min(...ys),
+    sqFt: Math.round(Math.abs(area / 2) / 144),
+  };
+}
+
+export const formatShellStats = (s: { widthIn: number; depthIn: number; sqFt: number }) =>
+  `${Math.round(s.widthIn / 12)}' × ${Math.round(s.depthIn / 12)}' · ${s.sqFt.toLocaleString()} SF`;
 
 // Build the exterior wall loop for a shell at a target square footage.
 // 6" exterior walls, 9' plate height — generic single-story defaults.

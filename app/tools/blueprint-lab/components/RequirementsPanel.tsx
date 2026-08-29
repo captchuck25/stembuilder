@@ -16,7 +16,7 @@ const DELIVERABLE_LABELS: Record<string, string> = {
   'elevations': 'Elevations',
 };
 
-export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose, briefOverride }: {
+export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose, briefOverride, shellInfo }: {
   level: Level;
   briefId: string;
   onChangeBrief: (id: string) => void;
@@ -24,10 +24,15 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
   // Assignment mode: check against this exact (teacher-edited) brief and hide
   // the built-in brief picker.
   briefOverride?: Brief;
+  // e.g. "Shell: U-shape (courtyard) — 62' × 38' · 2,182 SF" — shown so the
+  // student knows their seeded shell's real size without measuring it.
+  shellInfo?: string;
 }) {
   const brief = briefOverride ?? BRIEFS.find(b => b.id === briefId) ?? BRIEFS[0];
   const checks = useMemo(() => evaluateBrief(level, brief), [level, brief]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Minimized: collapse to just the header bar (≠ close — one click brings it back).
+  const [minimized, setMinimized] = useState(false);
 
   const passed = checks.filter(c => c.status === 'pass').length;
   const groups: Array<{ name: string; items: RubricCheck[] }> = [];
@@ -56,6 +61,14 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
           color: passed === checks.length ? T.good : T.accentInk,
         }}>{passed}/{checks.length}</span>
         <button
+          onClick={() => setMinimized(m => !m)}
+          title={minimized ? 'Expand' : 'Minimize'}
+          style={{
+            border: 'none', background: 'transparent', color: T.inkMuted,
+            cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 2,
+          }}
+        >{minimized ? '▾' : '–'}</button>
+        <button
           onClick={onClose}
           title="Close"
           style={{
@@ -65,6 +78,7 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
         >✕</button>
       </div>
 
+      {minimized ? null : <>
       {/* Brief picker (fixed title in assignment mode) */}
       <div style={{ padding: '8px 12px', borderBottom: `1px solid ${T.line}`, background: T.panel2 }}>
         {briefOverride ? (
@@ -87,6 +101,11 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
         <div style={{ fontSize: 10.5, color: T.inkMuted, marginTop: 4 }}>
           Deliverables: {brief.deliverables.map(d => DELIVERABLE_LABELS[d]).join(' → ')}
         </div>
+        {shellInfo && (
+          <div style={{ fontSize: 10.5, color: T.accentInk, fontWeight: 600, marginTop: 4 }}>
+            {shellInfo}
+          </div>
+        )}
       </div>
 
       {/* Checks */}
@@ -130,6 +149,7 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
           );
         })}
       </div>
+      </>}
     </div>
   );
 }

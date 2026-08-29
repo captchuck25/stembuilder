@@ -6,8 +6,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BRIEFS, Brief, RoomRequirement } from "@/app/tools/blueprint-lab/engine/rubric";
-import { SHELLS } from "@/app/tools/blueprint-lab/engine/shells";
+import { BRIEFS, Brief, DEFAULT_FURNISHINGS, RoomRequirement } from "@/app/tools/blueprint-lab/engine/rubric";
+import { SHELLS, formatShellStats, shellStats } from "@/app/tools/blueprint-lab/engine/shells";
 import { ROOM_TYPES } from "@/app/tools/blueprint-lab/engine/types";
 
 const INDIGO = "#4f46e5";
@@ -120,6 +120,27 @@ export default function BlueprintTab({ classId }: { classId: string }) {
       shellMode: row.shell_mode,
       shellIds: row.shell_ids ?? [],
       status: row.status,
+    });
+    setError(null);
+  };
+
+  const startNewCustom = () => {
+    setDraft({
+      title: "Custom assignment",
+      briefId: "custom",
+      config: {
+        id: "custom",
+        title: "Custom assignment",
+        description: "Teacher-defined design brief.",
+        totalSqFt: { min: 800, max: 1200 },
+        rooms: [],
+        frontDoor: true,
+        backDoor: false,
+        deliverables: ["floor-plan"],
+      },
+      shellMode: "scratch",
+      shellIds: [],
+      status: "draft",
     });
     setError(null);
   };
@@ -286,12 +307,11 @@ export default function BlueprintTab({ classId }: { classId: string }) {
                       onChange={e => patchRoom(i, { minDoors: Number(e.target.value) > 0 ? Number(e.target.value) : undefined })} />
                   </td>
                   <td style={{ padding: "6px 10px", textAlign: "center" }}>
-                    {r.furniture !== undefined || ["BEDROOM", "MASTER BEDROOM", "BATHROOM", "KITCHEN"].includes(r.roomType) ? (
+                    {DEFAULT_FURNISHINGS[r.roomType] ? (
                       <input type="checkbox" checked={!!r.furniture?.length}
                         title="Require standard furnishings/fixtures for this room type"
                         onChange={e => {
-                          const base = BRIEFS.flatMap(b => b.rooms).find(x => x.roomType === r.roomType && x.furniture?.length);
-                          patchRoom(i, { furniture: e.target.checked ? (base?.furniture ?? []) : undefined });
+                          patchRoom(i, { furniture: e.target.checked ? DEFAULT_FURNISHINGS[r.roomType] : undefined });
                         }} />
                     ) : <span style={{ color: "#ccc" }}>—</span>}
                   </td>
@@ -349,15 +369,23 @@ export default function BlueprintTab({ classId }: { classId: string }) {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
             {SHELLS.map(s => {
               const selected = draft.shellIds.includes(s.id);
+              // A shape that needs more area than this brief targets is
+              // offered grayed-out (no U-shape studios).
+              const tooSmall = sqFtMid < s.minSqFt;
+              const stats = shellStats(s.id, sqFtMid);
               return (
                 <div key={s.id}
-                  onClick={() => setDraft(d => {
-                    if (!d) return d;
-                    if (d.shellMode === "fixed") return { ...d, shellIds: [s.id] };
-                    return { ...d, shellIds: selected ? d.shellIds.filter(x => x !== s.id) : [...d.shellIds, s.id] };
-                  })}
-                  title={s.describe}
-                  style={{ width: 120, padding: "10px 10px 8px", borderRadius: 10, cursor: "pointer",
+                  onClick={() => {
+                    if (tooSmall) return;
+                    setDraft(d => {
+                      if (!d) return d;
+                      if (d.shellMode === "fixed") return { ...d, shellIds: [s.id] };
+                      return { ...d, shellIds: selected ? d.shellIds.filter(x => x !== s.id) : [...d.shellIds, s.id] };
+                    });
+                  }}
+                  title={tooSmall ? `Needs a target of at least ${s.minSqFt.toLocaleString()} SF` : s.describe}
+                  style={{ width: 132, padding: "10px 10px 8px", borderRadius: 10,
+                    cursor: tooSmall ? "not-allowed" : "pointer", opacity: tooSmall ? 0.4 : 1,
                     border: selected ? `2px solid ${INDIGO}` : "2px solid #e5e7eb",
                     background: selected ? "#eef2ff" : "#fff", textAlign: "center" }}>
                   <div style={{ display: "flex", justifyContent: "center" }}>
@@ -365,6 +393,9 @@ export default function BlueprintTab({ classId }: { classId: string }) {
                   </div>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: selected ? "#312e81" : "#555", marginTop: 6 }}>
                     {s.label}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "#888", marginTop: 2 }}>
+                    {tooSmall ? `needs ${s.minSqFt.toLocaleString()}+ SF` : stats ? formatShellStats(stats) : ""}
                   </div>
                 </div>
               );
@@ -398,6 +429,14 @@ export default function BlueprintTab({ classId }: { classId: string }) {
             <div style={{ fontSize: 11.5, color: "#666", marginTop: 4, lineHeight: 1.45 }}>{b.description}</div>
           </button>
         ))}
+        <button onClick={startNewCustom}
+          style={{ borderRadius: 10, border: "2px dashed #c7d2fe", background: "#fff", cursor: "pointer",
+            padding: "12px 16px", textAlign: "left", width: 240 }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#312e81" }}>+ Create custom</div>
+          <div style={{ fontSize: 11.5, color: "#666", marginTop: 4, lineHeight: 1.45 }}>
+            Start from a blank rubric — add your own rooms, sizes and shell options.
+          </div>
+        </button>
       </div>
 
       {/* Saved assignments */}

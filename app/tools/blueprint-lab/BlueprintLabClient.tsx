@@ -20,7 +20,7 @@ import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
 import RequirementsPanel from './components/RequirementsPanel';
 import { Brief, BRIEFS } from './engine/rubric';
-import { SHELLS, buildShellWalls } from './engine/shells';
+import { SHELLS, buildShellWalls, formatShellStats, shellStats } from './engine/shells';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
 // switches to the 3D tab.
@@ -185,6 +185,9 @@ export default function BlueprintLabClient() {
   // Choice-mode shell picker overlay: open until the student picks (or the
   // sheet already has walls).
   const [shellPickerOpen, setShellPickerOpen] = useState(false);
+  // Which shell got seeded this session — shown in the Requirements panel so
+  // the student knows the shell's real dimensions without measuring.
+  const [seededShellId, setSeededShellId] = useState<string | null>(null);
 
   type SaveStatus = 'idle' | 'saving' | 'saved' | 'unsaved' | 'error';
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -624,8 +627,22 @@ export default function BlueprintLabClient() {
       ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
       : 1000;
     updateLevel(l => l.walls.length > 0 ? l : { ...l, walls: buildShellWalls(shellId, sf, l.id) });
+    setSeededShellId(shellId);
     setShellPickerOpen(false);
   }, [assignment, updateLevel]);
+
+  // "Ranch (rectangle) — 45' × 22' · 1,013 SF" line for the Requirements
+  // panel, once an assignment shell is on the sheet.
+  const shellInfoLine = useMemo(() => {
+    if (!assignment || !seededShellId) return undefined;
+    const def = SHELLS.find(s => s.id === seededShellId);
+    const sf = assignment.brief.totalSqFt
+      ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
+      : 1000;
+    const stats = shellStats(seededShellId, sf);
+    if (!def || !stats) return undefined;
+    return `Shell: ${def.label} — ${formatShellStats(stats)}`;
+  }, [assignment, seededShellId]);
 
   useEffect(() => {
     if (!assignment || !isAssignmentMode || shellSeededRef.current) return;
@@ -1631,6 +1648,7 @@ export default function BlueprintLabClient() {
               onChangeBrief={setRequirementsBriefId}
               onClose={() => setRequirementsOpen(false)}
               briefOverride={assignment?.brief}
+              shellInfo={shellInfoLine}
             />
           )}
           {assignmentError && (
@@ -1667,6 +1685,7 @@ export default function BlueprintLabClient() {
                     const minX = Math.min(...xs), maxX = Math.max(...xs);
                     const minY = Math.min(...ys), maxY = Math.max(...ys);
                     const pad = Math.max(maxX - minX, maxY - minY) * 0.08;
+                    const stats = shellStats(id, sf);
                     return (
                       <button key={id} onClick={() => seedShell(id)} title={s.describe}
                         style={{
@@ -1680,6 +1699,9 @@ export default function BlueprintLabClient() {
                             fill={T.accentSoft} stroke={T.accent} strokeWidth={(maxX - minX) * 0.02} />
                         </svg>
                         <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 8 }}>{s.label}</div>
+                        {stats && (
+                          <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 3 }}>{formatShellStats(stats)}</div>
+                        )}
                       </button>
                     );
                   })}

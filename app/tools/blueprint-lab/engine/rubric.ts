@@ -55,6 +55,30 @@ export interface RubricCheck {
 const ANY_BED: FurnitureGroup = ['bed-twin', 'bed-full', 'bed-queen', 'bed-king'];
 const BATH_FIXTURES: FurnitureGroup[] = [['toilet'], ['sink-vanity', 'sink-pedestal'], ['bathtub', 'shower-stall']];
 const KITCHEN_FIXTURES: FurnitureGroup[] = [['sink-kitchen'], ['stove-range'], ['fridge']];
+const LIVING_FURNISHINGS: FurnitureGroup[] = [['sofa-3', 'loveseat', 'armchair']];
+const DINING_FURNISHINGS: FurnitureGroup[] = [['dining-table-4', 'dining-table-6', 'dining-table-8']];
+
+// Default furnishing requirements per room type — used to prefill briefs and
+// as the toggle-on value in the teacher rubric editor. Any room type listed
+// here can carry a furnishings requirement.
+export const DEFAULT_FURNISHINGS: Partial<Record<string, FurnitureGroup[]>> = {
+  'BEDROOM': [ANY_BED, ['dresser']],
+  'MASTER BEDROOM': [ANY_BED, ['dresser']],
+  'GUEST BEDROOM': [ANY_BED],
+  'NURSERY': [['crib']],
+  'BATHROOM': BATH_FIXTURES,
+  'MASTER BATH': BATH_FIXTURES,
+  'HALF BATH': [['toilet'], ['sink-vanity', 'sink-pedestal']],
+  'POWDER ROOM': [['toilet'], ['sink-vanity', 'sink-pedestal']],
+  'KITCHEN': KITCHEN_FIXTURES,
+  'LIVING ROOM': LIVING_FURNISHINGS,
+  'FAMILY ROOM': LIVING_FURNISHINGS,
+  'GREAT ROOM': LIVING_FURNISHINGS,
+  'DINING ROOM': DINING_FURNISHINGS,
+  'BREAKFAST NOOK': DINING_FURNISHINGS,
+  'OFFICE': [['desk'], ['office-chair']],
+  'STUDY': [['desk']],
+};
 
 export const BRIEFS: Brief[] = [
   {
@@ -63,10 +87,10 @@ export const BRIEFS: Brief[] = [
     description: 'A ~500 sqft studio unit: one main living space, kitchenette, full bath and a closet.',
     totalSqFt: { min: 400, max: 650 },
     rooms: [
-      { roomType: 'LIVING ROOM', count: 1, minDims: { a: 132, b: 120 }, minWindows: 1 },
-      { roomType: 'KITCHEN', count: 1, furniture: KITCHEN_FIXTURES },
+      { roomType: 'LIVING ROOM', count: 1, minDims: { a: 132, b: 120 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
+      { roomType: 'KITCHEN', count: 1, minDims: { a: 96, b: 96 }, furniture: KITCHEN_FIXTURES },
       { roomType: 'BATHROOM', count: 1, minDims: { a: 60, b: 96 }, minDoors: 1, furniture: BATH_FIXTURES },
-      { roomType: 'CLOSET', count: 1, minDoors: 1 },
+      { roomType: 'CLOSET', count: 1, minDims: { a: 36, b: 36 }, minDoors: 1 },
     ],
     frontDoor: true,
     backDoor: false,
@@ -83,9 +107,9 @@ export const BRIEFS: Brief[] = [
         minWindows: 1, minDoors: 1, furniture: [ANY_BED, ['dresser']], attachedCloset: true,
       },
       { roomType: 'BATHROOM', count: 1, minDims: { a: 60, b: 96 }, minDoors: 1, furniture: BATH_FIXTURES },
-      { roomType: 'KITCHEN', count: 1, furniture: KITCHEN_FIXTURES },
-      { roomType: 'LIVING ROOM', count: 1, minDims: { a: 144, b: 132 }, minWindows: 1 },
-      { roomType: 'LAUNDRY', count: 1, minDoors: 1 },
+      { roomType: 'KITCHEN', count: 1, minDims: { a: 96, b: 120 }, furniture: KITCHEN_FIXTURES },
+      { roomType: 'LIVING ROOM', count: 1, minDims: { a: 144, b: 132 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
+      { roomType: 'LAUNDRY', count: 1, minDims: { a: 36, b: 60 }, minDoors: 1 },
     ],
     frontDoor: true,
     backDoor: false,
@@ -106,10 +130,10 @@ export const BRIEFS: Brief[] = [
         minWindows: 1, minDoors: 1, furniture: [ANY_BED], attachedCloset: true,
       },
       { roomType: 'BATHROOM', count: 2, minDims: { a: 60, b: 96 }, minDoors: 1, furniture: BATH_FIXTURES },
-      { roomType: 'KITCHEN', count: 1, furniture: KITCHEN_FIXTURES },
-      { roomType: 'LIVING ROOM', count: 1, minDims: { a: 168, b: 144 }, minWindows: 1 },
-      { roomType: 'DINING ROOM', count: 1 },
-      { roomType: 'LAUNDRY', count: 1, minDoors: 1 },
+      { roomType: 'KITCHEN', count: 1, minDims: { a: 120, b: 144 }, furniture: KITCHEN_FIXTURES },
+      { roomType: 'LIVING ROOM', count: 1, minDims: { a: 168, b: 144 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
+      { roomType: 'DINING ROOM', count: 1, minDims: { a: 120, b: 144 }, furniture: DINING_FURNISHINGS },
+      { roomType: 'LAUNDRY', count: 1, minDims: { a: 60, b: 72 }, minDoors: 1 },
     ],
     frontDoor: true,
     backDoor: true,
@@ -263,6 +287,9 @@ const FURNITURE_NAMES: Partial<Record<FurnitureKind, string>> = {
   'bed-twin': 'bed', 'bed-full': 'bed', 'bed-queen': 'bed', 'bed-king': 'bed',
   'sink-vanity': 'sink', 'sink-pedestal': 'sink', 'sink-kitchen': 'sink',
   'stove-range': 'stove', 'shower-stall': 'shower', 'bathtub': 'tub',
+  'sofa-3': 'sofa', 'loveseat': 'sofa', 'armchair': 'armchair',
+  'dining-table-4': 'dining table', 'dining-table-6': 'dining table', 'dining-table-8': 'dining table',
+  'office-chair': 'chair',
 };
 const groupName = (g: FurnitureGroup) =>
   [...new Set(g.map(k => FURNITURE_NAMES[k] ?? k))].join(' or ');
