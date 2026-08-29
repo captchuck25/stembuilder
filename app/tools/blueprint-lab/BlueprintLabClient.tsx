@@ -1607,7 +1607,7 @@ export default function BlueprintLabClient() {
         <span style={{ flex: 1 }} />
 
         <button
-          onClick={() => setRequirementsOpen(o => !o)}
+          onClick={() => setRequirementsOpen(o => assignment ? true : !o)}
           title="Show design requirements checklist"
           style={{
             display: 'inline-flex', alignItems: 'center', height: 30, boxSizing: 'border-box',
@@ -1649,6 +1649,7 @@ export default function BlueprintLabClient() {
               onClose={() => setRequirementsOpen(false)}
               briefOverride={assignment?.brief}
               shellInfo={shellInfoLine}
+              closable={!assignment}
             />
           )}
           {assignmentError && (

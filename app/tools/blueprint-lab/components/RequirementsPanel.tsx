@@ -16,7 +16,7 @@ const DELIVERABLE_LABELS: Record<string, string> = {
   'elevations': 'Elevations',
 };
 
-export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose, briefOverride, shellInfo }: {
+export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose, briefOverride, shellInfo, closable = true }: {
   level: Level;
   briefId: string;
   onChangeBrief: (id: string) => void;
@@ -27,6 +27,9 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
   // e.g. "Shell: U-shape (courtyard) — 62' × 38' · 2,182 SF" — shown so the
   // student knows their seeded shell's real size without measuring it.
   shellInfo?: string;
+  // Assignment mode: the checklist is the student's guide — it can be
+  // minimized but never closed.
+  closable?: boolean;
 }) {
   const brief = briefOverride ?? BRIEFS.find(b => b.id === briefId) ?? BRIEFS[0];
   const checks = useMemo(() => evaluateBrief(level, brief), [level, brief]);
@@ -68,14 +71,16 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
             cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 2,
           }}
         >{minimized ? '▾' : '–'}</button>
-        <button
-          onClick={onClose}
-          title="Close"
-          style={{
-            border: 'none', background: 'transparent', color: T.inkMuted,
-            cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 2,
-          }}
-        >✕</button>
+        {closable && (
+          <button
+            onClick={onClose}
+            title="Close"
+            style={{
+              border: 'none', background: 'transparent', color: T.inkMuted,
+              cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 2,
+            }}
+          >✕</button>
+        )}
       </div>
 
       {minimized ? null : <>
