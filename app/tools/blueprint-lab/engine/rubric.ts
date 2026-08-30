@@ -134,6 +134,10 @@ export const BRIEFS: Brief[] = [
       { roomType: 'LIVING ROOM', count: 1, minDims: { a: 168, b: 144 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
       { roomType: 'DINING ROOM', count: 1, minDims: { a: 120, b: 144 }, furniture: DINING_FURNISHINGS },
       { roomType: 'LAUNDRY', count: 1, minDims: { a: 60, b: 72 }, minDoors: 1 },
+      // Drawn onto the plan like any room; its area does NOT count toward the
+      // SF target (see NON_LIVING_TYPES). 20×20 fits two cars; teachers can
+      // shrink to 12×20 for one car or delete the row to make it optional.
+      { roomType: 'GARAGE', count: 1, minDims: { a: 240, b: 240 }, minDoors: 1 },
     ],
     frontDoor: true,
     backDoor: true,
@@ -283,6 +287,8 @@ function exteriorDoors(level: Level): Door[] {
 // ─── Evaluation ───────────────────────────────────────────────────────────────
 
 const CLOSET_TYPES = new Set(['CLOSET', 'WALK-IN CLOSET']);
+// Unfinished / outdoor spaces excluded from the total-SF (living area) sum.
+const NON_LIVING_TYPES = new Set(['GARAGE', 'DECK', 'PATIO', 'PORCH', 'BALCONY']);
 const FURNITURE_NAMES: Partial<Record<FurnitureKind, string>> = {
   'bed-twin': 'bed', 'bed-full': 'bed', 'bed-queen': 'bed', 'bed-king': 'bed',
   'sink-vanity': 'sink', 'sink-pedestal': 'sink', 'sink-kitchen': 'sink',
@@ -312,12 +318,18 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
         detail: `Draw boundaries for open spaces first: ${openPlan.map(r => r.label.name).join(', ')}`,
       });
     } else {
-      const total = rooms.reduce((s, r) => s + (r.sqFt ?? 0), 0);
+      // Garages and outdoor spaces don't count toward living area — same as
+      // real gross-living-area (GLA) rules. A required garage still gets its
+      // own room checks; its footprint is just free against the SF target.
+      const living = rooms.filter(r => !NON_LIVING_TYPES.has(r.label.name.toUpperCase().trim()));
+      const excluded = rooms.length - living.length;
+      const total = living.reduce((s, r) => s + (r.sqFt ?? 0), 0);
       checks.push({
         id: 'total-sf', group: 'OVERALL',
         label: `Total area ${min.toLocaleString()}–${max.toLocaleString()} SF`,
         status: total >= min && total <= max ? 'pass' : 'fail',
-        detail: `Labeled rooms total ${Math.round(total).toLocaleString()} SF`,
+        detail: `Living area ${Math.round(total).toLocaleString()} SF`
+          + (excluded > 0 ? ' (garage/outdoor spaces not counted)' : ''),
       });
     }
   }

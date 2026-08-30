@@ -18,9 +18,22 @@ export interface ShellDef {
   // Below this target area the shape stops making sense (wings become
   // hallway-width). Used to filter the shape choices offered per brief.
   minSqFt: number;
+  // Asymmetric shapes offer a mirrored (left/right) variant, like real
+  // communities flip the same floor plan across the street.
+  mirrorable?: boolean;
   // Returns the perimeter polygon (clockwise, closed implicitly) for a target
-  // interior area in square feet.
-  outline: (targetSqFt: number) => Vec2[];
+  // interior area in square feet. `ratioScale` stretches the base width:depth
+  // proportion (1 = standard; ~1.4 = a longer, shallower version) so one
+  // shape yields visibly different footprints.
+  outline: (targetSqFt: number, ratioScale?: number) => Vec2[];
+}
+
+// Options that pin down one concrete shell from a shape family.
+export interface ShellVariant {
+  shellId: string;
+  sqFt: number;
+  mirror?: boolean;
+  ratioScale?: number;
 }
 
 // Solve a rectangle of `ratio` (w:d) whose area is targetSqFt, snapped to 6".
@@ -40,8 +53,8 @@ export const SHELLS: ShellDef[] = [
     minSqFt: 300,
     label: 'Ranch (rectangle)',
     describe: 'Simple full-width rectangle — the classic single-story ranch.',
-    outline: (sf) => {
-      const { w, d } = rectFor(sf, 2.0);
+    outline: (sf, rs = 1) => {
+      const { w, d } = rectFor(sf, 2.0 * rs);
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
         { x: w / 2, y: d / 2 }, { x: -w / 2, y: d / 2 },
@@ -53,8 +66,8 @@ export const SHELLS: ShellDef[] = [
     minSqFt: 300,
     label: 'Square',
     describe: 'Compact near-square footprint — shortest exterior walls for the area.',
-    outline: (sf) => {
-      const { w, d } = rectFor(sf, 1.15);
+    outline: (sf, rs = 1) => {
+      const { w, d } = rectFor(sf, 1.15 * rs);
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
         { x: w / 2, y: d / 2 }, { x: -w / 2, y: d / 2 },
@@ -65,10 +78,11 @@ export const SHELLS: ShellDef[] = [
     id: 'l-shape',
     minSqFt: 650,
     label: 'L-shape',
+    mirrorable: true,
     describe: 'Two wings meeting at a corner — makes a natural front porch nook.',
-    outline: (sf) => {
+    outline: (sf, rs = 1) => {
       // Big rect (w × d) minus a notch (w/2 × d/2) at one corner = 3/4 area.
-      const { w, d } = rectFor(sf / 0.75, 1.6);
+      const { w, d } = rectFor(sf / 0.75, 1.6 * rs);
       const nw = half(w), nd = half(d);
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
@@ -82,9 +96,9 @@ export const SHELLS: ShellDef[] = [
     minSqFt: 1000,
     label: 'T-shape',
     describe: 'Center wing off a long bar — good for separating bedrooms from living space.',
-    outline: (sf) => {
+    outline: (sf, rs = 1) => {
       // Bar (w × bd) + stem (sw × sd) centered below. Bar 2/3 of area.
-      const { w, d: bd } = rectFor(sf * (2 / 3), 2.6);
+      const { w, d: bd } = rectFor(sf * (2 / 3), 2.6 * rs);
       const sw = half(w);
       const sd = Math.round(((sf / 3) * 144) / sw / 6) * 6;
       return [
@@ -100,10 +114,10 @@ export const SHELLS: ShellDef[] = [
     minSqFt: 1200,
     label: 'U-shape (courtyard)',
     describe: 'Two wings around a recessed entry courtyard.',
-    outline: (sf) => {
+    outline: (sf, rs = 1) => {
       // Full rect minus a centered notch on the front: notch w/3 × d/2.
       // Area = w·d − (w/3)(d/2) = (5/6)·w·d.
-      const { w, d } = rectFor(sf / (5 / 6), 1.5);
+      const { w, d } = rectFor(sf / (5 / 6), 1.5 * rs);
       const nw = Math.round(w / 3 / 6) * 6, nd = half(d);
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
@@ -117,10 +131,11 @@ export const SHELLS: ShellDef[] = [
     id: 'wide-l',
     minSqFt: 1000,
     label: 'Wide L (split wings)',
+    mirrorable: true,
     describe: 'Long shallow bar with a deep garage-side wing.',
-    outline: (sf) => {
+    outline: (sf, rs = 1) => {
       // Keeps nw (58% of w); the removed notch is (w−nw) × nd = 0.42·0.4 ≈ 16.8%.
-      const { w, d } = rectFor(sf / 0.832, 2.2);
+      const { w, d } = rectFor(sf / 0.832, 2.2 * rs);
       const nw = Math.round(w * 0.58 / 6) * 6, nd = Math.round(d * 0.4 / 6) * 6;
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
@@ -133,14 +148,21 @@ export const SHELLS: ShellDef[] = [
 
 export const shellById = (id: string) => SHELLS.find(s => s.id === id) ?? null;
 
-// Actual built stats for a shell at a target area: overall bounding width ×
-// depth (inches) and true enclosed square footage. Shown to teachers when
-// picking shapes and to students in the shell chooser, so nobody has to
-// measure the plan to learn what they're getting.
-export function shellStats(shellId: string, targetSqFt: number): { widthIn: number; depthIn: number; sqFt: number } | null {
-  const def = shellById(shellId);
-  if (!def) return null;
-  const pts = def.outline(targetSqFt);
+// Final perimeter polygon for a concrete variant (ratio stretch + mirror).
+export function shellOutline(v: ShellVariant): Vec2[] {
+  const def = shellById(v.shellId);
+  if (!def) return [];
+  const pts = def.outline(v.sqFt, v.ratioScale ?? 1);
+  return v.mirror ? pts.map(p => ({ x: -p.x, y: p.y })) : pts;
+}
+
+// Actual built stats for a shell variant: overall bounding width × depth
+// (inches) and true enclosed square footage. Shown to teachers when picking
+// shapes and to students in the shell chooser, so nobody has to measure the
+// plan to learn what they're getting.
+export function shellStats(v: ShellVariant): { widthIn: number; depthIn: number; sqFt: number } | null {
+  const pts = shellOutline(v);
+  if (pts.length === 0) return null;
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   let area = 0;
   for (let i = 0; i < pts.length; i++) {
@@ -157,12 +179,36 @@ export function shellStats(shellId: string, targetSqFt: number): { widthIn: numb
 export const formatShellStats = (s: { widthIn: number; depthIn: number; sqFt: number }) =>
   `${Math.round(s.widthIn / 12)}' × ${Math.round(s.depthIn / 12)}' · ${s.sqFt.toLocaleString()} SF`;
 
-// Build the exterior wall loop for a shell at a target square footage.
-// 6" exterior walls, 9' plate height — generic single-story defaults.
-export function buildShellWalls(shellId: string, targetSqFt: number, levelId: string): Wall[] {
+// The concrete options a student sees after clicking a shape: two sizes
+// inside the brief's range × (mirrored | proportion) variants — like a real
+// community offering the same plan flipped or stretched.
+export function shellVariants(shellId: string, sqFtMin: number, sqFtMax: number): ShellVariant[] {
   const def = shellById(shellId);
   if (!def) return [];
-  const pts = def.outline(targetSqFt);
+  const round25 = (v: number) => Math.round(v / 25) * 25;
+  const span = Math.max(0, sqFtMax - sqFtMin);
+  const sfA = round25(sqFtMin + span * 0.25);
+  const sfB = round25(sqFtMin + span * 0.75);
+  if (def.mirrorable) {
+    return [
+      { shellId, sqFt: sfA },
+      { shellId, sqFt: sfA, mirror: true },
+      { shellId, sqFt: sfB, ratioScale: 1.35 },
+      { shellId, sqFt: sfB, ratioScale: 1.35, mirror: true },
+    ];
+  }
+  return [
+    { shellId, sqFt: sfA },
+    { shellId, sqFt: sfA, ratioScale: 1.4 },
+    { shellId, sqFt: sfB },
+    { shellId, sqFt: sfB, ratioScale: 1.4 },
+  ];
+}
+
+// Build the exterior wall loop for a shell variant.
+// 6" exterior walls, 9' plate height — generic single-story defaults.
+export function buildShellWalls(v: ShellVariant, levelId: string): Wall[] {
+  const pts = shellOutline(v);
   return pts.map((p, i) => ({
     id: makeId('wall'),
     levelId,

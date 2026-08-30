@@ -20,7 +20,7 @@ import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
 import RequirementsPanel from './components/RequirementsPanel';
 import { Brief, BRIEFS } from './engine/rubric';
-import { SHELLS, buildShellWalls, formatShellStats, shellStats } from './engine/shells';
+import { SHELLS, ShellVariant, buildShellWalls, formatShellStats, shellOutline, shellStats, shellVariants } from './engine/shells';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
 // switches to the 3D tab.
@@ -185,9 +185,11 @@ export default function BlueprintLabClient() {
   // Choice-mode shell picker overlay: open until the student picks (or the
   // sheet already has walls).
   const [shellPickerOpen, setShellPickerOpen] = useState(false);
-  // Which shell got seeded this session — shown in the Requirements panel so
-  // the student knows the shell's real dimensions without measuring.
-  const [seededShellId, setSeededShellId] = useState<string | null>(null);
+  // Which shell variant got seeded this session — shown in the Requirements
+  // panel so the student knows the shell's real dimensions without measuring.
+  const [seededVariant, setSeededVariant] = useState<ShellVariant | null>(null);
+  // Two-stage picker: which shape family is expanded into variants.
+  const [pickerShape, setPickerShape] = useState<string | null>(null);
 
   type SaveStatus = 'idle' | 'saving' | 'saved' | 'unsaved' | 'error';
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -280,10 +282,13 @@ export default function BlueprintLabClient() {
   }, [urlDesignId, isTeacherView, isAssignmentMode]);
 
   // Assignment mode: fetch the assignment, merge its teacher-edited config
-  // over the base brief, and open the Requirements panel on it.
+  // over the base brief, and open the Requirements panel on it. Triggers from
+  // the URL (?assignment=) OR from a reopened save that carries
+  // project.assignmentId — the checklist travels with the saved work.
+  const effectiveAssignmentId = assignmentId ?? project.assignmentId ?? null;
   useEffect(() => {
-    if (!assignmentId) return;
-    fetch(`/api/blueprint-assignments/${assignmentId}`)
+    if (!effectiveAssignmentId || assignment) return;
+    fetch(`/api/blueprint-assignments/${effectiveAssignmentId}`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('load failed')))
       .then((a: { id: string; title: string; briefId: string; config: Partial<Brief> | null;
                   shellMode: 'scratch' | 'choice' | 'fixed'; shellIds: string[] }) => {
@@ -293,13 +298,20 @@ export default function BlueprintLabClient() {
           : { ...base, title: a.title || base.title };
         setAssignment({ id: a.id, title: a.title, brief, shellMode: a.shellMode, shellIds: a.shellIds ?? [] });
         setRequirementsOpen(true);
-        // Show the assignment name in the toolbar without marking unsaved.
+        // Stamp the assignment onto the project (persists through saves).
+        // Only a fresh URL launch takes the assignment's title — a reopened
+        // save keeps whatever name it was saved under.
         suppressNextHistoryRef.current = true;
         justRestoredRef.current = true;
-        setProject(p => ({ ...p, name: a.title || p.name }));
+        setProject(p => ({
+          ...p,
+          ...(isAssignmentMode ? { name: a.title || p.name } : {}),
+          assignmentId: a.id,
+        }));
       })
       .catch(() => setAssignmentError('Could not load the assignment'));
-  }, [assignmentId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveAssignmentId, assignment]);
 
   // localStorage autosave on project change (debounced ~500ms). Also flips
   // status to 'unsaved' so the user sees that the cloud copy is stale.
@@ -621,39 +633,38 @@ export default function BlueprintLabClient() {
   // assignment loads (empty sheet only); 'choice' opens the picker overlay
   // instead. Runs once per mount.
   const shellSeededRef = useRef(false);
-  const seedShell = useCallback((shellId: string) => {
-    if (!assignment) return;
-    const sf = assignment.brief.totalSqFt
-      ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
-      : 1000;
-    updateLevel(l => l.walls.length > 0 ? l : { ...l, walls: buildShellWalls(shellId, sf, l.id) });
-    setSeededShellId(shellId);
+  const seedShell = useCallback((v: ShellVariant) => {
+    updateLevel(l => l.walls.length > 0 ? l : { ...l, walls: buildShellWalls(v, l.id) });
+    setSeededVariant(v);
     setShellPickerOpen(false);
-  }, [assignment, updateLevel]);
+    setPickerShape(null);
+  }, [updateLevel]);
 
   // "Ranch (rectangle) — 45' × 22' · 1,013 SF" line for the Requirements
   // panel, once an assignment shell is on the sheet.
   const shellInfoLine = useMemo(() => {
-    if (!assignment || !seededShellId) return undefined;
-    const def = SHELLS.find(s => s.id === seededShellId);
-    const sf = assignment.brief.totalSqFt
-      ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
-      : 1000;
-    const stats = shellStats(seededShellId, sf);
+    if (!assignment || !seededVariant) return undefined;
+    const def = SHELLS.find(s => s.id === seededVariant.shellId);
+    const stats = shellStats(seededVariant);
     if (!def || !stats) return undefined;
     return `Shell: ${def.label} — ${formatShellStats(stats)}`;
-  }, [assignment, seededShellId]);
+  }, [assignment, seededVariant]);
 
   useEffect(() => {
-    if (!assignment || !isAssignmentMode || shellSeededRef.current) return;
+    if (!assignment || shellSeededRef.current) return;
     shellSeededRef.current = true;
+    // Covers reopened saves too: a design saved before picking a shell gets
+    // the picker again; one saved with walls is left alone.
     if (activeLevel.walls.length > 0) return;
     if (assignment.shellMode === 'fixed' && assignment.shellIds[0]) {
-      seedShell(assignment.shellIds[0]);
+      const sf = assignment.brief.totalSqFt
+        ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
+        : 1000;
+      seedShell({ shellId: assignment.shellIds[0], sqFt: sf });
     } else if (assignment.shellMode === 'choice' && assignment.shellIds.length > 0) {
       setShellPickerOpen(true);
     }
-  }, [assignment, isAssignmentMode, activeLevel.walls.length, seedShell]);
+  }, [assignment, activeLevel.walls.length, seedShell]);
 
   // Keep cross-floor stair mirrors in sync whenever the floor count changes
   // (covers loading an existing multi-story project AND adding a floor).
@@ -1669,44 +1680,76 @@ export default function BlueprintLabClient() {
                 padding: '20px 24px', maxWidth: 620, margin: 16,
               }}>
                 <div style={{ fontWeight: 700, fontSize: 14, color: T.ink, marginBottom: 4 }}>
-                  Choose your perimeter
+                  {pickerShape ? 'Choose your version' : 'Choose your perimeter'}
                 </div>
                 <div style={{ fontSize: 12, color: T.inkSoft, marginBottom: 16 }}>
-                  Pick the shape of your building shell for “{assignment.title}”. You’ll design everything inside it.
+                  {pickerShape
+                    ? 'Same shape, different builds — flipped and stretched like plans across a real neighborhood.'
+                    : `Pick the shape of your building shell for “${assignment.title}”. You’ll design everything inside it.`}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-                  {assignment.shellIds.map(id => {
-                    const s = SHELLS.find(x => x.id === id);
-                    if (!s) return null;
-                    const sf = assignment.brief.totalSqFt
-                      ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
-                      : 1000;
-                    const pts = s.outline(sf);
-                    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-                    const minX = Math.min(...xs), maxX = Math.max(...xs);
-                    const minY = Math.min(...ys), maxY = Math.max(...ys);
-                    const pad = Math.max(maxX - minX, maxY - minY) * 0.08;
-                    const stats = shellStats(id, sf);
-                    return (
-                      <button key={id} onClick={() => seedShell(id)} title={s.describe}
-                        style={{
-                          width: 150, padding: '12px 10px 10px', borderRadius: 10, cursor: 'pointer',
-                          border: `2px solid ${T.lineStrong}`, background: T.panel2, textAlign: 'center',
-                        }}>
-                        <svg
-                          viewBox={`${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`}
-                          style={{ width: 96, height: 72, display: 'block', margin: '0 auto' }}>
-                          <polygon points={pts.map(p => `${p.x},${p.y}`).join(' ')}
-                            fill={T.accentSoft} stroke={T.accent} strokeWidth={(maxX - minX) * 0.02} />
-                        </svg>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 8 }}>{s.label}</div>
-                        {stats && (
-                          <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 3 }}>{formatShellStats(stats)}</div>
-                        )}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    const range = assignment.brief.totalSqFt ?? { min: 1000, max: 1000 };
+                    const mid = (range.min + range.max) / 2;
+                    // Stage 1: shape families. Stage 2: concrete variants.
+                    const cards: Array<{ key: string; label: string; sub: string | null; pts: Vec2[]; onPick: () => void }> =
+                      pickerShape
+                        ? shellVariants(pickerShape, range.min, range.max).map((v, i) => {
+                            const stats = shellStats(v);
+                            return {
+                              key: `${pickerShape}-${i}`,
+                              label: `Version ${String.fromCharCode(65 + i)}`,
+                              sub: stats ? formatShellStats(stats) : null,
+                              pts: shellOutline(v),
+                              onPick: () => seedShell(v),
+                            };
+                          })
+                        : assignment.shellIds.flatMap(id => {
+                            const s = SHELLS.find(x => x.id === id);
+                            if (!s) return [];
+                            return [{
+                              key: id,
+                              label: s.label,
+                              sub: null,
+                              pts: shellOutline({ shellId: id, sqFt: mid }),
+                              onPick: () => setPickerShape(id),
+                            }];
+                          });
+                    return cards.map(c => {
+                      const xs = c.pts.map(p => p.x), ys = c.pts.map(p => p.y);
+                      const minX = Math.min(...xs), maxX = Math.max(...xs);
+                      const minY = Math.min(...ys), maxY = Math.max(...ys);
+                      const pad = Math.max(maxX - minX, maxY - minY) * 0.08;
+                      return (
+                        <button key={c.key} onClick={c.onPick}
+                          style={{
+                            width: 150, padding: '12px 10px 10px', borderRadius: 10, cursor: 'pointer',
+                            border: `2px solid ${T.lineStrong}`, background: T.panel2, textAlign: 'center',
+                          }}>
+                          <svg
+                            viewBox={`${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`}
+                            style={{ width: 96, height: 72, display: 'block', margin: '0 auto' }}>
+                            <polygon points={c.pts.map(p => `${p.x},${p.y}`).join(' ')}
+                              fill={T.accentSoft} stroke={T.accent} strokeWidth={(maxX - minX) * 0.02} />
+                          </svg>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: T.ink, marginTop: 8 }}>{c.label}</div>
+                          {c.sub && (
+                            <div style={{ fontSize: 10.5, color: T.inkSoft, marginTop: 3 }}>{c.sub}</div>
+                          )}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
+                {pickerShape && (
+                  <button onClick={() => setPickerShape(null)}
+                    style={{
+                      marginTop: 14, fontSize: 12, fontWeight: 600, color: T.accentInk,
+                      background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+                    }}>
+                    ← Back to shapes
+                  </button>
+                )}
               </div>
             </div>
           )}

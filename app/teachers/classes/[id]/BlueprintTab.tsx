@@ -372,7 +372,7 @@ export default function BlueprintTab({ classId }: { classId: string }) {
               // A shape that needs more area than this brief targets is
               // offered grayed-out (no U-shape studios).
               const tooSmall = sqFtMid < s.minSqFt;
-              const stats = shellStats(s.id, sqFtMid);
+              const stats = shellStats({ shellId: s.id, sqFt: sqFtMid });
               return (
                 <div key={s.id}
                   onClick={() => {

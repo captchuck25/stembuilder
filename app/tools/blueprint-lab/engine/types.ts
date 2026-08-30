@@ -586,6 +586,10 @@ export interface Project {
   // Sandbox-sheet state (projection guide lines, etc.). Lives on the project so
   // it persists with the design. Optional for back-compat.
   sheet?: SheetSettings;
+  // The Blueprint assignment this design was started from. Persisted in the
+  // save so reopening from My Work restores the Requirements checklist and
+  // the assignment's rubric — the guide travels with the work.
+  assignmentId?: string;
 }
 
 // ─── Sandbox sheet ────────────────────────────────────────────────────────────
