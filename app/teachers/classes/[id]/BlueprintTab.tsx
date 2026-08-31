@@ -7,6 +7,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BRIEFS, Brief, DEFAULT_FURNISHINGS, RoomRequirement } from "@/app/tools/blueprint-lab/engine/rubric";
+import {
+  GradingRubric, resolveGradingRubric, rubricForDeliverables, rubricMaxPoints,
+} from "@/app/tools/blueprint-lab/engine/gradingRubric";
 import { SHELLS, formatShellStats, shellStats } from "@/app/tools/blueprint-lab/engine/shells";
 import { ROOM_TYPES } from "@/app/tools/blueprint-lab/engine/types";
 
@@ -35,10 +38,13 @@ interface Draft {
   title: string;
   briefId: string;
   config: Brief;
+  rubric: GradingRubric;
   shellMode: "scratch" | "choice" | "fixed";
   shellIds: string[];
   status: "draft" | "assigned";
 }
+
+const cloneRubric = (r: GradingRubric): GradingRubric => JSON.parse(JSON.stringify(r));
 
 // Deep-copy a brief template into an editable draft config.
 const cloneBrief = (b: Brief): Brief => JSON.parse(JSON.stringify(b));
@@ -83,6 +89,21 @@ export default function BlueprintTab({ classId }: { classId: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Submissions per assignment (expanded on demand).
+  interface SubRow {
+    id: string; student_id: string; student_name: string;
+    status: "submitted" | "returned" | "graded";
+    grade_total: number | null; submitted_at: string;
+  }
+  const [subsOpenId, setSubsOpenId] = useState<string | null>(null);
+  const [subs, setSubs] = useState<Record<string, SubRow[]>>({});
+  const toggleSubs = (aid: string) => {
+    if (subsOpenId === aid) { setSubsOpenId(null); return; }
+    setSubsOpenId(aid);
+    fetch(`/api/teacher/blueprint-submissions?assignmentId=${aid}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: SubRow[]) => setSubs(s => ({ ...s, [aid]: rows })));
+  };
 
   const reload = () => {
     fetch(`/api/teacher/blueprint-assignments?classId=${classId}`)
@@ -104,6 +125,7 @@ export default function BlueprintTab({ classId }: { classId: string }) {
       title: base.title,
       briefId: base.id,
       config: cloneBrief(base),
+      rubric: cloneRubric(resolveGradingRubric(null)),
       shellMode: "scratch",
       shellIds: [],
       status: "draft",
@@ -117,6 +139,7 @@ export default function BlueprintTab({ classId }: { classId: string }) {
       title: row.title,
       briefId: row.brief_id,
       config: resolveConfig(row),
+      rubric: cloneRubric(resolveGradingRubric(row.config as { gradingRubric?: GradingRubric })),
       shellMode: row.shell_mode,
       shellIds: row.shell_ids ?? [],
       status: row.status,
@@ -138,6 +161,7 @@ export default function BlueprintTab({ classId }: { classId: string }) {
         backDoor: false,
         deliverables: ["floor-plan"],
       },
+      rubric: cloneRubric(resolveGradingRubric(null)),
       shellMode: "scratch",
       shellIds: [],
       status: "draft",
@@ -158,7 +182,7 @@ export default function BlueprintTab({ classId }: { classId: string }) {
           classId,
           title: draft.title,
           briefId: draft.briefId,
-          config: draft.config,
+          config: { ...draft.config, gradingRubric: draft.rubric },
           shellMode: draft.shellMode,
           shellIds: draft.shellIds,
           status: statusOverride ?? draft.status,
@@ -418,6 +442,117 @@ export default function BlueprintTab({ classId }: { classId: string }) {
             Pick at least one shape.
           </div>
         )}
+
+        {/* ── Grading rubric builder ─────────────────────────────────── */}
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#312e81", margin: "24px 0 4px" }}>
+          Grading rubric
+          <span style={{ fontWeight: 600, color: "#6b7280", marginLeft: 8, fontSize: 11.5 }}>
+            {rubricMaxPoints(rubricForDeliverables(draft.rubric, draft.config.deliverables))} pts max
+            · AUTO rows score themselves; you grade the rest
+          </span>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#777", marginBottom: 10 }}>
+          Each category has 4 quality tiers. Edit points and wording freely — categories for
+          deliverables this assignment doesn&apos;t include are hidden from students automatically.
+        </div>
+        {rubricForDeliverables(draft.rubric, draft.config.deliverables).categories.map(cat => {
+          const catIndex = draft.rubric.categories.findIndex(c => c.id === cat.id);
+          const patchCat = (mut: (c: typeof cat) => typeof cat) =>
+            setDraft(d => {
+              if (!d) return d;
+              const categories = d.rubric.categories.map((c, i) => i === catIndex ? mut(c) : c);
+              return { ...d, rubric: { ...d.rubric, categories } };
+            });
+          return (
+            <div key={cat.id} style={{ border: CARD_BORDER, borderRadius: 10, padding: "10px 12px", marginBottom: 8, maxWidth: 720 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <input value={cat.name}
+                  onChange={e => patchCat(c => ({ ...c, name: e.target.value }))}
+                  style={{ ...inputStyle, width: 260, fontWeight: 700 }} />
+                <span style={{
+                  fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999,
+                  background: cat.scoring === "auto" ? "#dcfce7" : "#fff4e0",
+                  color: cat.scoring === "auto" ? "#15803d" : "#a05a00",
+                }}>{cat.scoring === "auto" ? "AUTO" : "TEACHER"}</span>
+                <span style={{ flex: 1 }} />
+                <button onClick={() => setDraft(d => d ? {
+                  ...d, rubric: { ...d.rubric, categories: d.rubric.categories.filter(c => c.id !== cat.id) },
+                } : d)}
+                  title="Remove category"
+                  style={{ background: "none", border: "none", color: "#e11d48", cursor: "pointer", fontWeight: 800 }}>✕</button>
+              </div>
+              {cat.tiers.map((tier, ti) => (
+                <div key={ti} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 4 }}>
+                  <input type="number" value={tier.points}
+                    onChange={e => patchCat(c => ({
+                      ...c,
+                      tiers: c.tiers.map((t, i) => i === ti ? { ...t, points: Number(e.target.value) || 0 } : t),
+                    }))}
+                    style={{ ...inputStyle, width: 52 }} />
+                  <textarea value={tier.descriptor} rows={1}
+                    onChange={e => patchCat(c => ({
+                      ...c,
+                      tiers: c.tiers.map((t, i) => i === ti ? { ...t, descriptor: e.target.value } : t),
+                    }))}
+                    style={{ ...inputStyle, width: "100%", minHeight: 26, resize: "vertical", fontFamily: "inherit" }} />
+                </div>
+              ))}
+            </div>
+          );
+        })}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+          <button
+            onClick={() => setDraft(d => d ? {
+              ...d,
+              rubric: {
+                ...d.rubric,
+                categories: [...d.rubric.categories, {
+                  id: `custom-${Date.now().toString(36)}`,
+                  name: "New category",
+                  scoring: "teacher" as const,
+                  deliverable: "floor-plan" as const,
+                  tiers: [
+                    { points: 14, descriptor: "Excellent." },
+                    { points: 12, descriptor: "Good." },
+                    { points: 9, descriptor: "Needs work." },
+                    { points: 6, descriptor: "Incomplete." },
+                  ],
+                }],
+              },
+            } : d)}
+            style={{ fontSize: 12, fontWeight: 700, color: "#4338ca", background: "#eef2ff",
+              border: CARD_BORDER, borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>
+            + Add teacher-graded category
+          </button>
+        </div>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: "#312e81", margin: "10px 0 4px" }}>Bonus / penalty</div>
+        {draft.rubric.bonuses.map((b, bi) => (
+          <div key={b.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+            <input value={b.label}
+              onChange={e => setDraft(d => d ? {
+                ...d, rubric: { ...d.rubric, bonuses: d.rubric.bonuses.map((x, i) => i === bi ? { ...x, label: e.target.value } : x) },
+              } : d)}
+              style={{ ...inputStyle, width: 280 }} />
+            <input type="number" value={b.points}
+              onChange={e => setDraft(d => d ? {
+                ...d, rubric: { ...d.rubric, bonuses: d.rubric.bonuses.map((x, i) => i === bi ? { ...x, points: Number(e.target.value) || 0 } : x) },
+              } : d)}
+              style={{ ...inputStyle, width: 60 }} />
+            <button onClick={() => setDraft(d => d ? {
+              ...d, rubric: { ...d.rubric, bonuses: d.rubric.bonuses.filter((_, i) => i !== bi) },
+            } : d)}
+              style={{ background: "none", border: "none", color: "#e11d48", cursor: "pointer", fontWeight: 800 }}>✕</button>
+          </div>
+        ))}
+        <button
+          onClick={() => setDraft(d => d ? {
+            ...d, rubric: { ...d.rubric, bonuses: [...d.rubric.bonuses, {
+              id: `bonus-${Date.now().toString(36)}`, label: "Bonus", points: 5, scoring: "teacher" as const }] },
+          } : d)}
+          style={{ fontSize: 12, fontWeight: 700, color: "#4338ca", background: "#eef2ff",
+            border: CARD_BORDER, borderRadius: 8, padding: "5px 12px", cursor: "pointer" }}>
+          + Add bonus/penalty (negative points = penalty)
+        </button>
       </div>
     );
   }
@@ -479,6 +614,12 @@ export default function BlueprintTab({ classId }: { classId: string }) {
                     : a.shell_mode === "fixed" ? "fixed shell" : `${(a.shell_ids ?? []).length} shell choices`}
                 </div>
               </div>
+              <button onClick={() => toggleSubs(a.id)}
+                style={{ fontSize: 12, fontWeight: 800, color: "#4338ca", cursor: "pointer",
+                  padding: "6px 14px", borderRadius: 999, border: `2px solid ${INDIGO}`,
+                  background: subsOpenId === a.id ? "#e0e7ff" : "#fff" }}>
+                Submissions{subs[a.id] ? ` (${subs[a.id].length})` : ""}
+              </button>
               <Link href={`/tools/blueprint-lab?assignment=${a.id}`} target="_blank"
                 style={{ fontSize: 12, fontWeight: 800, color: "#4338ca", textDecoration: "none",
                   padding: "6px 14px", borderRadius: 999, border: `2px solid ${INDIGO}`, background: "#eef2ff" }}>
@@ -502,6 +643,40 @@ export default function BlueprintTab({ classId }: { classId: string }) {
                   padding: "6px 14px", borderRadius: 999, border: "2px solid #fecdd3", background: "#fff" }}>
                 Delete
               </button>
+              {subsOpenId === a.id && (
+                <div style={{ flexBasis: "100%", borderTop: "1px solid #eef2ff", paddingTop: 10, marginTop: 4 }}>
+                  {!subs[a.id] ? (
+                    <div style={{ fontSize: 12, color: "#aaa" }}>Loading submissions…</div>
+                  ) : subs[a.id].length === 0 ? (
+                    <div style={{ fontSize: 12, color: "#888" }}>No submissions yet.</div>
+                  ) : (
+                    subs[a.id].map(s => (
+                      <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", fontSize: 12.5 }}>
+                        <span style={{ fontWeight: 700, color: "#111", minWidth: 160 }}>{s.student_name}</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999,
+                          background: s.status === "graded" ? "#dcfce7" : s.status === "returned" ? "#fff4e0" : "#e0e7ff",
+                          color: s.status === "graded" ? "#15803d" : s.status === "returned" ? "#a05a00" : "#4338ca",
+                        }}>{s.status.toUpperCase()}</span>
+                        {s.grade_total != null && (
+                          <span style={{ fontWeight: 800, color: "#15803d" }}>{s.grade_total} pts</span>
+                        )}
+                        <span style={{ color: "#999", fontSize: 11 }}>
+                          {new Date(s.submitted_at).toLocaleDateString()}
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        <Link
+                          href={`/tools/blueprint-lab?asStudent=${s.student_id}&submissionId=${s.id}`}
+                          target="_blank"
+                          style={{ fontSize: 11.5, fontWeight: 800, color: "#4338ca", textDecoration: "none",
+                            padding: "4px 12px", borderRadius: 999, border: `2px solid ${INDIGO}`, background: "#eef2ff" }}>
+                          {s.status === "graded" ? "Review grade" : "Grade →"}
+                        </Link>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

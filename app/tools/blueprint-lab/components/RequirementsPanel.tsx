@@ -16,7 +16,10 @@ const DELIVERABLE_LABELS: Record<string, string> = {
   'elevations': 'Elevations',
 };
 
-export default function RequirementsPanel({ level, briefId, onChangeBrief, onClose, briefOverride, shellInfo, closable = true }: {
+export default function RequirementsPanel({
+  level, briefId, onChangeBrief, onClose, briefOverride, shellInfo, closable = true,
+  onSubmit, submitLabel, submitDisabled, onOpenRubric,
+}: {
   level: Level;
   briefId: string;
   onChangeBrief: (id: string) => void;
@@ -30,6 +33,11 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
   // Assignment mode: the checklist is the student's guide — it can be
   // minimized but never closed.
   closable?: boolean;
+  // Assignment mode footer: submit action + rubric viewer.
+  onSubmit?: () => void;
+  submitLabel?: string;
+  submitDisabled?: boolean;
+  onOpenRubric?: () => void;
 }) {
   const brief = briefOverride ?? BRIEFS.find(b => b.id === briefId) ?? BRIEFS[0];
   const checks = useMemo(() => evaluateBrief(level, brief), [level, brief]);
@@ -162,6 +170,34 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
           );
         })}
       </div>
+      {(onSubmit || onOpenRubric) && (
+        <div style={{
+          padding: '8px 12px', borderTop: `1px solid ${T.line}`,
+          display: 'flex', gap: 8, alignItems: 'center',
+        }}>
+          {onOpenRubric && (
+            <button onClick={onOpenRubric}
+              style={{
+                fontSize: 11.5, fontWeight: 600, color: T.accentInk, background: 'transparent',
+                border: 'none', cursor: 'pointer', padding: '4px 0', textDecoration: 'underline',
+              }}>
+              View rubric
+            </button>
+          )}
+          <span style={{ flex: 1 }} />
+          {onSubmit && (
+            <button onClick={onSubmit} disabled={submitDisabled}
+              style={{
+                fontSize: 12, fontWeight: 800, color: '#fff',
+                background: submitDisabled ? T.lineStrong : T.accent,
+                border: 'none', borderRadius: 6, padding: '7px 16px',
+                cursor: submitDisabled ? 'default' : 'pointer',
+              }}>
+              {submitLabel ?? 'Submit assignment'}
+            </button>
+          )}
+        </div>
+      )}
       </>}
     </div>
   );

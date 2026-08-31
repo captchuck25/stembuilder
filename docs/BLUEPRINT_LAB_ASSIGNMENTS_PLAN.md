@@ -174,6 +174,68 @@ Teacher-editable rubrics, locked shells, and platform wiring are the next steps.
   tractable for students and sidesteps multi-floor complexity entirely. Revisit only
   if a future advanced brief demands it.
 
+## Rubric builder design (2026-08-31, from Charlie's West Hollow rubric)
+
+Source: Charlie's real classroom rubric (7 categories × 4 quality tiers at
+14/12/9/6 pts, /98 total, "Yard +5" bonus, "Inaccurate rubric −5" penalty).
+
+- **Tiered categories, not point-per-check.** Each category = 4 tier
+  descriptors + points. AUTO categories (Requirements, Room sizes & shape,
+  Windows, Doors, Furnishings, Closets) get an engine-SUGGESTED tier derived
+  from check results (all-pass-with-margin → tier 1; all pass → tier 2; one
+  fail → tier 3; two+ fails → tier 4) shown WITH evidence; teacher can bump
+  any tier. TEACHER categories (Design/flow, room pairings/adjacency) are
+  manual tier picks + comment. Software fills the majority; teacher reviews.
+- **Deliverable-gated sections**: categories grouped under Floor Plan / Roof
+  Plan / Cross Section / Elevations headings, toggled by the assignment's
+  deliverables. Excluded deliverables ALSO hide those tabs in the student's
+  assignment view (they auto-generate garbage without student work).
+- **Bonus/penalty rows** (label + points + auto|teacher).
+- **Optional student self-assessment at submission** (from the "−5 inaccurate"
+  tradition): student picks own tiers first; review shows student vs engine
+  vs teacher columns.
+- **Default template = the digitized West Hollow rubric**, edited from there
+  (same philosophy as brief generic standards).
+- **DECIDED (2026-08-31):**
+  - NO live score in the Requirements checklist — checkmarks only.
+  - Students can OPEN the rubric on demand ("View rubric" in assignment
+    mode): auto categories show current engine tier + evidence; teacher
+    categories show descriptors with a "Teacher graded" badge, no tier.
+  - Teachers grade IN-PLATFORM: assignment row → submissions list → student
+    project in the read-only viewer with the rubric docked beside it, auto
+    tiers pre-placed with evidence; teacher adjusts/fills the rest +
+    comments; total auto-sums. Grade computed from the FROZEN submission
+    snapshot, never the live design.
+- **Submission lifecycle (DECIDED 2026-08-31):**
+  - Working → Submit (frozen snapshot = what gets graded) → Submitted.
+  - While Submitted, the assignment design opens READ-ONLY for the student
+    with two actions: "View submitted version" (always available — the
+    keepsake/show-at-home view, and the future portfolio export source) and
+    "Make a copy" (lands in My Work with the assignment link STRIPPED —
+    free-play continuation, never affects grading).
+  - Teacher "Return for edits" → back to Working; student edits + resubmits;
+    new snapshot supersedes. Teacher tiers/comments entered pre-return are
+    kept as draft on the superseded snapshot and carried forward as
+    reference (returning is never destructive; auto tiers recompute).
+  - Pre-submission rubric viewing (live auto-tier standing) is fine.
+- Still open: fixed 4-tier format vs variable (lean: fixed 4); student
+  self-assessment step in v1?; confirm hiding excluded-deliverable tabs.
+
+## Queued ideas (2026-08-31, approved in spirit — not yet scheduled)
+
+- **Import existing plan into an assignment** — "Import from My Work" inside
+  assignment mode: load a saved design, stamp `assignmentId`, checklist grades
+  it immediately. Shell wrinkle: cleanest v1 = allow only on scratch-mode
+  assignments (fixed/choice shells won't match an imported perimeter). Also
+  lets teachers pull a free-play exemplar into an assignment.
+- **Printable architectural portfolio** — multi-page PDF, legal 8.5×14
+  landscape, classic title-block border per page (student last name, school,
+  project, date, sheet number "A-1 FLOOR PLAN"). Pages: cover, floor plan,
+  elevations two-up (using student's Front/Back/Left/Right labels), cross
+  section, roof plan. Reuse the Sandbox paper-space compositing; fields typed
+  in a dialog pre-export. PDF (not print CSS) so it prints anywhere and the
+  file itself is the keepsake. Priority over import if both greenlit.
+
 ## Open questions
 - **Where does grading live?** Assume existing teacher dashboard + same gradebook
   conventions as Quiz Builder / Measurement Lab assignments.

@@ -19,7 +19,12 @@ import RoofPlanView from './components/RoofPlanView';
 import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
 import RequirementsPanel from './components/RequirementsPanel';
+import RubricPanel, { emptyTeacherScores } from './components/RubricPanel';
 import { Brief, BRIEFS } from './engine/rubric';
+import {
+  AutoTierResult, GradingRubric, TeacherScores, computeAutoTiers,
+  resolveGradingRubric, rubricForDeliverables,
+} from './engine/gradingRubric';
 import { SHELLS, ShellVariant, buildShellWalls, formatShellStats, shellOutline, shellStats, shellVariants } from './engine/shells';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
@@ -48,7 +53,16 @@ import { buildPrimarySectionCut } from './engine/sectionPrimitives';
 import { T } from './engine/theme';
 
 export default function BlueprintLabClient() {
-  const [project, setProject] = useState<Project>(() => newProject());
+  const [project, setProjectRaw] = useState<Project>(() => newProject());
+  // Submission lock: while an assignment is Submitted/Graded the design is
+  // READ-ONLY for the student — every mutation flows through setProject, so
+  // gating here blocks edits app-wide while pan/zoom/tab state stay free.
+  // System loads (restore, submission doc, teacher view) use setProjectRaw.
+  const submissionLockRef = useRef(false);
+  const setProject: typeof setProjectRaw = useCallback((v) => {
+    if (submissionLockRef.current) return;
+    setProjectRaw(v);
+  }, []);
 
   // ─── Undo / redo ──────────────────────────────────────────────────────────
   // Strategy: a useEffect watches `project` and pushes the PREVIOUS state to
@@ -169,7 +183,9 @@ export default function BlueprintLabClient() {
   // relationship). Nothing persists in this mode: cloud save UI is hidden and
   // the localStorage draft is untouched so the teacher's own work survives.
   const viewAsStudent = searchParams.get('asStudent');
-  const isTeacherView = !!viewAsStudent && !!urlDesignId;
+  // Teacher read-only view targets either a saved design (?id=) or a frozen
+  // assignment submission (?submissionId= — the grading view).
+  const isTeacherView = !!viewAsStudent && !!(urlDesignId || searchParams.get('submissionId'));
   const [viewingStudent, setViewingStudent] = useState<string | null>(null);
   // Assignment mode: ?assignment=<id> — a saved teacher assignment (edited
   // brief + shell settings). Opens on a fresh sheet (no draft restore, no
@@ -186,6 +202,30 @@ export default function BlueprintLabClient() {
   // Choice-mode shell picker overlay: open until the student picks (or the
   // sheet already has walls).
   const [shellPickerOpen, setShellPickerOpen] = useState(false);
+  // ── Submission state (student side) ──
+  interface SubmissionInfo {
+    id: string;
+    status: 'submitted' | 'returned' | 'graded';
+    autoTiers: Record<string, AutoTierResult>;
+    teacherScores: TeacherScores;
+    gradeTotal: number | null;
+  }
+  const [submission, setSubmission] = useState<SubmissionInfo | null>(null);
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [rubricOpen, setRubricOpen] = useState(false);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  // ── Grading context (teacher opens ?asStudent=&submissionId=) ──
+  const gradeSubmissionId = searchParams.get('submissionId');
+  interface GradingCtx {
+    submissionId: string;
+    autoTiers: Record<string, AutoTierResult>;
+    rubric: GradingRubric;
+    status: string;
+  }
+  const [grading, setGrading] = useState<GradingCtx | null>(null);
+  const [gradingScores, setGradingScores] = useState<TeacherScores>(emptyTeacherScores());
+  const [gradingBusy, setGradingBusy] = useState(false);
+  const [gradingNotice, setGradingNotice] = useState<string | null>(null);
   // Which shell variant got seeded this session — shown in the Requirements
   // panel so the student knows the shell's real dimensions without measuring.
   const [seededVariant, setSeededVariant] = useState<ShellVariant | null>(null);
@@ -224,19 +264,50 @@ export default function BlueprintLabClient() {
     (async () => {
       if (isTeacherView) {
         // Teacher read-only load — never falls back to the localStorage draft
-        // (that's the teacher's own work, not this student's).
+        // (that's the teacher's own work, not this student's). With a
+        // submissionId this is the GRADING view: the frozen submission doc
+        // plus rubric context.
         try {
-          const res = await fetch(`/api/teacher/student-work/blueprint-lab?designId=${encodeURIComponent(urlDesignId!)}`);
+          const subId = searchParams.get('submissionId');
+          const query = subId
+            ? `submissionId=${encodeURIComponent(subId)}`
+            : `designId=${encodeURIComponent(urlDesignId!)}`;
+          const res = await fetch(`/api/teacher/student-work/blueprint-lab?${query}`);
           if (res.ok) {
             const payload = await res.json() as {
               design: { id: string; name: string; doc_json: Project };
               student: { name: string; email: string };
+              submission?: { id: string; status: string; autoTiers: Record<string, AutoTierResult>;
+                             teacherScores: Partial<TeacherScores> | null; gradeTotal: number | null };
+              assignment?: { id: string; title: string; briefId: string; config: Partial<Brief> | null };
             };
             suppressNextHistoryRef.current = true;
             justRestoredRef.current = true;
-            setProject(migrateProject({ ...payload.design.doc_json, name: payload.design.name }));
+            setProjectRaw(migrateProject({ ...payload.design.doc_json, name: payload.design.name }));
             setViewingStudent(payload.student?.name || payload.student?.email || 'student');
             setSaveStatus('saved');
+            if (payload.submission && payload.assignment) {
+              const base = BRIEFS.find(b => b.id === payload.assignment!.briefId) ?? BRIEFS[0];
+              const cfg = payload.assignment.config;
+              const brief: Brief = cfg && Array.isArray(cfg.rooms)
+                ? { ...base, ...cfg, id: base.id, title: payload.assignment.title || base.title }
+                : { ...base, title: payload.assignment.title || base.title };
+              const rubric = rubricForDeliverables(
+                resolveGradingRubric(cfg as { gradingRubric?: GradingRubric } | null),
+                brief.deliverables,
+              );
+              setGrading({
+                submissionId: payload.submission.id,
+                autoTiers: payload.submission.autoTiers ?? {},
+                rubric,
+                status: payload.submission.status,
+              });
+              const ts = payload.submission.teacherScores;
+              setGradingScores({
+                categories: ts?.categories ?? {},
+                bonuses: ts?.bonuses ?? {},
+              });
+            }
           } else {
             setViewingStudent(null);
             setSaveError(`Could not load student design (${res.status})`);
@@ -258,7 +329,7 @@ export default function BlueprintLabClient() {
             const row = await res.json() as { id: string; name: string; doc_json: Project };
             suppressNextHistoryRef.current = true;
             justRestoredRef.current = true;
-            setProject(migrateProject({ ...row.doc_json, name: row.name }));
+            setProjectRaw(migrateProject({ ...row.doc_json, name: row.name }));
             cloudIdRef.current = row.id;
             setSaveStatus('saved');
             setLastSavedAt(Date.now());
@@ -309,7 +380,7 @@ export default function BlueprintLabClient() {
         // save keeps whatever name it was saved under.
         suppressNextHistoryRef.current = true;
         justRestoredRef.current = true;
-        setProject(p => ({
+        setProjectRaw(p => ({
           ...p,
           ...(isAssignmentMode ? { name: a.title || p.name } : {}),
           assignmentId: a.id,
@@ -318,6 +389,137 @@ export default function BlueprintLabClient() {
       .catch(() => setAssignmentError('Could not load the assignment'));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveAssignmentId, assignment]);
+
+  // My submission for this assignment (student side). Submitted/Graded →
+  // design LOCKS read-only and shows the frozen submission doc.
+  const submissionFetchedRef = useRef(false);
+  useEffect(() => {
+    if (!effectiveAssignmentId || isTeacherView || submissionFetchedRef.current) return;
+    submissionFetchedRef.current = true;
+    fetch(`/api/blueprint-assignments/${effectiveAssignmentId}/submit`)
+      .then(r => r.ok ? r.json() : { submission: null })
+      .then((p: { submission: {
+        id: string; status: 'submitted' | 'returned' | 'graded'; doc_json: Project;
+        auto_tiers: Record<string, AutoTierResult>; teacher_scores: Partial<TeacherScores> | null;
+        grade_total: number | null;
+      } | null }) => {
+        if (!p.submission) return;
+        setSubmission({
+          id: p.submission.id,
+          status: p.submission.status,
+          autoTiers: p.submission.auto_tiers ?? {},
+          teacherScores: {
+            categories: p.submission.teacher_scores?.categories ?? {},
+            bonuses: p.submission.teacher_scores?.bonuses ?? {},
+          },
+          gradeTotal: p.submission.grade_total,
+        });
+        if (p.submission.status !== 'returned') {
+          // Locked: show the FROZEN submitted doc, not any local draft.
+          suppressNextHistoryRef.current = true;
+          justRestoredRef.current = true;
+          setProjectRaw(migrateProject(p.submission.doc_json));
+          setSaveStatus('saved');
+        }
+      })
+      .catch(() => { /* no submission — normal working state */ });
+  }, [effectiveAssignmentId, isTeacherView]);
+
+  const submissionLocked = !!submission && submission.status !== 'returned' && !isTeacherView;
+  useEffect(() => { submissionLockRef.current = submissionLocked; }, [submissionLocked]);
+
+  // The assignment brief's rubric (deliverable-filtered) — drives the student
+  // rubric modal and the submit-time expectations.
+  const assignmentRubric = useMemo<GradingRubric | null>(() => {
+    if (!assignment) return null;
+    return rubricForDeliverables(
+      resolveGradingRubric(assignment.brief as { gradingRubric?: GradingRubric }),
+      assignment.brief.deliverables,
+    );
+  }, [assignment]);
+
+  const handleSubmitAssignment = useCallback(async () => {
+    if (!assignment || submitBusy) return;
+    if (!window.confirm('Submit this design to your teacher? You won’t be able to edit it unless it’s returned.')) return;
+    setSubmitBusy(true);
+    try {
+      const res = await fetch(`/api/blueprint-assignments/${assignment.id}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ docJson: project }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSubmission(s => ({
+          id: body.id,
+          status: 'submitted',
+          autoTiers: s?.autoTiers ?? {},
+          teacherScores: s?.teacherScores ?? emptyTeacherScores(),
+          gradeTotal: s?.gradeTotal ?? null,
+        }));
+        setSaveStatus('saved');
+      } else {
+        window.alert(body.error ?? 'Submit failed — try again.');
+      }
+    } catch {
+      window.alert('Submit failed — check your connection and try again.');
+    } finally {
+      setSubmitBusy(false);
+    }
+  }, [assignment, project, submitBusy]);
+
+  // "Make a copy" — the pressure valve while Submitted: saves the frozen doc
+  // to My Work as an independent design (assignment link stripped).
+  const handleMakeCopy = useCallback(async () => {
+    try {
+      const res = await fetch('/api/blueprint-lab/designs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `${project.name} (copy)`.slice(0, 80),
+          docJson: { ...project, assignmentId: undefined },
+          units: project.units,
+          thumbnail: null,
+        }),
+      });
+      setCopyNotice(res.ok
+        ? `Saved “${project.name} (copy)” to My Work — open it from the folder menu.`
+        : 'Could not save the copy — are you signed in?');
+    } catch {
+      setCopyNotice('Could not save the copy — check your connection.');
+    }
+  }, [project]);
+
+  // Teacher grading actions.
+  const gradingAction = useCallback(async (action: 'save' | 'return' | 'grade', gradeTotal?: number) => {
+    if (!grading || gradingBusy) return;
+    setGradingBusy(true);
+    try {
+      const res = await fetch('/api/teacher/blueprint-submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          submissionId: grading.submissionId,
+          action,
+          teacherScores: gradingScores,
+          ...(gradeTotal != null ? { gradeTotal } : {}),
+        }),
+      });
+      if (res.ok) {
+        setGradingNotice(action === 'save' ? 'Draft saved.'
+          : action === 'return' ? 'Returned to the student for edits.'
+          : 'Grade finalized.');
+        if (action !== 'save') setGrading(g => g ? { ...g, status: action === 'return' ? 'returned' : 'graded' } : g);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setGradingNotice(body.error ?? 'Action failed.');
+      }
+    } catch {
+      setGradingNotice('Action failed — check your connection.');
+    } finally {
+      setGradingBusy(false);
+    }
+  }, [grading, gradingBusy, gradingScores]);
 
   // Track dirty state on project change so the Save button and the
   // beforeunload guard know there's unsaved work. (The old localStorage draft
@@ -546,6 +748,14 @@ export default function BlueprintLabClient() {
     () => project.levels.find(l => l.id === project.activeLevelId) ?? project.levels[0],
     [project],
   );
+
+  // Live auto tiers for the student rubric modal (pre-submission standing);
+  // once submitted, the frozen submission tiers take precedence.
+  const liveAutoTiers = useMemo<Record<string, AutoTierResult>>(() => {
+    if (!assignment || !assignmentRubric || !rubricOpen) return {};
+    if (submission && submission.status !== 'returned') return submission.autoTiers;
+    return computeAutoTiers(activeLevel, assignment.brief, assignmentRubric);
+  }, [assignment, assignmentRubric, rubricOpen, submission, activeLevel]);
 
   // The floor directly below the active one (greatest elevation still below it),
   // for the 2D "show floor below" ghost underlay. Null on the lowest floor.
@@ -1663,8 +1873,32 @@ export default function BlueprintLabClient() {
             background: T.accentSoft, border: `1px solid ${T.accent}`,
             color: T.accentInk, fontSize: 12, fontWeight: 600,
           }}>
-            👁 {viewingStudent ? `Viewing ${viewingStudent}'s design (read-only)` : 'Student design view'}
+            👁 {grading ? `Grading ${viewingStudent ?? 'student'}'s submission`
+              : viewingStudent ? `Viewing ${viewingStudent}'s design (read-only)` : 'Student design view'}
           </span>
+        ) : submissionLocked ? (
+          <>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, height: 30,
+              padding: '0 12px', borderRadius: 6, whiteSpace: 'nowrap',
+              background: '#e6f7ef', border: `1px solid ${T.good}`,
+              color: T.good, fontSize: 12, fontWeight: 700,
+            }}>
+              ✓ {submission?.status === 'graded'
+                ? `Graded${submission.gradeTotal != null ? ` — ${submission.gradeTotal} pts` : ''}`
+                : 'Submitted'} · read-only
+            </span>
+            <button
+              onClick={handleMakeCopy}
+              title="Save an editable copy to My Work (doesn’t affect grading)"
+              style={{
+                display: 'inline-flex', alignItems: 'center', height: 30, boxSizing: 'border-box',
+                border: `1px solid ${T.lineStrong}`, background: T.panel, color: T.ink,
+                padding: '0 12px', borderRadius: 6, cursor: 'pointer',
+                fontWeight: 500, fontSize: 12, whiteSpace: 'nowrap',
+              }}
+            >Make a copy</button>
+          </>
         ) : (
           <>
             <NewButton onNew={handleNewProject} />
@@ -1746,7 +1980,41 @@ export default function BlueprintLabClient() {
               briefOverride={assignment?.brief}
               shellInfo={shellInfoLine}
               closable={!assignment}
+              onOpenRubric={assignment ? () => setRubricOpen(true) : undefined}
+              onSubmit={assignment && !isTeacherView && !submissionLocked ? handleSubmitAssignment : undefined}
+              submitLabel={submitBusy ? 'Submitting…'
+                : submission?.status === 'returned' ? 'Resubmit assignment' : 'Submit assignment'}
+              submitDisabled={submitBusy}
             />
+          )}
+          {rubricOpen && assignment && assignmentRubric && (
+            <RubricPanel
+              mode="student"
+              rubric={assignmentRubric}
+              autoTiers={liveAutoTiers}
+              teacherScores={submission?.teacherScores ?? emptyTeacherScores()}
+              graded={submission?.status === 'graded'}
+              gradeTotal={submission?.gradeTotal}
+              onClose={() => setRubricOpen(false)}
+            />
+          )}
+          {copyNotice && (
+            <div style={{
+              position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 50, background: T.ink, color: '#fff', borderRadius: 8,
+              padding: '8px 16px', fontSize: 12, maxWidth: 480,
+            }}
+              onClick={() => setCopyNotice(null)}
+            >{copyNotice}</div>
+          )}
+          {gradingNotice && (
+            <div style={{
+              position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+              zIndex: 50, background: T.ink, color: '#fff', borderRadius: 8,
+              padding: '8px 16px', fontSize: 12,
+            }}
+              onClick={() => setGradingNotice(null)}
+            >{gradingNotice}</div>
           )}
           {assignmentError && (
             <div style={{
@@ -1952,7 +2220,21 @@ export default function BlueprintLabClient() {
           />
         </div>
 
-        {view === '2d' && <PropertiesPanel
+        {grading && (
+          <RubricPanel
+            mode="teacher"
+            rubric={grading.rubric}
+            autoTiers={grading.autoTiers}
+            teacherScores={gradingScores}
+            onChangeScores={setGradingScores}
+            onClose={() => setGrading(null)}
+            onSaveDraft={() => gradingAction('save')}
+            onReturn={() => gradingAction('return')}
+            onFinalize={total => gradingAction('grade', total)}
+            busy={gradingBusy}
+          />
+        )}
+        {!grading && view === '2d' && <PropertiesPanel
           tool={tool}
           activeLevel={activeLevel}
           selections={selections}
