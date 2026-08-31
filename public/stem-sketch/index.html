@@ -385,7 +385,10 @@
   /* ── Tutorial mode ────────────────────────────────────────────────────────
      Shares the assignment-panel shell but wears green (assignments are teal)
      so students never confuse "graded work" with "guided practice". */
-  .assignment-panel.tut { border-color: #16a34a; }
+  /* Slimmer than assignment panels — tutorial steps are numerous and wordy,
+     and the panel was crowding the canvas (ssissues.mp4 feedback). */
+  .assignment-panel.tut { border-color: #16a34a; width: 272px; font-size: 12.5px; }
+  .assignment-panel.tut .ap-body { padding: 9px 11px; }
   .assignment-panel.tut .ap-head { background: #f0fdf4; }
   .assignment-panel.tut .ap-title { color: #14532d; }
   .assignment-panel.tut .ap-toggle { color: #14532d; }
@@ -19242,6 +19245,18 @@ function _enumerateFilletableCorners() {
       for (let i = 0; i < n; i++) {
         // Open polyline endpoints have only one adjacent edge → not a corner.
         if (!e.closed && (i === 0 || i === n - 1)) continue;
+        // Only ACTUAL corners get a pick dot. Arcs and already-filleted
+        // corners are dense runs of nearly-collinear vertices — offering
+        // every one of them buried the real corners in dots (user feedback
+        // 2026-08-31: "it's already fillet"). Skip vertices where the two
+        // adjacent edges are within ~20° of a straight line.
+        const prev = e.points[(i - 1 + n) % n], cur = e.points[i], next = e.points[(i + 1) % n];
+        const l1 = Math.hypot(prev.x - cur.x, prev.y - cur.y);
+        const l2 = Math.hypot(next.x - cur.x, next.y - cur.y);
+        if (l1 > 1e-6 && l2 > 1e-6) {
+          const cosA = ((prev.x - cur.x) * (next.x - cur.x) + (prev.y - cur.y) * (next.y - cur.y)) / (l1 * l2);
+          if (cosA < -0.94) continue; // angle > ~160° — effectively straight
+        }
         out.push({ entityId: e.id, vertexIdx: i, x: e.points[i].x, y: e.points[i].y });
       }
     }
@@ -20855,6 +20870,10 @@ function enterAssignmentMode(a) {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
+  // 3D BEFORE rendering — the reset above cleared the active sketch, and a
+  // 2D render with none throws (same latent crash the tutorial path hit
+  // when entered from 2D mode; see enterTutorial).
+  setMode('3d');
   if (viewer) {
     viewer.rebuildBodies();
     viewer.updateSketchOverlay && viewer.updateSketchOverlay();
@@ -20862,9 +20881,7 @@ function enterAssignmentMode(a) {
     viewer.updateExtrudeGizmo && viewer.updateExtrudeGizmo();
     viewer.updateGizmo && viewer.updateGizmo();
   }
-  if (sketchEng) sketchEng.render();
   renderTree(); renderProps();
-  setMode('3d');
   _renderAssignmentPanel();
   setStatus(a.preview
     ? `Previewing challenge: ${a.challenge.title} — nothing is recorded`
@@ -21668,6 +21685,11 @@ const _tutSnowZ = (b, inches) => {
 // tutorial mode — the canvas starts fresh) has an entity passing `pred`.
 const _tutSketchHas = (d, pred) =>
   d.sketches.some(sk => (sk.entities || []).some(e => !e.construction && pred(e)));
+// 2D length matches the inch target (or its round-5mm metric sibling).
+const _tutSize2d = (v, inches) => {
+  const mm = inches * TUT_IN, sib = Math.round(mm / 5) * 5;
+  return _tutNear(v, mm, 1) || _tutNear(v, sib, 1);
+};
 
 const TUTORIALS = [
   {
@@ -21791,22 +21813,45 @@ const TUTORIALS = [
     id: 'sketch-toolbox',
     unit: 2,
     title: 'Sketch Toolbox',
-    intro: 'Three tools that make drawings faster: arcs, fillets, and mirror.',
+    // Redesigned per ssissues.mp4 (2026-08-31): one build that flows —
+    // rect → exact size via Properties → fillet ALL 4 corners at 0.25 →
+    // circle on the left → mirror it. Arc dropped (it cluttered the fillet
+    // step with pickable dots); each step says exactly where and how much.
+    intro: 'One little part, four tools: exact sizes, rounded corners, and a mirrored feature.',
     steps: [
       {
-        text: 'Start a sketch on **Top**. Pick the **Arc** tool: click where the curve starts, click where it ends, then move the mouse to bend it and click once more to set it.',
-        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && !e.closed && (e.points || []).length >= 20),
+        text: 'Click **+ Sketch** → **Top**, then pick the **Rect** tool and draw a rectangle near the **middle** of the grid — any size.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'rect'),
       },
       {
-        text: 'Draw a **rectangle**, then pick **Fillet**. Click one of the rectangle’s corners, press **Enter**, and click **Apply** — the sharp corner becomes a smooth curve.',
-        hint: 'The size box controls how big the rounding is — the suggested size is fine.',
-        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && e.closed && (e.points || []).length >= 10),
+        text: 'Click the rectangle with the **Select** tool. In the **Properties** panel on the left, set **Width to 3** and **Height to 2.25**, pressing Enter after each.',
+        hint: 'You can also click the numbers on the shape itself and type — both work.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'rect' && (
+          (_tutSize2d(e.w, 3) && _tutSize2d(e.h, 2.25)) ||
+          (_tutSize2d(e.w, 2.25) && _tutSize2d(e.h, 3)))),
       },
       {
-        text: 'Draw a **Circle**, click it with the **Select** tool, then pick **Mirror** and choose an axis — a twin circle appears on the other side. Half the drawing, twice the shape.',
+        text: 'Pick **Fillet** and click **all four corners** of the rectangle — each picked corner gets a dot. Press **Enter**, type **0.25** for the size, and click **Apply**.',
+        hint: 'All four sharp corners round off at once. Real parts almost never have knife-sharp corners.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && e.closed && (e.points || []).length >= 60),
+      },
+      {
+        text: 'Pick the **Circle** tool and draw a circle to the **left** of your rounded rectangle, outside it.',
+        done: (d) => d.sketches.some(sk => {
+          const ents = (sk.entities || []).filter(e => !e.construction);
+          const shapes = ents.filter(e => e.type === 'rect' || (e.type === 'polyline' && e.closed && (e.points || []).length >= 4));
+          if (!shapes.length) return false;
+          const minX = Math.min(...shapes.map(s =>
+            s.type === 'rect' ? s.x : Math.min(...s.points.map(p => p.x))));
+          return ents.some(e => e.type === 'circle' && e.cx + e.r < minX + 1);
+        }),
+      },
+      {
+        text: 'Click the circle with **Select**, then pick **Mirror** and mirror it across the **up-and-down axis** — a twin circle appears on the right side. Half the drawing, twice the shape.',
         done: (d) => d.sketches.some(sk => {
           const circles = (sk.entities || []).filter(e => e.type === 'circle' && !e.construction);
-          return circles.some(a => circles.some(b => b !== a && Math.abs(a.r - b.r) < 0.5));
+          return circles.some(a => circles.some(b => b !== a &&
+            Math.abs(a.r - b.r) < 0.5 && Math.abs(a.cx - b.cx) > Math.max(a.r, 2)));
         }),
       },
     ],
@@ -21872,6 +21917,11 @@ function enterTutorial(id) {
     if (el) el.style.display = 'none';
   });
 
+  // ORDER MATTERS: switch to 3D BEFORE any render. The doc reset above
+  // cleared the active sketch, and rendering the 2D engine with no active
+  // sketch throws (undefined.entities) — this is exactly the crash a user
+  // hit redoing a tutorial from 2D mode (ssissues.mp4, 2026-08-31).
+  setMode('3d');
   if (viewer) {
     viewer.rebuildBodies();
     viewer.updateSketchOverlay && viewer.updateSketchOverlay();
@@ -21879,9 +21929,7 @@ function enterTutorial(id) {
     viewer.updateExtrudeGizmo && viewer.updateExtrudeGizmo();
     viewer.updateGizmo && viewer.updateGizmo();
   }
-  if (sketchEng) sketchEng.render();
   renderTree(); renderProps();
-  setMode('3d');
   _renderTutorialPanel();
   _tutHideWelcome();
   clearInterval(_tutTimer);
@@ -21909,12 +21957,14 @@ function exitTutorial() {
     _tutPrevDoc = null;
   }
   doc.selection = null; doc.multiSelectedBodies = []; doc.selectedRegions = [];
+  // 3D first for the same reason as enterTutorial: the restored doc may have
+  // no active sketch, and a 2D render without one throws.
+  setMode('3d');
   if (viewer) {
     viewer.rebuildBodies();
     viewer.updateSketchOverlay && viewer.updateSketchOverlay();
     viewer.updateRegions && viewer.updateRegions();
   }
-  if (sketchEng) sketchEng.render();
   renderTree(); renderProps();
   setStatus('Back to your design.');
 }

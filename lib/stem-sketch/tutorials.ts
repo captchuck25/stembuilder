@@ -64,7 +64,7 @@ export const SKETCH_TUTORIALS: SketchTutorial[] = [
   // ── Unit 2 — Sketching ─────────────────────────────────────────────────────
   { id: "first-sketch", unit: 2, title: "First Sketch", blurb: "Start a sketch on the workplane and draw a rectangle and a circle.", stepCount: 4, ready: true },
   { id: "exact-sizes", unit: 2, title: "Exact Sizes", blurb: "Dimension a rectangle, then type the number to drive it to an exact size.", stepCount: 3, ready: true },
-  { id: "sketch-toolbox", unit: 2, title: "Sketch Toolbox", blurb: "Arcs, corner fillets, and mirror — the tools that make drawing faster.", stepCount: 3, ready: true },
+  { id: "sketch-toolbox", unit: 2, title: "Sketch Toolbox", blurb: "Build one part: exact-size rectangle, four rounded corners, a mirrored circle.", stepCount: 5, ready: true },
   // ── Unit 3 — Sketch to Solid ───────────────────────────────────────────────
   { id: "extrude", unit: 3, title: "Extrude", blurb: "Turn a sketch into a solid at an exact height.", stepCount: 0, ready: false },
   { id: "cut-a-hole", unit: 3, title: "Cut a Hole", blurb: "Sketch on a face and cut all the way through.", stepCount: 0, ready: false },
