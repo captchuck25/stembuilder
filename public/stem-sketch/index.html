@@ -1423,6 +1423,7 @@
         <button class="tool" data-action="mirror-3d" title="Mirror body across XY/YZ/XZ plane"><svg class="ico"><use href="#i-mirror-3d"/></svg><span class="tool-label">Mirror</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
+        <button class="tool" data-action="revolve" title="Revolve — spin a sketch profile around its vertical center line into a 3D body. Open a sketch (Front works best), draw the outline with the Line tool, then Revolve."><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
         <!-- 3D Fillet temporarily hidden — the CSG-prism approach (enterBevelPickMode /
              _bevelOnce / applyBevelsBatch) is preserved in the JS but pulled from the
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
@@ -15705,16 +15706,20 @@ function applyResize(rs, delta) {
 // to create a 3D body (chess-pawn-style workflow).
 function revolveCurrentSketch() {
   const sketch = doc.sketch;
-  if (!sketch) return;
+  if (!sketch) {
+    // Reachable from the 3D toolbar with no sketch open — guide, don't no-op.
+    showHint('Revolve needs a sketch: click + Sketch → Front, draw an outline with the Line tool, then click Revolve.');
+    return;
+  }
   const profile = sketch.entities.find(e => e.type === 'polyline' && !e.construction && e.points?.length >= 2);
   if (!profile) {
-    showHint('Draw a profile first — connected lines on one side of the sketch\'s Y axis.');
+    showHint('Draw the outline first: use the Line tool to click out a shape on the right side of the vertical center line, then click Revolve.');
     return;
   }
   // Validate: all profile points should have x >= 0 (revolve axis is sketch X = 0)
   const minX = Math.min(...profile.points.map(p => p.x));
   if (minX < -0.5) {
-    showHint('Profile must lie to the right of the Y axis (sketch x ≥ 0). The Y axis is the revolution axis.');
+    showHint('Keep the whole outline on the RIGHT side of the vertical center line — that line is what the shape spins around.');
     return;
   }
   openModal({
@@ -18291,6 +18296,7 @@ function renderProps() {
         ${allJoints.length ? `<h4 style="margin-top:6px">Joints${allJoints.length > 1 ? ` (${shownJoints.length} of ${allJoints.length})` : ''}</h4>
         ${jointRows}
         ${(selJoint && allJoints.length > 1) ? '<div class="hint" style="margin-top:4px"><a href="#" id="show-all-joints">Show all joints</a> — or pick a different one in the Joints list on the left.</div>' : ''}` : ''}
+        ${(allJoints.length || (typeof _activeCollisions !== 'undefined' && _activeCollisions.length)) ? `
         <h4 style="margin-top:14px">Warnings</h4>
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="warn-ground" style="width:auto;margin:0"${doc.collisionWarnGround !== false ? ' checked' : ''}/>
@@ -18306,7 +18312,7 @@ function renderProps() {
             <button type="button" id="mark-overlap-btn" style="flex:1;white-space:nowrap">🔴 Mark overlap</button>
             <button type="button" id="cut-overlap-btn" style="flex:1;white-space:nowrap">✂ Cut overlap away</button>
           </div>
-        </div>`;
+        </div>` : ''}`;
       $('warn-ground')?.addEventListener('change', (e) => { doc.collisionWarnGround = e.target.checked; setDirty(true); });
       $('warn-bodies')?.addEventListener('change', (e) => { doc.collisionWarnBodies = e.target.checked; setDirty(true); });
       $('mark-overlap-btn')?.addEventListener('click', () => markCollisionOverlaps());
