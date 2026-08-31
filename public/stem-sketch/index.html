@@ -9561,7 +9561,20 @@ function buildBodyMesh(body) {
   if (body.type === 'revolve') {
     const profile = (body.sketch?.entities || []).find(e => e.type === 'polyline' && !e.construction && e.points?.length >= 2);
     if (!profile) return null;
-    const pts = profile.points.map(p => new THREE.Vector2(Math.max(0, p.x), p.y));
+    const raw = profile.points.map(p => ({ x: Math.max(0, p.x), y: p.y }));
+    if (!profile.closed) {
+      // Drawing direction must not matter: LatheGeometry's normals face
+      // outward only for bottom→top profiles — a top→bottom drawing
+      // rendered inside-out (invisible from the front with FrontSide).
+      if (raw.length >= 2 && raw[0].y > raw[raw.length - 1].y) raw.reverse();
+      // Close the profile to the axis at both ends: an open profile lathes
+      // into a see-through shell with no caps (ssissues.mp4 2026-08-31).
+      // Dropping the ends to x=0 makes a closed solid of revolution — this
+      // also fixes CSG/export, which build from this same mesh.
+      if (raw[0].x > 0.01) raw.unshift({ x: 0, y: raw[0].y });
+      if (raw[raw.length - 1].x > 0.01) raw.push({ x: 0, y: raw[raw.length - 1].y });
+    }
+    const pts = raw.map(p => new THREE.Vector2(p.x, p.y));
     if (pts.length < 2) return null;
     geo = new THREE.LatheGeometry(pts, body.segments || 48);
     const revPlaneMat = makePlaneMatrix(body.plane || GROUND_PLANE);
@@ -21934,15 +21947,28 @@ const TUTORIALS = [
         done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
       },
       {
-        text: 'Pick the **Line** tool and draw the **right half of a vase**: start at the bottom on the vertical center line, click out to the right, up, and back in near the top. Press **Enter** to finish. Keep every click on the **right side** of the center line.',
-        hint: 'Just 4 or 5 clicks makes a nice profile — you’re drawing the silhouette, the spin does the rest.',
+        text: 'Pick the **Line** tool. Click the **center point** of the grid, then click straight **up 3½ inches** — that’s the vase’s spine. Now keep clicking to draw the right-side outline like the picture: out to the right, down in steps, and end back at the **bottom of the spine**. Press **Enter** to finish.',
+        hint: 'Every click adds a corner. Rough is fine — just keep every click on the right side of the center line.',
+        svg: `<svg viewBox="0 0 210 152" style="width:100%;height:auto;display:block">
+          <polyline points="60,138 10,138 15,112 40,98 40,60 22,44 22,20 60,20" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="3 3"/>
+          <line x1="60" y1="8" x2="60" y2="148" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>
+          <polyline points="60,138 60,20 98,20 98,44 80,60 80,98 105,112 110,138 60,138" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round"/>
+          <circle cx="60" cy="138" r="4" fill="#dc2626"/>
+          ${[[60,20],[98,20],[98,44],[80,60],[80,98],[105,112],[110,138]].map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#16a34a"/>`).join('')}
+          <line x1="150" y1="20" x2="150" y2="138" stroke="#64748b" stroke-width="1"/>
+          <line x1="145" y1="20" x2="155" y2="20" stroke="#64748b" stroke-width="1"/>
+          <line x1="145" y1="138" x2="155" y2="138" stroke="#64748b" stroke-width="1"/>
+          <text x="158" y="83" font-size="11" fill="#475569">3½ in</text>
+          <text x="66" y="149" font-size="9" fill="#dc2626">start here</text>
+        </svg>`,
         done: (d) => _tutSketchHas(d, e => e.type === 'polyline' &&
-          Array.isArray(e.points) && e.points.length >= 3 && e.points.length <= 30 &&
+          Array.isArray(e.points) && e.points.length >= 4 && e.points.length <= 40 &&
           Math.min(...e.points.map(p => p.x)) >= -0.5 &&
-          Math.max(...e.points.map(p => p.x)) > 5),
+          Math.max(...e.points.map(p => p.x)) > 20 &&
+          (Math.max(...e.points.map(p => p.y)) - Math.min(...e.points.map(p => p.y))) > 50),
       },
       {
-        text: 'Click **Revolve** in the toolbar and click **OK** — your half-outline spins all the way around into a solid vase. Orbit around it and admire your work. 🏺',
+        text: 'Click **Revolve** in the toolbar (no need to leave the sketch) and click **OK** — your outline spins all the way around into a solid vase. Orbit around it and admire your work. 🏺',
         done: (d) => d.bodies.some(b => b.type === 'revolve'),
       },
     ],
@@ -22131,6 +22157,7 @@ function _renderTutorialPanel() {
             <span class="tut-mark">${_tutStepsDone[i] ? '✓' : i === _tutStep ? '▶' : '○'}</span>
             <span>${_tutFmt(s.text)}</span>
           </div>`).join('')}
+        ${cur && cur.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${cur.svg}</div>` : ''}
         ${cur && cur.hint ? `<div class="tut-hint-line">💡 ${_apEsc(cur.hint)}</div>` : ''}
         <button class="tut-exit" id="tp-exit">✕ Exit tutorial</button>
       `}
