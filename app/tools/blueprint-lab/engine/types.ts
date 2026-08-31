@@ -593,6 +593,10 @@ export interface Project {
   // save so reopening from My Work restores the Requirements checklist and
   // the assignment's rubric — the guide travels with the work.
   assignmentId?: string;
+  // Which compass side of the plan is the FRONT of the house (student-chosen).
+  // Elevations are labeled Front/Back/Left/Right relative to this instead of
+  // compass directions. Default: 'south' (the bottom of the 2D plan).
+  frontDirection?: 'north' | 'south' | 'east' | 'west';
 }
 
 // ─── Sandbox sheet ────────────────────────────────────────────────────────────

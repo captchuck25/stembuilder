@@ -274,8 +274,8 @@ export default function Canvas2D({
 }: Canvas2DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  // Ctrl+C clipboard for furniture (session-local, survives selection changes).
-  const furnitureClipboardRef = useRef<FurnitureItem[] | null>(null);
+  // Ctrl+C clipboard for furniture/doors/windows (session-local).
+  const clipboardRef = useRef<{ furniture: FurnitureItem[]; doors: Door[]; windows: Window[] } | null>(null);
 
   const [vp, setVp] = useState<CanvasState>({
     pan: { x: 0, y: 0 }, pxPerInch: 2, width: 800, height: 600,
@@ -3113,31 +3113,66 @@ export default function Canvas2D({
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selections.length > 0) onDeleteSelections();
 
-      // Copy/paste for furniture (Ctrl/Cmd+C, Ctrl/Cmd+V). Pasted copies land
-      // 24" down-right of the originals and become the new selection, so a
-      // furnished bedroom can be duplicated piece by piece quickly.
+      // Copy/paste (Ctrl/Cmd+C, Ctrl/Cmd+V) for furniture, doors and windows.
+      // Furniture pastes 24" down-right; doors/windows clone onto their own
+      // wall, slid 24" along it (clamped inside the wall). The pasted set
+      // becomes the new selection.
       if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
-        const furn = selections
+        const furniture = selections
           .filter(s => s.kind === 'furniture')
           .map(s => level.furniture.find(f => f.id === s.id))
-          .filter((f): f is FurnitureItem => !!f);
-        if (furn.length > 0) {
-          furnitureClipboardRef.current = furn.map(f => ({ ...f, position: { ...f.position } }));
+          .filter((f): f is FurnitureItem => !!f)
+          .map(f => ({ ...f, position: { ...f.position } }));
+        const doors = selections
+          .filter(s => s.kind === 'door')
+          .map(s => level.doors.find(d => d.id === s.id))
+          .filter((d): d is Door => !!d)
+          .map(d => ({ ...d }));
+        const windows = selections
+          .filter(s => s.kind === 'window')
+          .map(s => level.windows.find(w => w.id === s.id))
+          .filter((w): w is Window => !!w)
+          .map(w => ({ ...w }));
+        if (furniture.length + doors.length + windows.length > 0) {
+          clipboardRef.current = { furniture, doors, windows };
           e.preventDefault();
         }
         return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
-        const clip = furnitureClipboardRef.current;
-        if (clip && clip.length > 0) {
-          const pasted = clip.map(f => ({
-            ...f,
-            id: makeId('furn'),
-            levelId: level.id,
-            position: { x: f.position.x + 24, y: f.position.y + 24 },
-          }));
-          for (const f of pasted) onAddFurniture(f);
-          onSelectionsChange(pasted.map(f => ({ kind: 'furniture' as const, id: f.id })));
+        const clip = clipboardRef.current;
+        if (clip && (clip.furniture.length + clip.doors.length + clip.windows.length) > 0) {
+          // Slide an opening 24" along its wall, clamped so it stays fully on.
+          const slideAlong = (wallId: string, positionAlong: number, width: number): number | null => {
+            const w = level.walls.find(x => x.id === wallId);
+            if (!w) return null;
+            const L = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+            const lo = width / 2 + 2, hi = L - width / 2 - 2;
+            if (hi < lo) return null;
+            return Math.min(hi, Math.max(lo, positionAlong + 24));
+          };
+          const newSel: Selection[] = [];
+          for (const f of clip.furniture) {
+            const nf = { ...f, id: makeId('furn'), levelId: level.id,
+              position: { x: f.position.x + 24, y: f.position.y + 24 } };
+            onAddFurniture(nf);
+            newSel.push({ kind: 'furniture', id: nf.id });
+          }
+          for (const d of clip.doors) {
+            const pa = slideAlong(d.wallId, d.positionAlong, d.width);
+            if (pa == null) continue;
+            const nd = { ...d, id: makeId('door'), levelId: level.id, positionAlong: pa };
+            onAddDoor(nd);
+            newSel.push({ kind: 'door', id: nd.id });
+          }
+          for (const w of clip.windows) {
+            const pa = slideAlong(w.wallId, w.positionAlong, w.width);
+            if (pa == null) continue;
+            const nw = { ...w, id: makeId('win'), levelId: level.id, positionAlong: pa };
+            onAddWindow(nw);
+            newSel.push({ kind: 'window', id: nw.id });
+          }
+          if (newSel.length > 0) onSelectionsChange(newSel);
           e.preventDefault();
         }
         return;
@@ -3190,7 +3225,7 @@ export default function Canvas2D({
       defaultLineStyle, defaultLineWeight, defaultLineColor,
       tool, offsetSource, dimDraft, onChangeTool, moveState, commitOffset,
       onUpdateWalls, onUpdateDimensions, onUpdateRoomLabels, onUpdateTexts, onUpdateStairs, onUpdateFurniture, onUpdateLines,
-      onAddFurniture, onSelectionsChange,
+      onAddFurniture, onAddDoor, onAddWindow, onSelectionsChange,
       onEndLiveOp, onCancelLiveOp, sectionCuts, onUpdateSectionCuts,
       filletFirst, mouseDown, stairCornerDrag,
       boundaryDraftRoomId, boundaryPoints, onCommitBoundary, onCancelBoundaryDraft]);

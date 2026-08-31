@@ -1345,7 +1345,13 @@ export function drawRoomLabel(ctx: CanvasRenderingContext2D, r: RoomLabel, vp: V
   const c = worldToScreen(r.position, vp);
   const needsSqft = r.squareFeet == null && (!r.boundary || r.boundary.length < 3);
   const color = selected ? SELECTED_STROKE : (needsSqft ? ROOM_NEEDS_SQFT_GLOW : '#1f2540');
-  ctx.font = '700 13px ui-sans-serif, system-ui';
+  // Text tracks the zoom (a label is ~7" of plan text) with clamps, so
+  // zooming OUT shrinks labels with the plan instead of letting fixed-px
+  // text swallow the whole sheet.
+  const namePx = Math.max(6, Math.min(14, 7 * vp.pxPerInch));
+  const subPx  = Math.max(5, Math.min(11, 5.5 * vp.pxPerInch));
+  const lineUp = namePx * 0.55, lineDn = subPx * 0.75;
+  ctx.font = `700 ${namePx.toFixed(1)}px ui-sans-serif, system-ui`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   // Room labels follow architectural convention: ALL CAPS. The Text tool is
@@ -1353,17 +1359,17 @@ export function drawRoomLabel(ctx: CanvasRenderingContext2D, r: RoomLabel, vp: V
   const name = (r.name || 'ROOM').toUpperCase();
   const hasSf = r.squareFeet != null;
   ctx.fillStyle = color;
-  ctx.fillText(name, c.x, hasSf ? c.y - 7 : c.y);
+  ctx.fillText(name, c.x, hasSf ? c.y - lineUp : c.y);
   if (hasSf) {
-    ctx.font = '500 11px ui-sans-serif, system-ui';
+    ctx.font = `500 ${subPx.toFixed(1)}px ui-sans-serif, system-ui`;
     ctx.fillStyle = selected ? SELECTED_STROKE : '#5a607a';
-    ctx.fillText(`${r.squareFeet} SF`, c.x, c.y + 8);
+    ctx.fillText(`${r.squareFeet} SF`, c.x, c.y + lineDn);
   } else if (needsSqft) {
     // Soft hint instead of a missing sqft value — disappears the moment a
     // boundary is drawn or a manual sqft is typed.
-    ctx.font = '600 9px ui-sans-serif, system-ui';
+    ctx.font = `600 ${Math.max(5, subPx - 1).toFixed(1)}px ui-sans-serif, system-ui`;
     ctx.fillStyle = ROOM_NEEDS_SQFT_GLOW;
-    ctx.fillText('NO SF', c.x, c.y + 8);
+    ctx.fillText('NO SF', c.x, c.y + lineDn);
   }
   // Subtle selection box.
   if (selected) {
@@ -1802,7 +1808,7 @@ export function drawStairCornerHandles(
 }
 
 // Map each specific catalog kind to one of the base symbol drawings.
-type FurnitureSymbol = 'bed' | 'sofa' | 'table' | 'chair' | 'office-chair' | 'toilet'
+type FurnitureSymbol = 'bed' | 'sofa' | 'table' | 'chair' | 'office-chair' | 'toilet' | 'dresser'
                      | 'sink-bath' | 'sink-kitchen' | 'fridge' | 'stove'
                      | 'bathtub' | 'shower'
                      | 'cabinet-base' | 'cabinet-upper'
@@ -1820,6 +1826,8 @@ function furnitureSymbolFor(kind: FurnitureItem['kind']): FurnitureSymbol {
       return 'table';
     case 'dining-chair':
       return 'chair';
+    case 'dresser': case 'wardrobe':
+      return 'dresser';
     case 'office-chair':
       return 'office-chair';
     case 'toilet':
@@ -1907,6 +1915,23 @@ function drawFurnitureSymbol(
       // Single inset rectangle hints at top surface vs frame.
       ctx.strokeRect(-w / 2 + 3, -d / 2 + 3, w - 6, d - 6);
       break;
+    case 'dresser': {
+      // Drawer band + knob dots along the FRONT (+d) edge — same side the 3D
+      // model's drawer fronts face, so plan orientation is obvious.
+      const band = Math.min(d * 0.28, 8);
+      ctx.strokeRect(-w / 2 + 2, -d / 2 + 2, w - 4, d - 4);
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 2, d / 2 - band); ctx.lineTo(w / 2 - 2, d / 2 - band);
+      ctx.moveTo(0, d / 2 - band); ctx.lineTo(0, d / 2 - 2);
+      ctx.stroke();
+      ctx.fillStyle = stroke;
+      for (const sx of [-w / 4, w / 4]) {
+        ctx.beginPath();
+        ctx.arc(sx, d / 2 - band / 2, 1.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
     case 'chair': {
       // Filled back band along the -d edge (same side as the 3D backrest) so
       // plan view shows which way the chair faces; seat inset fills the rest.

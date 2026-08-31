@@ -127,13 +127,25 @@ const LINE_APERTURE_CURSOR = (() => {
 })();
 
 
+// Students name a FRONT side; elevations read Front/Back/Left/Right relative
+// to it (left/right as seen when standing outside facing the front).
+function relativeElevationLabel(d: ElevationDirection, front: ElevationDirection): string {
+  const CW: Record<ElevationDirection, ElevationDirection> =
+    { north: 'east', east: 'south', south: 'west', west: 'north' };
+  if (d === front) return 'Front';
+  if (d === CW[CW[front]]) return 'Back';
+  if (d === CW[front]) return 'Left';
+  return 'Right';
+}
+
 export default function ElevationsView({ project, onChange, tool, onChangeTool }: {
   project: Project;
   onChange?: (p: Project) => void;
   tool?: ToolId;
   onChangeTool?: (t: ToolId) => void;
 }) {
-  const [direction, setDirection] = useState<ElevationDirection>('north');
+  const frontDirection: ElevationDirection = project.frontDirection ?? 'south';
+  const [direction, setDirection] = useState<ElevationDirection>(frontDirection);
   const [selection, setSelection] = useState<Set<string>>(new Set());
 
   // ── In-progress tool state ────────────────────────────────────────────
@@ -653,6 +665,7 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
               <button
                 key={d.id}
                 onClick={() => setDirection(d.id)}
+                title={`${d.label} side of the plan`}
                 style={{
                   padding: '5px 14px', fontSize: 12, fontWeight: 600,
                   background: active ? T.panel : 'transparent',
@@ -663,11 +676,30 @@ export default function ElevationsView({ project, onChange, tool, onChangeTool }
                   transition: 'all 120ms',
                 }}
               >
-                {d.label}
+                {relativeElevationLabel(d.id, frontDirection)}
               </button>
             );
           })}
         </div>
+
+        {/* Which side of the plan is the house's FRONT — students pick it;
+            the tabs above re-label relative to it (Front/Back/Left/Right). */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: T.inkSoft }}>
+          Front of house:
+          <select
+            value={frontDirection}
+            onChange={e => onChange?.({ ...project, frontDirection: e.target.value as ElevationDirection })}
+            style={{
+              fontSize: 12, padding: '3px 6px', borderRadius: 4,
+              border: `1px solid ${T.line}`, background: T.panel, color: T.ink,
+            }}
+          >
+            <option value="south">Bottom of plan (south)</option>
+            <option value="north">Top of plan (north)</option>
+            <option value="west">Left of plan (west)</option>
+            <option value="east">Right of plan (east)</option>
+          </select>
+        </label>
 
         {/* Traditional drafting tools (select / line / dim / text / trim /
             offset / hatch) live on the LEFT-HAND ToolPalette — same as the

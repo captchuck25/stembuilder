@@ -2211,7 +2211,10 @@ function StairEditor({ stairs, onUpdate, onDelete }: {
 
 // ─── Furniture: kind picker + size + editor ─────────────────────────────────
 
-const ALL_FURNITURE_KINDS: FurnitureKind[] = Object.keys(FURNITURE_CATALOG) as FurnitureKind[];
+// 'wardrobe' is retired from the picker (redundant with dresser — 2026-08-31
+// video feedback) but stays in the catalog so existing saves still render.
+const ALL_FURNITURE_KINDS: FurnitureKind[] = (Object.keys(FURNITURE_CATALOG) as FurnitureKind[])
+  .filter(k => k !== 'wardrobe');
 
 // Kinds that carry a cabinet face (use cabinetColor) and/or a countertop slab.
 const KITCHEN_CABINET_KINDS    = new Set<FurnitureKind>([
