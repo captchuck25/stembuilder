@@ -382,6 +382,52 @@
   .assign-check-card .acc-submit { border: none; background: #16a34a; color: #fff; }
   .assign-check-card .acc-submit:disabled { background: #86efac; cursor: default; }
 
+  /* ── Tutorial mode ────────────────────────────────────────────────────────
+     Shares the assignment-panel shell but wears green (assignments are teal)
+     so students never confuse "graded work" with "guided practice". */
+  .assignment-panel.tut { border-color: #16a34a; }
+  .assignment-panel.tut .ap-head { background: #f0fdf4; }
+  .assignment-panel.tut .ap-title { color: #14532d; }
+  .assignment-panel.tut .ap-toggle { color: #14532d; }
+  .assignment-panel.tut .ap-check { background: #16a34a; }
+  .assignment-panel.tut .ap-check:hover { background: #15803d; }
+  .tut-step { display: flex; gap: 7px; margin: 0 0 7px; line-height: 1.4; color: #64748b; }
+  .tut-step .tut-mark { flex: 0 0 16px; font-weight: 900; }
+  .tut-step.done { color: #94a3b8; }
+  .tut-step.done .tut-mark { color: #16a34a; }
+  .tut-step.current { color: #1f2937; font-weight: 600; }
+  .tut-step.current .tut-mark { color: #16a34a; }
+  .tut-hint-line { margin: -2px 0 8px 23px; font-size: 11.5px; color: #64748b; font-style: italic; }
+  .tut-progress { font-size: 11px; font-weight: 800; color: #16a34a; margin-bottom: 8px; }
+  .tut-exit { display: block; width: 100%; margin-top: 6px; padding: 7px 0; border: 2px solid #e2e8f0;
+    border-radius: 9px; background: #fff; color: #64748b; font-weight: 700; font-size: 12px; cursor: pointer; }
+  .tut-exit:hover { border-color: #cbd5e1; color: #334155; }
+  .tut-toast {
+    position: absolute; bottom: 46px; right: 14px; z-index: 70; max-width: 290px;
+    background: #fff; border: 2px solid #16a34a; border-radius: 12px; padding: 12px 14px;
+    box-shadow: 0 8px 24px rgba(20, 83, 45, 0.20); font-size: 13px; color: #1f2937;
+    opacity: 0; transform: translateY(8px); transition: opacity .25s, transform .25s; pointer-events: none;
+  }
+  .tut-toast.show { opacity: 1; transform: none; pointer-events: auto; }
+  .tut-toast .tt-title { font-weight: 800; color: #14532d; margin-bottom: 4px; }
+  .tut-toast .tt-buttons { display: flex; gap: 8px; margin-top: 9px; }
+  .tut-toast .tt-start { flex: 1; border: none; border-radius: 8px; background: #16a34a; color: #fff;
+    font-weight: 800; font-size: 12px; padding: 7px 0; cursor: pointer; }
+  .tut-toast .tt-start:hover { background: #15803d; }
+  .tut-toast .tt-dismiss { border: 2px solid #e2e8f0; border-radius: 8px; background: #fff; color: #64748b;
+    font-weight: 700; font-size: 12px; padding: 7px 10px; cursor: pointer; }
+  .tut-picker-unit { font-weight: 800; color: #14532d; margin: 10px 0 4px; font-size: 12.5px; }
+  .tut-picker-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; }
+  .tut-picker-row:hover { background: #f8fafc; }
+  .tut-picker-row .tp-name { flex: 1; font-size: 13px; color: #1f2937; }
+  .tut-picker-row .tp-name .tp-blurb { display: block; font-size: 11px; color: #64748b; }
+  .tut-picker-row .tp-done { color: #16a34a; font-weight: 900; font-size: 13px; }
+  .tut-picker-row .tp-start { border: none; border-radius: 7px; background: #16a34a; color: #fff;
+    font-weight: 800; font-size: 11.5px; padding: 5px 12px; cursor: pointer; }
+  .tut-picker-row .tp-start:hover { background: #15803d; }
+  .tut-picker-row.soon { opacity: 0.55; }
+  .tut-picker-row.soon .tp-soon { font-size: 11px; font-weight: 700; color: #94a3b8; }
+
   #cloud-save-btn.failed {
     background: rgba(229, 62, 62, 0.20);
     color: #c0392b;
@@ -1258,6 +1304,7 @@
         <button class="action" id="new-design-btn" title="Start a new blank design (clears the auto-restore draft)" style="font-size:14px;padding:0 8px">＋ New</button>
         <button class="action" id="cloud-load-btn" title="Load a saved design" style="font-size:14px;padding:0 8px">📂</button>
         <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
+        <button class="action" id="tutorials-btn" title="Tutorials — short guided lessons" style="font-size:14px;padding:0 8px">🎓</button>
         <button class="action primary" id="export-btn">Export ▾</button>
         <a class="action" id="home-link" href="/" target="_top" style="text-decoration:none;display:inline-flex;align-items:center">← Home</a>
         <div class="user-menu" id="user-menu">
@@ -11210,8 +11257,9 @@ function flushAutosave() {
   // ASSIGNMENT MODE: never write the personal draft. The assignment session
   // is its own world (work leaves via STEMSKETCH_SUBMIT) — writing here
   // would clobber the student's own in-progress design draft with
-  // assignment scratch work.
-  if (window.__assignment) return;
+  // assignment scratch work. TUTORIAL MODE: same rule — tutorial scratch is
+  // throwaway; the student's real doc is restored from _tutPrevDoc on exit.
+  if (window.__assignment || window.__tutorial) return;
   // Same guard as cloudSave's pre-save validation: refuse to autosave a
   // corrupt state (orphan threadShells, top-level group with no rebuildable
   // geometry). Without this, the cloud save validation could block but the
@@ -20544,6 +20592,9 @@ async function gzipJsonToBase64(value) {
 }
 
 async function cloudSave() {
+  // Tutorial scratch must never land in the student's designs (the Save
+  // button is hidden in tutorial mode; this guards any other path in).
+  if (window.__tutorial) { setStatus('Tutorials aren’t saved — your own design comes back when you exit.'); return; }
   const btn = document.getElementById('cloud-save-btn');
   if (btn) {
     // Stash the original glyph once, then drop any prior state and enter "saving".
@@ -21501,6 +21552,14 @@ async function submitAssignment() {
 window.addEventListener('message', (e) => {
   const data = e.data || {};
   if (data.type === 'STEMSKETCH_LOAD') {
+    // Tutorial mode owns the canvas — a late-arriving auto-load (the shell's
+    // most-recent-design fallback resolving after the student opened a
+    // tutorial) must not replace the guided scratch space. The student's own
+    // work is parked in _tutPrevDoc and comes back on exit.
+    if (window.__tutorial) {
+      console.warn(`STEMSKETCH_LOAD ignored — tutorial "${window.__tutorial.id}" is active.`);
+      return;
+    }
     // Safe-load guard: refuse to apply an over-large cloud design. A design
     // whose CSG geometry exploded (2M+ verts) makes loadDesignFromJson →
     // applySnapshot hang the whole page for minutes. This is the cloud-side
@@ -21548,6 +21607,424 @@ window.addEventListener('message', (e) => {
     setStatus('⚠ Submit failed: ' + (data.message || 'unknown error'));
   }
 });
+
+// ---------- 9. Tutorial mode ----------
+// Short guided lessons, free for every user (signed-in or not). Content —
+// step text, hints, and live completion predicates over `doc` — lives HERE;
+// the platform mirrors only metadata (lib/stem-sketch/tutorials.ts). Ids are
+// the join key for progress sync and teacher tracking: never rename one.
+//
+// Unlike assignment mode (one submit + Manifold fit check), a tutorial is a
+// sequence of steps each with a cheap predicate polled on a timer; steps
+// check themselves off live as the student works. The student's own design
+// is snapshotted on entry and restored on exit — tutorial work is scratch.
+window.__tutorial = null;      // active tutorial def; null = normal session
+let _tutStep = 0;              // index of the current (first not-done) step
+let _tutStepsDone = [];        // sticky per-step done flags (doc can regress)
+let _tutPrevDoc = null;        // student's real doc, restored on exit
+let _tutPrevName = '';         // project-name input value before entry
+let _tutTimer = null;          // predicate poll interval
+let _tutNotified = false;      // completion posted to the wrapper this run
+let _tutEvents = { views: new Set() };  // UI events predicates can consume
+
+const TUT_IN = 25.4; // mm per inch — doc storage is always mm
+
+// Completions: localStorage is the source of truth the UI reads (works for
+// anonymous users); the wrapper merges in server-known completions via
+// STEMSKETCH_TUTORIALS so progress follows a signed-in user across devices.
+const TUT_DONE_KEY = 'stem-sketch:tutorials-done';
+const TUT_WELCOME_KEY = 'stem-sketch:tut-welcomed';
+function _tutDoneMap() {
+  try { return JSON.parse(localStorage.getItem(TUT_DONE_KEY) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+function _tutMarkDone(id) {
+  const m = _tutDoneMap();
+  if (!m[id]) {
+    m[id] = new Date().toISOString();
+    try { localStorage.setItem(TUT_DONE_KEY, JSON.stringify(m)); } catch (_) {}
+  }
+}
+
+// ── Content ──────────────────────────────────────────────────────────────────
+// Predicates receive (doc, events). `near` tolerances are in mm; size checks
+// accept the imperial target OR its round metric sibling so mm-mode classes
+// aren't asked to type 50.8.
+const _tutNear = (v, target, tol = 1.5) => Math.abs(v - target) <= tol;
+const _tutIs2in = (v) => _tutNear(v, 2 * TUT_IN) || _tutNear(v, 50);
+const _tutSolids = (d, type) => d.bodies.filter(b => b.type === type && b.op !== 'subtract' && !b.hidden);
+
+const TUTORIALS = [
+  {
+    id: 'first-shape',
+    unit: 1,
+    title: 'First Shape',
+    intro: 'Every design starts with a shape. Let’s drop one in and give it an exact size.',
+    steps: [
+      {
+        text: 'Open the **Primitive** menu in the toolbar and click **Cube**.',
+        hint: 'It’s the button with the cube icon labeled "Primitive". Your cube lands on the workplane at 1 × 1 × 1.',
+        done: (d) => _tutSolids(d, 'cube').length > 0,
+      },
+      {
+        text: 'Click the cube to select it, then in the **Properties** panel set Width, Height, and Depth to **2 in** each (50 mm in metric).',
+        hint: 'Type each number and press Enter. Watch the cube grow!',
+        done: (d) => _tutSolids(d, 'cube').some(b => _tutIs2in(b.w) && _tutIs2in(b.h) && _tutIs2in(b.d)),
+      },
+    ],
+  },
+  {
+    id: 'look-around',
+    unit: 1,
+    title: 'Look Around',
+    intro: 'A designer checks every side. We’ve set out a small part — look at it from each direction.',
+    // Seed a part with a different silhouette in every view so the view
+    // buttons visibly DO something.
+    seed: (d) => {
+      d.bodies.push(
+        { id: d.nextBodyId++, type: 'cube', w: 2 * TUT_IN, h: 0.5 * TUT_IN, d: TUT_IN, x: 0, y: 0, z: 0, op: 'add' },
+        { id: d.nextBodyId++, type: 'cylinder', w: 0.75 * TUT_IN, h: TUT_IN, d: 0.75 * TUT_IN, x: -0.5 * TUT_IN, y: 0.5 * TUT_IN, z: 0, op: 'add' },
+      );
+    },
+    steps: [
+      { text: 'Click **Top** to look straight down at the part.', done: (d, ev) => ev.views.has('top') },
+      { text: 'Click **Front** to see it from the front.', done: (d, ev) => ev.views.has('front') },
+      { text: 'Click **Right** to see it from the side.', done: (d, ev) => ev.views.has('right') },
+      {
+        text: 'Click **Home** to go back to the angled view.',
+        hint: 'Tip: hold the right mouse button (or Ctrl) and drag to orbit anywhere you like.',
+        done: (d, ev) => ev.views.has('iso'),
+      },
+    ],
+  },
+  {
+    id: 'snowman',
+    unit: 1,
+    title: 'Build a Snowman',
+    intro: 'Time to stack shapes: move things where you want them and copy what you’ve made.',
+    steps: [
+      {
+        text: 'Add a **Cylinder** from the Primitive menu — that’s the base.',
+        done: (d) => _tutSolids(d, 'cylinder').length > 0,
+      },
+      {
+        text: 'Add a **Sphere** and move it up so it sits on top of the cylinder.',
+        hint: 'Drag it with the arrows, or select it and type its Y position in the Properties panel.',
+        done: (d) => {
+          const cyls = _tutSolids(d, 'cylinder'), sphs = _tutSolids(d, 'sphere');
+          return cyls.some(c => sphs.some(s => (s.y || 0) >= (c.y || 0) + c.h * 0.7));
+        },
+      },
+      {
+        text: '**Copy** the sphere and **Paste** it, make the copy smaller, and stack it on top — that’s the head.',
+        hint: 'Ctrl+C, Ctrl+V (or the Copy/Paste buttons), then shrink Width/Height/Depth in Properties.',
+        done: (d) => {
+          const sphs = _tutSolids(d, 'sphere');
+          return sphs.some(a => sphs.some(b => b !== a &&
+            b.w <= a.w * 0.85 && (b.y || 0) >= (a.y || 0) + a.h * 0.6));
+        },
+      },
+    ],
+  },
+];
+
+// Units that exist in the ladder but aren't authored yet — listed in the
+// picker as "coming soon" so students see the road ahead. Mirrors
+// lib/stem-sketch/tutorials.ts.
+const TUT_COMING_UNITS = [
+  '✏️ Unit 2 — Sketching',
+  '🧱 Unit 3 — Sketch to Solid',
+  '🔧 Unit 4 — Building Real Parts',
+  '🔩 Unit 5 — Hardware',
+  '🖨️ Unit 6 — Assemblies & Sharing',
+];
+
+function _tutById(id) { return TUTORIALS.find(t => t.id === id) || null; }
+// Step text supports **bold** only; everything else is escaped.
+function _tutFmt(s) { return _apEsc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'); }
+
+// ── Engine ───────────────────────────────────────────────────────────────────
+
+function enterTutorial(id) {
+  const t = _tutById(id);
+  if (!t) { setStatus('That tutorial isn’t available yet.'); return; }
+  if (window.__assignment) { showHint('Finish or close your assignment first — tutorials open in a fresh window.'); return; }
+  if (window.__tutorial && window.__tutorial.id === id) { _renderTutorialPanel(); return; }
+
+  // First tutorial of the session: park the student's real work. Switching
+  // tutorial-to-tutorial keeps the ORIGINAL parked doc.
+  if (!window.__tutorial) {
+    _tutPrevDoc = snapshotDoc();
+    const nameInp = document.getElementById('project-filename');
+    _tutPrevName = nameInp ? nameInp.value : '';
+  }
+  window.__tutorial = t;
+  _tutStep = 0;
+  _tutStepsDone = t.steps.map(() => false);
+  _tutNotified = false;
+  _tutEvents = { views: new Set() };
+
+  // Fresh canvas — same reset as assignment mode: no confirm, no draft
+  // clearing (autosave is suppressed while __tutorial is set), undo emptied
+  // so Ctrl+Z can't pull the parked design into the tutorial.
+  doc.sketches = []; doc.activeSketchId = null; doc.nextSketchId = 1;
+  doc.bodies = []; doc.nextBodyId = 1;
+  doc.selection = null; doc.multiSelectedSketch = []; doc.multiSelectedBodies = [];
+  doc.selectedRegions = []; doc.joints = []; doc.nextJointId = 1;
+  undoStack.length = 0; redoStack.length = 0;
+  updateUndoRedoButtons();
+  if (t.seed) { try { t.seed(doc); } catch (err) { console.warn('tutorial seed failed:', err); } }
+
+  const nameInp = document.getElementById('project-filename');
+  if (nameInp) { nameInp.value = `Tutorial: ${t.title}`; nameInp.disabled = true; }
+  // No New/Open/Save while practicing — tutorial scratch must never overwrite
+  // or sit beside the student's real designs. All restored on exit.
+  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn'].forEach(bid => {
+    const el = document.getElementById(bid);
+    if (el) el.style.display = 'none';
+  });
+
+  if (viewer) {
+    viewer.rebuildBodies();
+    viewer.updateSketchOverlay && viewer.updateSketchOverlay();
+    viewer.updateRegions && viewer.updateRegions();
+    viewer.updateExtrudeGizmo && viewer.updateExtrudeGizmo();
+    viewer.updateGizmo && viewer.updateGizmo();
+  }
+  if (sketchEng) sketchEng.render();
+  renderTree(); renderProps();
+  setMode('3d');
+  _renderTutorialPanel();
+  _tutHideWelcome();
+  clearInterval(_tutTimer);
+  _tutTimer = setInterval(_tutTick, 600);
+  setStatus(`🎓 Tutorial: ${t.title} — follow the green panel.`);
+}
+
+function exitTutorial() {
+  if (!window.__tutorial) return;
+  window.__tutorial = null;
+  clearInterval(_tutTimer);
+  _tutTimer = null;
+  const panel = document.getElementById('tutorial-panel');
+  if (panel) panel.remove();
+  const nameInp = document.getElementById('project-filename');
+  if (nameInp) { nameInp.disabled = false; nameInp.value = _tutPrevName; }
+  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn'].forEach(bid => {
+    const el = document.getElementById(bid);
+    if (el) el.style.display = '';
+  });
+  // Hand back the student's real work exactly as they left it.
+  if (_tutPrevDoc) {
+    try { applySnapshot(_tutPrevDoc); }
+    catch (err) { console.warn('tutorial doc restore failed:', err); }
+    _tutPrevDoc = null;
+  }
+  doc.selection = null; doc.multiSelectedBodies = []; doc.selectedRegions = [];
+  if (viewer) {
+    viewer.rebuildBodies();
+    viewer.updateSketchOverlay && viewer.updateSketchOverlay();
+    viewer.updateRegions && viewer.updateRegions();
+  }
+  if (sketchEng) sketchEng.render();
+  renderTree(); renderProps();
+  setStatus('Back to your design.');
+}
+
+function _tutTick() {
+  const t = window.__tutorial;
+  if (!t) { clearInterval(_tutTimer); _tutTimer = null; return; }
+  if (_tutStep >= t.steps.length) return; // completed; panel already final
+  let step = t.steps[_tutStep];
+  try {
+    if (!step.done(doc, _tutEvents)) return;
+  } catch (err) {
+    console.warn(`tutorial predicate threw (${t.id} step ${_tutStep}):`, err);
+    return;
+  }
+  _tutStepsDone[_tutStep] = true; // sticky — undoing the work won't un-check
+  _tutStep++;
+  if (_tutStep < t.steps.length) {
+    showHint('✓ Step complete!');
+    _renderTutorialPanel();
+  } else {
+    _tutComplete(t);
+  }
+}
+
+function _tutComplete(t) {
+  const already = !!_tutDoneMap()[t.id];
+  _tutMarkDone(t.id);
+  if (!already || !_tutNotified) {
+    // The wrapper persists this for signed-in users (fire-and-forget); for
+    // anonymous users localStorage above is all there is, and that's fine.
+    notifyParent({ type: 'STEMSKETCH_TUTORIAL_COMPLETE', tutorialId: t.id });
+    _tutNotified = true;
+  }
+  showHint(`🎉 Tutorial complete: ${t.title}`, 3500);
+  setStatus(`🎉 You finished "${t.title}"!`);
+  _renderTutorialPanel();
+}
+
+function _renderTutorialPanel() {
+  const t = window.__tutorial;
+  if (!t) return;
+  let panel = document.getElementById('tutorial-panel');
+  const host = document.querySelector('.canvas-area') || document.body;
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'tutorial-panel';
+    panel.className = 'assignment-panel tut';
+    host.appendChild(panel);
+  }
+  const finished = _tutStep >= t.steps.length;
+  const idx = TUTORIALS.indexOf(t);
+  const next = idx >= 0 ? TUTORIALS[idx + 1] : null;
+  const cur = finished ? null : t.steps[_tutStep];
+  panel.innerHTML = `
+    <div class="ap-head" id="tp-head" title="Show / hide the steps">
+      <span class="ap-title">🎓 Tutorial: ${_apEsc(t.title)}</span>
+      <button class="ap-toggle" id="tp-toggle">▾</button>
+    </div>
+    <div class="ap-body">
+      ${finished ? `
+        <div style="text-align:center;font-size:26px;margin:2px 0 6px">🎉</div>
+        <div style="text-align:center;font-weight:800;color:#14532d;margin-bottom:4px">You finished this tutorial!</div>
+        <div style="text-align:center;font-size:12px;color:#64748b;margin-bottom:10px">
+          ${next ? 'Ready for the next one?' : 'That’s every tutorial we have so far — more are coming.'}</div>
+        ${next ? `<button class="ap-check" id="tp-next">▶ Next: ${_apEsc(next.title)}</button>` : ''}
+        <button class="tut-exit" id="tp-exit">← Back to my design</button>
+      ` : `
+        <div class="tut-progress">Step ${_tutStep + 1} of ${t.steps.length}</div>
+        ${t.intro && _tutStep === 0 ? `<div style="font-size:12px;color:#475569;margin-bottom:8px">${_apEsc(t.intro)}</div>` : ''}
+        ${t.steps.map((s, i) => `
+          <div class="tut-step ${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}">
+            <span class="tut-mark">${_tutStepsDone[i] ? '✓' : i === _tutStep ? '▶' : '○'}</span>
+            <span>${_tutFmt(s.text)}</span>
+          </div>`).join('')}
+        ${cur && cur.hint ? `<div class="tut-hint-line">💡 ${_apEsc(cur.hint)}</div>` : ''}
+        <button class="tut-exit" id="tp-exit">✕ Exit tutorial</button>
+      `}
+    </div>`;
+  document.getElementById('tp-head').onclick = () => panel.classList.toggle('collapsed');
+  document.getElementById('tp-exit').onclick = (ev) => { ev.stopPropagation(); exitTutorial(); };
+  const nextBtn = document.getElementById('tp-next');
+  if (nextBtn) nextBtn.onclick = (ev) => { ev.stopPropagation(); enterTutorial(next.id); };
+}
+
+// ── Picker (🎓 toolbar button) ───────────────────────────────────────────────
+
+function showTutorialPicker() {
+  const done = _tutDoneMap();
+  const rows = TUTORIALS.map(t => `
+    <div class="tut-picker-row">
+      <span class="tp-name">${_apEsc(t.title)}<span class="tp-blurb">${_apEsc(t.intro || '')}</span></span>
+      ${done[t.id] ? '<span class="tp-done">✓ Done</span>' : ''}
+      <button class="tp-start" data-tut="${_apEsc(t.id)}">${done[t.id] ? 'Redo' : 'Start'}</button>
+    </div>`).join('');
+  const soon = TUT_COMING_UNITS.map(u => `
+    <div class="tut-picker-row soon">
+      <span class="tp-name">${_apEsc(u)}</span><span class="tp-soon">coming soon</span>
+    </div>`).join('');
+  openModal({
+    title: '🎓 Tutorials',
+    body: `<div style="font-size:12.5px;color:#475569;margin-bottom:6px">
+        Short guided lessons — the tool checks your work as you go. Your design is saved and comes right back when you exit.</div>
+      <div style="max-height:320px;overflow-y:auto">
+        <div class="tut-picker-unit">🧭 Unit 1 — Getting Around</div>
+        ${rows}
+        ${soon}
+      </div>`,
+    hideOk: true,
+    custom: () => {
+      document.querySelectorAll('#modal [data-tut]').forEach(b => {
+        b.addEventListener('click', () => {
+          document.getElementById('modal-bg').classList.remove('show');
+          enterTutorial(b.dataset.tut);
+        });
+      });
+    },
+  });
+}
+
+// ── "New here?" first-launch toast ───────────────────────────────────────────
+// One-time, dismissible nudge — never a forced modal (VISION.md). Shown only
+// on a fresh canvas with no assignment/tutorial active and no prior visit.
+
+function _tutHideWelcome() {
+  const el = document.getElementById('tut-toast');
+  if (el) el.classList.remove('show');
+}
+
+function _tutMaybeShowWelcome() {
+  try { if (localStorage.getItem(TUT_WELCOME_KEY)) return; } catch (_) {}
+  if (window.__assignment || window.__tutorial) return;
+  if (_tutDoneMap()['first-shape']) return;
+  if (doc.bodies.length || doc.sketches.length) return; // returning user with work
+  const host = document.querySelector('.canvas-area') || document.body;
+  let el = document.getElementById('tut-toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'tut-toast';
+    el.className = 'tut-toast';
+    el.innerHTML = `
+      <div class="tt-title">👋 New here?</div>
+      <div>Try the 2-minute intro — drop in your first shape and size it like a pro.</div>
+      <div class="tt-buttons">
+        <button class="tt-start" id="tt-start">🎓 Start the intro</button>
+        <button class="tt-dismiss" id="tt-dismiss">Not now</button>
+      </div>`;
+    host.appendChild(el);
+    document.getElementById('tt-start').onclick = () => {
+      try { localStorage.setItem(TUT_WELCOME_KEY, '1'); } catch (_) {}
+      _tutHideWelcome();
+      enterTutorial('first-shape');
+    };
+    document.getElementById('tt-dismiss').onclick = () => {
+      try { localStorage.setItem(TUT_WELCOME_KEY, '1'); } catch (_) {}
+      _tutHideWelcome();
+    };
+  }
+  requestAnimationFrame(() => el.classList.add('show'));
+}
+
+// ── Wiring ───────────────────────────────────────────────────────────────────
+
+// View-button clicks feed the look-around predicates. Capture phase so the
+// event is seen regardless of the buttons' own handlers.
+document.addEventListener('click', (e) => {
+  if (!window.__tutorial) return;
+  const b = e.target && e.target.closest ? e.target.closest('[data-view]') : null;
+  if (b && b.dataset.view) _tutEvents.views.add(b.dataset.view);
+}, true);
+
+{
+  const tb = document.getElementById('tutorials-btn');
+  if (tb) tb.onclick = showTutorialPicker;
+}
+
+// Give init() time to settle (draft restore, engine boot) before judging the
+// canvas empty; the toast fades in, it doesn't block anything.
+setTimeout(_tutMaybeShowWelcome, 1800);
+
+window.addEventListener('message', (e) => {
+  const data = e.data || {};
+  if (data.type === 'STEMSKETCH_TUTORIAL_START') {
+    // Deep link (?tutorial=<id>) from a dashboard card or teacher assignment.
+    if (data.tutorialId) enterTutorial(String(data.tutorialId));
+  } else if (data.type === 'STEMSKETCH_TUTORIALS') {
+    // Server-known completions for the signed-in user — merge into the local
+    // map so the picker shows cross-device progress.
+    const list = Array.isArray(data.completed) ? data.completed : [];
+    for (const c of list) {
+      const id = typeof c === 'string' ? c : c && c.tutorialId;
+      if (id && _tutById(id)) _tutMarkDone(id);
+    }
+  }
+});
+// Cover the race where the wrapper posted tutorial state before this
+// listener existed (same handshake pattern as user/assignment).
+notifyParent({ type: 'STEMSKETCH_REQUEST_TUTORIALS' });
 
 // ---------- Account menu (driven by the wrapper page's auth session) ----------
 // The wrapper posts STEMSKETCH_USER on load / session change; Sign Out posts
@@ -22598,7 +23075,7 @@ function init() {
       // fresh locked canvas must NOT be replaced by last session's work
       // (this exact bug — "bolt idea" restored under an assignment banner —
       // is what shipped the guard).
-      if (!window.__assignment && restoreLocalDraft()) setDirty(true);
+      if (!window.__assignment && !window.__tutorial && restoreLocalDraft()) setDirty(true);
     } catch (err) { console.warn('Local draft restore failed:', err); }
   });
 
