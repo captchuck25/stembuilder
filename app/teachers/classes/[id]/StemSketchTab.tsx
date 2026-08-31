@@ -225,7 +225,6 @@ function TutorialsSection({ classId }: { classId: string }) {
 export default function StemSketchTab({ classId }: { classId: string }) {
   const [assignments, setAssignments] = useState<SketchAssignment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
   // Which assignment type (level) the teacher is creating — picking a level
   // box filters the challenge list to that stage.
   const [createStage, setCreateStage] = useState<SketchStage | null>(null);
@@ -312,7 +311,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
       }
       const created = await res.json();
       setAssignments(prev => [created, ...prev]);
-      setShowForm(false);
+      setCreateStage(null);
       setForm(f => ({ ...f, title: "" }));
     } finally {
       setSaving(false);
@@ -357,22 +356,15 @@ export default function StemSketchTab({ classId }: { classId: string }) {
             Print the challenge block, students measure it in real life, model it in STEM Sketch, and submit — the tool checks the fit.
           </p>
         </div>
-        <button
-          onClick={() => { setShowForm(v => !v); setCreateStage(null); setFormError(""); }}
-          style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #0891b2",
-            background: showForm ? "#cffafe" : "#fff", color: "#155e75",
-            fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
-          {showForm ? "✕ Cancel" : "+ New Assignment"}
-        </button>
       </div>
 
-      {showForm && (
+      {/* Level boxes are ALWAYS visible (user feedback 2026-08-31): teachers
+          should see what's available the moment they land on the tab, no
+          "+ New Assignment" click first. Picking a level opens the challenge
+          form below it; clicking the active level again collapses it. */}
+      {(
         <div style={{ background: "#ecfeff", border: "2px solid #a5f3fc", borderRadius: 14,
           padding: "20px 22px", marginBottom: 24 }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#155e75", marginBottom: 14 }}>
-            Create STEM Sketch Assignment — pick a level
-          </div>
-          {/* Level boxes: the three assignment types */}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
             {([1, 2, 3] as const).map(lvl => {
               const meta = STAGE_META[lvl];
@@ -382,7 +374,9 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                 <div key={lvl}
                   onClick={() => {
                     if (comingSoon) return;
+                    if (active) { setCreateStage(null); return; }
                     setCreateStage(lvl);
+                    setFormError("");
                     const first = challengesForStage(lvl)[0];
                     setForm(f => ({ ...f, challengeId: first?.id ?? "" }));
                   }}
@@ -490,7 +484,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
       ) : assignments.length === 0 ? (
         <div style={{ padding: "32px 0", textAlign: "center", color: "#aaa", fontSize: 14 }}>
           <div style={{ fontSize: 36, marginBottom: 10 }}>✏️</div>
-          No STEM Sketch assignments yet — click <strong>+ New Assignment</strong> to create one.
+          No STEM Sketch assignments yet — pick a <strong>level above</strong> to create one.
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
