@@ -2133,17 +2133,37 @@ function drawFurnitureSymbol(
     }
     case 'cabinet-corner': {
       // Square corner unit: back edges sit in the wall corner (-x / -y); a
-      // 45° door face chamfers the room-side (+x/+y) corner — same corner
-      // the 3D model's angled door faces. Knob dot just inside the door.
+      // 45° DOOR SLAB (double line) chamfers the room-side (+x/+y) corner —
+      // same corner the 3D model's angled door faces. A lazy-susan circle
+      // (with cross) inside makes it read unmistakably as a corner cabinet,
+      // and counter-edge lines run along the two room-facing sides.
       const cc = Math.min(w, d) * 0.55;
+      const edge = Math.min(d * 0.10, 2.5);
+      // Counter front edges along +x and +y faces (stop at the chamfer).
       ctx.beginPath();
-      ctx.moveTo(w / 2 - cc, d / 2 - 2);
-      ctx.lineTo(w / 2 - 2, d / 2 - cc);
+      ctx.moveTo(-w / 2 + 2, d / 2 - edge); ctx.lineTo(w / 2 - cc, d / 2 - edge);
+      ctx.moveTo(w / 2 - edge, -d / 2 + 2); ctx.lineTo(w / 2 - edge, d / 2 - cc);
+      ctx.stroke();
+      // Door slab across the chamfer — two parallel lines + knob dot.
+      const off = 2.2;
+      ctx.beginPath();
+      ctx.moveTo(w / 2 - cc, d / 2 - 2); ctx.lineTo(w / 2 - 2, d / 2 - cc);
+      ctx.moveTo(w / 2 - cc + off, d / 2 - 2 - off); ctx.lineTo(w / 2 - 2 - off, d / 2 - cc + off);
       ctx.stroke();
       ctx.fillStyle = stroke;
       ctx.beginPath();
-      ctx.arc(w / 2 - cc * 0.55, d / 2 - cc * 0.55, 1.4, 0, Math.PI * 2);
+      ctx.arc(w / 2 - cc * 0.62, d / 2 - cc * 0.62, 1.4, 0, Math.PI * 2);
       ctx.fill();
+      // Lazy susan: circle biased toward the back corner, with a + cross.
+      const sr = Math.min(w, d) * 0.28;
+      const scx = -w * 0.08, scy = -d * 0.08;
+      ctx.beginPath();
+      ctx.arc(scx, scy, sr, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(scx - sr, scy); ctx.lineTo(scx + sr, scy);
+      ctx.moveTo(scx, scy - sr); ctx.lineTo(scx, scy + sr);
+      ctx.stroke();
       break;
     }
     case 'cabinet-upper': {
