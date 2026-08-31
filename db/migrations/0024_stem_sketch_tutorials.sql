@@ -1,4 +1,6 @@
--- 0023: STEM Sketch tutorials — per-user completion tracking.
+-- 0024: STEM Sketch tutorials — per-user completion tracking.
+-- (Renumbered from 0023 pre-merge — 0023 was taken by blueprint_assignments
+-- in a parallel branch. Same SQL; already run in Supabase 2026-08-31.)
 --
 -- Design notes (conventions follow 0021/0022):
 --  * Tutorial CONTENT (steps, checks) lives in the tool
@@ -21,7 +23,7 @@
 --    NOT this table — that lands with the teacher dashboard slice and will
 --    follow the stem_sketch_assignments pattern.
 --
--- Run once in the Supabase SQL editor (project: stembuilder), after 0022 and
+-- Run once in the Supabase SQL editor (project: stembuilder), after 0023 and
 -- BEFORE deploying the tutorials app code (its API route needs this table).
 
 create table if not exists stem_sketch_tutorial_progress (

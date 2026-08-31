@@ -9,7 +9,7 @@
 //
 // KEEP IN SYNC with the TUTORIALS array in index.html — ids are the join key
 // for progress rows (stem_sketch_tutorial_progress.tutorial_id, migration
-// 0023), teacher assignment tracking, and ?tutorial= deep links. Never rename
+// 0024), teacher assignment tracking, and ?tutorial= deep links. Never rename
 // or reorder an id once shipped; add new ones instead.
 //
 // Tutorials are FREE for every user (no plan gate on taking them). Teachers

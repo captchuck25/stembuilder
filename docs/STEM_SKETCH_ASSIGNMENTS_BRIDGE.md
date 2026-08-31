@@ -145,7 +145,7 @@ both sides. Never tighten below float-noise levels or loosen past ~1.5 mm.
 Tutorials share the bridge but are a separate mode (section 9 of
 index.html, green UI, free for all users). Content + checks live in the
 iframe; `lib/stem-sketch/tutorials.ts` mirrors metadata; progress persists in
-`stem_sketch_tutorial_progress` (migration 0023) via
+`stem_sketch_tutorial_progress` (migration 0024) via
 `/api/stem-sketch/tutorials`.
 
 Shell → iframe:
