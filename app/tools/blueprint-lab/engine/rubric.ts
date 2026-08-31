@@ -641,3 +641,31 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
 
   return checks;
 }
+
+// ─── Signals for the grading rubric's auto-tier placement ────────────────────
+
+// Labeled room types BEYOND the brief's requirements (closets/outdoor
+// excluded) — the "met and exceeded" signal: a student who added an office
+// or an extra half bath went beyond the minimum program.
+export function extraRoomTypes(level: Level, brief: Brief): string[] {
+  const covered = new Set(brief.rooms.map(r => r.roomType));
+  const out = new Set<string>();
+  for (const r of level.roomLabels) {
+    const t = (r.name || '').toUpperCase().trim();
+    if (!t || covered.has(t) || CLOSET_TYPES.has(t) || NON_LIVING_TYPES.has(t)) continue;
+    out.add(t);
+  }
+  return [...out];
+}
+
+// How many bedroom-family rooms exist, and how many carry 2+ windows — the
+// "thoughtfully placed windows" standard (a nice bedroom has two windows).
+export function bedroomWindowStats(level: Level): { bedrooms: number; withTwoPlus: number } {
+  const rooms = resolveRooms(level).filter(r =>
+    BEDROOM_TYPES.has(r.label.name.toUpperCase().trim()) && r.poly && !r.needsBoundary);
+  let withTwoPlus = 0;
+  for (const r of rooms) {
+    if (openingsOnRoom(level, r, level.windows) >= 2) withTwoPlus++;
+  }
+  return { bedrooms: rooms.length, withTwoPlus };
+}

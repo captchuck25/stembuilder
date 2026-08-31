@@ -7,7 +7,9 @@
 // See docs/BLUEPRINT_LAB_ASSIGNMENTS_PLAN.md → "Rubric builder design".
 
 import { Level } from './types';
-import { BRIEFS, Brief, RubricCheck, evaluateBrief } from './rubric';
+import {
+  BRIEFS, Brief, RubricCheck, bedroomWindowStats, evaluateBrief, extraRoomTypes,
+} from './rubric';
 
 // Merge a stored assignment's teacher-edited config over its base brief —
 // the same resolution the tool client performs. Server routes use this to
@@ -87,8 +89,8 @@ export const DEFAULT_GRADING_RUBRIC: GradingRubric = {
     {
       id: 'design-flow', name: 'Design — floor plan', scoring: 'teacher', deliverable: 'floor-plan',
       tiers: T(
-        'The home is very well designed. Traveling room to room is fluid! No dead space!',
-        'Home has a good design. Some room orientation could be better. No dead space!',
+        'The home is very well designed. Traveling room to room is fluid, room groupings are appropriate (bedrooms together; kitchen, dining and living connected). No dead space!',
+        'Home has a good design. Some room orientation could be better — e.g. a bedroom stranded on the far side of the kitchen. No dead space!',
         'Some rooms are out of place. Some maze qualities! Some dead space!',
         'Room orientation is off. Your home is a maze!',
       ),
@@ -96,8 +98,8 @@ export const DEFAULT_GRADING_RUBRIC: GradingRubric = {
     {
       id: 'requirements', name: 'Requirements — required rooms', scoring: 'auto', autoSource: 'requirements', deliverable: 'floor-plan',
       tiers: T(
-        'All requirements are met and exceeded. Overall SQFT is in range.',
-        'All requirements are met. Overall SQFT is off.',
+        'All requirements are met AND exceeded — additional living spaces beyond the required rooms (an office, an extra half bath…). Overall SQFT is in range.',
+        'All requirements are met. (Nothing beyond the minimum, or overall SQFT is off.)',
         'One requirement was not completely met.',
         'More than one requirement was not completely met.',
       ),
@@ -114,7 +116,7 @@ export const DEFAULT_GRADING_RUBRIC: GradingRubric = {
     {
       id: 'windows', name: 'Windows', scoring: 'auto', autoSource: 'windows', deliverable: 'floor-plan',
       tiers: T(
-        'Every required room has windows. Windows are reasonable in size and thoughtfully placed.',
+        'Every required room has windows, thoughtfully placed — bedrooms have at least two.',
         'Every required room has windows.',
         'Windows are missing.',
         'No windows.',
@@ -141,17 +143,72 @@ export const DEFAULT_GRADING_RUBRIC: GradingRubric = {
     {
       id: 'closets', name: 'Closets', scoring: 'auto', autoSource: 'closets', deliverable: 'floor-plan',
       tiers: T(
-        'Closets where required, appropriately sized (walk-in or double for the master).',
+        'Closets where required, appropriately sized.',
         'All closets present but wrong sizes.',
         'Some closets are missing.',
         'No closets.',
       ),
     },
   ],
-  bonuses: [
-    { id: 'yard', label: 'Yard (must be meaningful)', points: 5, scoring: 'teacher' },
-  ],
+  // No default bonuses — the paper rubric's "Yard +5" needs a yard tool that
+  // doesn't exist yet; teachers add their own bonus/penalty rows as needed.
+  bonuses: [],
 };
+
+// Ready-made teacher-graded categories the builder offers from a dropdown —
+// deliverable-tagged so "Roof plan complete" hides on floor-plan-only
+// assignments automatically. "Custom" is the blank starting point.
+export const TEACHER_CATEGORY_PRESETS: Array<Omit<RubricCategory, 'id'>> = [
+  {
+    name: 'Room pairings & adjacency', scoring: 'teacher', deliverable: 'floor-plan',
+    tiers: T(
+      'Rooms are grouped the way a real home lives: bedrooms clustered away from noise, kitchen–dining–living connected.',
+      'Groupings mostly make sense; one pairing is questionable.',
+      'Several rooms are paired oddly (a bedroom opening into the kitchen, bathroom far from bedrooms).',
+      'Room placement shows no grouping logic.',
+    ),
+  },
+  {
+    name: 'Creativity & presentation', scoring: 'teacher', deliverable: 'floor-plan',
+    tiers: T(
+      'The design shows original thinking and the plan is clean, labeled and a pleasure to read.',
+      'Solid, readable plan with some personal touches.',
+      'Functional but plain; presentation is rough in places.',
+      'Hard to read; little care in presentation.',
+    ),
+  },
+  {
+    name: 'Roof plan complete', scoring: 'teacher', deliverable: 'roof-plan',
+    tiers: T(
+      'Roof plan is complete and coherent — ridges, valleys and overhangs all resolved.',
+      'Roof plan is complete with minor issues.',
+      'Roof plan is started but unresolved in places.',
+      'No usable roof plan.',
+    ),
+  },
+  {
+    name: 'Cross section complete', scoring: 'teacher', deliverable: 'section',
+    tiers: T(
+      'Cross section is complete and reads correctly (foundation, walls, roof structure).',
+      'Cross section is complete with minor issues.',
+      'Cross section is partially done.',
+      'No usable cross section.',
+    ),
+  },
+  {
+    name: 'Elevations complete', scoring: 'teacher', deliverable: 'elevations',
+    tiers: T(
+      'All four elevations are complete and consistent with the plan.',
+      'Elevations complete with minor inconsistencies.',
+      'Some elevations missing or inconsistent.',
+      'No usable elevations.',
+    ),
+  },
+  {
+    name: 'Custom category', scoring: 'teacher', deliverable: 'floor-plan',
+    tiers: T('Excellent.', 'Good.', 'Needs work.', 'Incomplete.'),
+  },
+];
 
 // ─── Auto-tier computation ───────────────────────────────────────────────────
 
@@ -176,21 +233,42 @@ function checksForSource(checks: RubricCheck[], source: RubricAutoSource): Rubri
   }
 }
 
+// Context for "exceeded"-style top-tier judgments.
+interface TierContext {
+  extraRooms: string[];                              // living rooms beyond the brief
+  bedrooms: { bedrooms: number; withTwoPlus: number }; // 2+-window standard
+}
+
 // Tier placement rule (teacher can always override):
-//   0 fails → tier 0 (best) ....... except 'requirements', where counts pass
-//                                   but SF off lands tier 1, per the sheet
+//   0 fails + "exceeded" signal → tier 0 (met AND exceeded)
+//   0 fails                     → tier 1 for requirements/windows (met), 0 elsewhere
+//   SF-only miss (requirements) → tier 1
 //   1 fail  → tier 2
 //   2+ fails → tier 3
-function placeTier(relevant: RubricCheck[], source: RubricAutoSource): AutoTierResult {
+//   no applicable checks → tier 3 (empty plans don't score 14s)
+function placeTier(relevant: RubricCheck[], source: RubricAutoSource, ctx: TierContext): AutoTierResult {
   const fails = relevant.filter(c => c.status === 'fail');
   if (relevant.length === 0) {
-    // No applicable checks = the rooms these checks live on aren't drawn
-    // yet. An empty plan earns the bottom tier, not a free 14 ("No
-    // windows." on the paper rubric). Teachers whose brief genuinely has no
-    // such requirements should remove the category in the builder.
     return { tier: 3, evidence: 'No matching rooms drawn yet — this scores once the rooms exist.' };
   }
   if (fails.length === 0) {
+    if (source === 'requirements') {
+      if (ctx.extraRooms.length > 0) {
+        return { tier: 0, evidence: `All requirements met AND exceeded — added ${ctx.extraRooms.join(', ')}.` };
+      }
+      return { tier: 1, evidence: 'All requirements met (nothing beyond the minimum yet).' };
+    }
+    if (source === 'windows') {
+      if (ctx.bedrooms.bedrooms > 0 && ctx.bedrooms.withTwoPlus === ctx.bedrooms.bedrooms) {
+        return { tier: 0, evidence: `All window checks pass and every bedroom has 2+ windows.` };
+      }
+      return {
+        tier: 1,
+        evidence: ctx.bedrooms.bedrooms > 0
+          ? `All window checks pass; ${ctx.bedrooms.withTwoPlus} of ${ctx.bedrooms.bedrooms} bedrooms have 2+ windows (top tier wants all).`
+          : `All ${relevant.length} checks pass.`,
+      };
+    }
     return { tier: 0, evidence: `All ${relevant.length} checks pass.` };
   }
   if (source === 'requirements') {
@@ -209,10 +287,14 @@ export function computeAutoTiers(
   level: Level, brief: Brief, rubric: GradingRubric,
 ): Record<string, AutoTierResult> {
   const checks = evaluateBrief(level, brief);
+  const ctx: TierContext = {
+    extraRooms: extraRoomTypes(level, brief),
+    bedrooms: bedroomWindowStats(level),
+  };
   const out: Record<string, AutoTierResult> = {};
   for (const cat of rubric.categories) {
     if (cat.scoring !== 'auto' || !cat.autoSource) continue;
-    out[cat.id] = placeTier(checksForSource(checks, cat.autoSource), cat.autoSource);
+    out[cat.id] = placeTier(checksForSource(checks, cat.autoSource), cat.autoSource, ctx);
   }
   return out;
 }

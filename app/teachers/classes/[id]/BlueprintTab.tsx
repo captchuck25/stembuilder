@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BRIEFS, Brief, DEFAULT_FURNISHINGS, RoomRequirement } from "@/app/tools/blueprint-lab/engine/rubric";
 import {
-  GradingRubric, resolveGradingRubric, rubricForDeliverables, rubricMaxPoints,
+  GradingRubric, TEACHER_CATEGORY_PRESETS, resolveGradingRubric, rubricForDeliverables, rubricMaxPoints,
 } from "@/app/tools/blueprint-lab/engine/gradingRubric";
 import { SHELLS, formatShellStats, shellStats } from "@/app/tools/blueprint-lab/engine/shells";
 import { ROOM_TYPES } from "@/app/tools/blueprint-lab/engine/types";
@@ -500,29 +500,37 @@ export default function BlueprintTab({ classId }: { classId: string }) {
             </div>
           );
         })}
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          <select value="" style={{ ...inputStyle, width: 260 }}
+            onChange={e => {
+              const idx = Number(e.target.value);
+              if (Number.isNaN(idx)) return;
+              const preset = TEACHER_CATEGORY_PRESETS[idx];
+              if (!preset) return;
+              setDraft(d => d ? {
+                ...d,
+                rubric: {
+                  ...d.rubric,
+                  categories: [...d.rubric.categories, {
+                    ...JSON.parse(JSON.stringify(preset)),
+                    id: `custom-${Date.now().toString(36)}`,
+                  }],
+                },
+              } : d);
+            }}>
+            <option value="">+ Add teacher-graded category…</option>
+            {TEACHER_CATEGORY_PRESETS.map((p, i) => (
+              <option key={p.name} value={i}>{p.name}</option>
+            ))}
+          </select>
           <button
-            onClick={() => setDraft(d => d ? {
-              ...d,
-              rubric: {
-                ...d.rubric,
-                categories: [...d.rubric.categories, {
-                  id: `custom-${Date.now().toString(36)}`,
-                  name: "New category",
-                  scoring: "teacher" as const,
-                  deliverable: "floor-plan" as const,
-                  tiers: [
-                    { points: 14, descriptor: "Excellent." },
-                    { points: 12, descriptor: "Good." },
-                    { points: 9, descriptor: "Needs work." },
-                    { points: 6, descriptor: "Incomplete." },
-                  ],
-                }],
-              },
-            } : d)}
-            style={{ fontSize: 12, fontWeight: 700, color: "#4338ca", background: "#eef2ff",
-              border: CARD_BORDER, borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>
-            + Add teacher-graded category
+            onClick={() => {
+              if (!window.confirm("Replace this assignment's rubric with the latest default template? Your edits to it will be lost.")) return;
+              setDraft(d => d ? { ...d, rubric: cloneRubric(resolveGradingRubric(null)) } : d);
+            }}
+            style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", background: "#fff",
+              border: "2px solid #d1d5db", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>
+            Reset rubric to default
           </button>
         </div>
         <div style={{ fontSize: 12.5, fontWeight: 800, color: "#312e81", margin: "10px 0 4px" }}>Bonus / penalty</div>
