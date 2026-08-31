@@ -9561,19 +9561,28 @@ function buildBodyMesh(body) {
   if (body.type === 'revolve') {
     const profile = (body.sketch?.entities || []).find(e => e.type === 'polyline' && !e.construction && e.points?.length >= 2);
     if (!profile) return null;
-    const raw = profile.points.map(p => ({ x: Math.max(0, p.x), y: p.y }));
-    if (!profile.closed) {
-      // Drawing direction must not matter: LatheGeometry's normals face
-      // outward only for bottom→top profiles — a top→bottom drawing
-      // rendered inside-out (invisible from the front with FrontSide).
+    let raw = profile.points.map(p => ({ x: Math.max(0, p.x), y: p.y }));
+    const AX = 0.01;
+    const offAxis = raw.filter(p => p.x > AX);
+    if (offAxis.length && (!profile.closed || raw.some(p => p.x <= AX))) {
+      // Normalize any profile that touches (or should touch) the axis into
+      // one bottom→top open chain, then close it to the axis:
+      // 1. Trim runs of on-axis points at each end to a single junction —
+      //    profiles drawn WITH the center spine (the tutorial flow) start
+      //    with two axis points, which defeated the direction test and
+      //    lathed the visible outline inside-out (ssissues round 4).
+      let s = 0; while (s < raw.length - 1 && raw[s].x <= AX && raw[s + 1].x <= AX) s++;
+      let e = raw.length - 1; while (e > 0 && raw[e].x <= AX && raw[e - 1].x <= AX) e--;
+      if (e > s) raw = raw.slice(s, e + 1);
+      // 2. LatheGeometry's normals face outward only for bottom→top chains.
       if (raw.length >= 2 && raw[0].y > raw[raw.length - 1].y) raw.reverse();
-      // Close the profile to the axis at both ends: an open profile lathes
-      // into a see-through shell with no caps (ssissues.mp4 2026-08-31).
-      // Dropping the ends to x=0 makes a closed solid of revolution — this
-      // also fixes CSG/export, which build from this same mesh.
-      if (raw[0].x > 0.01) raw.unshift({ x: 0, y: raw[0].y });
-      if (raw[raw.length - 1].x > 0.01) raw.push({ x: 0, y: raw[raw.length - 1].y });
+      // 3. Cap the solid: drop both ends to x=0 (an open profile lathes into
+      //    a see-through capless shell). Also fixes CSG/export — they build
+      //    from this same mesh.
+      if (raw[0].x > AX) raw.unshift({ x: 0, y: raw[0].y });
+      if (raw[raw.length - 1].x > AX) raw.push({ x: 0, y: raw[raw.length - 1].y });
     }
+    // else: fully off-axis closed loop (a donut) — lathe the loop as-is.
     const pts = raw.map(p => new THREE.Vector2(p.x, p.y));
     if (pts.length < 2) return null;
     geo = new THREE.LatheGeometry(pts, body.segments || 48);
@@ -21795,7 +21804,7 @@ const TUTORIALS = [
     intro: '3D parts start as flat drawings. Let’s make your first 2D sketch.',
     steps: [
       {
-        text: 'Click **+ Sketch** in the top toolbar and choose **Top** — now you’re looking straight down at the workplane, ready to draw.',
+        text: 'Click the **Sketch** button in the top toolbar and choose **Top** — now you’re looking straight down at the workplane, ready to draw.',
         hint: 'Notice the toolbar changed: these are the 2D drawing tools.',
         done: (d) => d.sketches.length >= 1,
       },
@@ -21820,7 +21829,7 @@ const TUTORIALS = [
     intro: 'Real designs use real measurements. Dimensions measure your shapes — and can resize them.',
     steps: [
       {
-        text: 'Start a sketch on **Top** (+ Sketch → Top) and draw a **rectangle** — any size for now.',
+        text: 'Start a sketch on **Top** (**Sketch** → Top) and draw a **rectangle** — any size for now.',
         done: (d) => _tutSketchHas(d, e => e.type === 'rect'),
       },
       {
@@ -21847,7 +21856,7 @@ const TUTORIALS = [
     intro: 'One little part, four tools: exact sizes, rounded corners, and a mirrored feature.',
     steps: [
       {
-        text: 'Click **+ Sketch** → **Top**, then pick the **Rect** tool and draw a rectangle near the **middle** of the grid — any size.',
+        text: 'Click **Sketch** → **Top**, then pick the **Rect** tool and draw a rectangle near the **middle** of the grid — any size.',
         done: (d) => _tutSketchHas(d, e => e.type === 'rect'),
       },
       {
@@ -21891,7 +21900,7 @@ const TUTORIALS = [
     intro: 'This is the big one: turning a flat sketch into a solid part.',
     steps: [
       {
-        text: 'Click **+ Sketch** → **Top** and draw a **rectangle** near the middle. Click it with **Select** and set **Width 2, Height 2** in the Properties panel.',
+        text: 'Click **Sketch** → **Top** and draw a **rectangle** near the middle. Click it with **Select** and set **Width 2, Height 2** in the Properties panel.',
         done: (d) => _tutSketchHas(d, e => e.type === 'rect' && _tutSize2d(e.w, 2) && _tutSize2d(e.h, 2)),
       },
       {
@@ -21943,11 +21952,11 @@ const TUTORIALS = [
     intro: 'Extrude pushes a sketch straight up. Revolve spins one around — perfect for vases, wheels, and chess pieces.',
     steps: [
       {
-        text: 'Click **+ Sketch** → **Front**. Revolve spins your drawing around the sketch’s vertical center line, and a Front sketch makes the finished body stand upright.',
+        text: 'Click **Sketch** → **Front**. Revolve spins your drawing around the sketch’s vertical center line, and a Front sketch makes the finished body stand upright.',
         done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
       },
       {
-        text: 'Pick the **Line** tool. Click the **center point** of the grid, then click straight **up 3½ inches** — that’s the vase’s spine. Now keep clicking to draw the right-side outline like the picture: out to the right, down in steps, and end back at the **bottom of the spine**. Press **Enter** to finish.',
+        text: 'Pick the **Line** tool. Click the **center point** of the grid, then click straight **up 3½ inches** — that’s the vase’s spine. Now keep clicking to draw the right-side outline like the picture: out to the right, down in steps, and end back at the **bottom of the spine**. Press **Enter** to finish the line, then click **← Done** to go back to 3D.',
         hint: 'Every click adds a corner. Rough is fine — just keep every click on the right side of the center line.',
         svg: `<svg viewBox="0 0 210 152" style="width:100%;height:auto;display:block">
           <polyline points="60,138 10,138 15,112 40,98 40,60 22,44 22,20 60,20" fill="none" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="3 3"/>
@@ -21965,10 +21974,11 @@ const TUTORIALS = [
           Array.isArray(e.points) && e.points.length >= 4 && e.points.length <= 40 &&
           Math.min(...e.points.map(p => p.x)) >= -0.5 &&
           Math.max(...e.points.map(p => p.x)) > 20 &&
-          (Math.max(...e.points.map(p => p.y)) - Math.min(...e.points.map(p => p.y))) > 50),
+          (Math.max(...e.points.map(p => p.y)) - Math.min(...e.points.map(p => p.y))) > 50) &&
+          d.mode === '3d',
       },
       {
-        text: 'Click **Revolve** in the toolbar (no need to leave the sketch) and click **OK** — your outline spins all the way around into a solid vase. Orbit around it and admire your work. 🏺',
+        text: 'Click **Revolve** in the toolbar and click **OK** — your outline spins all the way around into a solid vase. Orbit around it and admire your work. 🏺',
         done: (d) => d.bodies.some(b => b.type === 'revolve'),
       },
     ],
@@ -22156,9 +22166,9 @@ function _renderTutorialPanel() {
           <div class="tut-step ${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}">
             <span class="tut-mark">${_tutStepsDone[i] ? '✓' : i === _tutStep ? '▶' : '○'}</span>
             <span>${_tutFmt(s.text)}</span>
-          </div>`).join('')}
-        ${cur && cur.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${cur.svg}</div>` : ''}
-        ${cur && cur.hint ? `<div class="tut-hint-line">💡 ${_apEsc(cur.hint)}</div>` : ''}
+          </div>
+          ${i === _tutStep && s.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${s.svg}</div>` : ''}
+          ${i === _tutStep && s.hint ? `<div class="tut-hint-line">💡 ${_apEsc(s.hint)}</div>` : ''}`).join('')}
         <button class="tut-exit" id="tp-exit">✕ Exit tutorial</button>
       `}
     </div>`;
