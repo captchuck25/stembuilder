@@ -12,6 +12,7 @@ import {
   Door, FurnitureItem, FurnitureKind, Level, RoomLabel, Vec2, Window,
 } from './types';
 import { autoDetectRoomBoundary, polygonAreaSqFt } from './geometry';
+import { buildRoofFootprint } from './roof';
 
 // ─── Brief model ──────────────────────────────────────────────────────────────
 
@@ -319,7 +320,10 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
   if (brief.totalSqFt) {
     const { min, max } = brief.totalSqFt;
     const openPlan = rooms.filter(r => r.needsBoundary);
-    if (openPlan.length > 0) {
+    const tracedFp = buildRoofFootprint(level, 0);
+    // With no traceable footprint the total falls back to summing rooms —
+    // which double-counts open-plan spaces until boundaries are drawn.
+    if (!tracedFp && openPlan.length > 0) {
       checks.push({
         id: 'total-sf', group: 'OVERALL',
         label: `Total area ${min.toLocaleString()}–${max.toLocaleString()} SF`,
@@ -327,18 +331,49 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
         detail: `Draw boundaries for open spaces first: ${openPlan.map(r => r.label.name).join(', ')}`,
       });
     } else {
-      // Garages and outdoor spaces don't count toward living area — same as
-      // real gross-living-area (GLA) rules. A required garage still gets its
-      // own room checks; its footprint is just free against the SF target.
-      const living = rooms.filter(r => !NON_LIVING_TYPES.has(r.label.name.toUpperCase().trim()));
-      const excluded = rooms.length - living.length;
-      const total = living.reduce((s, r) => s + (r.sqFt ?? 0), 0);
+      // Total area comes from the BUILDING FOOTPRINT (the enclosed structure)
+      // when one can be traced — a student who picked a 2,182 SF shell simply
+      // HAS 2,182 SF; labeling rooms shouldn't move the number, and summing
+      // rooms would punish wall thickness and unlabeled circulation space.
+      // Garage/outdoor rooms attached to the structure are subtracted (GLA
+      // convention). Falls back to summing labeled rooms with no footprint.
+      const fp = tracedFp;
+      let total: number;
+      let detail: string;
+      if (fp) {
+        let area = 0;
+        const poly = fp.centerline;
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i], q = poly[(i + 1) % poly.length];
+          area += p.x * q.y - q.x * p.y;
+        }
+        let sf = Math.abs(area / 2) / 144;
+        // Subtract attached non-living rooms (garage bump traced into the
+        // footprint). Detached ones (patio floating off-structure) aren't in
+        // the footprint, so only subtract rooms whose center sits inside it.
+        let excluded = 0;
+        for (const r of rooms) {
+          if (!NON_LIVING_TYPES.has(r.label.name.toUpperCase().trim())) continue;
+          if (r.poly && pointInPolygon(r.label.position, poly)) {
+            sf -= r.sqFt ?? 0;
+            excluded++;
+          }
+        }
+        total = sf;
+        detail = `Building footprint ${Math.round(sf).toLocaleString()} SF`
+          + (excluded > 0 ? ' (garage/outdoor spaces not counted)' : '');
+      } else {
+        const living = rooms.filter(r => !NON_LIVING_TYPES.has(r.label.name.toUpperCase().trim()));
+        const excluded = rooms.length - living.length;
+        total = living.reduce((s, r) => s + (r.sqFt ?? 0), 0);
+        detail = `Labeled rooms total ${Math.round(total).toLocaleString()} SF`
+          + (excluded > 0 ? ' (garage/outdoor spaces not counted)' : '');
+      }
       checks.push({
         id: 'total-sf', group: 'OVERALL',
         label: `Total area ${min.toLocaleString()}–${max.toLocaleString()} SF`,
         status: total >= min && total <= max ? 'pass' : 'fail',
-        detail: `Living area ${Math.round(total).toLocaleString()} SF`
-          + (excluded > 0 ? ' (garage/outdoor spaces not counted)' : ''),
+        detail,
       });
     }
   }
@@ -511,6 +546,51 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
         detail: subDetail(bad.length === 0, 'Closet connected by a door',
           `${bad.length} of ${matched.length} without a closet (label it CLOSET, connect with a door)`),
       });
+    }
+  }
+
+  // ── Rooms added beyond the brief ─────────────────────────────────────────
+  // A half bath, mudroom or hallway the student adds still carries the
+  // standard rules for its type: default furnishings (half bath → toilet +
+  // sink), and hallways must be at least 3' wide. Types with no applicable
+  // rules (closets, storage, …) don't clutter the panel.
+  const coveredTypes = new Set(brief.rooms.map(r => r.roomType));
+  const extrasByType = new Map<string, ResolvedRoom[]>();
+  for (const r of rooms) {
+    const t = r.label.name.toUpperCase().trim();
+    if (coveredTypes.has(t) || CLOSET_TYPES.has(t)) continue;
+    if (!extrasByType.has(t)) extrasByType.set(t, []);
+    extrasByType.get(t)!.push(r);
+  }
+  for (const [t, rs] of extrasByType) {
+    const group = `${t}${rs.length > 1 ? ` ×${rs.length}` : ''} — added`;
+    const usable = rs.filter(r => r.poly && !r.needsBoundary);
+    if (t === 'HALLWAY') {
+      const bad = usable.filter(r => {
+        const { w, h } = usableDims(r.poly!);
+        return Math.min(w, h) < 36 - 0.5;
+      });
+      checks.push({
+        id: 'HALLWAY-width', group,
+        label: 'At least 3\' wide',
+        status: bad.length === 0 && usable.length === rs.length ? 'pass' : 'fail',
+        detail: bad.length === 0
+          ? 'Hallways are wide enough'
+          : `${bad.length} of ${rs.length} narrower than 3'`,
+      });
+    }
+    const furn = DEFAULT_FURNISHINGS[t];
+    if (furn) {
+      for (const g of furn) {
+        const bad = usable.filter(r =>
+          !furnitureInRoom(r, level.furniture).some(f => g.includes(f.kind)));
+        checks.push({
+          id: `${t}-extra-furn-${g[0]}`, group,
+          label: `Has ${groupName(g)}`,
+          status: bad.length === 0 && usable.length === rs.length ? 'pass' : 'fail',
+          detail: bad.length === 0 ? 'Placed in every room' : `Missing in ${bad.length} of ${rs.length}`,
+        });
+      }
     }
   }
 
