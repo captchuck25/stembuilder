@@ -165,8 +165,14 @@ export function snapToLineFeatures(
     const dx = b.x - a.x, dy = b.y - a.y;
     const L2 = dx * dx + dy * dy;
     if (L2 <= 0) return;
+    const L = Math.sqrt(L2);
     const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2;
-    if (t <= 0.02 || t >= 0.98) return; // near-endpoint handled separately
+    // Corners OWN a zone at each end (12" or a quarter of a short segment):
+    // edge projections there would out-score the corner point and make
+    // corners feel unclickable on trackpads.
+    const excl = Math.min(12, L * 0.25);
+    const along = t * L;
+    if (along <= excl || along >= L - excl) return;
     const proj: Vec2 = { x: a.x + t * dx, y: a.y + t * dy };
     const d = dist(p, proj);
     if (d < bestScore) { bestScore = d; best = { point: proj, kind: 'edge', lineId: id }; }

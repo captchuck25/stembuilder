@@ -970,14 +970,14 @@ export default function Canvas2D({
       const L = Math.hypot(dx, dy);
       return L < 1e-6 ? null : { x: dx / L, y: dy / L };
     };
-    const onBody = (p: Vec2, a: Vec2, b: Vec2): boolean => {
+    const onBody = (p: Vec2, a: Vec2, b: Vec2, latTol = TOL): boolean => {
       const dx = b.x - a.x, dy = b.y - a.y;
       const L = Math.hypot(dx, dy);
       if (L < 1e-6) return false;
       const ux = dx / L, uy = dy / L;
       const along = (p.x - a.x) * ux + (p.y - a.y) * uy;
       if (along < TOL || along > L - TOL) return false;
-      return Math.abs((p.x - a.x) * -uy + (p.y - a.y) * ux) <= TOL;
+      return Math.abs((p.x - a.x) * -uy + (p.y - a.y) * ux) <= latTol;
     };
     const out: Vec2[] = [];
     for (let i = 0; i < walls.length; i++) {
@@ -991,9 +991,13 @@ export default function Canvas2D({
           if (j === i) continue;
           const o = walls[j];
           const od = dirOf(o);
+          // Joined: at another endpoint, on another wall's centerline — or
+          // BUTTED flush against its face (end face touching the other wall's
+          // face reads as a legitimate joint, not a broken corner).
           if (Math.hypot(o.start.x - ep.x, o.start.y - ep.y) <= TOL
            || Math.hypot(o.end.x - ep.x, o.end.y - ep.y) <= TOL
-           || onBody(ep, o.start, o.end)) { joined = true; break; }
+           || onBody(ep, o.start, o.end)
+           || onBody(ep, o.start, o.end, o.thickness / 2 + w.thickness / 2 + 0.75)) { joined = true; break; }
           if (!od) continue;
           // A nearby endpoint on a wall at an ANGLE = a corner that didn't close.
           const collinear = Math.abs(wd.x * od.x + wd.y * od.y) >= COLLINEAR_COS;

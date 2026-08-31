@@ -1277,19 +1277,20 @@ export default function BlueprintLabClient() {
       const wL = Math.hypot(wDx, wDy);
       if (wL === 0) return l;
       // Collect every cut as a parametric position in INCHES along the wall,
-      // remembering which wall produced it (face-pair handling below).
+      // remembering which wall produced it. Wall crossings cut at the crossed
+      // wall's CENTERLINE — the app's junction convention — so a trimmed end
+      // lands ON the other wall (true T-join: mitered rendering, footprint
+      // noding, no open-corner warning). Face cuts left ends 2" short of the
+      // wall body, spawning red open-corner rings and fillet busywork.
       const rawCuts: Array<{ t: number; owner: string | null }> = [];
       for (const lineObj of (l.lines ?? [])) {
         const t = intersectT(w.start, w.end, lineObj.start, lineObj.end);
         if (t != null) rawCuts.push({ t: t * wL, owner: null });
       }
-      const ownerThickness = new Map<string, number>();
       for (const other of l.walls) {
         if (other.id === w.id) continue;
-        ownerThickness.set(other.id, other.thickness);
-        for (const t of intersectTWithWallFaces(w.start, w.end, other, w.thickness / 2)) {
-          rawCuts.push({ t: t * wL, owner: other.id });
-        }
+        const t = intersectT(w.start, w.end, other.start, other.end);
+        if (t != null) rawCuts.push({ t: t * wL, owner: other.id });
       }
       // Keep only cuts strictly inside the wall, dedup near-duplicates, sort.
       const DEDUP_IN = 0.25;
@@ -1317,26 +1318,6 @@ export default function BlueprintLabClient() {
       for (const c of cuts) {
         if (c < clickT) prev = c;
         else if (c > clickT) { next = c; break; }
-      }
-      // A crossed wall contributes TWO cuts (its two faces). If the removal
-      // stops at one face of a crossed wall, extend it through to the other
-      // face — otherwise the kept piece spans the crossed wall's thickness and
-      // a sliver is left sitting inside it (the "little line piece").
-      const facePairGap = (owner: string) =>
-        (ownerThickness.get(owner) ?? 0) + w.thickness + 0.5;
-      const prevIdx = annotated.findIndex(c => c.t === prev);
-      if (prevIdx > 0) {
-        const c = annotated[prevIdx], below = annotated[prevIdx - 1];
-        if (c.owner && below.owner === c.owner && c.t - below.t <= facePairGap(c.owner)) {
-          prev = below.t;
-        }
-      }
-      const nextIdx = annotated.findIndex(c => c.t === next);
-      if (nextIdx >= 0 && nextIdx < annotated.length - 1) {
-        const c = annotated[nextIdx], above = annotated[nextIdx + 1];
-        if (c.owner && above.owner === c.owner && above.t - c.t <= facePairGap(c.owner)) {
-          next = above.t;
-        }
       }
       const ux = wDx / wL, uy = wDy / wL;
       const pointAt = (t: number): Vec2 => ({ x: w.start.x + ux * t, y: w.start.y + uy * t });
