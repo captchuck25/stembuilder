@@ -51,6 +51,10 @@ export default function StemSketchClient() {
   const assignmentId = searchParams.get("assignment");
   // Teacher previewing a challenge BEFORE assigning it (from the picker).
   const challengeId = searchParams.get("challenge");
+  // Deep link straight into a tutorial (dashboard cards, future teacher
+  // tutorial assignments). Content + checks live in the iframe; this just
+  // tells it which one to open.
+  const tutorialId = searchParams.get("tutorial");
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const dirtyRef = useRef(false);
@@ -60,6 +64,7 @@ export default function StemSketchClient() {
   const [demoError, setDemoError] = useState<string | null>(null);
   const [assignment, setAssignment] = useState<AssignmentInfo | null>(null);
   const [assignmentError, setAssignmentError] = useState<string | null>(null);
+  const [tutorialProgress, setTutorialProgress] = useState<string[] | null>(null);
 
   const postToSketch = useCallback((msg: object) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
@@ -151,6 +156,32 @@ export default function StemSketchClient() {
     return () => { cancelled = true; };
   }, [challengeId, assignmentId, isDemoMode]);
 
+  // ── Tutorials ──
+  // Server-known completions for the signed-in user, pushed into the iframe
+  // so the picker shows cross-device progress (anonymous users just use the
+  // iframe's localStorage — nothing to sync).
+  useEffect(() => {
+    if (!session?.user?.id || isDemoMode) return;
+    let cancelled = false;
+    fetch("/api/stem-sketch/tutorials")
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { completed?: { tutorialId: string }[] } | null) => {
+        if (data && !cancelled) setTutorialProgress((data.completed ?? []).map(c => c.tutorialId));
+      })
+      .catch(() => { /* progress push is best-effort */ });
+    return () => { cancelled = true; };
+  }, [session?.user?.id, isDemoMode]);
+
+  const postTutorialState = useCallback(() => {
+    if (!iframeLoadedRef.current) return;
+    if (tutorialProgress) postToSketch({ type: "STEMSKETCH_TUTORIALS", completed: tutorialProgress });
+    if (tutorialId) postToSketch({ type: "STEMSKETCH_TUTORIAL_START", tutorialId });
+  }, [tutorialProgress, tutorialId, postToSketch]);
+
+  useEffect(() => {
+    postTutorialState();
+  }, [postTutorialState]);
+
   const postAssignment = useCallback(() => {
     if (!assignment || !iframeLoadedRef.current) return;
     postToSketch({
@@ -208,6 +239,26 @@ export default function StemSketchClient() {
 
       } else if (type === "STEMSKETCH_REQUEST_ASSIGNMENT") {
         postAssignment();
+
+      } else if (type === "STEMSKETCH_REQUEST_TUTORIALS") {
+        postTutorialState();
+
+      } else if (type === "STEMSKETCH_TUTORIAL_COMPLETE") {
+        // Best-effort persist; the iframe's localStorage already recorded it,
+        // so a failure here only costs cross-device sync, not the completion.
+        const { tutorialId: doneId } = e.data as { tutorialId?: string };
+        if (!doneId || !session?.user?.id || isDemoMode) return;
+        try {
+          const res = await fetch("/api/stem-sketch/tutorials", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tutorialId: doneId }),
+          });
+          if (res.ok) setTutorialProgress(prev => (prev && !prev.includes(doneId) ? [...prev, doneId] : prev));
+          else console.warn(`Tutorial completion sync failed (HTTP ${res.status})`);
+        } catch (err) {
+          console.warn("Tutorial completion sync failed:", err);
+        }
 
       } else if (type === "STEMSKETCH_SUBMIT") {
         // Assignment submission: frozen model snapshot + the in-tool fit-check
@@ -388,7 +439,7 @@ export default function StemSketchClient() {
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [session, postToSketch, postUser, postAssignment, isDemoMode, demoDesign, assignmentId, assignment]);
+  }, [session, postToSketch, postUser, postAssignment, postTutorialState, isDemoMode, demoDesign, assignmentId, assignment]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
@@ -463,6 +514,7 @@ export default function StemSketchClient() {
           postUser();
           pushDemoDesign();
           postAssignment();
+          postTutorialState();
           // Cloud-backed fallback. If the iframe's localStorage draft is
           // missing or corrupt, restoreLocalDraft inside the iframe leaves
           // a blank canvas. That's surprising right after a successful
@@ -473,9 +525,9 @@ export default function StemSketchClient() {
           // to seed the canvas. Skipped in demo mode and when a draft
           // exists (iframe's own restore handles that path).
           if (isDemoMode) return;
-          // Assignment/preview mode: the canvas starts per the iframe's
-          // assignment flow — don't pull in unrelated saved work.
-          if (assignmentId || challengeId) return;
+          // Assignment/preview/tutorial mode: the canvas starts per the
+          // iframe's own flow — don't pull in unrelated saved work.
+          if (assignmentId || challengeId || tutorialId) return;
           if (!session?.user?.id) return;
           // If the URL specifies a design id (e.g. opened from My Work), load
           // THAT design directly — overrides both the localStorage-draft check

@@ -139,3 +139,32 @@ Challenge dimensions are quantized to eighths of an inch (1/8" = 3.175 mm).
 A student model is either exactly right or off by ≥ 1/8" in some dimension, so
 ±0.5 mm cleanly separates correct from one-increment-wrong with huge margin on
 both sides. Never tighten below float-noise levels or loosen past ~1.5 mm.
+
+## Tutorial messages (2026-08-31)
+
+Tutorials share the bridge but are a separate mode (section 9 of
+index.html, green UI, free for all users). Content + checks live in the
+iframe; `lib/stem-sketch/tutorials.ts` mirrors metadata; progress persists in
+`stem_sketch_tutorial_progress` (migration 0024) via
+`/api/stem-sketch/tutorials`.
+
+Shell → iframe:
+
+```jsonc
+{ "type": "STEMSKETCH_TUTORIAL_START", "tutorialId": "first-shape" }   // ?tutorial= deep link
+{ "type": "STEMSKETCH_TUTORIALS", "completed": ["first-shape", "…"] }  // server-known completions (signed-in)
+```
+
+Iframe → shell:
+
+```jsonc
+{ "type": "STEMSKETCH_REQUEST_TUTORIALS" }                             // handshake, mirrors REQUEST_USER
+{ "type": "STEMSKETCH_TUTORIAL_COMPLETE", "tutorialId": "first-shape" } // fire-and-forget persist
+```
+
+Iframe obligations: tutorial mode parks the user's doc (`_tutPrevDoc`) and
+restores it on exit; autosave, draft-restore, cloud save, and inbound
+`STEMSKETCH_LOAD` are all suppressed while `window.__tutorial` is set.
+Completion is also written to localStorage (`stem-sketch:tutorials-done`) so
+anonymous users keep progress on-device. First completion wins server-side —
+re-running a tutorial never moves `completed_at`.
