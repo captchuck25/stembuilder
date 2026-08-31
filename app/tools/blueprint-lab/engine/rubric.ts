@@ -398,17 +398,26 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
 
     if (req.minDims) {
       const need = [Math.min(req.minDims.a, req.minDims.b), Math.max(req.minDims.a, req.minDims.b)];
+      let worstShortfall = 0;
       const bad = matched.filter(r => {
         const { w, h } = usableDims(r.poly!);
-        return Math.min(w, h) < need[0] - 0.5 || Math.max(w, h) < need[1] - 0.5;
+        const shortfall = Math.max(need[0] - Math.min(w, h), need[1] - Math.max(w, h));
+        if (shortfall <= 0.5) return false;
+        worstShortfall = Math.max(worstShortfall, shortfall);
+        return true;
       });
+      // A near-miss is almost always outer-drawn walls: rooms measure INSIDE
+      // face-to-face, so a room drawn 20'×20' outside is ~19'3" clear. Teach
+      // it instead of leaving a mystery fail.
+      const nearMiss = bad.length > 0 && worstShortfall <= 12;
       checks.push({
         id: `${req.roomType}-dims`, group,
         label: `At least ${fmtFt(req.minDims.a)} × ${fmtFt(req.minDims.b)}`,
         status: bad.length === 0 ? 'pass' : 'fail',
         detail: bad.length === 0
           ? 'All meet the minimum'
-          : `${bad.length} of ${matched.length} too small`,
+          : `${bad.length} of ${matched.length} too small`
+            + (nearMiss ? ' — rooms measure inside the walls, so draw a little bigger to allow for wall thickness' : ''),
       });
     }
 

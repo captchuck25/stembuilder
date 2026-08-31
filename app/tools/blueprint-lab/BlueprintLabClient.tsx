@@ -41,7 +41,8 @@ import {
   Project, RoomLabel, SectionCut, Selection, Stair, StairShape, TextLabel, ToolId, Vec2, Wall, WallStatus, WallType,
   Window, WindowType, WindowTypeSettings, emptyLevel, makeId, newProject,
 } from './engine/types';
-import { autoDetectRoomBoundary, diningChairPlacements, driveDimension, polygonAreaSqFt, wallPolygon } from './engine/geometry';
+import { autoDetectRoomBoundary, diningChairPlacements, dist, driveDimension, polygonAreaSqFt, wallPolygon } from './engine/geometry';
+import { infiniteLineIntersection } from './engine/sectionEdit';
 import { syncLinkedStairs, linkedGeometryPatch } from './engine/stairs';
 import { buildPrimarySectionCut } from './engine/sectionPrimitives';
 import { T } from './engine/theme';
@@ -1326,6 +1327,30 @@ export default function BlueprintLabClient() {
       };
       if (prev > 1)      addSeg(0, prev, true, false);
       if (next < wL - 1) addSeg(next, wL, false, true);
+      // Picture-frame corners: when the cut that bounds the removal came from
+      // a wall that ENDS near the crossing (an L-corner, not a T), join both
+      // walls at the centerline intersection automatically — same result as
+      // running the fillet tool by hand after every trim.
+      const ownerPatches = new Map<string, { end: 'start' | 'end'; p: Vec2 }>();
+      const tryCorner = (boundaryT: number, endKey: 'start' | 'end') => {
+        const range = segRanges.find(r => (endKey === 'end' ? r.t1 : r.t0) === boundaryT);
+        const seg = range ? newWalls.find(x => x.id === range.id) : undefined;
+        if (!seg) return;
+        const ownerId = annotated.find(c => Math.abs(c.t - boundaryT) < 0.001)?.owner;
+        if (!ownerId) return;
+        const O = l.walls.find(x => x.id === ownerId);
+        if (!O || O.locked) return;
+        const ip = infiniteLineIntersection(w.start, w.end, O.start, O.end);
+        if (!ip) return;
+        const tol = O.thickness / 2 + w.thickness / 2 + 6;
+        if (dist(ip, seg[endKey]) > tol) return;
+        const dS = dist(ip, O.start), dE = dist(ip, O.end);
+        if (Math.min(dS, dE) > tol) return; // owner runs past — butt joint is correct
+        seg[endKey] = { ...ip };
+        ownerPatches.set(ownerId, { end: dS <= dE ? 'start' : 'end', p: { ...ip } });
+      };
+      tryCorner(prev, 'end');
+      tryCorner(next, 'start');
       const reassign = <T extends { wallId: string; positionAlong: number; width: number }>(op: T): T | null => {
         if (op.wallId !== w.id) return op;
         const opStart = op.positionAlong - op.width / 2;
@@ -1339,7 +1364,13 @@ export default function BlueprintLabClient() {
       };
       return {
         ...l,
-        walls: [...l.walls.filter(x => x.id !== w.id), ...newWalls],
+        walls: [
+          ...l.walls.filter(x => x.id !== w.id).map(x => {
+            const patch = ownerPatches.get(x.id);
+            return patch ? { ...x, [patch.end]: patch.p } : x;
+          }),
+          ...newWalls,
+        ],
         doors: l.doors.map(reassign).filter((d): d is Door => d != null),
         windows: l.windows.map(reassign).filter((wn): wn is Window => wn != null),
       };
