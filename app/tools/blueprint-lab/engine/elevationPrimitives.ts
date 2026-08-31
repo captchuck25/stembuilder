@@ -361,30 +361,19 @@ function pushOpeningGroupPrimitives(
   const outerCasingLeft  = hasLeftSidelight  ? first.x - slWidth - EP_TRIM_WIDTH : casingLeft;
   const outerCasingRight = hasRightSidelight ? first.x + first.width + slWidth + EP_TRIM_WIDTH : casingRight;
 
-  // Casing (+ integrated sill for windows) — single merged polygon.
+  // Casing — windows get simple PICTURE-FRAME molding (no projecting sill
+  // horns: they collided with corner boards / neighboring trim whenever a
+  // student placed a window within a foot of a corner, which students do).
   if (isWindow) {
-    const sillVerts: Vec2[] = [
-      { x: casingLeft,                          y: casingTop },
-      { x: casingRight,                         y: casingTop },
-      { x: casingRight,                         y: casingBottom },
-      { x: casingRight + EP_SILL_PROJECTION,    y: casingBottom },
-      { x: casingRight + EP_SILL_PROJECTION,    y: casingBottom - EP_SILL_HEIGHT },
-      { x: casingLeft  - EP_SILL_PROJECTION,    y: casingBottom - EP_SILL_HEIGHT },
-      { x: casingLeft  - EP_SILL_PROJECTION,    y: casingBottom },
-      { x: casingLeft,                          y: casingBottom },
-    ];
     out.push({
-      id: id('win-trim'), kind: 'polyline', verts: sillVerts,
+      id: id('win-trim'), kind: 'polyline',
+      verts: [
+        { x: casingLeft,  y: casingTop },
+        { x: casingRight, y: casingTop },
+        { x: casingRight, y: casingBottom },
+        { x: casingLeft,  y: casingBottom },
+      ],
       closed: true, style: 'normal', fill: 'trim',
-    });
-    // Sill top edge — full sill width so the joint line reads as a single
-    // continuous bead (the merged polygon naturally draws it only in the
-    // projecting ends; this fills the gap under the casing).
-    out.push({
-      id: id('win-sill-line'), kind: 'line',
-      a: { x: casingLeft  - EP_SILL_PROJECTION, y: casingBottom },
-      b: { x: casingRight + EP_SILL_PROJECTION, y: casingBottom },
-      style: 'normal',
     });
   } else {
     // Door casing rect — wraps door + (optional) sidelights.
