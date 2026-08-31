@@ -534,6 +534,8 @@ function WallMesh({ wall, elevation, doors, windows, extension, isExterior }: {
           return <BifoldDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
         if (d.doorType === 'garage')
           return <GarageDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
+        if (d.doorType === 'pocket')
+          return <PocketDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
         return (
           <group key={`slab-${d.id}`}>
             <DoorSlab door={d} wall={wall} elevation={elevation} angle={angle} />
@@ -884,6 +886,38 @@ function SlidingDoorSlab({ door, wall, elevation, angle }: {
       {/* Center mullion between the two panels */}
       <mesh castShadow>
         <boxGeometry args={[MULLION, h, FRAME_T]} />
+        <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
+      </mesh>
+    </group>
+  );
+}
+
+// Pocket door — the slab slides INTO the wall, so render it mostly retracted:
+// a thin panel in the wall plane covering ~30% of the opening from the
+// pocket side (hingeSide = which jamb hides the pocket), never swinging.
+function PocketDoorSlab({ door, wall, elevation, angle }: {
+  door: import('../engine/types').Door;
+  wall: Wall;
+  elevation: number;
+  angle: number;
+}) {
+  const visible = door.width * 0.3;
+  const pocketAtStart = door.hingeSide === 'start';
+  // Center of the visible sliver: at the pocket-side jamb, extending inward.
+  const along = pocketAtStart
+    ? door.positionAlong - door.width / 2 + visible / 2
+    : door.positionAlong + door.width / 2 - visible / 2;
+  const cx = wall.start.x + Math.cos(angle) * along;
+  const cy = wall.start.y + Math.sin(angle) * along;
+  return (
+    <group position={[cx, elevation + door.height / 2, cy]} rotation={[0, -angle, 0]}>
+      <mesh castShadow>
+        <boxGeometry args={[visible, door.height, 1.5]} />
+        <meshStandardMaterial color={DOOR_SLAB_INTERIOR} roughness={0.6} />
+      </mesh>
+      {/* Head track across the full opening */}
+      <mesh position={[pocketAtStart ? (door.width - visible) / 2 : -(door.width - visible) / 2, door.height / 2 - 1, 0]}>
+        <boxGeometry args={[door.width, 2, 2.2]} />
         <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
       </mesh>
     </group>

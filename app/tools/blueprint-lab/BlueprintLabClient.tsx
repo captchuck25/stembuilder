@@ -1133,23 +1133,39 @@ export default function BlueprintLabClient() {
   }, []);
 
   const handleAddFurniture = useCallback((f: FurnitureItem) => {
-    // Dining tables come with their chairs: one per seat, tucked up to the
-    // table and facing it. Added in the same edit so undo removes the set.
-    // Table + chairs share a setId so they select/rotate as one unit.
+    // Some pieces arrive as a SET (shared setId → selects/rotates as one
+    // unit, one undo entry): dining tables bring their chairs, desks bring
+    // an office chair tucked at the front.
+    const companions: FurnitureItem[] = [];
     const chairSize = furnitureSettings['dining-chair'] ?? FURNITURE_CATALOG['dining-chair'];
-    const placements = diningChairPlacements(f, chairSize);
-    const table: FurnitureItem = placements.length > 0 ? { ...f, setId: f.id } : f;
-    const chairs: FurnitureItem[] = placements.map(p => ({
-      id: makeId('furn'),
-      levelId: f.levelId,
-      kind: 'dining-chair',
-      position: p.position,
-      rotation: p.rotation,
-      width: chairSize.width,
-      depth: chairSize.depth,
-      setId: f.id,
-    }));
-    updateLevel(l => ({ ...l, furniture: [...l.furniture, table, ...chairs] }));
+    for (const p of diningChairPlacements(f, chairSize)) {
+      companions.push({
+        id: makeId('furn'),
+        levelId: f.levelId,
+        kind: 'dining-chair',
+        position: p.position,
+        rotation: p.rotation,
+        width: chairSize.width,
+        depth: chairSize.depth,
+        setId: f.id,
+      });
+    }
+    if (f.kind === 'desk') {
+      const cs = furnitureSettings['office-chair'] ?? FURNITURE_CATALOG['office-chair'];
+      companions.push({
+        id: makeId('furn'),
+        levelId: f.levelId,
+        kind: 'office-chair',
+        // Tucked at the desk front (+d side), facing the desk.
+        position: { x: f.position.x, y: f.position.y + f.depth / 2 + cs.depth / 2 - 4 },
+        rotation: Math.PI,
+        width: cs.width,
+        depth: cs.depth,
+        setId: f.id,
+      });
+    }
+    const item: FurnitureItem = companions.length > 0 ? { ...f, setId: f.id } : f;
+    updateLevel(l => ({ ...l, furniture: [...l.furniture, item, ...companions] }));
   }, [updateLevel, furnitureSettings]);
 
   const handleUpdateFurniture = useCallback((ids: string[], patch: Partial<FurnitureItem>) => {

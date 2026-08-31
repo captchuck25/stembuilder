@@ -96,6 +96,8 @@ export function FurnitureModel({ kind, width, depth, cabinetColor, countertopCol
     case 'desk':           return <DeskModel width={width} depth={depth} />;
     case 'office-chair':   return <OfficeChairModel width={width} depth={depth} />;
     case 'filing-cabinet': return <FilingCabinetModel width={width} depth={depth} />;
+    case 'washer':         return <LaundryApplianceModel width={width} depth={depth} kind="washer" />;
+    case 'dryer':          return <LaundryApplianceModel width={width} depth={depth} kind="dryer" />;
   }
 }
 
@@ -805,6 +807,24 @@ function CabinetCornerModel({ width: w, depth: d, cabinetColor, countertopColor 
         <boxGeometry args={[leg + 1, counterT, d - leg]} />
         <meshStandardMaterial color={countertopColor} roughness={0.35} />
       </mesh>
+      {/* Wedge of countertop over the diagonal door — without it the door
+          "facade" shows from above with no counter over the corner. Centered
+          between the chamfer line and the legs' inner corner. */}
+      {(() => {
+        const cx = -w / 2 + leg, cz = -d / 2 + leg;                   // inner corner
+        const wedgeDepth = Math.abs((bx - ax) * (cz - az) - (bz - az) * (cx - ax)) / (diagLen || 1);
+        return (
+          <group
+            position={[(midX + cx) / 2, cabH + counterT / 2, (midZ + cz) / 2]}
+            rotation={[0, beta, 0]}
+          >
+            <mesh castShadow>
+              <boxGeometry args={[diagLen + 1, counterT, Math.max(2, wedgeDepth)]} />
+              <meshStandardMaterial color={countertopColor} roughness={0.35} />
+            </mesh>
+          </group>
+        );
+      })()}
     </group>
   );
 }
@@ -1063,6 +1083,66 @@ function TvConsoleModel({ width: w, depth: d }: ModelProps) {
       <mesh position={[0, 2, 0]}>
         <boxGeometry args={[w - 1, 0.5, d - 1]} />
         <meshStandardMaterial color={COL.woodLight} roughness={0.7} />
+      </mesh>
+      {/* TV on top — panel + slim stand, screen facing the front (+Z) */}
+      {(() => {
+        const tvW = Math.min(w * 0.72, 55);
+        const tvH = tvW * 0.58;
+        return (
+          <group position={[0, h + 0.6, -d * 0.12]}>
+            <mesh position={[0, 2, 0]}>
+              <boxGeometry args={[tvW * 0.35, 1.2, Math.min(d * 0.5, 10)]} />
+              <meshStandardMaterial color={COL.metalDark} roughness={0.4} metalness={0.6} />
+            </mesh>
+            <mesh position={[0, 2.6 + tvH / 2, 0]} castShadow>
+              <boxGeometry args={[tvW, tvH, 1.2]} />
+              <meshStandardMaterial color={COL.applianceDark} roughness={0.6} />
+            </mesh>
+            <mesh position={[0, 2.6 + tvH / 2, 0.65]}>
+              <boxGeometry args={[tvW - 1.6, tvH - 1.6, 0.2]} />
+              <meshStandardMaterial color={COL.screen} roughness={0.25} metalness={0.3} />
+            </mesh>
+          </group>
+        );
+      })()}
+    </group>
+  );
+}
+
+// Front-load laundry appliance — white box, round door on the front,
+// control strip along the top. `door` picks the porthole style.
+function LaundryApplianceModel({ width: w, depth: d, kind }: ModelProps & { kind: 'washer' | 'dryer' }) {
+  const h = 38;
+  const doorR = Math.min(w, h) * 0.30;
+  return (
+    <group>
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={COL.appliance} roughness={0.4} metalness={0.2} />
+      </mesh>
+      {/* Control strip */}
+      <mesh position={[0, h - 2.5, d / 2 + 0.1]}>
+        <boxGeometry args={[w - 2, 4, 0.3]} />
+        <meshStandardMaterial color={COL.applianceDark} roughness={0.7} />
+      </mesh>
+      {[-1, 0, 1].map(sx => (
+        <mesh key={sx} position={[sx * w * 0.25, h - 2.5, d / 2 + 0.35]}>
+          <cylinderGeometry args={[0.8, 0.8, 0.4, 12]} />
+          <meshStandardMaterial color={COL.metalLight} roughness={0.3} metalness={0.6} />
+        </mesh>
+      ))}
+      {/* Round door — dark glass for the washer, solid panel for the dryer */}
+      <mesh position={[0, h * 0.45, d / 2 + 0.15]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[doorR, doorR, 0.5, 24]} />
+        <meshStandardMaterial color={COL.metalLight} roughness={0.35} metalness={0.5} />
+      </mesh>
+      <mesh position={[0, h * 0.45, d / 2 + 0.45]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[doorR * 0.72, doorR * 0.72, 0.3, 24]} />
+        <meshStandardMaterial
+          color={kind === 'washer' ? COL.screen : COL.appliance}
+          roughness={kind === 'washer' ? 0.2 : 0.5}
+          metalness={kind === 'washer' ? 0.4 : 0.2}
+        />
       </mesh>
     </group>
   );

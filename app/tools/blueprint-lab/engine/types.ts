@@ -297,7 +297,7 @@ export interface Stair {
 
 // Furniture is organized as a catalog by room. Each kind has standard-size
 // defaults — bed-queen is 60x80, bed-king is 76x80, etc.
-export type FurnitureRoom = 'bedroom' | 'bathroom' | 'kitchen' | 'living' | 'dining' | 'office';
+export type FurnitureRoom = 'bedroom' | 'bathroom' | 'kitchen' | 'living' | 'dining' | 'office' | 'laundry';
 
 export type FurnitureKind =
   // Bedroom
@@ -313,7 +313,9 @@ export type FurnitureKind =
   // Dining room
   | 'dining-table-4' | 'dining-table-6' | 'dining-table-8' | 'dining-chair' | 'buffet'
   // Office
-  | 'desk' | 'office-chair' | 'filing-cabinet';
+  | 'desk' | 'office-chair' | 'filing-cabinet'
+  // Laundry
+  | 'washer' | 'dryer';
 
 // Stove + fridge size variants — burner count / door layout adjusts with width.
 export type StoveSize  = '30' | '36' | '48';
@@ -340,6 +342,7 @@ export const FURNITURE_ROOMS: { id: FurnitureRoom; label: string }[] = [
   { id: 'living',   label: 'Living' },
   { id: 'dining',   label: 'Dining' },
   { id: 'office',   label: 'Office' },
+  { id: 'laundry',  label: 'Laundry' },
 ];
 
 export const FURNITURE_CATALOG: Record<FurnitureKind, FurnitureCatalogEntry> = {
@@ -387,6 +390,9 @@ export const FURNITURE_CATALOG: Record<FurnitureKind, FurnitureCatalogEntry> = {
   'desk':          { room: 'office',   label: 'Desk',         width: 60, depth: 30 },
   'office-chair':  { room: 'office',   label: 'Office chair', width: 22, depth: 22 },
   'filing-cabinet':{ room: 'office',   label: 'Filing cabinet', width: 18, depth: 27 },
+  // ── Laundry ────────────────────────────────────────────────
+  'washer':        { room: 'laundry',  label: 'Washer',       width: 27, depth: 30 },
+  'dryer':         { room: 'laundry',  label: 'Dryer',        width: 27, depth: 30 },
 };
 
 // Back-compat alias for any code still importing FURNITURE_DEFAULTS.

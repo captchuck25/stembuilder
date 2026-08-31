@@ -1812,6 +1812,7 @@ type FurnitureSymbol = 'bed' | 'sofa' | 'table' | 'chair' | 'office-chair' | 'to
                      | 'sink-bath' | 'sink-kitchen' | 'fridge' | 'stove'
                      | 'bathtub' | 'shower'
                      | 'cabinet-base' | 'cabinet-upper' | 'cabinet-corner'
+                     | 'laundry'
                      | 'generic';
 
 function furnitureSymbolFor(kind: FurnitureItem['kind']): FurnitureSymbol {
@@ -1826,8 +1827,10 @@ function furnitureSymbolFor(kind: FurnitureItem['kind']): FurnitureSymbol {
       return 'table';
     case 'dining-chair':
       return 'chair';
-    case 'dresser': case 'wardrobe':
+    case 'dresser': case 'wardrobe': case 'tv-console':
       return 'dresser';
+    case 'washer': case 'dryer':
+      return 'laundry';
     case 'office-chair':
       return 'office-chair';
     case 'toilet':
@@ -1867,6 +1870,13 @@ export function drawFurniture(ctx: CanvasRenderingContext2D, f: FurnitureItem, v
   ctx.fillStyle = selected ? 'rgba(79,124,255,0.18)' : '#ffffff';
   ctx.strokeStyle = selected ? SELECTED_STROKE : '#1f2540';
   ctx.lineWidth = 1.1;
+  if (f.kind === 'office-chair') {
+    // Round pedestal chair — the rectangular bbox reads as a weird box
+    // around it in plan; the symbol (base + seat + backrest) stands alone.
+    drawFurnitureSymbol(ctx, f, w, d, selected);
+    ctx.restore();
+    return;
+  }
   if (f.kind === 'cabinet-corner') {
     // True corner-unit footprint: two cabinet-depth legs along the walls with
     // a 45° chamfer bridging their fronts — not a full square.
@@ -1954,6 +1964,30 @@ function drawFurnitureSymbol(
         ctx.arc(sx, d / 2 - band / 2, 1.4, 0, Math.PI * 2);
         ctx.fill();
       }
+      break;
+    }
+    case 'laundry': {
+      // Front-load washer/dryer: drum circles + control band along the BACK
+      // (-d) edge with knob dots — the door faces +d. A W/D letter in the
+      // drum tells the two apart at a glance.
+      const band = Math.max(3, d * 0.14);
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 2, -d / 2 + band); ctx.lineTo(w / 2 - 2, -d / 2 + band);
+      ctx.stroke();
+      ctx.fillStyle = stroke;
+      for (const sx of [-0.28, 0, 0.28]) {
+        ctx.beginPath();
+        ctx.arc(sx * w * 0.6, -d / 2 + band / 2, 1.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const r = Math.min(w, d) * 0.30;
+      const cy = band * 0.35;
+      ctx.beginPath(); ctx.arc(0, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, cy, r * 0.6, 0, Math.PI * 2); ctx.stroke();
+      ctx.font = `600 ${Math.max(6, r * 0.7).toFixed(0)}px ui-sans-serif, system-ui`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(f.kind === 'washer' ? 'W' : 'D', 0, cy);
       break;
     }
     case 'chair': {

@@ -64,6 +64,7 @@ const BATH_FIXTURES: FurnitureGroup[] = [['toilet'], ['sink-vanity', 'sink-pedes
 const KITCHEN_FIXTURES: FurnitureGroup[] = [['sink-kitchen'], ['stove-range'], ['fridge']];
 const LIVING_FURNISHINGS: FurnitureGroup[] = [['sofa-3', 'loveseat', 'armchair']];
 const DINING_FURNISHINGS: FurnitureGroup[] = [['dining-table-4', 'dining-table-6', 'dining-table-8']];
+const LAUNDRY_FIXTURES: FurnitureGroup[] = [['washer'], ['dryer']];
 
 // Default furnishing requirements per room type — used to prefill briefs and
 // as the toggle-on value in the teacher rubric editor. Any room type listed
@@ -85,6 +86,7 @@ export const DEFAULT_FURNISHINGS: Partial<Record<string, FurnitureGroup[]>> = {
   'BREAKFAST NOOK': DINING_FURNISHINGS,
   'OFFICE': [['desk'], ['office-chair']],
   'STUDY': [['desk']],
+  'LAUNDRY': LAUNDRY_FIXTURES,
 };
 
 export const BRIEFS: Brief[] = [
@@ -114,9 +116,9 @@ export const BRIEFS: Brief[] = [
         minWindows: 1, minDoors: 1, furniture: [ANY_BED, ['dresser']], attachedCloset: true,
       },
       { roomType: 'BATHROOM', count: 1, minDims: { a: 60, b: 96 }, minDoors: 1, furniture: BATH_FIXTURES },
-      { roomType: 'KITCHEN', count: 1, minDims: { a: 96, b: 120 }, minWindows: 1, furniture: KITCHEN_FIXTURES },
+      { roomType: 'KITCHEN', count: 1, minDims: { a: 96, b: 120 }, furniture: KITCHEN_FIXTURES },
       { roomType: 'LIVING ROOM', count: 1, minDims: { a: 144, b: 132 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
-      { roomType: 'LAUNDRY', count: 1, minDims: { a: 36, b: 60 }, minDoors: 1 },
+      { roomType: 'LAUNDRY', count: 1, minDims: { a: 36, b: 60 }, minDoors: 1, furniture: LAUNDRY_FIXTURES },
     ],
     frontDoor: true,
     backDoor: false,
@@ -137,10 +139,10 @@ export const BRIEFS: Brief[] = [
         minWindows: 1, minDoors: 1, furniture: [ANY_BED], attachedCloset: true,
       },
       { roomType: 'BATHROOM', count: 2, minDims: { a: 60, b: 96 }, minDoors: 1, furniture: BATH_FIXTURES },
-      { roomType: 'KITCHEN', count: 1, minDims: { a: 120, b: 144 }, minWindows: 1, furniture: KITCHEN_FIXTURES },
+      { roomType: 'KITCHEN', count: 1, minDims: { a: 120, b: 144 }, furniture: KITCHEN_FIXTURES },
       { roomType: 'LIVING ROOM', count: 1, minDims: { a: 168, b: 144 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
       { roomType: 'DINING ROOM', count: 1, minDims: { a: 120, b: 144 }, minWindows: 1, furniture: DINING_FURNISHINGS },
-      { roomType: 'LAUNDRY', count: 1, minDims: { a: 60, b: 72 }, minDoors: 1 },
+      { roomType: 'LAUNDRY', count: 1, minDims: { a: 60, b: 72 }, minDoors: 1, furniture: LAUNDRY_FIXTURES },
       // Drawn onto the plan like any room; its area does NOT count toward the
       // SF target (see NON_LIVING_TYPES). 20×20 fits two cars; teachers can
       // shrink to 12×20 for one car or delete the row to make it optional.

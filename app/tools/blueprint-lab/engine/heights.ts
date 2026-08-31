@@ -19,6 +19,7 @@ export const FURNITURE_HEIGHTS: Record<FurnitureKind, number> = {
   'dining-table-4': 30, 'dining-table-6': 30, 'dining-table-8': 30,
   'dining-chair': 34, 'buffet': 36,
   'desk': 30, 'office-chair': 38, 'filing-cabinet': 52,
+  'washer': 38, 'dryer': 38,
 };
 
 // Upper cabinets float ABOVE the floor — top of a typical 36" base cabinet
