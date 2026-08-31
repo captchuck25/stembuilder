@@ -57,7 +57,7 @@ export const SKETCH_TUTORIALS: SketchTutorial[] = [
     id: "snowman",
     unit: 1,
     title: "Build a Snowman",
-    blurb: "Stack shapes, move them into place, and copy & paste — your first real build.",
+    blurb: "Three spheres, three exact sizes — lift each one into place by dragging or typing Z.",
     stepCount: 3,
     ready: true,
   },

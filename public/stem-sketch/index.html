@@ -21653,6 +21653,17 @@ function _tutMarkDone(id) {
 const _tutNear = (v, target, tol = 1.5) => Math.abs(v - target) <= tol;
 const _tutIs2in = (v) => _tutNear(v, 2 * TUT_IN) || _tutNear(v, 50);
 const _tutSolids = (d, type) => d.bodies.filter(b => b.type === type && b.op !== 'subtract' && !b.hidden);
+// Snowman checks: all three axes at the inch target (or a round-5mm metric
+// sibling), and elevation — body.y is the BOTTOM offset above the workplane,
+// shown as "Z" in the Properties panel.
+const _tutSnowSize = (b, inches) => {
+  const mm = inches * TUT_IN, sib = Math.round(mm / 5) * 5;
+  return [b.w, b.h, b.d].every(v => _tutNear(v, mm, 2) || _tutNear(v, sib, 2));
+};
+const _tutSnowZ = (b, inches) => {
+  const mm = inches * TUT_IN, sib = Math.round(mm / 5) * 5;
+  return _tutNear(b.y || 0, mm, 4) || _tutNear(b.y || 0, sib, 4);
+};
 
 const TUTORIALS = [
   {
@@ -21667,8 +21678,8 @@ const TUTORIALS = [
         done: (d) => _tutSolids(d, 'cube').length > 0,
       },
       {
-        text: 'Click the cube to select it, then in the **Properties** panel set Width, Height, and Depth to **2 in** each (50 mm in metric).',
-        hint: 'Type each number and press Enter. Watch the cube grow!',
+        text: 'Click the cube to select it. In the **Properties** panel on the left, set Width, Height, and Depth to **2** each (50 mm in metric), pressing Enter after each one.',
+        hint: 'Watch the cube grow with each number — you just made your first exact-size part.',
         done: (d) => _tutSolids(d, 'cube').some(b => _tutIs2in(b.w) && _tutIs2in(b.h) && _tutIs2in(b.d)),
       },
     ],
@@ -21701,28 +21712,26 @@ const TUTORIALS = [
     id: 'snowman',
     unit: 1,
     title: 'Build a Snowman',
-    intro: 'Time to stack shapes: move things where you want them and copy what you’ve made.',
+    // Charlie's video spec (snowmantutorial.mp4, 2026-08-31): three spheres
+    // only — 3.25³ base on the ground, 2.25³ middle at Z=3, 1.25³ head at
+    // Z=5 (slight overlaps blend them). Teach BOTH elevation methods: drag
+    // the cone arrow (1-in snap) on one step, type Z on another.
+    intro: 'Three snowballs, three sizes. You’ll size each sphere exactly and lift it into place.',
     steps: [
       {
-        text: 'Add a **Cylinder** from the Primitive menu — that’s the base.',
-        done: (d) => _tutSolids(d, 'cylinder').length > 0,
+        text: 'Add a **Sphere** from the Primitive menu. In the **Properties** panel on the left, set Width, Height, and Depth to **3.25** each, then press Enter. Leave it on the ground — that’s the big snowball.',
+        hint: 'Click the sphere first if the Properties panel is empty. Type 3.25 in each of the three size boxes.',
+        done: (d) => _tutSolids(d, 'sphere').some(s => _tutSnowSize(s, 3.25)),
       },
       {
-        text: 'Add a **Sphere** and move it up so it sits on top of the cylinder.',
-        hint: 'Drag it with the arrows, or select it and type its Y position in the Properties panel.',
-        done: (d) => {
-          const cyls = _tutSolids(d, 'cylinder'), sphs = _tutSolids(d, 'sphere');
-          return cyls.some(c => sphs.some(s => (s.y || 0) >= (c.y || 0) + c.h * 0.7));
-        },
+        text: 'Add a **second Sphere** and make it **2.25 × 2.25 × 2.25**. Now lift it: drag the **cone arrow** above the sphere straight up until the **Z** box in Properties says **3**.',
+        hint: 'With Snap set to 1 in (bottom-right corner), the sphere hops up one inch at a time — three hops. It will sink into the big snowball a little. That’s perfect.',
+        done: (d) => _tutSolids(d, 'sphere').some(s => _tutSnowSize(s, 2.25) && _tutSnowZ(s, 3)),
       },
       {
-        text: '**Copy** the sphere and **Paste** it, make the copy smaller, and stack it on top — that’s the head.',
-        hint: 'Ctrl+C, Ctrl+V (or the Copy/Paste buttons), then shrink Width/Height/Depth in Properties.',
-        done: (d) => {
-          const sphs = _tutSolids(d, 'sphere');
-          return sphs.some(a => sphs.some(b => b !== a &&
-            b.w <= a.w * 0.85 && (b.y || 0) >= (a.y || 0) + a.h * 0.6));
-        },
+        text: 'Add a **third Sphere** and make it **1.25 × 1.25 × 1.25**. This time lift it by typing: click the **Z** box in Properties, type **5**, and press Enter — that’s the head. ⛄',
+        hint: 'Dragging the cone arrow and typing Z do the same job — now you know both ways.',
+        done: (d) => _tutSolids(d, 'sphere').some(s => _tutSnowSize(s, 1.25) && _tutSnowZ(s, 5)),
       },
     ],
   },
