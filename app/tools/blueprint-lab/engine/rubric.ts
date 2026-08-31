@@ -144,8 +144,8 @@ export const BRIEFS: Brief[] = [
       // SF target (see NON_LIVING_TYPES). 20×20 fits two cars; teachers can
       // shrink to 12×20 for one car or delete the row to make it optional.
       {
-        roomType: 'GARAGE', count: 1, minDims: { a: 240, b: 240 }, minDoors: 1,
-        note: 'Draw the garage OUTSIDE the shell — the SF target is for the interior. 1-car ≈ 12\' × 20\', 2-car ≈ 20\' × 20\'. Garage area is not counted in total SF.',
+        roomType: 'GARAGE', count: 1, minDims: { a: 240, b: 240 }, minDoors: 2,
+        note: 'Draw the garage OUTSIDE the shell — the SF target is for the interior. 1-car ≈ 12\' × 20\', 2-car ≈ 20\' × 20\'. Needs its garage door PLUS an interior door into the house. Garage area is not counted in total SF.',
       },
     ],
     frontDoor: true,

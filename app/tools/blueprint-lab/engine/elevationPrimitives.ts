@@ -561,6 +561,15 @@ function pushVariantDetail(
       }
       return;
     }
+    case 'garage': {
+      // Sectional overhead door: horizontal panel seams.
+      for (let i = 1; i < 4; i++) {
+        const y = bot + ((top - bot) / 4) * i;
+        out.push({ id: id('panel'), kind: 'line',
+          a: { x: left, y }, b: { x: right, y }, style: 'thin' });
+      }
+      return;
+    }
     case 'barn':
     case 'pocket':
     default:

@@ -204,12 +204,11 @@ export default function BlueprintLabClient() {
   const justRestoredRef = useRef(false);
   const saveRef = useRef<(() => void) | null>(null);
 
-  const LOCAL_DRAFT_KEY = 'blueprint-lab:draft';
-
-  type Draft = { project: Project; cloudId: string | null; savedAt: number | null };
-
-  // Restore-on-mount: prefer ?id=... (load from cloud) over the localStorage
-  // draft. If neither, leave the fresh new-project state alone.
+  // Restore-on-mount: ?id=... loads from the cloud; otherwise the app opens
+  // on a BLANK sheet (deliberate — see 2026-08-31 feedback: auto-reopening
+  // the last design invites accidental edits; saved work is opened through
+  // the folder menu instead). The beforeunload guard below covers accidental
+  // closes with unsaved work.
   //
   // NOTE: do NOT add a `cancelled` flag tied to the effect cleanup here. React
   // StrictMode (on by default in dev) mounts → unmounts → remounts: the first
@@ -265,22 +264,28 @@ export default function BlueprintLabClient() {
             setLastSavedAt(Date.now());
             return;
           }
-        } catch { /* fall through to localStorage */ }
+          setSaveError(`Could not load design (${res.status})`);
+          setSaveStatus('error');
+        } catch {
+          setSaveError('Could not load design');
+          setSaveStatus('error');
+        }
       }
-      try {
-        const raw = localStorage.getItem(LOCAL_DRAFT_KEY);
-        if (!raw) return;
-        const draft = JSON.parse(raw) as Draft;
-        if (!draft?.project) return;
-        suppressNextHistoryRef.current = true;
-        justRestoredRef.current = true;
-        setProject(migrateProject(draft.project));
-        cloudIdRef.current = draft.cloudId ?? null;
-        if (draft.savedAt) { setSaveStatus('saved'); setLastSavedAt(draft.savedAt); }
-        else setSaveStatus('unsaved');
-      } catch { /* corrupt draft — ignore */ }
+      // No ?id= → stay on the blank sheet.
     })();
   }, [urlDesignId, isTeacherView, isAssignmentMode]);
+
+  // Warn before closing/leaving the tab with unsaved work — without the old
+  // draft auto-restore this is the safety net against losing a session.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (saveStatus !== 'unsaved' || isTeacherView) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [saveStatus, isTeacherView]);
 
   // Assignment mode: fetch the assignment, merge its teacher-edited config
   // over the base brief, and open the Requirements panel on it. Triggers from
@@ -314,31 +319,20 @@ export default function BlueprintLabClient() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveAssignmentId, assignment]);
 
-  // localStorage autosave on project change (debounced ~500ms). Also flips
-  // status to 'unsaved' so the user sees that the cloud copy is stale.
+  // Track dirty state on project change so the Save button and the
+  // beforeunload guard know there's unsaved work. (The old localStorage draft
+  // autosave is gone — the app opens blank by design now.)
   useEffect(() => {
     if (!restoredOnceRef.current) return;
-    // Teacher read-only view: never overwrite the teacher's own local draft
-    // with the student's project, and don't track save status.
+    // Teacher read-only view: don't track save status.
     if (isTeacherView) return;
     // The project change that the restore-on-mount load triggers isn't a user
-    // edit — don't mark it unsaved (but still let it persist to localStorage).
+    // edit — don't mark it unsaved.
     if (justRestoredRef.current) {
       justRestoredRef.current = false;
     } else {
       setSaveStatus(s => (s === 'saved' || s === 'idle') ? 'unsaved' : s);
     }
-    // Assignment mode never writes the local draft — that slot belongs to the
-    // user's own free-play plan.
-    if (isAssignmentMode) return;
-    const t = setTimeout(() => {
-      try {
-        const draft: Draft = { project, cloudId: cloudIdRef.current, savedAt: lastSavedAt };
-        localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draft));
-      } catch { /* quota or disabled — ignore */ }
-    }, 500);
-    return () => clearTimeout(t);
-  // lastSavedAt is intentionally excluded — it doesn't represent a draft change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
 
@@ -369,10 +363,6 @@ export default function BlueprintLabClient() {
       const now = Date.now();
       setLastSavedAt(now);
       setSaveStatus('saved');
-      try {
-        const draft: Draft = { project, cloudId: cloudIdRef.current, savedAt: now };
-        localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(draft));
-      } catch { /* ignore */ }
     } catch (e) {
       setSaveStatus('error');
       setSaveError(e instanceof Error ? e.message : String(e));

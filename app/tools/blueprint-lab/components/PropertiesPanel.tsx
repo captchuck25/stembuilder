@@ -961,7 +961,7 @@ function parseLengthInput(s: string): number | null {
 
 // ─── Door: type picker (2×3 grid) ────────────────────────────────────────────
 
-const DOOR_TYPES: DoorType[] = ['room', 'entry', 'sliding', 'bifold', 'pocket', 'barn'];
+const DOOR_TYPES: DoorType[] = ['room', 'entry', 'sliding', 'bifold', 'pocket', 'barn', 'garage'];
 
 function DoorTypePicker({
   active, onChange,
@@ -1052,6 +1052,13 @@ function DoorGlyph({ type, active }: { type: DoorType; active: boolean }) {
           <rect x="6" y="10" width="28" height="6" fill="white" stroke={color} strokeWidth="1.3" />
         </svg>
       );
+    case 'garage':
+      return (
+        <svg width="40" height="28" viewBox="0 0 40 28" fill="none">
+          <rect x="6" y="6" width="28" height="16" fill="white" stroke={color} strokeWidth="1.3" />
+          <path d="M6 10 L34 10 M6 14 L34 14 M6 18 L34 18" stroke={light} strokeWidth="1" />
+        </svg>
+      );
   }
 }
 
@@ -1137,6 +1144,29 @@ function DoorTypeVariantControls({
           >
             <option value="single">Single</option>
             <option value="double">Double</option>
+          </select>
+        </div>
+      </>
+    );
+  }
+  if (doorType === 'garage') {
+    const isDouble = (settings.panels ?? (settings.width >= 150 ? 'double' : 'single')) === 'double';
+    return (
+      <>
+        <div style={{ height: 1, background: T.line, margin: '8px 0' }} />
+        <div style={ROW}>
+          <span style={LABEL}>Size</span>
+          <select
+            value={isDouble ? 'double' : 'single'}
+            onChange={e => {
+              const panels = e.target.value as 'single' | 'double';
+              onChange({ panels, width: panels === 'double' ? 192 : 108 });
+            }}
+            onFocus={inputFocus} onBlur={inputBlur}
+            style={SELECT}
+          >
+            <option value="single">Single car (9&apos;)</option>
+            <option value="double">Double car (16&apos;)</option>
           </select>
         </div>
       </>

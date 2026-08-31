@@ -345,8 +345,8 @@ export default function BlueprintTab({ classId }: { classId: string }) {
               const t = e.target.value;
               if (!t) return;
               const row: RoomRequirement = t === "GARAGE"
-                ? { roomType: t, count: 1, minDims: { a: 240, b: 240 }, minDoors: 1,
-                    note: "Draw the garage OUTSIDE the shell — the SF target is for the interior. 1-car ≈ 12' × 20', 2-car ≈ 20' × 20'. Garage area is not counted in total SF." }
+                ? { roomType: t, count: 1, minDims: { a: 240, b: 240 }, minDoors: 2,
+                    note: "Draw the garage OUTSIDE the shell — the SF target is for the interior. 1-car ≈ 12' × 20', 2-car ≈ 20' × 20'. Needs its garage door PLUS an interior door into the house. Garage area is not counted in total SF." }
                 : { roomType: t, count: 1 };
               setDraft(d => d ? { ...d, config: { ...d.config,
                 rooms: [...d.config.rooms, row] } } : d);

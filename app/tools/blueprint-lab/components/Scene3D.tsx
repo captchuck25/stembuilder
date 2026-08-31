@@ -531,6 +531,8 @@ function WallMesh({ wall, elevation, doors, windows, extension, isExterior }: {
           return <SlidingDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
         if (d.doorType === 'bifold')
           return <BifoldDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
+        if (d.doorType === 'garage')
+          return <GarageDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
         return <DoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
       })}
 
@@ -876,6 +878,34 @@ function SlidingDoorSlab({ door, wall, elevation, angle }: {
         <boxGeometry args={[MULLION, h, FRAME_T]} />
         <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
       </mesh>
+    </group>
+  );
+}
+
+// Garage door — closed sectional overhead door: white paneled slab filling
+// the opening, horizontal seams between the four sections.
+function GarageDoorSlab({ door, wall, elevation, angle }: {
+  door: import('../engine/types').Door;
+  wall: Wall;
+  elevation: number;
+  angle: number;
+}) {
+  const cx = wall.start.x + Math.cos(angle) * door.positionAlong;
+  const cy = wall.start.y + Math.sin(angle) * door.positionAlong;
+  const w = door.width;
+  const h = door.height;
+  const yMid = elevation + h / 2;
+  const SECTIONS = 4;
+  const GAP = 0.6;
+  const secH = (h - GAP * (SECTIONS - 1)) / SECTIONS;
+  return (
+    <group position={[cx, yMid, cy]} rotation={[0, -angle, 0]}>
+      {Array.from({ length: SECTIONS }, (_, i) => (
+        <mesh key={i} position={[0, -h / 2 + secH / 2 + i * (secH + GAP), 0]} castShadow>
+          <boxGeometry args={[w, secH, 1.5]} />
+          <meshStandardMaterial color={DOOR_SLAB_INTERIOR} roughness={0.65} />
+        </mesh>
+      ))}
     </group>
   );
 }

@@ -68,7 +68,7 @@ export interface Opening {
 // from the wall, so the door follows the wall if the wall moves. The wall data
 // is preserved fully even when a door visually cuts it — needed for 3D extrude.
 
-export type DoorType = 'room' | 'entry' | 'sliding' | 'bifold' | 'pocket' | 'barn';
+export type DoorType = 'room' | 'entry' | 'sliding' | 'bifold' | 'pocket' | 'barn' | 'garage';
 
 export interface Door {
   kind: 'door';
@@ -121,6 +121,9 @@ export const DOOR_DEFAULTS: Record<DoorType, DoorTypeDefaults> = {
   bifold:  { width: 48, height: 80, label: 'Bifold door' },
   pocket:  { width: 30, height: 80, label: 'Pocket door' },
   barn:    { width: 36, height: 84, label: 'Barn door' },
+  // Sectional overhead door. Single-car 9' × 7'; the Double option in the
+  // panel bumps width to 16' (192").
+  garage:  { width: 108, height: 84, label: 'Garage door' },
 };
 
 // ─── Windows ──────────────────────────────────────────────────────────────────

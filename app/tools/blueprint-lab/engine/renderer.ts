@@ -719,9 +719,45 @@ export function drawDoor(
     case 'barn':
       drawBarnDoor(ctx, w, t, d, stroke, lightStroke, flipSign);
       break;
+    case 'garage':
+      drawGarageDoor(ctx, w, t, d, ppi, stroke, lightStroke, flipSign);
+      break;
   }
 
   ctx.restore();
+}
+
+function drawGarageDoor(
+  ctx: CanvasRenderingContext2D, w: number, t: number, d: Door,
+  ppi: number, stroke: string, lightStroke: string, flipSign: number,
+) {
+  // Sectional overhead door: closed panel across the opening + jamb ticks,
+  // with dashed track lines showing the overhead travel into the garage.
+  const bandT = Math.max(3, t * 0.4);
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.4;
+  ctx.fillRect(-w / 2, -bandT / 2, w, bandT);
+  ctx.strokeRect(-w / 2, -bandT / 2, w, bandT);
+  // Jamb ticks.
+  ctx.strokeStyle = lightStroke;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, -t / 2); ctx.lineTo(-w / 2, t / 2);
+  ctx.moveTo(+w / 2, -t / 2); ctx.lineTo(+w / 2, t / 2);
+  ctx.stroke();
+  // Overhead track (dashed) extending into the garage on the flipped side,
+  // roughly the door's height when raised.
+  const reach = flipSign * Math.min(d.height, 84) * ppi;
+  const inset = Math.min(w * 0.08, 6 * ppi);
+  ctx.setLineDash([5, 4]);
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(-w / 2 + inset, flipSign * (t / 2)); ctx.lineTo(-w / 2 + inset, flipSign * (t / 2) + reach);
+  ctx.moveTo(+w / 2 - inset, flipSign * (t / 2)); ctx.lineTo(+w / 2 - inset, flipSign * (t / 2) + reach);
+  ctx.moveTo(-w / 2 + inset, flipSign * (t / 2) + reach); ctx.lineTo(+w / 2 - inset, flipSign * (t / 2) + reach);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function drawEntryDoor(
