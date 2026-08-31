@@ -119,8 +119,12 @@ export const DEFAULT_GRADING_RUBRIC: GradingRubric = {
     },
     {
       id: 'windows', name: 'Windows', scoring: 'auto', autoSource: 'windows', deliverable: 'floor-plan',
+      // The engine verifies counts (incl. the bedrooms-have-2+ standard) but
+      // two windows jammed in a corner isn't "thoughtful placement" — the
+      // top tier is the teacher's call.
+      topTierNeedsTeacher: true,
       tiers: T(
-        'Every required room has windows, thoughtfully placed — bedrooms have at least two.',
+        'Every required room has windows, thoughtfully placed — bedrooms have at least two, sensibly spaced. (Teacher confirms full credit.)',
         'Every required room has windows.',
         'Windows are missing.',
         'No windows.',
