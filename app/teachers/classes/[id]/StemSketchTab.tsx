@@ -20,6 +20,7 @@ import {
   challengeReady,
   type SketchStage,
 } from "@/lib/stem-sketch/challenges";
+import { SKETCH_TUTORIALS, TUTORIAL_UNIT_META } from "@/lib/stem-sketch/tutorials";
 
 interface SketchAssignment {
   id: string;
@@ -58,6 +59,168 @@ const TD: React.CSSProperties = {
   padding: "9px 14px", fontSize: 13, color: "#111",
   borderTop: "1px solid #cffafe",
 };
+
+// ─── Tutorials (assign + track) ──────────────────────────────────────────────
+// Tutorials are free for every student to take; this section lets the teacher
+// pick which ones the class must complete and shows a live per-student
+// checklist. Completion comes from stem_sketch_tutorial_progress — students
+// who already finished a tutorial before it was assigned show complete
+// immediately (that's a feature, not a bug). Green = tutorials (guided
+// practice), teal stays assignments (graded work).
+
+interface TutorialRosterRow { studentId: string; name: string; completed: string[] }
+
+function TutorialsSection({ classId }: { classId: string }) {
+  const readyTutorials = SKETCH_TUTORIALS.filter(t => t.ready);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [draft, setDraft] = useState<Set<string>>(new Set());
+  const [roster, setRoster] = useState<TutorialRosterRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [showTable, setShowTable] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/teacher/stem-sketch-tutorials?classId=${encodeURIComponent(classId)}`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { tutorialIds: string[]; roster: TutorialRosterRow[] } | null) => {
+        if (!data || cancelled) return;
+        setSaved(data.tutorialIds);
+        setDraft(new Set(data.tutorialIds));
+        setRoster(data.roster);
+      })
+      .catch(() => { if (!cancelled) setError("Could not load tutorials"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [classId]);
+
+  const dirty = saved.length !== draft.size || saved.some(id => !draft.has(id));
+  // Column order follows the ladder, not the click order.
+  const assigned = readyTutorials.filter(t => saved.includes(t.id));
+  const units = [...new Set(readyTutorials.map(t => t.unit))].sort((a, b) => a - b);
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      const res = await fetch("/api/teacher/stem-sketch-tutorials", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId, tutorialIds: [...draft] }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        setError(d?.error || `Save failed (HTTP ${res.status})`);
+        return;
+      }
+      setSaved([...draft]);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ background: "#f0fdf4", border: "2px solid #bbf7d0", borderRadius: 14,
+      padding: "18px 22px", marginBottom: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 900, color: "#14532d" }}>🎓 Tutorials</div>
+          <div style={{ fontSize: 12, color: "#4d7c5f", marginTop: 2 }}>
+            Guided in-tool lessons, free for every student. Check the ones this class should complete — progress updates as they finish.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {assigned.length > 0 && (
+            <button onClick={() => setShowTable(v => !v)}
+              style={{ padding: "8px 16px", borderRadius: 9, border: "2px solid #16a34a",
+                background: showTable ? "#dcfce7" : "#fff", color: "#14532d",
+                fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+              📊 Progress
+            </button>
+          )}
+          {dirty && (
+            <button onClick={save} disabled={saving}
+              style={{ padding: "8px 16px", borderRadius: 9, border: "none",
+                background: "#16a34a", color: "#fff", fontWeight: 800, fontSize: 12,
+                cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Saving…" : "Save assignment"}
+            </button>
+          )}
+        </div>
+      </div>
+      {error && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#dc2626" }}>{error}</div>}
+
+      {loading ? (
+        <div style={{ marginTop: 12, fontSize: 13, color: "#888" }}>Loading…</div>
+      ) : (
+        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginTop: 14 }}>
+          {units.map(u => (
+            <div key={u} style={{ minWidth: 190 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#166534",
+                textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6 }}>
+                {TUTORIAL_UNIT_META[u]?.icon} Unit {u} — {TUTORIAL_UNIT_META[u]?.title}
+              </div>
+              {readyTutorials.filter(t => t.unit === u).map(t => (
+                <label key={t.id} title={t.blurb}
+                  style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13,
+                    color: "#1f2937", fontWeight: 600, margin: "0 0 5px", cursor: "pointer" }}>
+                  <input type="checkbox" checked={draft.has(t.id)}
+                    onChange={e => setDraft(prev => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(t.id); else next.delete(t.id);
+                      return next;
+                    })}
+                    style={{ width: "auto", margin: 0, accentColor: "#16a34a" }} />
+                  {t.title}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showTable && assigned.length > 0 && (
+        <div style={{ marginTop: 14, overflowX: "auto", background: "#fff",
+          border: "1px solid #bbf7d0", borderRadius: 10 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr style={{ background: "#f0fdf4" }}>
+                <th style={{ ...TH, color: "#14532d" }}>Student</th>
+                {assigned.map(t => (
+                  <th key={t.id} style={{ ...TH, color: "#14532d", textAlign: "center" }} title={t.blurb}>{t.title}</th>
+                ))}
+                <th style={{ ...TH, color: "#14532d", textAlign: "center" }}>Done</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roster.length === 0 ? (
+                <tr><td style={{ ...TD, borderTopColor: "#dcfce7" }} colSpan={assigned.length + 2}>No students enrolled yet.</td></tr>
+              ) : roster.map(r => {
+                const doneCount = assigned.filter(t => r.completed.includes(t.id)).length;
+                return (
+                  <tr key={r.studentId}>
+                    <td style={{ ...TD, borderTopColor: "#dcfce7", fontWeight: 700 }}>{r.name}</td>
+                    {assigned.map(t => (
+                      <td key={t.id} style={{ ...TD, borderTopColor: "#dcfce7", textAlign: "center",
+                        color: r.completed.includes(t.id) ? "#16a34a" : "#d1d5db", fontWeight: 900 }}>
+                        {r.completed.includes(t.id) ? "✓" : "○"}
+                      </td>
+                    ))}
+                    <td style={{ ...TD, borderTopColor: "#dcfce7", textAlign: "center", fontWeight: 800,
+                      color: doneCount === assigned.length ? "#16a34a" : "#555" }}>
+                      {doneCount}/{assigned.length}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function StemSketchTab({ classId }: { classId: string }) {
   const [assignments, setAssignments] = useState<SketchAssignment[]>([]);
@@ -186,6 +349,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
 
   return (
     <div style={{ marginBottom: 24 }}>
+      <TutorialsSection classId={classId} />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0891b2", margin: 0 }}>STEM Sketch Assignments</h2>

@@ -11,6 +11,7 @@ import { LEVELS } from "@/app/tools/code-lab/python/levels";
 import { UNITS } from "@/app/tools/block-lab/units";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 import { runTurtleBackfillOnce } from "@/lib/turtle-backfill";
+import { getTutorial } from "@/lib/stem-sketch/tutorials";
 import SiteHeader from "@/app/components/SiteHeader";
 
 const CARD: React.CSSProperties = {
@@ -67,6 +68,12 @@ interface SketchAssignmentRow {
   rubricMax?: number | null;
 }
 
+// Assigned STEM Sketch tutorials (per class) + the student's own completions.
+interface SketchTutorialState {
+  classes: { class_id: string; class_name: string; tutorialIds: string[] }[];
+  completed: string[];
+}
+
 interface QuizAssignmentRow {
   id: string;
   class_id: string;
@@ -105,6 +112,7 @@ export default function StudentDashboard() {
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [measAssignments, setMeasAssignments] = useState<MeasurementAssignment[]>([]);
   const [sketchAssignments, setSketchAssignments] = useState<SketchAssignmentRow[]>([]);
+  const [sketchTutorials, setSketchTutorials] = useState<SketchTutorialState>({ classes: [], completed: [] });
   const [quizAssignments, setQuizAssignments] = useState<QuizAssignmentRow[]>([]);
   const [progressMap, setProgressMap] = useState<ProgressMap>({});
   // challenge_ids the student has a turtle_submissions row for — used to show
@@ -130,7 +138,7 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes, measRes, sketchRes, quizRes, progressRes, turtleRes] = await Promise.all([
+    const [classRes, bridgeRes, measRes, sketchRes, quizRes, progressRes, turtleRes, tutorialRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
       fetch("/api/student/measurement-assignments"),
@@ -138,12 +146,17 @@ export default function StudentDashboard() {
       fetch("/api/student/quiz-assignments"),
       fetch("/api/student/my-progress"),
       fetch("/api/turtle"),
+      fetch("/api/student/stem-sketch-tutorials"),
     ]);
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
     setMeasAssignments(measRes.ok ? await measRes.json() : []);
     setSketchAssignments(sketchRes.ok ? await sketchRes.json() : []);
     setQuizAssignments(quizRes.ok ? await quizRes.json() : []);
+    if (tutorialRes.ok) {
+      const t: SketchTutorialState = await tutorialRes.json();
+      setSketchTutorials(t);
+    }
     if (turtleRes.ok) {
       const subs: Array<{ challenge_id: string }> = await turtleRes.json();
       setTurtleCompletedIds(new Set(subs.map(s => s.challenge_id)));
@@ -285,8 +298,9 @@ export default function StudentDashboard() {
                 const classMeasAssignments = measAssignments.filter(m => m.class_id === cls.id);
                 const classSketchAssignments = sketchAssignments.filter(s => s.class_id === cls.id);
                 const classQuizAssignments = quizAssignments.filter(q => q.class_id === cls.id);
+                const classSketchTutorials = sketchTutorials.classes.find(t => t.class_id === cls.id)?.tutorialIds ?? [];
                 const turtleIds = turtleAssignedIds ?? [];
-                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + classSketchAssignments.length + classQuizAssignments.length + turtleIds.length;
+                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + classSketchAssignments.length + classQuizAssignments.length + turtleIds.length + classSketchTutorials.length;
                 return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
@@ -544,6 +558,40 @@ export default function StudentDashboard() {
                                 </div>
                               </Link>
                             ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* STEM Sketch Tutorials — guided practice, separate from
+                          graded assignment cards (green vs teal). */}
+                      {classSketchTutorials.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#16a34a",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            🎓 STEM Sketch Tutorials
+                          </div>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                            {classSketchTutorials.map(tid => {
+                              const t = getTutorial(tid);
+                              if (!t) return null;
+                              const done = sketchTutorials.completed.includes(tid);
+                              return (
+                                <Link key={tid} href={`/tools/stem-sketch?tutorial=${tid}`} style={{ textDecoration: "none" }}>
+                                  <div style={{ padding: "10px 16px", borderRadius: 12,
+                                    background: done ? "#f0fdf4" : "#fff",
+                                    border: `2px solid ${done ? "#16a34a" : "#bbf7d0"}`,
+                                    display: "flex", alignItems: "center", gap: 8 }}>
+                                    <span style={{ fontSize: 15, fontWeight: 900,
+                                      color: done ? "#16a34a" : "#d1d5db" }}>{done ? "✓" : "○"}</span>
+                                    <div>
+                                      <div style={{ fontSize: 13, fontWeight: 800, color: "#111" }}>{t.title}</div>
+                                      <div style={{ fontSize: 11, color: done ? "#16a34a" : "#888", fontWeight: 700 }}>
+                                        {done ? "Complete" : `${t.stepCount} steps`}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </Link>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
