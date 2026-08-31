@@ -147,6 +147,11 @@ export function snapToLineFeatures(
   lines: LineEntity[], p: Vec2, toleranceIn: number,
   walls: Wall[] = [],
   polylines: Vec2[][] = [],
+  // When provided, the jamb corners of door/window openings on each wall are
+  // snap targets too — the "corners" a user sees at a cut in the wall, which
+  // don't exist in the wall's own polygon (2026-08-31 hallway-boundary video).
+  doors: Door[] = [],
+  windows: Window[] = [],
 ): LineSnapHit | null {
   let best: LineSnapHit | null = null;
   let bestScore = toleranceIn;
@@ -222,6 +227,33 @@ export function snapToLineFeatures(
     // Long-face edges for perpendicular projection (silent snap — no marker).
     considerEdge(corners[0], corners[1], w.id);
     considerEdge(corners[3], corners[2], w.id);
+
+    // Jamb corners at openings: each door/window cut edge × both wall faces.
+    if (doors.length + windows.length > 0) {
+      const cuts = [
+        ...doors.filter(d => d.wallId === w.id).map(d => doorOpeningCut(d)),
+        ...windows.filter(x => x.wallId === w.id).flatMap(x => windowOpeningCuts(x)),
+      ];
+      if (cuts.length > 0) {
+        const dxw = w.end.x - w.start.x, dyw = w.end.y - w.start.y;
+        const Lw = Math.hypot(dxw, dyw);
+        if (Lw > 0) {
+          const ux = dxw / Lw, uy = dyw / Lw;
+          const nx = -uy, ny = ux;
+          for (const c of cuts) {
+            for (const t of [c.positionAlong - c.width / 2, c.positionAlong + c.width / 2]) {
+              if (t <= JOIN_EPS || t >= Lw - JOIN_EPS) continue;
+              for (const s of [1, -1] as const) {
+                considerPoint({
+                  x: w.start.x + ux * t + s * nx * (w.thickness / 2),
+                  y: w.start.y + uy * t + s * ny * (w.thickness / 2),
+                }, 'endpoint', `${w.id}:jamb`, 0.6);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   // Mitered junction corners between pairs of walls. Filter to the

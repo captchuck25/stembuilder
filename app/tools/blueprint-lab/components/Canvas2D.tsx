@@ -509,19 +509,19 @@ export default function Canvas2D({
   const snapBoundaryPoint = useCallback((world: Vec2): Vec2 => {
     // ~36 screen px: boundary clicks should grab corners eagerly — students
     // click fast and slightly off.
-    const hit = snapToLineFeatures(level.lines ?? [], world, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries);
+    const hit = snapToLineFeatures(level.lines ?? [], world, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries, level.doors, level.windows);
     if (hit) return hit.point;
     const prev = boundaryPoints[boundaryPoints.length - 1];
     if (prev) return snapOrtho(prev, world);
     return snapToGridOn ? snapToGrid(world, gridInches) : world;
-  }, [level.lines, level.walls, otherRoomBoundaries, boundaryPoints, vp.pxPerInch, snapToGridOn, gridInches]);
+  }, [level.lines, level.walls, level.doors, level.windows, otherRoomBoundaries, boundaryPoints, vp.pxPerInch, snapToGridOn, gridInches]);
 
   // The discrete snap target under the cursor (corner / midpoint), if any —
   // drives the CAD-style snap marker so the user can see the lock.
   const boundarySnapHit: LineSnapHit | null = useMemo(() => {
     if (!boundaryDraftRoomId || !hoverWorld) return null;
-    return snapToLineFeatures(level.lines ?? [], hoverWorld, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries);
-  }, [boundaryDraftRoomId, hoverWorld, level.lines, level.walls, otherRoomBoundaries, vp.pxPerInch]);
+    return snapToLineFeatures(level.lines ?? [], hoverWorld, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries, level.doors, level.windows);
+  }, [boundaryDraftRoomId, hoverWorld, level.lines, level.walls, level.doors, level.windows, otherRoomBoundaries, vp.pxPerInch]);
 
   // Where the next vertex would land — used for both the live preview line and
   // the close-on-start detection so all three (preview, marker, commit) agree.
@@ -792,7 +792,7 @@ export default function Canvas2D({
     // Line tool: snap to the VISIBLE wall outline (polygon corners + face
     // midpoints + mitered junction corners) rather than the wall centerline.
     if (tool === 'line') {
-      const lineHit = snapToLineFeatures(level.lines ?? [], q, 18 / vp.pxPerInch, level.walls);
+      const lineHit = snapToLineFeatures(level.lines ?? [], q, 18 / vp.pxPerInch, level.walls, [], level.doors, level.windows);
       if (lineHit) return { point: lineHit.point, feature: true };
       return { point: snapToGridOn ? snapToGrid(q, gridInches) : quantizeToBase(q), feature: false };
     }
@@ -825,7 +825,7 @@ export default function Canvas2D({
       if (s !== q) return { point: s, feature: true };
     }
     return { point: snapToGridOn ? snapToGrid(q, gridInches) : quantizeToBase(q), feature: false };
-  }, [orthoOn, snapToGridOn, gridInches, level.walls, level.lines, level.stairs, vp.pxPerInch, tool, showFloorBelow, floorBelow, defaultWallThickness]);
+  }, [orthoOn, snapToGridOn, gridInches, level.walls, level.lines, level.doors, level.windows, level.stairs, vp.pxPerInch, tool, showFloorBelow, floorBelow, defaultWallThickness]);
 
   const snap = useCallback((p: Vec2, drawingStart?: Vec2): Vec2 => snapWithInfo(p, drawingStart).point, [snapWithInfo]);
 
