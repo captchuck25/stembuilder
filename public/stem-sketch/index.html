@@ -21664,6 +21664,10 @@ const _tutSnowZ = (b, inches) => {
   const mm = inches * TUT_IN, sib = Math.round(mm / 5) * 5;
   return _tutNear(b.y || 0, mm, 4) || _tutNear(b.y || 0, sib, 4);
 };
+// True if ANY sketch (top-level; embedded extrude sketches don't count in
+// tutorial mode — the canvas starts fresh) has an entity passing `pred`.
+const _tutSketchHas = (d, pred) =>
+  d.sketches.some(sk => (sk.entities || []).some(e => !e.construction && pred(e)));
 
 const TUTORIALS = [
   {
@@ -21735,13 +21739,88 @@ const TUTORIALS = [
       },
     ],
   },
+  {
+    id: 'first-sketch',
+    unit: 2,
+    title: 'First Sketch',
+    intro: '3D parts start as flat drawings. Let’s make your first 2D sketch.',
+    steps: [
+      {
+        text: 'Click **+ Sketch** in the top toolbar and choose **Top** — now you’re looking straight down at the workplane, ready to draw.',
+        hint: 'Notice the toolbar changed: these are the 2D drawing tools.',
+        done: (d) => d.sketches.length >= 1,
+      },
+      {
+        text: 'Pick the **Rect** tool. Click where one corner should go, drag to the opposite corner, and release.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'rect'),
+      },
+      {
+        text: 'Pick the **Circle** tool. Click where the center should go, drag outward, and release — a circle right beside your rectangle.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'circle'),
+      },
+      {
+        text: 'Click **← Done** (top left) to go back to 3D. Your sketch is saved in the **Project** tree on the left — you’ll turn sketches like this into solids in the next unit.',
+        done: (d) => d.mode === '3d',
+      },
+    ],
+  },
+  {
+    id: 'exact-sizes',
+    unit: 2,
+    title: 'Exact Sizes',
+    intro: 'Real designs use real measurements. Dimensions measure your shapes — and can resize them.',
+    steps: [
+      {
+        text: 'Start a sketch on **Top** (+ Sketch → Top) and draw a **rectangle** — any size for now.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'rect'),
+      },
+      {
+        text: 'Pick the **Dim** tool. Click one bottom corner of the rectangle, then the other bottom corner, then move away from the shape and click to place the dimension.',
+        hint: 'The number that appears is the real measured distance across that side.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'dimension' && !e.autoDim),
+      },
+      {
+        text: 'Now make it exact: click the **number** on your dimension, type **3**, and press Enter. The rectangle snaps to exactly 3 inches wide (type 75 in metric).',
+        hint: 'This is called a driving dimension — you told the shape how big to be, instead of measuring what you drew.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'rect' &&
+          ([e.w, e.h].some(v => _tutNear(v, 3 * TUT_IN, 1) || _tutNear(v, 75, 1)))),
+      },
+    ],
+  },
+  {
+    id: 'sketch-toolbox',
+    unit: 2,
+    title: 'Sketch Toolbox',
+    intro: 'Three tools that make drawings faster: arcs, fillets, and mirror.',
+    steps: [
+      {
+        text: 'Start a sketch on **Top**. Pick the **Arc** tool: click where the curve starts, click where it ends, then move the mouse to bend it and click once more to set it.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && !e.closed && (e.points || []).length >= 20),
+      },
+      {
+        text: 'Draw a **rectangle**, then pick **Fillet**. Click one of the rectangle’s corners, press **Enter**, and click **Apply** — the sharp corner becomes a smooth curve.',
+        hint: 'The size box controls how big the rounding is — the suggested size is fine.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && e.closed && (e.points || []).length >= 10),
+      },
+      {
+        text: 'Draw a **Circle**, click it with the **Select** tool, then pick **Mirror** and choose an axis — a twin circle appears on the other side. Half the drawing, twice the shape.',
+        done: (d) => d.sketches.some(sk => {
+          const circles = (sk.entities || []).filter(e => e.type === 'circle' && !e.construction);
+          return circles.some(a => circles.some(b => b !== a && Math.abs(a.r - b.r) < 0.5));
+        }),
+      },
+    ],
+  },
 ];
 
+const TUT_UNIT_TITLES = {
+  1: '🧭 Unit 1 — Getting Around',
+  2: '✏️ Unit 2 — Sketching',
+};
 // Units that exist in the ladder but aren't authored yet — listed in the
 // picker as "coming soon" so students see the road ahead. Mirrors
 // lib/stem-sketch/tutorials.ts.
 const TUT_COMING_UNITS = [
-  '✏️ Unit 2 — Sketching',
   '🧱 Unit 3 — Sketch to Solid',
   '🔧 Unit 4 — Building Real Parts',
   '🔩 Unit 5 — Hardware',
@@ -21925,12 +22004,15 @@ function _renderTutorialPanel() {
 
 function showTutorialPicker() {
   const done = _tutDoneMap();
-  const rows = TUTORIALS.map(t => `
+  const units = [...new Set(TUTORIALS.map(t => t.unit))].sort((a, b) => a - b);
+  const rows = units.map(u => `
+    <div class="tut-picker-unit">${_apEsc(TUT_UNIT_TITLES[u] || `Unit ${u}`)}</div>
+    ${TUTORIALS.filter(t => t.unit === u).map(t => `
     <div class="tut-picker-row">
       <span class="tp-name">${_apEsc(t.title)}<span class="tp-blurb">${_apEsc(t.intro || '')}</span></span>
       ${done[t.id] ? '<span class="tp-done">✓ Done</span>' : ''}
       <button class="tp-start" data-tut="${_apEsc(t.id)}">${done[t.id] ? 'Redo' : 'Start'}</button>
-    </div>`).join('');
+    </div>`).join('')}`).join('');
   const soon = TUT_COMING_UNITS.map(u => `
     <div class="tut-picker-row soon">
       <span class="tp-name">${_apEsc(u)}</span><span class="tp-soon">coming soon</span>
@@ -21940,7 +22022,6 @@ function showTutorialPicker() {
     body: `<div style="font-size:12.5px;color:#475569;margin-bottom:6px">
         Short guided lessons — the tool checks your work as you go. Your design is saved and comes right back when you exit.</div>
       <div style="max-height:320px;overflow-y:auto">
-        <div class="tut-picker-unit">🧭 Unit 1 — Getting Around</div>
         ${rows}
         ${soon}
       </div>`,

@@ -7,6 +7,7 @@ import SiteHeader from "@/app/components/SiteHeader";
 import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, fetchBlueprintLabDesigns, deleteBlueprintLabDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign, BlueprintLabDesign } from "@/lib/achievements";
 import { runTurtleBackfillOnce } from "@/lib/turtle-backfill";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
+import { SKETCH_TUTORIALS, TUTORIAL_UNIT_META } from "@/lib/stem-sketch/tutorials";
 import { GameDef, TILE, VIEW_W, VIEW_H, validDims } from "@/app/tools/arcade-lab/engine/types";
 import { BotConfig, defaultBot, sanitizeBot } from "@/app/tools/arcade-lab/engine/bot";
 import { renderBotPortrait } from "@/app/tools/arcade-lab/engine/render";
@@ -801,6 +802,86 @@ function TurtleSection({ completedIds, submissions }: { completedIds: Set<string
 
 // ─── STEM Sketch section ──────────────────────────────────────────────────────
 
+function StemSketchTutorials() {
+  // Ready tutorials only, grouped by unit; completion comes from the same
+  // table the in-tool picker syncs to, so both surfaces always agree.
+  const [doneIds, setDoneIds] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/stem-sketch/tutorials")
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { completed?: { tutorialId: string }[] } | null) => {
+        if (!cancelled) setDoneIds(new Set((data?.completed ?? []).map(c => c.tutorialId)));
+      })
+      .catch(() => { if (!cancelled) setDoneIds(new Set()); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const ready = SKETCH_TUTORIALS.filter(t => t.ready);
+  const done = doneIds ?? new Set<string>();
+  const doneCount = ready.filter(t => done.has(t.id)).length;
+  const pct = ready.length > 0 ? doneCount / ready.length : 0;
+  const units = [...new Set(ready.map(t => t.unit))].sort((a, b) => a - b);
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 10 }}>🎓 Tutorials</div>
+
+      {/* Progress bar — same visual language as the Turtle section */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+        <div style={{ flex: 1, height: 10, background: "#f0f0f0", borderRadius: 99, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${pct * 100}%`,
+            background: "#16a34a", borderRadius: 99, transition: "width 600ms" }} />
+        </div>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#888", whiteSpace: "nowrap" }}>
+          {doneCount}/{ready.length} tutorials
+        </span>
+      </div>
+
+      {units.map(u => (
+        <div key={u} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: "#888",
+            textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 6 }}>
+            {TUTORIAL_UNIT_META[u]?.icon} Unit {u} — {TUTORIAL_UNIT_META[u]?.title}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {ready.filter(t => t.unit === u).map((t, i) => {
+              const isDone = done.has(t.id);
+              return (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                    background: isDone ? "#16a34a" : "#e5e7eb",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, fontWeight: 900, color: isDone ? "#fff" : "#aaa" }}>
+                    {isDone ? "✓" : i + 1}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: isDone ? "#111" : "#666" }}>
+                    {t.title}
+                  </span>
+                  {isDone && (
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#16a34a",
+                      background: "#f0fdf4", padding: "2px 8px", borderRadius: 6 }}>
+                      Complete
+                    </span>
+                  )}
+                  <Link href={`/tools/stem-sketch?tutorial=${t.id}`}
+                    style={{ marginLeft: "auto", fontSize: 12, fontWeight: 800,
+                      color: isDone ? "#888" : "#16a34a", textDecoration: "none" }}>
+                    {isDone ? "Redo →" : "Start →"}
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}>
+        More tutorial units coming soon — sketch-to-solid, real parts, hardware, and assemblies.
+      </div>
+    </div>
+  );
+}
+
 function StemSketchSection({ designs, onDeleted }: {
   designs: StemSketchDesign[];
   onDeleted: (id: string) => void;
@@ -827,6 +908,11 @@ function StemSketchSection({ designs, onDeleted }: {
   return (
     <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
       <SectionHeader icon="✏️" title="STEM Sketch" href="/tools/stem-sketch" linkLabel="Open STEM Sketch" />
+      {/* Tutorials live above the designs, in their own block — guided
+          practice and personal projects stay visually separate. */}
+      <StemSketchTutorials />
+      <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 10,
+        borderTop: "2px solid #f0f0f0", paddingTop: 14 }}>✏️ My Designs</div>
       {designs.length === 0 ? (
         <p style={{ fontSize: 14, color: "#888", margin: 0 }}>
           No saved designs yet. Open STEM Sketch and save your first design!
