@@ -639,6 +639,83 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
     }
   }
 
+  // ── Placement sanity ─────────────────────────────────────────────────────
+  // A bathroom "has" its fixtures even if the tub, sink and toilet are piled
+  // on top of each other — these checks catch that class of cheat/mistake so
+  // the furnishings/doors auto-tiers stay honest.
+  if (level.furniture.length > 1) {
+    const CHAIR_KINDS = new Set(['dining-chair', 'office-chair']);
+    const half = (f: FurnitureItem) => {
+      const c = Math.abs(Math.cos(f.rotation)), s = Math.abs(Math.sin(f.rotation));
+      return {
+        hx: (f.width / 2) * c + (f.depth / 2) * s,
+        hy: (f.width / 2) * s + (f.depth / 2) * c,
+      };
+    };
+    let overlapPairs = 0;
+    for (let i = 0; i < level.furniture.length; i++) {
+      const a = level.furniture[i];
+      if (CHAIR_KINDS.has(a.kind)) continue; // tucked chairs overlap by design
+      const ha = half(a);
+      for (let j = i + 1; j < level.furniture.length; j++) {
+        const b = level.furniture[j];
+        if (CHAIR_KINDS.has(b.kind)) continue;
+        const hb = half(b);
+        const ox = Math.min(a.position.x + ha.hx, b.position.x + hb.hx) - Math.max(a.position.x - ha.hx, b.position.x - hb.hx);
+        const oy = Math.min(a.position.y + ha.hy, b.position.y + hb.hy) - Math.max(a.position.y - ha.hy, b.position.y - hb.hy);
+        if (ox <= 0 || oy <= 0) continue;
+        const overlap = ox * oy;
+        const minArea = Math.min(ha.hx * ha.hy, hb.hx * hb.hy) * 4;
+        if (overlap > minArea * 0.25) overlapPairs++;
+      }
+    }
+    checks.push({
+      id: 'furnishings-overlap', group: 'OVERALL',
+      label: 'Furniture placed without overlapping',
+      status: overlapPairs === 0 ? 'pass' : 'fail',
+      detail: overlapPairs === 0
+        ? 'Nothing is stacked on anything else'
+        : `${overlapPairs} pair${overlapPairs > 1 ? 's' : ''} of pieces overlap — spread them out`,
+    });
+  }
+  if (level.doors.some(d => d.doorType === 'room' || d.doorType === 'entry') && level.furniture.length > 0) {
+    let blockedDoors = 0;
+    for (const d of level.doors) {
+      if (d.doorType !== 'room' && d.doorType !== 'entry') continue;
+      const w = level.walls.find(x => x.id === d.wallId);
+      if (!w) continue;
+      const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y;
+      const L = Math.hypot(dx, dy);
+      if (L < 1e-6) continue;
+      const ux = dx / L, uy = dy / L;
+      const nx = -uy, ny = ux;
+      const hingeAlong = d.hingeSide === 'start' ? d.positionAlong - d.width / 2 : d.positionAlong + d.width / 2;
+      const hx = w.start.x + ux * hingeAlong, hy = w.start.y + uy * hingeAlong;
+      const side = d.flipped ? -1 : 1; // which side of the wall the leaf swings into
+      let hit = false;
+      for (const f of level.furniture) {
+        const sideDot = (f.position.x - hx) * nx * side + (f.position.y - hy) * ny * side;
+        if (sideDot <= 0) continue; // furniture on the other side of the wall
+        const c = Math.abs(Math.cos(f.rotation)), s = Math.abs(Math.sin(f.rotation));
+        const fhx = (f.width / 2) * c + (f.depth / 2) * s;
+        const fhy = (f.width / 2) * s + (f.depth / 2) * c;
+        // Nearest point of the furniture's bbox to the hinge.
+        const qx = Math.max(f.position.x - fhx, Math.min(hx, f.position.x + fhx));
+        const qy = Math.max(f.position.y - fhy, Math.min(hy, f.position.y + fhy));
+        if (Math.hypot(qx - hx, qy - hy) < d.width - 1) { hit = true; break; }
+      }
+      if (hit) blockedDoors++;
+    }
+    checks.push({
+      id: 'door-swings', group: 'OVERALL',
+      label: 'Door swings clear of furniture',
+      status: blockedDoors === 0 ? 'pass' : 'fail',
+      detail: blockedDoors === 0
+        ? 'No door hits anything when it opens'
+        : `${blockedDoors} door${blockedDoors > 1 ? 's' : ''} would hit furniture when opened — move the furniture or flip the swing`,
+    });
+  }
+
   return checks;
 }
 

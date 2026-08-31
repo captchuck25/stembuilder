@@ -44,7 +44,11 @@ export interface RubricCategory {
   scoring: RubricScoring;
   autoSource?: RubricAutoSource;   // required when scoring === 'auto'
   deliverable: RubricDeliverable;  // category hidden when deliverable excluded
-  tiers: RubricTier[];             // best → worst (4 by convention)
+  tiers: RubricTier[];             // best → worst (4 tiered; 2 = yes/no checkbox)
+  // The engine may certify "met" but can't judge QUALITY (fixtures could be
+  // stacked in a corner) — when set, the auto suggestion caps at tier 2 and
+  // the top tier is the teacher's to award.
+  topTierNeedsTeacher?: boolean;
 }
 
 export interface RubricBonus {
@@ -124,8 +128,11 @@ export const DEFAULT_GRADING_RUBRIC: GradingRubric = {
     },
     {
       id: 'furnishings', name: 'Furnishings & fixtures', scoring: 'auto', autoSource: 'furnishings', deliverable: 'floor-plan',
+      // The engine verifies presence + no overlaps + clear door swings, but
+      // "displays quality room size and function" is a human call.
+      topTierNeedsTeacher: true,
       tiers: T(
-        'Home is fully furnished. Furniture and fixtures give a viewer an understanding of the home and display quality room size and function.',
+        'Home is fully furnished. Furniture and fixtures give a viewer an understanding of the home and display quality room size and function. (Teacher confirms full credit.)',
         'Home is furnished. Some furnishings or fixtures are out of place.',
         'Furnishings or fixtures are not present or do not fit in the home.',
         'No furnishings or fixtures.',
@@ -177,35 +184,38 @@ export const TEACHER_CATEGORY_PRESETS: Array<Omit<RubricCategory, 'id'>> = [
       'Hard to read; little care in presentation.',
     ),
   },
+  // Completion rows are simple YES/NO (two tiers) — "roof plan complete"
+  // doesn't need four quality degrees unless the teacher rewrites it.
   {
     name: 'Roof plan complete', scoring: 'teacher', deliverable: 'roof-plan',
-    tiers: T(
-      'Roof plan is complete and coherent — ridges, valleys and overhangs all resolved.',
-      'Roof plan is complete with minor issues.',
-      'Roof plan is started but unresolved in places.',
-      'No usable roof plan.',
-    ),
+    tiers: [
+      { points: 10, descriptor: 'Roof plan is complete.' },
+      { points: 0, descriptor: 'Not complete.' },
+    ],
   },
   {
     name: 'Cross section complete', scoring: 'teacher', deliverable: 'section',
-    tiers: T(
-      'Cross section is complete and reads correctly (foundation, walls, roof structure).',
-      'Cross section is complete with minor issues.',
-      'Cross section is partially done.',
-      'No usable cross section.',
-    ),
+    tiers: [
+      { points: 10, descriptor: 'Cross section is complete.' },
+      { points: 0, descriptor: 'Not complete.' },
+    ],
   },
   {
     name: 'Elevations complete', scoring: 'teacher', deliverable: 'elevations',
-    tiers: T(
-      'All four elevations are complete and consistent with the plan.',
-      'Elevations complete with minor inconsistencies.',
-      'Some elevations missing or inconsistent.',
-      'No usable elevations.',
-    ),
+    tiers: [
+      { points: 10, descriptor: 'All four elevations are complete.' },
+      { points: 0, descriptor: 'Not complete.' },
+    ],
   },
   {
-    name: 'Custom category', scoring: 'teacher', deliverable: 'floor-plan',
+    name: 'Custom yes/no check', scoring: 'teacher', deliverable: 'floor-plan',
+    tiers: [
+      { points: 10, descriptor: 'Done.' },
+      { points: 0, descriptor: 'Not done.' },
+    ],
+  },
+  {
+    name: 'Custom tiered category', scoring: 'teacher', deliverable: 'floor-plan',
     tiers: T('Excellent.', 'Good.', 'Needs work.', 'Incomplete.'),
   },
 ];
@@ -225,9 +235,10 @@ function checksForSource(checks: RubricCheck[], source: RubricAutoSource): Rubri
       return checks.filter(c =>
         c.id.endsWith('-doors') || c.id.endsWith('-extra-door')
         || c.id === 'front-door' || c.id === 'back-door'
-        || c.id === 'GARAGE-garage-door' || c.id === 'GARAGE-house-door');
+        || c.id === 'GARAGE-garage-door' || c.id === 'GARAGE-house-door'
+        || c.id === 'door-swings');
     case 'furnishings':
-      return checks.filter(c => c.id.includes('-furn-'));
+      return checks.filter(c => c.id.includes('-furn-') || c.id === 'furnishings-overlap');
     case 'closets':
       return checks.filter(c => c.id.endsWith('-closet'));
   }
@@ -294,7 +305,14 @@ export function computeAutoTiers(
   const out: Record<string, AutoTierResult> = {};
   for (const cat of rubric.categories) {
     if (cat.scoring !== 'auto' || !cat.autoSource) continue;
-    out[cat.id] = placeTier(checksForSource(checks, cat.autoSource), cat.autoSource, ctx);
+    let placed = placeTier(checksForSource(checks, cat.autoSource), cat.autoSource, ctx);
+    if (cat.topTierNeedsTeacher && placed.tier === 0) {
+      placed = {
+        tier: 1,
+        evidence: `${placed.evidence} Everything checks out — the top tier is the teacher's call on quality.`,
+      };
+    }
+    out[cat.id] = placed;
   }
   return out;
 }
