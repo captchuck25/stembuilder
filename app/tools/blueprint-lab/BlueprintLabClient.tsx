@@ -41,7 +41,7 @@ import {
   Project, RoomLabel, SectionCut, Selection, Stair, StairShape, TextLabel, ToolId, Vec2, Wall, WallStatus, WallType,
   Window, WindowType, WindowTypeSettings, emptyLevel, makeId, newProject,
 } from './engine/types';
-import { autoDetectRoomBoundary, diningChairPlacements, dist, driveDimension, polygonAreaSqFt, wallPolygon } from './engine/geometry';
+import { autoDetectRoomBoundary, diningChairPlacements, dist, driveDimension, inferDimDriveOwner, polygonAreaSqFt, wallPolygon } from './engine/geometry';
 import { infiniteLineIntersection } from './engine/sectionEdit';
 import { syncLinkedStairs, linkedGeometryPatch } from './engine/stairs';
 import { buildPrimarySectionCut } from './engine/sectionPrimitives';
@@ -992,9 +992,11 @@ export default function BlueprintLabClient() {
     if (patch.offset != null) setDimensionOffset(patch.offset);
   }, [updateLevel]);
 
-  // Driving dimension: move the co-selected element so this dimension's measured
-  // length becomes `targetInches`. One setProject ⇒ one undo entry. The element
-  // is whichever drivable object is currently selected alongside the dimension.
+  // Driving dimension: move an element so this dimension's measured length
+  // becomes `targetInches`. One setProject ⇒ one undo entry. The element is
+  // the drivable object co-selected alongside the dimension — or, when the
+  // dim is selected ALONE, whatever its anchors point at (so typing into the
+  // Measured field just works: a dim to a door edge moves the door).
   const handleDriveDimension = useCallback((dimId: string, targetInches: number) => {
     setProject(p => {
       const level = p.levels.find(l => l.id === p.activeLevelId);
@@ -1002,7 +1004,8 @@ export default function BlueprintLabClient() {
       const dim = level.dimensions.find(d => d.id === dimId);
       if (!dim) return p;
       const el = selections.find(s =>
-        s.kind === 'wall' || s.kind === 'door' || s.kind === 'window' || s.kind === 'furniture' || s.kind === 'stair');
+        s.kind === 'wall' || s.kind === 'door' || s.kind === 'window' || s.kind === 'furniture' || s.kind === 'stair')
+        ?? inferDimDriveOwner(level, dim);
       if (!el) return p;
       const next = driveDimension(level, dim, { kind: el.kind, id: el.id }, targetInches);
       if (!next) return p;

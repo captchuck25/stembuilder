@@ -431,7 +431,26 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       });
     }
 
-    if (req.minDoors) {
+    if (req.roomType === 'GARAGE') {
+      // Garages get SPECIFIC door checks instead of a generic count: the
+      // overhead garage door, and a regular door connecting into the house.
+      const garageDoors = level.doors.filter(d => d.doorType === 'garage');
+      const houseDoors = level.doors.filter(d => d.doorType !== 'garage');
+      const badG = matched.filter(r => openingsOnRoom(level, r, garageDoors) < 1);
+      checks.push({
+        id: 'GARAGE-garage-door', group,
+        label: 'Has a garage door',
+        status: badG.length === 0 ? 'pass' : 'fail',
+        detail: badG.length === 0 ? 'Overhead door placed' : 'Place a Garage door (door tool → Garage door)',
+      });
+      const badH = matched.filter(r => openingsOnRoom(level, r, houseDoors) < 1);
+      checks.push({
+        id: 'GARAGE-house-door', group,
+        label: 'Door into the house',
+        status: badH.length === 0 ? 'pass' : 'fail',
+        detail: badH.length === 0 ? 'Access door placed' : 'Add a regular door connecting the garage to the house',
+      });
+    } else if (req.minDoors) {
       const bad = matched.filter(r => openingsOnRoom(level, r, level.doors) < req.minDoors!);
       checks.push({
         id: `${req.roomType}-doors`, group,

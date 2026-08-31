@@ -10,7 +10,7 @@ import {
   WINDOW_DEFAULTS, Window, WindowType, WindowTypeSettings,
   formatImperial,
 } from '../engine/types';
-import { resolveDimAnchor } from '../engine/geometry';
+import { inferDimDriveOwner, resolveDimAnchor } from '../engine/geometry';
 import { useState } from 'react';
 import { wallAngleDeg, wallLength } from '../engine/geometry';
 import { T } from '../engine/theme';
@@ -241,6 +241,7 @@ export default function PropertiesPanel({
           activeLevel={activeLevel}
           onUpdate={p => onUpdateDimensions(selectedDimensions.map(d => d.id), p)}
           onDelete={onDelete}
+          onDrive={onDriveDimension}
         />
       </aside>
     );
@@ -1810,9 +1811,10 @@ function DrivingDimensionEditor({ dim, activeLevel, elementLabel, onDrive }: {
 
 // ─── Dimension editor ────────────────────────────────────────────────────────
 
-function DimensionEditor({ dims, activeLevel, onUpdate, onDelete }: {
+function DimensionEditor({ dims, activeLevel, onUpdate, onDelete, onDrive }: {
   dims: Dimension[]; activeLevel: Level;
   onUpdate: (p: Partial<Dimension>) => void; onDelete: () => void;
+  onDrive: (dimId: string, inches: number) => void;
 }) {
   const d = dims[0];
   // Resolved length: depends on the anchored objects' current positions.
@@ -1820,14 +1822,39 @@ function DimensionEditor({ dims, activeLevel, onUpdate, onDelete }: {
   const b = resolveDimAnchor(d.end, activeLevel);
   const len = (a && b) ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
   const single = dims.length === 1;
+  // A dim whose anchors identify a movable element makes Measured EDITABLE:
+  // type a distance and the element moves (no co-selection needed).
+  const driveOwner = single ? inferDimDriveOwner(activeLevel, d) : null;
   return (
     <div>
       {single && (
         <>
           <div style={ROW}>
             <span style={LABEL}>Measured</span>
-            <span style={VALUE}>{formatImperial(len)}</span>
+            {driveOwner ? (
+              <input
+                key={Math.round(len * 100)}
+                defaultValue={formatImperial(len)}
+                onFocus={e => { inputFocus(e); e.currentTarget.select(); }}
+                onBlur={inputBlur}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const v = parseLengthInput(e.currentTarget.value);
+                    if (v != null) onDrive(d.id, v);
+                  }
+                }}
+                style={INPUT}
+              />
+            ) : (
+              <span style={VALUE}>{formatImperial(len)}</span>
+            )}
           </div>
+          {driveOwner && (
+            <div style={{ padding: '0 16px 6px', fontSize: 11, color: T.inkMuted, lineHeight: 1.5 }}>
+              Type a distance + Enter — the {driveOwner.kind} moves to match.
+            </div>
+          )}
           <div style={{ height: 1, background: T.line, margin: '8px 0' }} />
         </>
       )}

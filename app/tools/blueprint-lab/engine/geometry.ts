@@ -1001,6 +1001,22 @@ export function nearestElementAnchor(
 // it, that endpoint is re-anchored so the dim tracks the element afterward.
 // Returns a NEW Level with the dim (re)anchored and the element moved, or null
 // if the dimension can't be driven from this element.
+// Which element should a LONE selected dimension drive? Prefer an end whose
+// anchor belongs to a movable element (door/window/furniture/stair) — the
+// other end stays fixed. Falls back to a wall owner (stretch), else null.
+// Lets the Measured field in the dimension panel be directly editable
+// without co-selecting the element first.
+export function inferDimDriveOwner(
+  level: Level, dim: Dimension,
+): { kind: SelectionKind; id: string } | null {
+  const oA = dimAnchorOwner(dim.start);
+  const oB = dimAnchorOwner(dim.end);
+  if (oA && oB && oA.kind === oB.kind && oA.id === oB.id) return null; // both ends on one element
+  const movable = (o: { kind: SelectionKind; id: string } | null) =>
+    o && o.kind !== 'wall' ? o : null;
+  return movable(oA) ?? movable(oB) ?? oA ?? oB;
+}
+
 export function driveDimension(
   level: Level, dim: Dimension, owner: { kind: SelectionKind; id: string }, targetLen: number,
 ): Level | null {

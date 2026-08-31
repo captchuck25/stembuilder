@@ -348,13 +348,18 @@ function pushOpeningGroupPrimitives(
   const casingTop    = top + EP_TRIM_WIDTH;
   const casingBottom = isWindow ? bottom - EP_TRIM_WIDTH : bottom;
 
-  // Sidelight extension (single entry doors only).
+  // Sidelight extension (single entry doors only). Sidelites sit FLUSH
+  // against the door slab — exactly like the plan's opening cut (door width +
+  // sidelite widths, no trim in between). The casing then wraps the whole
+  // unit. Adding an extra trim width between slab and sidelite (the old
+  // behavior) pushed the drawn opening ~5" wider per side than the real
+  // opening, so doors near a corner looked like they touched it.
   const isSingleDoor = !isWindow && group.length === 1;
   const hasLeftSidelight  = isSingleDoor && (first.sidePanels === 'left'  || first.sidePanels === 'both') && !!first.sidePanelWidth;
   const hasRightSidelight = isSingleDoor && (first.sidePanels === 'right' || first.sidePanels === 'both') && !!first.sidePanelWidth;
   const slWidth = first.sidePanelWidth ?? 0;
-  const outerCasingLeft  = hasLeftSidelight  ? casingLeft  - (slWidth + EP_TRIM_WIDTH) : casingLeft;
-  const outerCasingRight = hasRightSidelight ? casingRight + (slWidth + EP_TRIM_WIDTH) : casingRight;
+  const outerCasingLeft  = hasLeftSidelight  ? first.x - slWidth - EP_TRIM_WIDTH : casingLeft;
+  const outerCasingRight = hasRightSidelight ? first.x + first.width + slWidth + EP_TRIM_WIDTH : casingRight;
 
   // Casing (+ integrated sill for windows) — single merged polygon.
   if (isWindow) {
@@ -395,18 +400,18 @@ function pushOpeningGroupPrimitives(
     });
   }
 
-  // Sidelights (entry doors only).
+  // Sidelights (entry doors only) — flush against the door slab.
   if (hasLeftSidelight) {
     out.push({
       id: id('sidelight-L'), kind: 'polyline',
-      verts: rectVerts(casingLeft - slWidth, bottom, slWidth, h),
+      verts: rectVerts(first.x - slWidth, bottom, slWidth, h),
       closed: true, style: 'normal', fill: 'glass',
     });
   }
   if (hasRightSidelight) {
     out.push({
       id: id('sidelight-R'), kind: 'polyline',
-      verts: rectVerts(casingRight, bottom, slWidth, h),
+      verts: rectVerts(first.x + first.width, bottom, slWidth, h),
       closed: true, style: 'normal', fill: 'glass',
     });
   }
