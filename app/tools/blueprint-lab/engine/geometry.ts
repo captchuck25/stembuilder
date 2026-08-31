@@ -310,6 +310,29 @@ export function snapToLineFeatures(
     }
   }
 
+  // CROSS junctions — one wall passing THROUGH another. Neither endpoint is
+  // inside the other wall, so the T-junction pass above never fires, yet the
+  // crossing makes four real visible corners (face × face intersections).
+  for (let i = 0; i < walls.length; i++) {
+    for (let j = i + 1; j < walls.length; j++) {
+      const A = walls[i], B = walls[j];
+      const x = segmentIntersection(A.start, A.end, B.start, B.end);
+      if (!x) continue;
+      // Skip near-endpoint meets (L/T junctions — handled above).
+      const MARGIN = 2;
+      if (Math.hypot(x.x - A.start.x, x.y - A.start.y) < MARGIN) continue;
+      if (Math.hypot(x.x - A.end.x,   x.y - A.end.y)   < MARGIN) continue;
+      if (Math.hypot(x.x - B.start.x, x.y - B.start.y) < MARGIN) continue;
+      if (Math.hypot(x.x - B.end.x,   x.y - B.end.y)   < MARGIN) continue;
+      for (const sA of [1, -1] as const) {
+        for (const sB of [1, -1] as const) {
+          const pt = faceLineIntersection(A, B, sA, sB);
+          if (pt) considerPoint(pt, 'endpoint', `${A.id}x${B.id}`, 0.55);
+        }
+      }
+    }
+  }
+
   // Arbitrary polylines (e.g. already-measured room boundaries). Each vertex is
   // a corner, each segment contributes a midpoint and an on-edge projection —
   // so a new room boundary can lock exactly onto an adjacent room's outline

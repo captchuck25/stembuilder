@@ -299,6 +299,11 @@ function exteriorDoors(level: Level): Door[] {
 const CLOSET_TYPES = new Set(['CLOSET', 'WALK-IN CLOSET']);
 // Unfinished / outdoor spaces excluded from the total-SF (living area) sum.
 const NON_LIVING_TYPES = new Set(['GARAGE', 'DECK', 'PATIO', 'PORCH', 'BALCONY']);
+const BEDROOM_TYPES = new Set(['BEDROOM', 'MASTER BEDROOM', 'GUEST BEDROOM', 'NURSERY']);
+const BATH_TYPES = new Set(['BATHROOM', 'MASTER BATH', 'HALF BATH', 'POWDER ROOM']);
+// Rooms that are themselves circulation — an added hallway/foyer doesn't
+// need a door of its own.
+const CIRCULATION_TYPES = new Set(['HALLWAY', 'FOYER', 'ENTRY', 'STAIRS', 'LANDING']);
 const FURNITURE_NAMES: Partial<Record<FurnitureKind, string>> = {
   'bed-twin': 'bed', 'bed-full': 'bed', 'bed-queen': 'bed', 'bed-king': 'bed',
   'sink-vanity': 'sink', 'sink-pedestal': 'sink', 'sink-kitchen': 'sink',
@@ -394,6 +399,31 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       detail: ext.length >= 2 ? 'Second exterior door placed' : 'Needs a second exterior door',
     });
   }
+
+  // ── Door-access accounting ──────────────────────────────────────────────
+  // A door "gets you into" a room only if its other side isn't a closet —
+  // and for bedrooms, isn't an ensuite bathroom either. Otherwise a master
+  // bedroom with a closet door + bath door but no way IN reads as ✓.
+  const doorRooms = new Map<string, ResolvedRoom[]>();
+  for (const d of level.doors) {
+    const op = openingPoint(level, d);
+    if (!op) continue;
+    doorRooms.set(d.id, rooms.filter(r =>
+      r.poly && !r.needsBoundary && distToPerimeter(op.p, r.poly) <= op.tol));
+  }
+  const accessDoorCount = (r: ResolvedRoom): number => {
+    const rType = r.label.name.toUpperCase().trim();
+    let n = 0;
+    for (const d of level.doors) {
+      const rs = doorRooms.get(d.id) ?? [];
+      if (!rs.includes(r)) continue;
+      const others = rs.filter(x => x !== r).map(x => x.label.name.toUpperCase().trim());
+      if (others.some(t => CLOSET_TYPES.has(t))) continue;
+      if (BEDROOM_TYPES.has(rType) && others.some(t => BATH_TYPES.has(t))) continue;
+      n++;
+    }
+    return n;
+  };
 
   // ── Per-room-type sections ──
   const closets = rooms.filter(r => CLOSET_TYPES.has(r.label.name.toUpperCase().trim()));
@@ -500,13 +530,16 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
           'Access door placed', 'Add a regular door connecting the garage to the house'),
       });
     } else if (req.minDoors) {
-      const bad = matched.filter(r => openingsOnRoom(level, r, level.doors) < req.minDoors!);
+      const bad = matched.filter(r => accessDoorCount(r) < req.minDoors!);
+      const isBedroom = BEDROOM_TYPES.has(req.roomType);
       checks.push({
         id: `${req.roomType}-doors`, group,
         label: req.minDoors > 1 ? `${req.minDoors}+ doors` : 'Has a door',
         status: subStatus(bad.length === 0),
         detail: subDetail(bad.length === 0,
-          'Every room has one', `${bad.length} of ${matched.length} missing doors`),
+          'Every room has one',
+          `${bad.length} of ${matched.length} missing doors`
+            + (isBedroom ? ' — closet/bathroom doors don’t count as the way in' : '')),
       });
     }
 
@@ -577,6 +610,16 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
         detail: bad.length === 0
           ? 'Hallways are wide enough'
           : `${bad.length} of ${rs.length} narrower than 3'`,
+      });
+    }
+    // Any added functional room needs a way in (circulation rooms exempt).
+    if (!CIRCULATION_TYPES.has(t) && !NON_LIVING_TYPES.has(t)) {
+      const bad = usable.filter(r => accessDoorCount(r) < 1);
+      checks.push({
+        id: `${t}-extra-door`, group,
+        label: 'Has a door',
+        status: bad.length === 0 && usable.length === rs.length ? 'pass' : 'fail',
+        detail: bad.length === 0 ? 'Every room has one' : `${bad.length} of ${rs.length} missing doors`,
       });
     }
     const furn = DEFAULT_FURNISHINGS[t];
