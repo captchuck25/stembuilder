@@ -204,7 +204,9 @@ export const ROOM_TYPES: readonly string[] = [
   // Sleeping
   'BEDROOM', 'MASTER BEDROOM', 'GUEST BEDROOM', 'NURSERY',
   // Bath
-  'BATHROOM', 'HALF BATH', 'MASTER BATH', 'POWDER ROOM',
+  // ('POWDER ROOM' retired 2026-08-31 — redundant with HALF BATH; still
+  // recognized by the rubric for old saves, just not offered in the picker.)
+  'BATHROOM', 'HALF BATH', 'MASTER BATH',
   // Living
   'LIVING ROOM', 'FAMILY ROOM', 'GREAT ROOM', 'DEN',
   // Eating / cooking

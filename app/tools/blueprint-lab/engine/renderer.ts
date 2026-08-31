@@ -1867,10 +1867,32 @@ export function drawFurniture(ctx: CanvasRenderingContext2D, f: FurnitureItem, v
   ctx.fillStyle = selected ? 'rgba(79,124,255,0.18)' : '#ffffff';
   ctx.strokeStyle = selected ? SELECTED_STROKE : '#1f2540';
   ctx.lineWidth = 1.1;
-  ctx.fillRect(-w / 2, -d / 2, w, d);
-  ctx.strokeRect(-w / 2, -d / 2, w, d);
+  if (f.kind === 'cabinet-corner') {
+    // True corner-unit footprint: two cabinet-depth legs along the walls with
+    // a 45° chamfer bridging their fronts — not a full square.
+    const leg = cornerCabinetLegPx(f, w, d);
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -d / 2);
+    ctx.lineTo(w / 2, -d / 2);
+    ctx.lineTo(w / 2, -d / 2 + leg);
+    ctx.lineTo(-w / 2 + leg, d / 2);
+    ctx.lineTo(-w / 2, d / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.fillRect(-w / 2, -d / 2, w, d);
+    ctx.strokeRect(-w / 2, -d / 2, w, d);
+  }
   drawFurnitureSymbol(ctx, f, w, d, selected);
   ctx.restore();
+}
+
+// Screen-px leg depth of a corner cabinet: standard 24" base-cabinet depth,
+// clamped so small units still leave a visible chamfer.
+function cornerCabinetLegPx(f: FurnitureItem, w: number, d: number): number {
+  const ppi = f.width > 0 ? w / f.width : 1;
+  return Math.min(24 * ppi, Math.min(w, d) * 0.8);
 }
 
 // Per-symbol interior hint — keeps the symbol readable beyond just a label.
@@ -2044,7 +2066,9 @@ function drawFurnitureSymbol(
       const bh = d - 2 * pad;
       const by = -d / 2 + pad;
       for (const sx of [-1, 1]) {
-        const bx = sx === -1 ? -w / 2 + pad : pad + gap / 2;
+        // Left basin insets `pad` from the left edge; the right one mirrors
+        // it exactly (was `pad + gap/2`, pushing it flush to the right edge).
+        const bx = sx === -1 ? -w / 2 + pad : gap / 2;
         ctx.strokeRect(bx, by, bw, bh);
         ctx.beginPath();
         ctx.moveTo(bx, by);
@@ -2132,31 +2156,30 @@ function drawFurnitureSymbol(
       break;
     }
     case 'cabinet-corner': {
-      // Square corner unit: back edges sit in the wall corner (-x / -y); a
-      // 45° DOOR SLAB (double line) chamfers the room-side (+x/+y) corner —
-      // same corner the 3D model's angled door faces. A lazy-susan circle
-      // (with cross) inside makes it read unmistakably as a corner cabinet,
-      // and counter-edge lines run along the two room-facing sides.
-      const cc = Math.min(w, d) * 0.55;
-      const edge = Math.min(d * 0.10, 2.5);
-      // Counter front edges along +x and +y faces (stop at the chamfer).
+      // Interior detail on the L+chamfer footprint (drawn by drawFurniture):
+      // double-line door slab along the chamfer with a knob, and a lazy-susan
+      // circle with cross toward the back corner.
+      const leg = cornerCabinetLegPx(f, w, d);
+      const ax = w / 2, ay = -d / 2 + leg;         // chamfer start (on +x end cap)
+      const bx = -w / 2 + leg, by = d / 2;         // chamfer end (on +y end cap)
+      // Unit vector along chamfer + inward normal.
+      const clen = Math.hypot(bx - ax, by - ay) || 1;
+      const uxc = (bx - ax) / clen, uyc = (by - ay) / clen;
+      const nxc = -uyc, nyc = uxc; // points toward the back corner (inward)
+      const off = 2.4;
       ctx.beginPath();
-      ctx.moveTo(-w / 2 + 2, d / 2 - edge); ctx.lineTo(w / 2 - cc, d / 2 - edge);
-      ctx.moveTo(w / 2 - edge, -d / 2 + 2); ctx.lineTo(w / 2 - edge, d / 2 - cc);
-      ctx.stroke();
-      // Door slab across the chamfer — two parallel lines + knob dot.
-      const off = 2.2;
-      ctx.beginPath();
-      ctx.moveTo(w / 2 - cc, d / 2 - 2); ctx.lineTo(w / 2 - 2, d / 2 - cc);
-      ctx.moveTo(w / 2 - cc + off, d / 2 - 2 - off); ctx.lineTo(w / 2 - 2 - off, d / 2 - cc + off);
+      ctx.moveTo(ax + nxc * 1.2, ay + nyc * 1.2);
+      ctx.lineTo(bx + nxc * 1.2, by + nyc * 1.2);
+      ctx.moveTo(ax + nxc * (1.2 + off), ay + nyc * (1.2 + off));
+      ctx.lineTo(bx + nxc * (1.2 + off), by + nyc * (1.2 + off));
       ctx.stroke();
       ctx.fillStyle = stroke;
       ctx.beginPath();
-      ctx.arc(w / 2 - cc * 0.62, d / 2 - cc * 0.62, 1.4, 0, Math.PI * 2);
+      ctx.arc((ax + bx) / 2 + nxc * (2 + off), (ay + by) / 2 + nyc * (2 + off), 1.4, 0, Math.PI * 2);
       ctx.fill();
-      // Lazy susan: circle biased toward the back corner, with a + cross.
-      const sr = Math.min(w, d) * 0.28;
-      const scx = -w * 0.08, scy = -d * 0.08;
+      // Lazy susan toward the back corner.
+      const sr = Math.min(w, d) * 0.24;
+      const scx = -w * 0.14, scy = -d * 0.14;
       ctx.beginPath();
       ctx.arc(scx, scy, sr, 0, Math.PI * 2);
       ctx.stroke();

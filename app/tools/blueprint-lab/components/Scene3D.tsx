@@ -228,6 +228,7 @@ export default function Scene3D({ project }: { project: Project }) {
           minDistance={24}
           maxDistance={camDist * 4}
           maxPolarAngle={Math.PI / 2 - 0.02}
+          zoomToCursor
         />
       </Canvas>
 

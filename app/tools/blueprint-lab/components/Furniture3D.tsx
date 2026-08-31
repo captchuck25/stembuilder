@@ -548,16 +548,26 @@ function FridgeModel({ width: w, depth: d, sizeVariant }: ModelProps & { sizeVar
       </mesh>
       {isFrench ? (
         <>
-          {/* Two French doors */}
+          {/* Two French doors — thicker panels with a visible center seam */}
           {[-1, 1].map(sx => (
-            <mesh key={sx} position={[sx * w / 4, freezerH + fridgeH / 2, d / 2 + 0.1]} castShadow>
-              <boxGeometry args={[w / 2 - 0.3, fridgeH - 1, 0.3]} />
-              <meshStandardMaterial color={COL.metalLight} roughness={0.4} metalness={0.5} />
+            <mesh key={sx} position={[sx * (w / 4 + 0.2), freezerH + fridgeH / 2, d / 2 + 0.35]} castShadow>
+              <boxGeometry args={[w / 2 - 1, fridgeH - 1.6, 0.7]} />
+              <meshStandardMaterial color={COL.metalLight} roughness={0.35} metalness={0.55} />
             </mesh>
           ))}
+          {/* Center seam shadow line */}
+          <mesh position={[0, freezerH + fridgeH / 2, d / 2 + 0.36]}>
+            <boxGeometry args={[0.5, fridgeH - 1.6, 0.66]} />
+            <meshStandardMaterial color={COL.applianceDark} roughness={0.8} />
+          </mesh>
+          {/* Water/ice dispenser inset on the left door */}
+          <mesh position={[-w / 4 - 0.2, freezerH + fridgeH * 0.62, d / 2 + 0.72]}>
+            <boxGeometry args={[Math.min(8, w * 0.22), 11, 0.3]} />
+            <meshStandardMaterial color={COL.applianceDark} roughness={0.7} />
+          </mesh>
           {[-1, 1].map(sx => (
-            <mesh key={`uh${sx}`} position={[sx * 1.5, freezerH + fridgeH / 2, d / 2 + 0.45]}>
-              <cylinderGeometry args={[0.3, 0.3, fridgeH - 8, 10]} />
+            <mesh key={`uh${sx}`} position={[sx * 2, freezerH + fridgeH / 2, d / 2 + 1.05]}>
+              <cylinderGeometry args={[0.4, 0.4, fridgeH - 10, 10]} />
               <meshStandardMaterial color={COL.metalDark} roughness={0.2} metalness={0.85} />
             </mesh>
           ))}
@@ -565,25 +575,35 @@ function FridgeModel({ width: w, depth: d, sizeVariant }: ModelProps & { sizeVar
       ) : (
         <>
           {/* Single fridge door */}
-          <mesh position={[0, freezerH + fridgeH / 2, d / 2 + 0.1]} castShadow>
-            <boxGeometry args={[w - 0.5, fridgeH - 1, 0.3]} />
-            <meshStandardMaterial color={COL.metalLight} roughness={0.4} metalness={0.5} />
+          <mesh position={[0, freezerH + fridgeH / 2, d / 2 + 0.35]} castShadow>
+            <boxGeometry args={[w - 1, fridgeH - 1.6, 0.7]} />
+            <meshStandardMaterial color={COL.metalLight} roughness={0.35} metalness={0.55} />
           </mesh>
           {/* Single vertical handle on the right */}
-          <mesh position={[w / 2 - 2, freezerH + fridgeH / 2, d / 2 + 0.45]}>
-            <cylinderGeometry args={[0.3, 0.3, fridgeH - 8, 10]} />
+          <mesh position={[w / 2 - 2.5, freezerH + fridgeH / 2, d / 2 + 1.05]}>
+            <cylinderGeometry args={[0.4, 0.4, fridgeH - 10, 10]} />
             <meshStandardMaterial color={COL.metalDark} roughness={0.2} metalness={0.85} />
           </mesh>
         </>
       )}
-      {/* Freezer drawer */}
-      <mesh position={[0, freezerH / 2, d / 2 + 0.1]} castShadow>
-        <boxGeometry args={[w - 0.5, freezerH - 1, 0.3]} />
-        <meshStandardMaterial color={COL.metalLight} roughness={0.4} metalness={0.5} />
+      {/* Fridge/freezer divider seam */}
+      <mesh position={[0, freezerH, d / 2 + 0.34]}>
+        <boxGeometry args={[w - 0.8, 0.8, 0.6]} />
+        <meshStandardMaterial color={COL.applianceDark} roughness={0.8} />
       </mesh>
-      <mesh position={[0, freezerH - 2.5, d / 2 + 0.45]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.3, 0.3, w - 8, 10]} />
+      {/* Freezer drawer */}
+      <mesh position={[0, freezerH / 2, d / 2 + 0.35]} castShadow>
+        <boxGeometry args={[w - 1, freezerH - 1.6, 0.7]} />
+        <meshStandardMaterial color={COL.metalLight} roughness={0.35} metalness={0.55} />
+      </mesh>
+      <mesh position={[0, freezerH - 2.5, d / 2 + 1.05]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.4, 0.4, w - 10, 10]} />
         <meshStandardMaterial color={COL.metalDark} roughness={0.2} metalness={0.85} />
+      </mesh>
+      {/* Kick plate */}
+      <mesh position={[0, 1.5, d / 2 + 0.2]}>
+        <boxGeometry args={[w - 2, 3, 0.4]} />
+        <meshStandardMaterial color={COL.applianceDark} roughness={0.8} />
       </mesh>
     </group>
   );
@@ -744,38 +764,45 @@ function CabinetCornerModel({ width: w, depth: d, cabinetColor, countertopColor 
 }) {
   const cabH = 34.5;
   const counterT = 1.5;
-  const C = Math.min(w, d) * 0.55;              // chamfer leg length
-  const diagLen = Math.hypot(C, C);
-  const beta = Math.PI / 4;                     // 45° chamfer
-  // Diagonal runs from (w/2 − C, d/2) to (w/2, d/2 − C) in plan (x, z).
-  const midX = (w / 2 - C + w / 2) / 2;
-  const midZ = (d / 2 + d / 2 - C) / 2;
+  // Two cabinet-depth legs along the walls (back = −X/−Z) with a 45° door
+  // bridging their fronts — matches the 2D pentagon footprint exactly.
+  const leg = Math.min(24, Math.min(w, d) * 0.8);
+  // Chamfer runs from (w/2, −d/2+leg) to (−w/2+leg, d/2) in plan (x, z).
+  const ax = w / 2, az = -d / 2 + leg;
+  const bx = -w / 2 + leg, bz = d / 2;
+  const midX = (ax + bx) / 2, midZ = (az + bz) / 2;
+  const diagLen = Math.hypot(bx - ax, bz - az);
+  const beta = Math.atan2(-(bz - az), bx - ax);
   return (
     <group>
-      {/* Back slab (full width, rear depth) */}
-      <mesh position={[0, cabH / 2, -C / 4]} castShadow receiveShadow>
-        <boxGeometry args={[w, cabH, d - C / 2]} />
+      {/* Leg along the −Z wall (full width) */}
+      <mesh position={[0, cabH / 2, -d / 2 + leg / 2]} castShadow receiveShadow>
+        <boxGeometry args={[w, cabH, leg]} />
         <meshStandardMaterial color={cabinetColor} roughness={0.7} />
       </mesh>
-      {/* Front-left slab (fills up to where the chamfer starts) */}
-      <mesh position={[-C / 4, cabH / 2, d / 2 - C / 4]} castShadow receiveShadow>
-        <boxGeometry args={[w - C / 2, cabH, C / 2]} />
+      {/* Leg along the −X wall (remaining depth, z ∈ [−d/2+leg, d/2]) */}
+      <mesh position={[-w / 2 + leg / 2, cabH / 2, leg / 2]} castShadow receiveShadow>
+        <boxGeometry args={[leg, cabH, d - leg]} />
         <meshStandardMaterial color={cabinetColor} roughness={0.7} />
       </mesh>
-      {/* 45° door across the corner + knob */}
+      {/* 45° door bridging the leg fronts + knob */}
       <group position={[midX, 0, midZ]} rotation={[0, beta, 0]}>
         <mesh position={[0, cabH / 2, 0]} castShadow>
-          <boxGeometry args={[diagLen, cabH - 1.5, 0.6]} />
+          <boxGeometry args={[diagLen, cabH - 1.5, 0.8]} />
           <meshStandardMaterial color={cabinetColor} roughness={0.65} />
         </mesh>
-        <mesh position={[diagLen * 0.28, cabH * 0.55, 0.6]}>
+        <mesh position={[diagLen * 0.25, cabH * 0.55, 0.7]}>
           <boxGeometry args={[0.5, 3, 0.5]} />
           <meshStandardMaterial color={COL.metalDark} roughness={0.3} metalness={0.7} />
         </mesh>
       </group>
-      {/* Countertop — square slab with slight overhang */}
-      <mesh position={[0, cabH + counterT / 2, 0]} castShadow>
-        <boxGeometry args={[w + 0.5, counterT, d + 0.5]} />
+      {/* Countertop slabs over each leg (slight overhang past the fronts) */}
+      <mesh position={[0, cabH + counterT / 2, -d / 2 + (leg + 1) / 2]} castShadow>
+        <boxGeometry args={[w + 0.5, counterT, leg + 1]} />
+        <meshStandardMaterial color={countertopColor} roughness={0.35} />
+      </mesh>
+      <mesh position={[-w / 2 + (leg + 1) / 2, cabH + counterT / 2, leg / 2]} castShadow>
+        <boxGeometry args={[leg + 1, counterT, d - leg]} />
         <meshStandardMaterial color={countertopColor} roughness={0.35} />
       </mesh>
     </group>

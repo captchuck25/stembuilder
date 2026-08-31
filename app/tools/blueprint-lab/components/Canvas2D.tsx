@@ -512,8 +512,17 @@ export default function Canvas2D({
     const hit = snapToLineFeatures(level.lines ?? [], world, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries, level.doors, level.windows);
     if (hit) return hit.point;
     const prev = boundaryPoints[boundaryPoints.length - 1];
-    if (prev) return snapOrtho(prev, world);
-    return snapToGridOn ? snapToGrid(world, gridInches) : world;
+    const q = prev ? snapOrtho(prev, world) : { ...world };
+    // Ortho locks ONE axis to the previous point; the free axis aligns to any
+    // EARLIER vertex within tolerance — so the closing run lands perfectly
+    // across from the start point and corners come out square both ways.
+    const alignTol = Math.max(12 / vp.pxPerInch, 3);
+    for (const pt of boundaryPoints) {
+      if (Math.abs(q.x - pt.x) <= alignTol) q.x = pt.x;
+      if (Math.abs(q.y - pt.y) <= alignTol) q.y = pt.y;
+    }
+    if (prev) return q;
+    return snapToGridOn ? snapToGrid(q, gridInches) : q;
   }, [level.lines, level.walls, level.doors, level.windows, otherRoomBoundaries, boundaryPoints, vp.pxPerInch, snapToGridOn, gridInches]);
 
   // The discrete snap target under the cursor (corner / midpoint), if any —
