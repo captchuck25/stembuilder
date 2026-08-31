@@ -375,6 +375,17 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
     });
     if (matched.length === 0) continue; // sub-checks are meaningless with no rooms
 
+    // Sub-checks can't fully pass while rooms are still missing — with 1 of 2
+    // bedrooms drawn, "at least 10×10 ✓" would be a lie about the room that
+    // doesn't exist yet. They stay red with a "waiting on N more" note.
+    const missing = Math.max(0, req.count - matched.length);
+    const subStatus = (okSoFar: boolean): 'pass' | 'fail' =>
+      missing === 0 && okSoFar ? 'pass' : 'fail';
+    const subDetail = (okSoFar: boolean, passDetail: string, failDetail: string): string =>
+      okSoFar && missing > 0
+        ? `OK so far — waiting on ${missing} more room${missing > 1 ? 's' : ''}`
+        : okSoFar ? passDetail : failDetail;
+
     const unresolved = matched.filter(r => !r.poly);
     if (unresolved.length > 0) {
       checks.push({
@@ -413,11 +424,11 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       checks.push({
         id: `${req.roomType}-dims`, group,
         label: `At least ${fmtFt(req.minDims.a)} × ${fmtFt(req.minDims.b)}`,
-        status: bad.length === 0 ? 'pass' : 'fail',
-        detail: bad.length === 0
-          ? 'All meet the minimum'
-          : `${bad.length} of ${matched.length} too small`
-            + (nearMiss ? ' — rooms measure inside the walls, so draw a little bigger to allow for wall thickness' : ''),
+        status: subStatus(bad.length === 0),
+        detail: subDetail(bad.length === 0,
+          'All meet the minimum',
+          `${bad.length} of ${matched.length} too small`
+            + (nearMiss ? ' — rooms measure inside the walls, so draw a little bigger to allow for wall thickness' : '')),
       });
     }
 
@@ -426,8 +437,9 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       checks.push({
         id: `${req.roomType}-windows`, group,
         label: req.minWindows > 1 ? `${req.minWindows}+ windows` : 'Has a window',
-        status: bad.length === 0 ? 'pass' : 'fail',
-        detail: bad.length === 0 ? 'Every room has one' : `${bad.length} of ${matched.length} missing windows`,
+        status: subStatus(bad.length === 0),
+        detail: subDetail(bad.length === 0,
+          'Every room has one', `${bad.length} of ${matched.length} missing windows`),
       });
     }
 
@@ -440,23 +452,26 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       checks.push({
         id: 'GARAGE-garage-door', group,
         label: 'Has a garage door',
-        status: badG.length === 0 ? 'pass' : 'fail',
-        detail: badG.length === 0 ? 'Overhead door placed' : 'Place a Garage door (door tool → Garage door)',
+        status: subStatus(badG.length === 0),
+        detail: subDetail(badG.length === 0,
+          'Overhead door placed', 'Place a Garage door (door tool → Garage door)'),
       });
       const badH = matched.filter(r => openingsOnRoom(level, r, houseDoors) < 1);
       checks.push({
         id: 'GARAGE-house-door', group,
         label: 'Door into the house',
-        status: badH.length === 0 ? 'pass' : 'fail',
-        detail: badH.length === 0 ? 'Access door placed' : 'Add a regular door connecting the garage to the house',
+        status: subStatus(badH.length === 0),
+        detail: subDetail(badH.length === 0,
+          'Access door placed', 'Add a regular door connecting the garage to the house'),
       });
     } else if (req.minDoors) {
       const bad = matched.filter(r => openingsOnRoom(level, r, level.doors) < req.minDoors!);
       checks.push({
         id: `${req.roomType}-doors`, group,
         label: req.minDoors > 1 ? `${req.minDoors}+ doors` : 'Has a door',
-        status: bad.length === 0 ? 'pass' : 'fail',
-        detail: bad.length === 0 ? 'Every room has one' : `${bad.length} of ${matched.length} missing doors`,
+        status: subStatus(bad.length === 0),
+        detail: subDetail(bad.length === 0,
+          'Every room has one', `${bad.length} of ${matched.length} missing doors`),
       });
     }
 
@@ -467,10 +482,9 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
         checks.push({
           id: `${req.roomType}-furn-${g[0]}`, group,
           label: `Has ${groupName(g)}`,
-          status: bad.length === 0 ? 'pass' : 'fail',
-          detail: bad.length === 0
-            ? 'Placed in every room'
-            : `Missing in ${bad.length} of ${matched.length}`,
+          status: subStatus(bad.length === 0),
+          detail: subDetail(bad.length === 0,
+            'Placed in every room', `Missing in ${bad.length} of ${matched.length}`),
         });
       }
     }
@@ -493,10 +507,9 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       checks.push({
         id: `${req.roomType}-closet`, group,
         label: 'Attached closet',
-        status: bad.length === 0 ? 'pass' : 'fail',
-        detail: bad.length === 0
-          ? 'Closet connected by a door'
-          : `${bad.length} of ${matched.length} without a closet (label it CLOSET, connect with a door)`,
+        status: subStatus(bad.length === 0),
+        detail: subDetail(bad.length === 0, 'Closet connected by a door',
+          `${bad.length} of ${matched.length} without a closet (label it CLOSET, connect with a door)`),
       });
     }
   }

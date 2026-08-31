@@ -274,6 +274,8 @@ export default function Canvas2D({
 }: Canvas2DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Ctrl+C clipboard for furniture (session-local, survives selection changes).
+  const furnitureClipboardRef = useRef<FurnitureItem[] | null>(null);
 
   const [vp, setVp] = useState<CanvasState>({
     pan: { x: 0, y: 0 }, pxPerInch: 2, width: 800, height: 600,
@@ -505,7 +507,9 @@ export default function Canvas2D({
   }, [boundaryDraftRoomId, level.roomLabels]);
 
   const snapBoundaryPoint = useCallback((world: Vec2): Vec2 => {
-    const hit = snapToLineFeatures(level.lines ?? [], world, Math.max(26 / vp.pxPerInch, 6), level.walls, otherRoomBoundaries);
+    // ~36 screen px: boundary clicks should grab corners eagerly — students
+    // click fast and slightly off.
+    const hit = snapToLineFeatures(level.lines ?? [], world, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries);
     if (hit) return hit.point;
     const prev = boundaryPoints[boundaryPoints.length - 1];
     if (prev) return snapOrtho(prev, world);
@@ -516,7 +520,7 @@ export default function Canvas2D({
   // drives the CAD-style snap marker so the user can see the lock.
   const boundarySnapHit: LineSnapHit | null = useMemo(() => {
     if (!boundaryDraftRoomId || !hoverWorld) return null;
-    return snapToLineFeatures(level.lines ?? [], hoverWorld, Math.max(26 / vp.pxPerInch, 6), level.walls, otherRoomBoundaries);
+    return snapToLineFeatures(level.lines ?? [], hoverWorld, Math.max(36 / vp.pxPerInch, 8), level.walls, otherRoomBoundaries);
   }, [boundaryDraftRoomId, hoverWorld, level.lines, level.walls, otherRoomBoundaries, vp.pxPerInch]);
 
   // Where the next vertex would land — used for both the live preview line and
@@ -841,6 +845,43 @@ export default function Canvas2D({
     if (s !== p) return { point: s, feature: true };
     return { point: p, feature: false };
   }, [level.lines, level.walls, vp.pxPerInch]);
+
+  // Dragging a single furniture item near a wall pulls it flush against the
+  // wall's face (e.g. a bed against the bedroom wall). Uses the item's
+  // rotation-aware bbox vs axis-aligned walls; picks the smallest shift per
+  // axis within tolerance.
+  const snapFurnitureToWalls = useCallback((f: FurnitureItem, pos: Vec2): Vec2 => {
+    const SNAP_IN = 6;
+    const c = Math.abs(Math.cos(f.rotation)), s = Math.abs(Math.sin(f.rotation));
+    const hx = (f.width / 2) * c + (f.depth / 2) * s;
+    const hy = (f.width / 2) * s + (f.depth / 2) * c;
+    let bestDx: number | null = null;
+    let bestDy: number | null = null;
+    for (const w of level.walls) {
+      const horizontal = Math.abs(w.start.y - w.end.y) < 0.01;
+      const vertical   = Math.abs(w.start.x - w.end.x) < 0.01;
+      if (horizontal) {
+        const x0 = Math.min(w.start.x, w.end.x), x1 = Math.max(w.start.x, w.end.x);
+        if (pos.x + hx < x0 || pos.x - hx > x1) continue;
+        for (const face of [w.start.y - w.thickness / 2, w.start.y + w.thickness / 2]) {
+          for (const edge of [pos.y - hy, pos.y + hy]) {
+            const d = face - edge;
+            if (Math.abs(d) <= SNAP_IN && (bestDy == null || Math.abs(d) < Math.abs(bestDy))) bestDy = d;
+          }
+        }
+      } else if (vertical) {
+        const y0 = Math.min(w.start.y, w.end.y), y1 = Math.max(w.start.y, w.end.y);
+        if (pos.y + hy < y0 || pos.y - hy > y1) continue;
+        for (const face of [w.start.x - w.thickness / 2, w.start.x + w.thickness / 2]) {
+          for (const edge of [pos.x - hx, pos.x + hx]) {
+            const d = face - edge;
+            if (Math.abs(d) <= SNAP_IN && (bestDx == null || Math.abs(d) < Math.abs(bestDx))) bestDx = d;
+          }
+        }
+      }
+    }
+    return { x: pos.x + (bestDx ?? 0), y: pos.y + (bestDy ?? 0) };
+  }, [level.walls]);
 
   // The selected stair/furniture "grab handles" (own corners + edge midpoints)
   // the Move tool picks the piece up by.
@@ -2713,8 +2754,20 @@ export default function Canvas2D({
           end:   { x: orig.end.x   + dx, y: orig.end.y   + dy },
         });
       }
-      for (const [id, orig] of directDrag.originals.furniture)
-        onUpdateFurniture([id], { position: { x: orig.x + dx, y: orig.y + dy } });
+      // Single-furniture drags get the flush-to-wall snap; group drags move
+      // rigidly (snapping members individually would tear the group apart).
+      const dd = directDrag.originals;
+      const soloFurniture = dd.furniture.size === 1 && dd.walls.size === 0
+        && dd.stairs.size === 0 && dd.texts.size === 0 && dd.roomLabels.size === 0
+        && dd.lines.size === 0 && dd.dimensions.size === 0;
+      for (const [id, orig] of directDrag.originals.furniture) {
+        let p = { x: orig.x + dx, y: orig.y + dy };
+        if (soloFurniture) {
+          const f = level.furniture.find(x => x.id === id);
+          if (f) p = snapFurnitureToWalls(f, p);
+        }
+        onUpdateFurniture([id], { position: p });
+      }
       for (const [id, orig] of directDrag.originals.stairs)
         onUpdateStairs([id], { position: { x: orig.x + dx, y: orig.y + dy } });
       for (const [id, orig] of directDrag.originals.texts)
@@ -3060,6 +3113,36 @@ export default function Canvas2D({
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selections.length > 0) onDeleteSelections();
 
+      // Copy/paste for furniture (Ctrl/Cmd+C, Ctrl/Cmd+V). Pasted copies land
+      // 24" down-right of the originals and become the new selection, so a
+      // furnished bedroom can be duplicated piece by piece quickly.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        const furn = selections
+          .filter(s => s.kind === 'furniture')
+          .map(s => level.furniture.find(f => f.id === s.id))
+          .filter((f): f is FurnitureItem => !!f);
+        if (furn.length > 0) {
+          furnitureClipboardRef.current = furn.map(f => ({ ...f, position: { ...f.position } }));
+          e.preventDefault();
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        const clip = furnitureClipboardRef.current;
+        if (clip && clip.length > 0) {
+          const pasted = clip.map(f => ({
+            ...f,
+            id: makeId('furn'),
+            levelId: level.id,
+            position: { x: f.position.x + 24, y: f.position.y + 24 },
+          }));
+          for (const f of pasted) onAddFurniture(f);
+          onSelectionsChange(pasted.map(f => ({ kind: 'furniture' as const, id: f.id })));
+          e.preventDefault();
+        }
+        return;
+      }
+
       // Arrow-key nudge for selected entities. 1" per press, 12" with Shift.
       // Walls, furniture, stairs, room labels, and lines all translate;
       // doors/windows are anchored to walls and dimensions follow their
@@ -3107,6 +3190,7 @@ export default function Canvas2D({
       defaultLineStyle, defaultLineWeight, defaultLineColor,
       tool, offsetSource, dimDraft, onChangeTool, moveState, commitOffset,
       onUpdateWalls, onUpdateDimensions, onUpdateRoomLabels, onUpdateTexts, onUpdateStairs, onUpdateFurniture, onUpdateLines,
+      onAddFurniture, onSelectionsChange,
       onEndLiveOp, onCancelLiveOp, sectionCuts, onUpdateSectionCuts,
       filletFirst, mouseDown, stairCornerDrag,
       boundaryDraftRoomId, boundaryPoints, onCommitBoundary, onCancelBoundaryDraft]);
