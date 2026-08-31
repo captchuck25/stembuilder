@@ -29,6 +29,9 @@ export interface RoomRequirement {
   minDoors?: number;
   furniture?: FurnitureGroup[];
   attachedCloset?: boolean;    // room must connect to a CLOSET/WALK-IN via a door
+  // Guidance shown under the room's section in the Requirements panel and the
+  // teacher's rubric editor (e.g. the garage's draw-outside-the-shell note).
+  note?: string;
 }
 
 export interface Brief {
@@ -48,6 +51,9 @@ export interface RubricCheck {
   status: 'pass' | 'fail';
   detail: string;              // one-line explanation of the current state
   group: string;               // panel section header, e.g. "MASTER BEDROOM"
+  // Guidance for the whole group (carried on its first check), e.g. the
+  // garage's draw-outside-the-shell note.
+  note?: string;
 }
 
 // ─── Built-in briefs (generic standards — teacher-editable in a later phase) ──
@@ -137,7 +143,10 @@ export const BRIEFS: Brief[] = [
       // Drawn onto the plan like any room; its area does NOT count toward the
       // SF target (see NON_LIVING_TYPES). 20×20 fits two cars; teachers can
       // shrink to 12×20 for one car or delete the row to make it optional.
-      { roomType: 'GARAGE', count: 1, minDims: { a: 240, b: 240 }, minDoors: 1 },
+      {
+        roomType: 'GARAGE', count: 1, minDims: { a: 240, b: 240 }, minDoors: 1,
+        note: 'Draw the garage OUTSIDE the shell — the SF target is for the interior. 1-car ≈ 12\' × 20\', 2-car ≈ 20\' × 20\'. Garage area is not counted in total SF.',
+      },
     ],
     frontDoor: true,
     backDoor: true,
@@ -362,6 +371,7 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       label: req.count > 1 ? `${req.count} rooms labeled` : 'Room labeled',
       status: matched.length >= req.count ? 'pass' : 'fail',
       detail: `${matched.length} of ${req.count} labeled (with square footage)`,
+      note: req.note,
     });
     if (matched.length === 0) continue; // sub-checks are meaningless with no rooms
 

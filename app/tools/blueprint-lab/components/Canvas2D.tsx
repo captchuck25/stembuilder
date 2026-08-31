@@ -807,6 +807,11 @@ export default function Canvas2D({
     const stairPts = level.stairs.flatMap(st => stairStepEdgePoints(st, defaultWallThickness / 2));
     const sp = nearestPoint(q, stairPts, TOL);
     if (sp) return { point: sp, feature: true };
+    // Anywhere along a wall FACE — so a drawn wall (e.g. a garage wall coming
+    // back to the shell) butts cleanly against an existing wall instead of
+    // stopping just short of it. Lower priority than endpoints/midpoints.
+    s = snapToWallEdge(q, level.walls, TOL);
+    if (s !== q) return { point: s, feature: true };
     // Then the floor-below ghost (when shown) so walls stack on the floor below.
     if (showFloorBelow && floorBelow) {
       s = snapToWallEndpoint(q, floorBelow.walls, TOL);

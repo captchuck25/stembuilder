@@ -1247,22 +1247,28 @@ export default function BlueprintLabClient() {
       const wDx = w.end.x - w.start.x, wDy = w.end.y - w.start.y;
       const wL = Math.hypot(wDx, wDy);
       if (wL === 0) return l;
-      // Collect every cut as a parametric position in INCHES along the wall.
-      const rawCuts: number[] = [];
+      // Collect every cut as a parametric position in INCHES along the wall,
+      // remembering which wall produced it (face-pair handling below).
+      const rawCuts: Array<{ t: number; owner: string | null }> = [];
       for (const lineObj of (l.lines ?? [])) {
         const t = intersectT(w.start, w.end, lineObj.start, lineObj.end);
-        if (t != null) rawCuts.push(t * wL);
+        if (t != null) rawCuts.push({ t: t * wL, owner: null });
       }
+      const ownerThickness = new Map<string, number>();
       for (const other of l.walls) {
         if (other.id === w.id) continue;
+        ownerThickness.set(other.id, other.thickness);
         for (const t of intersectTWithWallFaces(w.start, w.end, other, w.thickness / 2)) {
-          rawCuts.push(t * wL);
+          rawCuts.push({ t: t * wL, owner: other.id });
         }
       }
       // Keep only cuts strictly inside the wall, dedup near-duplicates, sort.
-      const cuts = dedupSortedCuts(
-        rawCuts.filter(t => t > 0.5 && t < wL - 0.5),
-      );
+      const DEDUP_IN = 0.25;
+      const annotated = rawCuts
+        .filter(c => c.t > 0.5 && c.t < wL - 0.5)
+        .sort((a, b) => a.t - b.t)
+        .filter((c, i, arr) => i === 0 || Math.abs(c.t - arr[i - 1].t) > DEDUP_IN);
+      const cuts = annotated.map(c => c.t);
       if (cuts.length === 0) return l;
       // Project the click onto the wall's centerline → click position in
       // inches. Clamp to [0, wL] so a slightly off-wall click still maps to
@@ -1282,6 +1288,26 @@ export default function BlueprintLabClient() {
       for (const c of cuts) {
         if (c < clickT) prev = c;
         else if (c > clickT) { next = c; break; }
+      }
+      // A crossed wall contributes TWO cuts (its two faces). If the removal
+      // stops at one face of a crossed wall, extend it through to the other
+      // face — otherwise the kept piece spans the crossed wall's thickness and
+      // a sliver is left sitting inside it (the "little line piece").
+      const facePairGap = (owner: string) =>
+        (ownerThickness.get(owner) ?? 0) + w.thickness + 0.5;
+      const prevIdx = annotated.findIndex(c => c.t === prev);
+      if (prevIdx > 0) {
+        const c = annotated[prevIdx], below = annotated[prevIdx - 1];
+        if (c.owner && below.owner === c.owner && c.t - below.t <= facePairGap(c.owner)) {
+          prev = below.t;
+        }
+      }
+      const nextIdx = annotated.findIndex(c => c.t === next);
+      if (nextIdx >= 0 && nextIdx < annotated.length - 1) {
+        const c = annotated[nextIdx], above = annotated[nextIdx + 1];
+        if (c.owner && above.owner === c.owner && above.t - c.t <= facePairGap(c.owner)) {
+          next = above.t;
+        }
       }
       const ux = wDx / wL, uy = wDy / wL;
       const pointAt = (t: number): Vec2 => ({ x: w.start.x + ux * t, y: w.start.y + uy * t });

@@ -136,6 +136,14 @@ export default function RequirementsPanel({ level, briefId, onChangeBrief, onClo
                   {gPassed}/{g.items.length} {isCollapsed ? '▸' : '▾'}
                 </span>
               </button>
+              {!isCollapsed && g.items[0]?.note && (
+                <div style={{
+                  margin: '2px 12px 4px 14px', padding: '5px 8px', borderRadius: 6,
+                  background: T.accentSoft, color: T.accentInk, fontSize: 10.5, lineHeight: 1.45,
+                }}>
+                  {g.items[0].note}
+                </div>
+              )}
               {!isCollapsed && g.items.map(c => (
                 <div key={c.id} style={{ padding: '3px 12px 3px 14px', display: 'flex', gap: 8 }}>
                   <span style={{

@@ -8,7 +8,7 @@
 // All dimensions in inches. Shapes are drawn around the origin so the fit-on-
 // mount viewport centers them.
 
-import { Vec2, Wall, makeId } from './types';
+import { DEFAULT_WALL_HEIGHT, DEFAULT_WALL_THICKNESS, Vec2, Wall, makeId } from './types';
 
 export interface ShellDef {
   id: string;
@@ -205,8 +205,9 @@ export function shellVariants(shellId: string, sqFtMin: number, sqFtMax: number)
   ];
 }
 
-// Build the exterior wall loop for a shell variant.
-// 6" exterior walls, 9' plate height — generic single-story defaults.
+// Build the exterior wall loop for a shell variant. Same thickness/height as
+// every other wall in the program — mismatched shells make ugly junction
+// indents where interior walls meet them.
 export function buildShellWalls(v: ShellVariant, levelId: string): Wall[] {
   const pts = shellOutline(v);
   return pts.map((p, i) => ({
@@ -214,8 +215,8 @@ export function buildShellWalls(v: ShellVariant, levelId: string): Wall[] {
     levelId,
     start: { ...p },
     end: { ...pts[(i + 1) % pts.length] },
-    thickness: 6,
-    height: 108,
+    thickness: DEFAULT_WALL_THICKNESS,
+    height: DEFAULT_WALL_HEIGHT,
     type: 'wall' as const,
     status: 'proposed' as const,
     locked: true,

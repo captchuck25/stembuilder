@@ -332,13 +332,24 @@ export default function BlueprintTab({ classId }: { classId: string }) {
             </tbody>
           </table>
         </div>
+        {draft.config.rooms.some(r => r.roomType === "GARAGE") && (
+          <div style={{ margin: "0 0 12px", padding: "7px 12px", borderRadius: 8, maxWidth: 640,
+            background: "#eef2ff", color: "#4338ca", fontSize: 12, lineHeight: 1.5 }}>
+            Garage: students draw it OUTSIDE the shell — its area doesn&apos;t count toward the
+            SF target. Set the min size for 1-car (≈ 12&apos; × 20&apos;) or 2-car (≈ 20&apos; × 20&apos;).
+          </div>
+        )}
         <div style={{ marginBottom: 22 }}>
           <select value="" style={{ ...inputStyle, width: 220 }}
             onChange={e => {
               const t = e.target.value;
               if (!t) return;
+              const row: RoomRequirement = t === "GARAGE"
+                ? { roomType: t, count: 1, minDims: { a: 240, b: 240 }, minDoors: 1,
+                    note: "Draw the garage OUTSIDE the shell — the SF target is for the interior. 1-car ≈ 12' × 20', 2-car ≈ 20' × 20'. Garage area is not counted in total SF." }
+                : { roomType: t, count: 1 };
               setDraft(d => d ? { ...d, config: { ...d.config,
-                rooms: [...d.config.rooms, { roomType: t, count: 1 }] } } : d);
+                rooms: [...d.config.rooms, row] } } : d);
             }}>
             <option value="">+ Add room requirement…</option>
             {ROOM_TYPES.filter(t => !draft.config.rooms.some(r => r.roomType === t)).map(t =>
