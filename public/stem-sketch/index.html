@@ -1351,6 +1351,10 @@
             <button data-shape2d="teardrop"><span class="ico">💧</span> Teardrop</button>
           </div>
         </div>
+        <!-- Restored 2026-08-31 for the Revolve tutorial (was parked in the
+             2026-08-17 housekeeping). Lives in the 2D toolbar because it
+             acts on the ACTIVE sketch (revolveCurrentSketch). -->
+        <button class="tool" data-action="revolve" title="Revolve — spin your connected-line profile around the sketch's vertical center line to make a 3D body. Draw the profile to the RIGHT of the center line; works best on a Front or Right sketch."><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-tool="eraser" title="Eraser (E) — click a shape to delete"><svg class="ico"><use href="#i-eraser"/></svg><span class="tool-label">Erase</span></button>
         <button class="tool" data-action="mirror-2d" title="Mirror selected shape across an axis"><svg class="ico"><use href="#i-mirror"/></svg><span class="tool-label">Mirror</span></button>
@@ -1424,10 +1428,9 @@
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
              2D BEFORE Extrude / Revolve. See action 'fillet-3d' (still wired) if you
              want to reach it from the console. -->
-        <!-- Revolve toolbar button hidden (housekeeping, 2026-08-17): lightly
-             used; parked until it earns a spot (or an advanced-tools row).
-             Action 'revolve' is still wired in JS; existing revolved bodies in
-             saves are unaffected. -->
+        <!-- Revolve button restored 2026-08-31 — it now lives in the 2D
+             toolbar (after the Shape dropdown), since revolveCurrentSketch
+             acts on the ACTIVE sketch. Taught by the Unit 3 tutorial. -->
 
       </div>
     </div>
@@ -21914,6 +21917,30 @@ const TUTORIALS = [
       },
     ],
   },
+  {
+    id: 'revolve',
+    unit: 3,
+    title: 'Revolve',
+    intro: 'Extrude pushes a sketch straight up. Revolve spins one around — perfect for vases, wheels, and chess pieces.',
+    steps: [
+      {
+        text: 'Click **+ Sketch** → **Front**. Revolve spins your drawing around the sketch’s vertical center line, and a Front sketch makes the finished body stand upright.',
+        done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
+      },
+      {
+        text: 'Pick the **Line** tool and draw the **right half of a vase**: start at the bottom on the vertical center line, click out to the right, up, and back in near the top. Press **Enter** to finish. Keep every click on the **right side** of the center line.',
+        hint: 'Just 4 or 5 clicks makes a nice profile — you’re drawing the silhouette, the spin does the rest.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' &&
+          Array.isArray(e.points) && e.points.length >= 3 && e.points.length <= 30 &&
+          Math.min(...e.points.map(p => p.x)) >= -0.5 &&
+          Math.max(...e.points.map(p => p.x)) > 5),
+      },
+      {
+        text: 'Click **Revolve** in the toolbar and click **OK** — your half-outline spins all the way around into a solid vase. Orbit around it and admire your work. 🏺',
+        done: (d) => d.bodies.some(b => b.type === 'revolve'),
+      },
+    ],
+  },
 ];
 
 const TUT_UNIT_TITLES = {
@@ -21923,8 +21950,7 @@ const TUT_UNIT_TITLES = {
 };
 // Units that exist in the ladder but aren't authored yet — listed in the
 // picker as "coming soon" so students see the road ahead. Mirrors
-// lib/stem-sketch/tutorials.ts. (Unit 3's Revolve waits on the revolve
-// button returning to the toolbar — can't teach a button that isn't there.)
+// lib/stem-sketch/tutorials.ts.
 const TUT_COMING_UNITS = [
   '🔧 Unit 4 — Building Real Parts',
   '🔩 Unit 5 — Hardware',

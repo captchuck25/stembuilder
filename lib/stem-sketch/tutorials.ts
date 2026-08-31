@@ -68,9 +68,7 @@ export const SKETCH_TUTORIALS: SketchTutorial[] = [
   // ── Unit 3 — Sketch to Solid ───────────────────────────────────────────────
   { id: "extrude", unit: 3, title: "Extrude", blurb: "Draw a 2×2 rectangle and pull it into a solid slab exactly 1 inch tall.", stepCount: 4, ready: true },
   { id: "cut-a-hole", unit: 3, title: "Cut a Hole", blurb: "Sketch a circle on a cube's face and punch it all the way through.", stepCount: 4, ready: true },
-  // Revolve waits on its toolbar button returning (parked 2026-08; can't
-  // teach a button that isn't in the UI).
-  { id: "revolve", unit: 3, title: "Revolve", blurb: "Spin a profile into a vase or a wheel.", stepCount: 0, ready: false },
+  { id: "revolve", unit: 3, title: "Revolve", blurb: "Draw half a vase on a Front sketch and spin it into a solid.", stepCount: 3, ready: true },
   // ── Unit 4 — Building Real Parts ───────────────────────────────────────────
   { id: "add-and-subtract", unit: 4, title: "Add and Subtract", blurb: "Use negative shapes to hollow and notch a body.", stepCount: 0, ready: false },
   { id: "group-it", unit: 4, title: "Group It", blurb: "Combine bodies into one part — and take them apart again.", stepCount: 0, ready: false },
