@@ -304,7 +304,7 @@ export type FurnitureKind =
   // Bathroom
   | 'toilet' | 'sink-vanity' | 'sink-pedestal' | 'bathtub' | 'shower-stall'
   // Kitchen
-  | 'cabinet-base' | 'cabinet-upper'
+  | 'cabinet-base' | 'cabinet-upper' | 'cabinet-corner'
   | 'fridge' | 'stove-range' | 'sink-kitchen' | 'dishwasher' | 'island'
   // Living room
   | 'sofa-3' | 'loveseat' | 'armchair' | 'coffee-table' | 'end-table' | 'tv-console' | 'bookshelf'
@@ -359,6 +359,9 @@ export const FURNITURE_CATALOG: Record<FurnitureKind, FurnitureCatalogEntry> = {
   // ── Kitchen ────────────────────────────────────────────────
   'cabinet-base':  { room: 'kitchen',  label: 'Base cabinet', width: 36, depth: 24 },
   'cabinet-upper': { room: 'kitchen',  label: 'Upper cabinet',width: 36, depth: 12 },
+  // Corner base cabinet — square footprint tucked into a wall corner with a
+  // 45° door face; the anchor a cabinet run builds out from.
+  'cabinet-corner':{ room: 'kitchen',  label: 'Corner cabinet', width: 36, depth: 36 },
   'fridge':        { room: 'kitchen',  label: 'Refrigerator', width: 36, depth: 30 },
   'stove-range':   { room: 'kitchen',  label: 'Range / stove',width: 30, depth: 26 },
   'sink-kitchen':  { room: 'kitchen',  label: 'Kitchen sink', width: 33, depth: 24 },
@@ -412,6 +415,10 @@ export interface FurnitureItem {
   // Stove / fridge size variants — drives door layout and burner count.
   // Empty / undefined → catalog default ('30' for stove, '36' for fridge).
   sizeVariant?: StoveSize | FridgeSize;
+  // Furniture placed as one visual set (dining table + its chairs). Clicking
+  // any member selects the whole set; rotating the set pivots around the
+  // table. Set members can still be deleted individually via shift-click.
+  setId?: string;
 }
 
 // Standalone annotation lines — not walls, not anchored to anything.

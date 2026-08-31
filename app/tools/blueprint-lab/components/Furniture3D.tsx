@@ -76,6 +76,7 @@ export function FurnitureModel({ kind, width, depth, cabinetColor, countertopCol
     case 'shower-stall':   return <ShowerStallModel width={width} depth={depth} />;
     case 'cabinet-base':   return <CabinetBaseModel width={width} depth={depth} cabinetColor={cabCol} countertopColor={topCol} />;
     case 'cabinet-upper':  return <CabinetUpperModel width={width} depth={depth} cabinetColor={cabCol} />;
+    case 'cabinet-corner': return <CabinetCornerModel width={width} depth={depth} cabinetColor={cabCol} countertopColor={topCol} />;
     case 'fridge':         return <FridgeModel width={width} depth={depth} sizeVariant={(sizeVariant as FridgeSize) ?? '36'} />;
     case 'stove-range':    return <StoveModel width={width} depth={depth} sizeVariant={(sizeVariant as StoveSize) ?? '30'} />;
     case 'sink-kitchen':   return <KitchenSinkModel width={width} depth={depth} cabinetColor={cabCol} countertopColor={topCol} />;
@@ -729,6 +730,52 @@ function CabinetBaseModel({ width: w, depth: d, cabinetColor, countertopColor }:
       {/* Countertop — slight overhang front + ends */}
       <mesh position={[0, cabH + counterT / 2, 0.5]} castShadow>
         <boxGeometry args={[w + 0.5, counterT, d + 1]} />
+        <meshStandardMaterial color={countertopColor} roughness={0.35} />
+      </mesh>
+    </group>
+  );
+}
+
+// Corner base cabinet — square footprint that tucks into a wall corner
+// (back faces −X/−Z) with a 45° door across the room-side corner. The body
+// is two boxes forming an L; the angled door panel bridges the notch.
+function CabinetCornerModel({ width: w, depth: d, cabinetColor, countertopColor }: ModelProps & {
+  cabinetColor: string; countertopColor: string;
+}) {
+  const cabH = 34.5;
+  const counterT = 1.5;
+  const C = Math.min(w, d) * 0.55;              // chamfer leg length
+  const diagLen = Math.hypot(C, C);
+  const beta = Math.PI / 4;                     // 45° chamfer
+  // Diagonal runs from (w/2 − C, d/2) to (w/2, d/2 − C) in plan (x, z).
+  const midX = (w / 2 - C + w / 2) / 2;
+  const midZ = (d / 2 + d / 2 - C) / 2;
+  return (
+    <group>
+      {/* Back slab (full width, rear depth) */}
+      <mesh position={[0, cabH / 2, -C / 4]} castShadow receiveShadow>
+        <boxGeometry args={[w, cabH, d - C / 2]} />
+        <meshStandardMaterial color={cabinetColor} roughness={0.7} />
+      </mesh>
+      {/* Front-left slab (fills up to where the chamfer starts) */}
+      <mesh position={[-C / 4, cabH / 2, d / 2 - C / 4]} castShadow receiveShadow>
+        <boxGeometry args={[w - C / 2, cabH, C / 2]} />
+        <meshStandardMaterial color={cabinetColor} roughness={0.7} />
+      </mesh>
+      {/* 45° door across the corner + knob */}
+      <group position={[midX, 0, midZ]} rotation={[0, beta, 0]}>
+        <mesh position={[0, cabH / 2, 0]} castShadow>
+          <boxGeometry args={[diagLen, cabH - 1.5, 0.6]} />
+          <meshStandardMaterial color={cabinetColor} roughness={0.65} />
+        </mesh>
+        <mesh position={[diagLen * 0.28, cabH * 0.55, 0.6]}>
+          <boxGeometry args={[0.5, 3, 0.5]} />
+          <meshStandardMaterial color={COL.metalDark} roughness={0.3} metalness={0.7} />
+        </mesh>
+      </group>
+      {/* Countertop — square slab with slight overhang */}
+      <mesh position={[0, cabH + counterT / 2, 0]} castShadow>
+        <boxGeometry args={[w + 0.5, counterT, d + 0.5]} />
         <meshStandardMaterial color={countertopColor} roughness={0.35} />
       </mesh>
     </group>

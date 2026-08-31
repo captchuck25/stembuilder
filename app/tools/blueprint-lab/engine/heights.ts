@@ -12,7 +12,7 @@ export const FURNITURE_HEIGHTS: Record<FurnitureKind, number> = {
   'bed-twin': 26, 'bed-full': 26, 'bed-queen': 26, 'bed-king': 26, 'crib': 38,
   'nightstand': 24, 'dresser': 32, 'wardrobe': 72,
   'toilet': 30, 'sink-vanity': 34, 'sink-pedestal': 34, 'bathtub': 22, 'shower-stall': 80,
-  'cabinet-base': 36, 'cabinet-upper': 30,
+  'cabinet-base': 36, 'cabinet-upper': 30, 'cabinet-corner': 36,
   'fridge': 70, 'stove-range': 36, 'sink-kitchen': 36, 'dishwasher': 34, 'island': 36,
   'sofa-3': 34, 'loveseat': 34, 'armchair': 36, 'coffee-table': 17, 'end-table': 24,
   'tv-console': 24, 'bookshelf': 72,

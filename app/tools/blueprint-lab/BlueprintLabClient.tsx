@@ -1135,8 +1135,11 @@ export default function BlueprintLabClient() {
   const handleAddFurniture = useCallback((f: FurnitureItem) => {
     // Dining tables come with their chairs: one per seat, tucked up to the
     // table and facing it. Added in the same edit so undo removes the set.
+    // Table + chairs share a setId so they select/rotate as one unit.
     const chairSize = furnitureSettings['dining-chair'] ?? FURNITURE_CATALOG['dining-chair'];
-    const chairs: FurnitureItem[] = diningChairPlacements(f, chairSize).map(p => ({
+    const placements = diningChairPlacements(f, chairSize);
+    const table: FurnitureItem = placements.length > 0 ? { ...f, setId: f.id } : f;
+    const chairs: FurnitureItem[] = placements.map(p => ({
       id: makeId('furn'),
       levelId: f.levelId,
       kind: 'dining-chair',
@@ -1144,12 +1147,44 @@ export default function BlueprintLabClient() {
       rotation: p.rotation,
       width: chairSize.width,
       depth: chairSize.depth,
+      setId: f.id,
     }));
-    updateLevel(l => ({ ...l, furniture: [...l.furniture, f, ...chairs] }));
+    updateLevel(l => ({ ...l, furniture: [...l.furniture, table, ...chairs] }));
   }, [updateLevel, furnitureSettings]);
 
   const handleUpdateFurniture = useCallback((ids: string[], patch: Partial<FurnitureItem>) => {
     const idSet = new Set(ids);
+    // Rotating a dining SET (all selected items share a setId): pivot every
+    // member around the table so the arrangement turns as one unit instead of
+    // each piece spinning in place.
+    if (patch.rotation != null && ids.length > 1) {
+      const setRotated = ((): boolean => {
+        const l = activeLevel;
+        const members = ids.map(id => l.furniture.find(x => x.id === id));
+        if (members.some(m => !m)) return false;
+        const sid = members[0]!.setId;
+        if (!sid || members.some(m => m!.setId !== sid)) return false;
+        const anchor = members.find(m => m!.kind.startsWith('dining-table')) ?? members[0];
+        const delta = patch.rotation! - anchor!.rotation;
+        if (Math.abs(delta) < 1e-9) return true;
+        const pivot = anchor!.position;
+        const cos = Math.cos(delta), sin = Math.sin(delta);
+        updateLevel(lv => ({
+          ...lv,
+          furniture: lv.furniture.map(x => {
+            if (!idSet.has(x.id)) return x;
+            const rx = x.position.x - pivot.x, ry = x.position.y - pivot.y;
+            return {
+              ...x,
+              rotation: x.rotation + delta,
+              position: { x: pivot.x + rx * cos - ry * sin, y: pivot.y + rx * sin + ry * cos },
+            };
+          }),
+        }));
+        return true;
+      })();
+      if (setRotated) return;
+    }
     updateLevel(l => ({
       ...l,
       furniture: l.furniture.map(f => idSet.has(f.id) ? { ...f, ...patch } : f),

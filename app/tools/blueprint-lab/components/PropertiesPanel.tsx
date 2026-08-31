@@ -2218,7 +2218,7 @@ const ALL_FURNITURE_KINDS: FurnitureKind[] = (Object.keys(FURNITURE_CATALOG) as 
 
 // Kinds that carry a cabinet face (use cabinetColor) and/or a countertop slab.
 const KITCHEN_CABINET_KINDS    = new Set<FurnitureKind>([
-  'cabinet-base', 'cabinet-upper', 'sink-kitchen', 'island',
+  'cabinet-base', 'cabinet-upper', 'cabinet-corner', 'sink-kitchen', 'island',
 ]);
 const KITCHEN_COUNTERTOP_KINDS = new Set<FurnitureKind>([
   'cabinet-base', 'sink-kitchen', 'island',

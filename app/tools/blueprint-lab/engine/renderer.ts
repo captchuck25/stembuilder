@@ -1811,7 +1811,7 @@ export function drawStairCornerHandles(
 type FurnitureSymbol = 'bed' | 'sofa' | 'table' | 'chair' | 'office-chair' | 'toilet' | 'dresser'
                      | 'sink-bath' | 'sink-kitchen' | 'fridge' | 'stove'
                      | 'bathtub' | 'shower'
-                     | 'cabinet-base' | 'cabinet-upper'
+                     | 'cabinet-base' | 'cabinet-upper' | 'cabinet-corner'
                      | 'generic';
 
 function furnitureSymbolFor(kind: FurnitureItem['kind']): FurnitureSymbol {
@@ -1848,6 +1848,8 @@ function furnitureSymbolFor(kind: FurnitureItem['kind']): FurnitureSymbol {
       return 'cabinet-base';
     case 'cabinet-upper':
       return 'cabinet-upper';
+    case 'cabinet-corner':
+      return 'cabinet-corner';
     // Generic: nightstand, dresser, wardrobe, dishwasher, tv-console,
     // bookshelf, buffet, filing-cabinet.
     default:
@@ -2073,12 +2075,19 @@ function drawFurnitureSymbol(
       break;
     }
     case 'stove': {
-      // 4 burners.
-      const r = Math.min(w, d) * 0.18;
+      // 4 burners + control-knob dots along the FRONT (+d) edge so plan view
+      // shows which way the range faces (matches the 3D model's front).
+      const r = Math.min(w, d) * 0.16;
       for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
         ctx.beginPath();
-        ctx.arc(sx * w * 0.22, sy * d * 0.22, r, 0, Math.PI * 2);
+        ctx.arc(sx * w * 0.22, sy * d * 0.22 - d * 0.06, r, 0, Math.PI * 2);
         ctx.stroke();
+      }
+      ctx.fillStyle = stroke;
+      for (const sx of [-0.3, -0.1, 0.1, 0.3]) {
+        ctx.beginPath();
+        ctx.arc(sx * w, d / 2 - Math.max(2, d * 0.07), 1.2, 0, Math.PI * 2);
+        ctx.fill();
       }
       break;
     }
@@ -2110,8 +2119,9 @@ function drawFurnitureSymbol(
       ctx.moveTo(-w / 2 + 2, front);
       ctx.lineTo( w / 2 - 2, front);
       ctx.stroke();
-      // Door splits — vertical tick marks at ~30" intervals along front.
-      const doors = Math.max(1, Math.round(w / 30));
+      // Door splits — one door per ~30 REAL inches (f.width, not screen px —
+      // px-based counts changed with zoom).
+      const doors = Math.max(1, Math.round(f.width / 30));
       for (let i = 1; i < doors; i++) {
         const x = -w / 2 + (w * i) / doors;
         ctx.beginPath();
@@ -2121,14 +2131,29 @@ function drawFurnitureSymbol(
       }
       break;
     }
+    case 'cabinet-corner': {
+      // Square corner unit: back edges sit in the wall corner (-x / -y); a
+      // 45° door face chamfers the room-side (+x/+y) corner — same corner
+      // the 3D model's angled door faces. Knob dot just inside the door.
+      const cc = Math.min(w, d) * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(w / 2 - cc, d / 2 - 2);
+      ctx.lineTo(w / 2 - 2, d / 2 - cc);
+      ctx.stroke();
+      ctx.fillStyle = stroke;
+      ctx.beginPath();
+      ctx.arc(w / 2 - cc * 0.55, d / 2 - cc * 0.55, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
     case 'cabinet-upper': {
       // Upper cabinet: drawn with a DASHED outline since it hangs above the
       // counter (hidden line per architectural convention).
       ctx.save();
       ctx.setLineDash([3, 2]);
       ctx.strokeRect(-w / 2 + 1.5, -d / 2 + 1.5, w - 3, d - 3);
-      // Diagonal split lines for doors.
-      const doors = Math.max(1, Math.round(w / 30));
+      // Split lines for doors — per ~30 REAL inches (constant across zoom).
+      const doors = Math.max(1, Math.round(f.width / 30));
       for (let i = 1; i < doors; i++) {
         const x = -w / 2 + (w * i) / doors;
         ctx.beginPath();

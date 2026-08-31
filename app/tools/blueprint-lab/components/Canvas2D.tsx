@@ -857,6 +857,36 @@ export default function Canvas2D({
     const hy = (f.width / 2) * s + (f.depth / 2) * c;
     let bestDx: number | null = null;
     let bestDy: number | null = null;
+    // Other furniture: snap edge-to-edge (cabinets butting in a run) and
+    // edge-flush (aligned fronts), plus center alignment.
+    for (const o of level.furniture) {
+      if (o.id === f.id) continue;
+      const oc = Math.abs(Math.cos(o.rotation)), os = Math.abs(Math.sin(o.rotation));
+      const ohx = (o.width / 2) * oc + (o.depth / 2) * os;
+      const ohy = (o.width / 2) * os + (o.depth / 2) * oc;
+      if (Math.abs(pos.x - o.position.x) > hx + ohx + 48) continue;
+      if (Math.abs(pos.y - o.position.y) > hy + ohy + 48) continue;
+      const overlapY = (pos.y - hy) < (o.position.y + ohy) && (pos.y + hy) > (o.position.y - ohy);
+      const overlapX = (pos.x - hx) < (o.position.x + ohx) && (pos.x + hx) > (o.position.x - ohx);
+      const xCands = [
+        ...(overlapY ? [o.position.x - ohx - hx, o.position.x + ohx + hx] : []), // touching
+        o.position.x - ohx + hx, o.position.x + ohx - hx,                        // flush edges
+        o.position.x,                                                            // centers
+      ];
+      for (const cx of xCands) {
+        const dv = cx - pos.x;
+        if (Math.abs(dv) <= SNAP_IN && (bestDx == null || Math.abs(dv) < Math.abs(bestDx))) bestDx = dv;
+      }
+      const yCands = [
+        ...(overlapX ? [o.position.y - ohy - hy, o.position.y + ohy + hy] : []),
+        o.position.y - ohy + hy, o.position.y + ohy - hy,
+        o.position.y,
+      ];
+      for (const cy of yCands) {
+        const dv = cy - pos.y;
+        if (Math.abs(dv) <= SNAP_IN && (bestDy == null || Math.abs(dv) < Math.abs(bestDy))) bestDy = dv;
+      }
+    }
     for (const w of level.walls) {
       const horizontal = Math.abs(w.start.y - w.end.y) < 0.01;
       const vertical   = Math.abs(w.start.x - w.end.x) < 0.01;
@@ -881,7 +911,7 @@ export default function Canvas2D({
       }
     }
     return { x: pos.x + (bestDx ?? 0), y: pos.y + (bestDy ?? 0) };
-  }, [level.walls]);
+  }, [level.walls, level.furniture]);
 
   // The selected stair/furniture "grab handles" (own corners + edge midpoints)
   // the Move tool picks the piece up by.
@@ -2269,6 +2299,19 @@ export default function Canvas2D({
         return;
       }
       const click = (kind: 'dimension' | 'roomLabel' | 'text' | 'stair' | 'furniture' | 'line', id: string) => {
+        // Furniture sets (dining table + chairs): a plain click on any member
+        // selects the whole set so it moves/rotates as a unit. Shift+click
+        // still targets the single piece (remove one chair, etc.).
+        if (kind === 'furniture' && !e.shiftKey) {
+          const item = level.furniture.find(x => x.id === id);
+          if (item?.setId) {
+            const members = level.furniture.filter(x => x.setId === item.setId);
+            if (members.length > 1 && !selections.some(s => s.kind === 'furniture' && s.id === id)) {
+              onSelectionsChange(members.map(m => ({ kind: 'furniture' as const, id: m.id })));
+              return;
+            }
+          }
+        }
         if (e.shiftKey) {
           const exists = selections.some(s => s.kind === kind && s.id === id);
           onSelectionsChange(exists
@@ -3153,7 +3196,9 @@ export default function Canvas2D({
           };
           const newSel: Selection[] = [];
           for (const f of clip.furniture) {
-            const nf = { ...f, id: makeId('furn'), levelId: level.id,
+            // Pasted copies never join the original's set (a pasted table
+            // spawns its own fresh chair set via onAddFurniture).
+            const nf = { ...f, id: makeId('furn'), levelId: level.id, setId: undefined,
               position: { x: f.position.x + 24, y: f.position.y + 24 } };
             onAddFurniture(nf);
             newSel.push({ kind: 'furniture', id: nf.id });
