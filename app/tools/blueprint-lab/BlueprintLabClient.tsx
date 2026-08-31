@@ -1699,7 +1699,10 @@ export default function BlueprintLabClient() {
         <ToolPalette tool={tool} onChange={setTool} view={view} />
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-          {requirementsOpen && (
+          {/* The checklist overlays only the plan + 3D views — on roof /
+              elevations / specs / sandbox it would sit on top of those views'
+              own controls (which live in the same corner). */}
+          {requirementsOpen && (view === '2d' || view === '3d') && (
             <RequirementsPanel
               level={activeLevel}
               briefId={requirementsBriefId}

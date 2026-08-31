@@ -1892,6 +1892,22 @@ export function nearestPoint(p: Vec2, pts: Vec2[], toleranceIn: number): Vec2 | 
 // Snap to the nearest point ON a wall FACE (the outside edges of the rendered
 // wall rectangle), not just its corners — so an object can be dropped flush
 // along a wall edge. Returns the input unchanged if no edge is within tolerance.
+// Nearest point on a wall's CENTERLINE (not the face polygon). Wall junctions
+// in this app live on centerlines — T-junction noding, roof footprint tracing
+// and mitered rendering all key off centerline contact — so walls DRAWN onto
+// another wall must land here, not on the face.
+export function snapToWallCenterline(p: Vec2, walls: Wall[], toleranceIn: number): Vec2 {
+  let best: Vec2 | null = null;
+  let bestD = Infinity;
+  for (const w of walls) {
+    const q = closestPointOnSegment(p, w.start, w.end);
+    const d = dist(p, q);
+    // Capture anywhere within the wall body + tolerance.
+    if (d <= toleranceIn + w.thickness / 2 && d < bestD) { best = q; bestD = d; }
+  }
+  return best ?? p;
+}
+
 export function snapToWallEdge(p: Vec2, walls: Wall[], toleranceIn: number): Vec2 {
   let best: Vec2 | null = null;
   let bestD = toleranceIn;

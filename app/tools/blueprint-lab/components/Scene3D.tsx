@@ -25,7 +25,7 @@ import {
   buildRoofTiers, pointInPolygon, RoofTopology,
 } from '../engine/roofTopology';
 import {
-  FurnitureItem,
+  DEFAULT_SIDE_PANEL_WIDTH, FurnitureItem,
   Project, Stair, Vec2, Wall, Window as WinType,
 } from '../engine/types';
 import { getStructural } from '../engine/structural';
@@ -533,7 +533,14 @@ function WallMesh({ wall, elevation, doors, windows, extension, isExterior }: {
           return <BifoldDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
         if (d.doorType === 'garage')
           return <GarageDoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
-        return <DoorSlab key={`slab-${d.id}`} door={d} wall={wall} elevation={elevation} angle={angle} />;
+        return (
+          <group key={`slab-${d.id}`}>
+            <DoorSlab door={d} wall={wall} elevation={elevation} angle={angle} />
+            {d.doorType === 'entry' && d.sidePanels && d.sidePanels !== 'none' && (
+              <EntrySidelites door={d} wall={wall} elevation={elevation} angle={angle} />
+            )}
+          </group>
+        );
       })}
 
       {/* Trim casing — 3-sided for doors, 4-sided for windows, on both faces. */}
@@ -878,6 +885,60 @@ function SlidingDoorSlab({ door, wall, elevation, angle }: {
         <boxGeometry args={[MULLION, h, FRAME_T]} />
         <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
       </mesh>
+    </group>
+  );
+}
+
+// Entry-door sidelites — the narrow fixed glass panes flanking the door.
+// The wall opening is already cut to doorOpeningCut's full width (door +
+// sidelites); this fills the flanking gaps with glass + a mullion, matching
+// the 2D symbol.
+function EntrySidelites({ door, wall, elevation, angle }: {
+  door: import('../engine/types').Door;
+  wall: Wall;
+  elevation: number;
+  angle: number;
+}) {
+  const sw = door.sidePanelWidth ?? DEFAULT_SIDE_PANEL_WIDTH;
+  const h = door.height;
+  const RAIL = 3;      // top/bottom rail height
+  const MULLION = 2;   // post between door slab and glass
+  const sides: number[] = [];
+  if (door.sidePanels === 'left' || door.sidePanels === 'both') sides.push(-1);
+  if (door.sidePanels === 'right' || door.sidePanels === 'both') sides.push(1);
+  return (
+    <group>
+      {sides.map(sign => {
+        const centerAlong = door.positionAlong + sign * (door.width / 2 + sw / 2);
+        const cx = wall.start.x + Math.cos(angle) * centerAlong;
+        const cy = wall.start.y + Math.sin(angle) * centerAlong;
+        return (
+          <group key={sign} position={[cx, elevation + h / 2, cy]} rotation={[0, -angle, 0]}>
+            {/* Glass pane */}
+            <mesh castShadow>
+              <boxGeometry args={[sw - MULLION, h - RAIL * 2, 1]} />
+              <meshStandardMaterial
+                color={WINDOW_GLASS_COLOR}
+                roughness={0.2} metalness={0.1} transparent opacity={0.55}
+              />
+            </mesh>
+            {/* Mullion post on the door side */}
+            <mesh position={[-sign * (sw / 2 - MULLION / 2), 0, 0]} castShadow>
+              <boxGeometry args={[MULLION, h, 2]} />
+              <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
+            </mesh>
+            {/* Top + bottom rails */}
+            <mesh position={[0, h / 2 - RAIL / 2, 0]} castShadow>
+              <boxGeometry args={[sw, RAIL, 2]} />
+              <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
+            </mesh>
+            <mesh position={[0, -h / 2 + RAIL / 2, 0]} castShadow>
+              <boxGeometry args={[sw, RAIL, 2]} />
+              <meshStandardMaterial color={DOOR_FRAME_COLOR} roughness={0.6} />
+            </mesh>
+          </group>
+        );
+      })}
     </group>
   );
 }

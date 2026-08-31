@@ -83,6 +83,29 @@ function splitEdgesAtOnEdgeVertices(vertices: VertexNode[], edges: EdgeRef[]): E
   return out;
 }
 
+// Remove spur chains: edges hanging off a degree-1 vertex can never be part
+// of a closed perimeter loop, but the outer walk can wander into one and hit
+// a dead end — which used to kill the whole trace (the "no footprint yet"
+// bug when a garage wall didn't quite meet the shell). Iteratively deleting
+// degree-1 edges leaves only the closed structure.
+function pruneSpurs(vertices: VertexNode[], edges: EdgeRef[]): EdgeRef[] {
+  const alive = new Set(edges.map((_, i) => i));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const v of vertices) {
+      const live = v.edges.filter(ei => alive.has(ei));
+      if (live.length === 1) {
+        alive.delete(live[0]);
+        changed = true;
+      }
+    }
+  }
+  const out = edges.filter((_, i) => alive.has(i));
+  reindexAdjacency(vertices, out);
+  return out;
+}
+
 // Collapse consecutive collinear vertices of a closed perimeter into a single
 // edge. Tracing across split / collinear fragments (or a wall split at a
 // T-junction we added above) leaves intermediate points on an otherwise
@@ -216,7 +239,8 @@ function traceFootprint(walls: Wall[]): { perimeter: TracedPerimeter; loopWallId
   if (walls.length < 3) return null;
   const { vertices, edges } = clusterEndpoints(walls);
   const nodedEdges = splitEdgesAtOnEdgeVertices(vertices, edges);
-  const traced = traceOuterPerimeter(vertices, nodedEdges);
+  const closedEdges = pruneSpurs(vertices, nodedEdges);
+  const traced = traceOuterPerimeter(vertices, closedEdges);
   if (!traced || traced.verts.length < 3) return null;
   const loopWallIds = new Set(traced.edgeWallIds);
   const perimeter = mergeCollinearPerimeter(traced.verts, traced.edgeWallIds);
