@@ -66,8 +66,10 @@ export const SKETCH_TUTORIALS: SketchTutorial[] = [
   { id: "exact-sizes", unit: 2, title: "Exact Sizes", blurb: "Dimension a rectangle, then type the number to drive it to an exact size.", stepCount: 3, ready: true },
   { id: "sketch-toolbox", unit: 2, title: "Sketch Toolbox", blurb: "Build one part: exact-size rectangle, four rounded corners, a mirrored circle.", stepCount: 5, ready: true },
   // ── Unit 3 — Sketch to Solid ───────────────────────────────────────────────
-  { id: "extrude", unit: 3, title: "Extrude", blurb: "Turn a sketch into a solid at an exact height.", stepCount: 0, ready: false },
-  { id: "cut-a-hole", unit: 3, title: "Cut a Hole", blurb: "Sketch on a face and cut all the way through.", stepCount: 0, ready: false },
+  { id: "extrude", unit: 3, title: "Extrude", blurb: "Draw a 2×2 rectangle and pull it into a solid slab exactly 1 inch tall.", stepCount: 4, ready: true },
+  { id: "cut-a-hole", unit: 3, title: "Cut a Hole", blurb: "Sketch a circle on a cube's face and punch it all the way through.", stepCount: 4, ready: true },
+  // Revolve waits on its toolbar button returning (parked 2026-08; can't
+  // teach a button that isn't in the UI).
   { id: "revolve", unit: 3, title: "Revolve", blurb: "Spin a profile into a vase or a wheel.", stepCount: 0, ready: false },
   // ── Unit 4 — Building Real Parts ───────────────────────────────────────────
   { id: "add-and-subtract", unit: 4, title: "Add and Subtract", blurb: "Use negative shapes to hollow and notch a body.", stepCount: 0, ready: false },

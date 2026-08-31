@@ -21690,6 +21690,11 @@ const _tutSize2d = (v, inches) => {
   const mm = inches * TUT_IN, sib = Math.round(mm / 5) * 5;
   return _tutNear(v, mm, 1) || _tutNear(v, sib, 1);
 };
+// A cutting extrude anywhere in the body tree — auto-cut may leave it
+// top-level or grouped under the body it cut.
+const _tutHasSubtractExtrude = (bodies) => (bodies || []).some(b =>
+  (b.type === 'extrude' && b.op === 'subtract') ||
+  (Array.isArray(b.children) && _tutHasSubtractExtrude(b.children)));
 
 const TUTORIALS = [
   {
@@ -21847,7 +21852,8 @@ const TUTORIALS = [
         }),
       },
       {
-        text: 'Click the circle with **Select**, then pick **Mirror** and mirror it across the **up-and-down axis** — a twin circle appears on the right side. Half the drawing, twice the shape.',
+        text: 'Click the circle with **Select**, then pick **Mirror**. Now draw the mirror line vertically through the **center** of your rectangle: click the middle of its **top edge**, then the middle of its **bottom edge**. A twin circle appears on the right side — half the drawing, twice the shape.',
+        hint: 'The cursor snaps to edge midpoints, so aiming for the middle of an edge lands dead center.',
         done: (d) => d.sketches.some(sk => {
           const circles = (sk.entities || []).filter(e => e.type === 'circle' && !e.construction);
           return circles.some(a => circles.some(b => b !== a &&
@@ -21856,17 +21862,70 @@ const TUTORIALS = [
       },
     ],
   },
+  {
+    id: 'extrude',
+    unit: 3,
+    title: 'Extrude',
+    intro: 'This is the big one: turning a flat sketch into a solid part.',
+    steps: [
+      {
+        text: 'Click **+ Sketch** → **Top** and draw a **rectangle** near the middle. Click it with **Select** and set **Width 2, Height 2** in the Properties panel.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'rect' && _tutSize2d(e.w, 2) && _tutSize2d(e.h, 2)),
+      },
+      {
+        text: 'Click **← Done** (top left) to go back to 3D. Your rectangle shows as a shaded shape lying on the workplane.',
+        done: (d) => d.mode === '3d',
+      },
+      {
+        text: 'Click **inside** the rectangle. An arrow and a small number box pop up — that’s the extruder.',
+        hint: 'You can drag the arrow up to pull the shape into 3D — but we’ll type it for an exact height.',
+        done: (d) => (d.selectedRegions || []).length > 0 ||
+          d.bodies.some(b => b.type === 'extrude'),
+      },
+      {
+        text: 'Type **1** in the number box and click **Done** (or press Enter). Your flat drawing is now a solid slab exactly 1 inch tall. That’s how almost every real part gets made.',
+        done: (d) => d.bodies.some(b => b.type === 'extrude' && b.op !== 'subtract' &&
+          (_tutNear(b.height, TUT_IN, 1) || _tutNear(b.height, 25, 1))),
+      },
+    ],
+  },
+  {
+    id: 'cut-a-hole',
+    unit: 3,
+    title: 'Cut a Hole',
+    intro: 'Sketches don’t just add material — drawn on a face, they can cut straight through it.',
+    steps: [
+      {
+        text: 'Add a **Cube** from the Primitive menu and set it to **2 × 2 × 2** in the Properties panel.',
+        done: (d) => _tutSolids(d, 'cube').some(b => _tutIs2in(b.w) && _tutIs2in(b.h) && _tutIs2in(b.d)),
+      },
+      {
+        text: 'Pick **On Face** in the toolbar, then click the cube’s **top face** — a new sketch opens right on that face.',
+        done: (d) => d.sketches.length >= 1,
+      },
+      {
+        text: 'Draw a **Circle** near the middle of the face, then click **← Done** to go back to 3D.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'circle') && d.mode === '3d',
+      },
+      {
+        text: 'Click **inside** your circle on the cube. In the pop-up, click **－ Cut**, then **⇣ Through** — the circle punches a hole all the way through the cube. (If the box is still open, click **Done**.)',
+        hint: 'Cut = remove material instead of adding it. Through = no need to measure the depth.',
+        done: (d) => _tutHasSubtractExtrude(d.bodies),
+      },
+    ],
+  },
 ];
 
 const TUT_UNIT_TITLES = {
   1: '🧭 Unit 1 — Getting Around',
   2: '✏️ Unit 2 — Sketching',
+  3: '🧱 Unit 3 — Sketch to Solid',
 };
 // Units that exist in the ladder but aren't authored yet — listed in the
 // picker as "coming soon" so students see the road ahead. Mirrors
-// lib/stem-sketch/tutorials.ts.
+// lib/stem-sketch/tutorials.ts. (Unit 3's Revolve waits on the revolve
+// button returning to the toolbar — can't teach a button that isn't there.)
 const TUT_COMING_UNITS = [
-  '🧱 Unit 3 — Sketch to Solid',
   '🔧 Unit 4 — Building Real Parts',
   '🔩 Unit 5 — Hardware',
   '🖨️ Unit 6 — Assemblies & Sharing',
