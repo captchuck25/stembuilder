@@ -12,7 +12,7 @@ const TABS: { id: ViewId; label: string; enabled: boolean }[] = [
   { id: 'elevations', label: 'Elevations',  enabled: true  },
   { id: 'rooms',      label: 'Rooms',       enabled: true  },
   { id: 'sandbox',    label: 'Sandbox',     enabled: true  },
-  { id: 'print',      label: 'Print/Export', enabled: false },
+  { id: 'print',      label: 'Print/Export', enabled: true },
 ];
 
 export default function ViewTabs({ view, onChange }: { view: ViewId; onChange: (v: ViewId) => void }) {

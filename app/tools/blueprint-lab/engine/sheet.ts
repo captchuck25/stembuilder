@@ -188,8 +188,9 @@ const ELEVATION_ORDER: { dir: ElevationDirection; title: string }[] = [
   { dir: 'north', title: 'NORTH ELEVATION' },
 ];
 
-// Raw (unplaced) building blocks shared by both layout modes.
-interface RawFloorPlan {
+// Raw (unplaced) building blocks shared by both layout modes. Exported so the
+// portfolio PDF export can page the same views without re-deriving them.
+export interface RawFloorPlan {
   level: Level;
   // Plan geometry as primitives (walls + lines + labels + section cut lines) —
   // used for DXF export of the floor plan (on screen the plan uses drawScene).
@@ -197,7 +198,7 @@ interface RawFloorPlan {
   lb: SheetBounds;
 }
 
-interface RawBlocks {
+export interface RawBlocks {
   elevations: { dir: ElevationDirection; title: string; prims: SectionPrimitive[]; lb: SheetBounds }[];
   sections: { id: string; title: string; prims: SectionPrimitive[]; lb: SheetBounds }[];
   // One entry per level (LOW→HIGH), so a two-story design composites BOTH floor
@@ -206,7 +207,7 @@ interface RawBlocks {
   roof: { prims: SectionPrimitive[]; lb: SheetBounds } | null;
 }
 
-function gatherRaw(project: Project): RawBlocks {
+export function gatherRaw(project: Project): RawBlocks {
   // Floor plans for EVERY level, ordered low→high (Floor 1 first).
   const floorPlans: RawFloorPlan[] = [...project.levels]
     .sort((a, b) => a.elevation - b.elevation)

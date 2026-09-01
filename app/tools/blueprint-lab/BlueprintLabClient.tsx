@@ -18,6 +18,7 @@ import ElevationsView from './components/ElevationsView';
 import RoofPlanView from './components/RoofPlanView';
 import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
+import PrintExportView from './components/PrintExportView';
 import RequirementsPanel from './components/RequirementsPanel';
 import RubricPanel, { emptyTeacherScores } from './components/RubricPanel';
 import { Brief, BRIEFS, doorSwingConflicts } from './engine/rubric';
@@ -2233,6 +2234,12 @@ export default function BlueprintLabClient() {
             <ElevationsView project={project} onChange={setProject} tool={tool} onChangeTool={setTool} />
           ) : view === 'sandbox' ? (
             <SandboxView project={project} onChange={setProject} tool={tool} onChangeTool={setTool} orthoOn={orthoOn} onBeginLiveOp={beginLiveOp} onEndLiveOp={endLiveOp} />
+          ) : view === 'print' ? (
+            <PrintExportView
+              project={project}
+              studentName={session?.user?.name ?? ''}
+              deliverables={assignment?.brief.deliverables ?? null}
+            />
           ) : view === 'rooms' ? (
             <RoomsView
               project={project}

@@ -228,13 +228,20 @@ Source: Charlie's real classroom rubric (7 categories × 4 quality tiers at
   it immediately. Shell wrinkle: cleanest v1 = allow only on scratch-mode
   assignments (fixed/choice shells won't match an imported perimeter). Also
   lets teachers pull a free-play exemplar into an assignment.
-- **Printable architectural portfolio** — multi-page PDF, legal 8.5×14
-  landscape, classic title-block border per page (student last name, school,
-  project, date, sheet number "A-1 FLOOR PLAN"). Pages: cover, floor plan,
-  elevations two-up (using student's Front/Back/Left/Right labels), cross
-  section, roof plan. Reuse the Sandbox paper-space compositing; fields typed
-  in a dialog pre-export. PDF (not print CSS) so it prints anywhere and the
-  file itself is the keepsake. Priority over import if both greenlit.
+- **Printable architectural portfolio** — SHIPPED 2026-08-31 as the
+  Print/Export tab. Multi-page vector PDF, legal 8.5×14 landscape, double-line
+  border + bottom title strip per page (student / school / project / date /
+  sheet number "A-1" with sheet title). Pages: A-0 cover with drawing index,
+  floor plan (per level, WITH furniture as drafting rects), elevations two-up
+  at a shared scale, one page per placed section, roof plan. Drawings plot at
+  standard architect's scales (largest of 1/2"…1/32"=1'-0" that fits — noted
+  in each caption; title block says AS NOTED). Engine: engine/portfolio.ts on
+  gatherRaw (sheet.ts) + renderBlocksToPdf (pdf.ts, print floors keep
+  lineweights/text legible at small plot scales — floors are 0 for the CAD
+  exchange export, byte-identical). Assignment deliverables preset the
+  optional-sheet checkboxes (floor-plan-only briefs start with
+  elevations/section/roof off, still checkable). Grading view exports the
+  frozen submission because the export reads the open document.
 
 ## Open questions
 - **Where does grading live?** Assume existing teacher dashboard + same gradebook

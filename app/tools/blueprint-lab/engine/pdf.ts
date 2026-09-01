@@ -52,6 +52,16 @@ export interface PdfExportOptions {
 let SCALE = 1;
 let HIDE_HATCH = false;
 let LINE_OVERRIDE: string | null = null;
+// Print-legibility floors (both 0 for the CAD exchange export, so its output is
+// unchanged). The portfolio export plots at architectural scales like 1/96,
+// where SCALE-proportional strokes/text collapse to invisible hairlines — the
+// floors keep lineweights and labels at readable absolute sizes while geometry
+// stays exactly to scale.
+let MIN_LW_IN_PER_PX = 0;   // per-px lineweight floor (inches of stroke per authored px)
+let MIN_TEXT_IN = 0;        // absolute text-height floor (inches)
+
+// Plotted stroke width for an authored screen-px weight, floored for print.
+const lwIn = (px: number) => px * Math.max(LW_IN_PER_PX * SCALE, MIN_LW_IN_PER_PX);
 
 // ── Style → stroke attributes (mirrors ElevationsView.strokeFor) ──────────────
 function strokeFor(style: SectionLineStyle | SectionPolyStyle): { color: string; widthPx: number; dash?: number[] } {
@@ -173,11 +183,11 @@ function hatchSegments(verts: Vec2[], pattern: string, angle = 0): [Vec2, Vec2][
 }
 
 // ── Drawing helpers (operate in PDF inches) ───────────────────────────────────
-type ToPdf = (p: Vec2) => Vec2;
+export type ToPdf = (p: Vec2) => Vec2;
 
 function applyStroke(doc: jsPDF, s: { color: string; widthPx: number; dash?: number[] }) {
   doc.setDrawColor(...hexToRgb(LINE_OVERRIDE ?? s.color));
-  doc.setLineWidth(s.widthPx * LW_IN_PER_PX * SCALE);
+  doc.setLineWidth(lwIn(s.widthPx));
   doc.setLineDashPattern((s.dash ?? []).map(d => d * SCALE), 0);
 }
 
@@ -231,7 +241,7 @@ function drawPrim(doc: jsPDF, p: SectionPrimitive, block: SheetBlock, toPdf: ToP
       const segs = HIDE_HATCH ? [] : hatchSegments(wpts, p.pattern, p.angle ?? 0);
       if (segs.length) {
         applyStroke(doc, { color: '#565c75', widthPx: 0.4, dash: [] });
-        doc.setLineWidth(HATCH_LINE_IN * SCALE);
+        doc.setLineWidth(Math.max(HATCH_LINE_IN * SCALE, lwIn(0.8)));
         for (const [a, b] of segs) { const pa = toPdf(a), pb = toPdf(b); doc.line(pa.x, pa.y, pb.x, pb.y); }
       }
       return;
@@ -274,7 +284,7 @@ function drawText(
   // makes the WHOLE drawing (lines + labels) visible on a dark CAD background,
   // instead of labels staying dark-navy and disappearing.
   doc.setTextColor(...hexToRgb(LINE_OVERRIDE ?? color));
-  doc.setFontSize(heightIn * SCALE * 72);   // jsPDF font size is points (1/72")
+  doc.setFontSize(Math.max(heightIn * SCALE, MIN_TEXT_IN * (heightIn / DIM_FONT_IN)) * 72);   // jsPDF font size is points (1/72")
   doc.text(text, at.x, at.y, {
     align: align ?? 'left',
     baseline: baseline === 'top' ? 'top' : baseline === 'middle' ? 'middle' : baseline === 'bottom' ? 'bottom' : 'alphabetic',
@@ -315,13 +325,13 @@ function drawDimLinear(doc: jsPDF, aW: Vec2, bW: Vec2, offset: number, toPdf: To
   const ea = gapFrom(a, da), eb = gapFrom(b, db);
   doc.line(ea.x, ea.y, da.x, da.y);               // extension lines (gapped)
   doc.line(eb.x, eb.y, db.x, db.y);
-  doc.setLineWidth(1.1 * LW_IN_PER_PX * SCALE);
+  doc.setLineWidth(lwIn(1.1));
   doc.line(da.x, da.y, db.x, db.y);               // dim line
   const ang = Math.atan2(db.y - da.y, db.x - da.x);
   const tick = DIM_TICK_HALF * SCALE;
   const tdx = Math.cos(ang + Math.PI / 4) * tick;
   const tdy = Math.sin(ang + Math.PI / 4) * tick;
-  doc.setLineWidth(1.4 * LW_IN_PER_PX * SCALE);
+  doc.setLineWidth(lwIn(1.4));
   doc.line(da.x - tdx, da.y - tdy, da.x + tdx, da.y + tdy);   // 45° ticks
   doc.line(db.x - tdx, db.y - tdy, db.x + tdx, db.y + tdy);
 
@@ -368,6 +378,39 @@ function drawDimChain(doc: jsPDF, xIn: number, y1In: number, y2In: number, text:
 // CAD import and remain dimensionally exact.
 const PDF_MAX_IN = 199;   // 1" under the hard 200" limit for safety
 
+// ── Reusable block renderer ───────────────────────────────────────────────────
+// Draw a set of sheet blocks onto an EXISTING jsPDF document through a caller-
+// supplied sheet-world→page mapping. This is the shared engine behind the CAD
+// exchange export (buildSheetPdf below, floors = 0) and the portfolio export
+// (engine/portfolio.ts, which plots small architectural scales and needs the
+// print floors). Sets the module render state, so calls must not interleave.
+export interface BlockRenderOptions {
+  scale: number;              // geometry scale factor (also scales strokes/text)
+  hideHatches?: boolean;
+  lineColor?: string | null;
+  minLwInPerPx?: number;      // print floor: min inches of stroke per authored px
+  minTextIn?: number;         // print floor: min height of a size-11 label, inches
+}
+export function renderBlocksToPdf(doc: jsPDF, blocks: SheetBlock[], toPdf: ToPdf, opts: BlockRenderOptions): void {
+  SCALE = opts.scale;
+  HIDE_HATCH = !!opts.hideHatches;
+  LINE_OVERRIDE = opts.lineColor ?? null;
+  MIN_LW_IN_PER_PX = opts.minLwInPerPx ?? 0;
+  MIN_TEXT_IN = opts.minTextIn ?? 0;
+  for (const block of blocks) {
+    const rawPrims = block.kind === 'plan-scene'
+      ? (block.primitives ?? (block.level ? planExportPrimitives(block.level) : []))
+      : (block.primitives ?? []);
+    // "Remove material hatches" → emit clean linework: drop hatches AND the
+    // white masking fills (wall shells / hatch backings), clipping the lines
+    // they hid. Same pass the DXF export uses, so the PDF reads identically to
+    // the DXF in CAD — no solid grey shapes on a dark background. With hatches
+    // kept on, draw the full filled presentation (good for white-page viewing).
+    const prims = HIDE_HATCH ? occludePrimitives(rawPrims) : rawPrims;
+    for (const p of prims) drawPrim(doc, p, block, toPdf);
+  }
+}
+
 // ── Assemble the full PDF ─────────────────────────────────────────────────────
 export async function buildSheetPdf(sheet: SheetLayout, opts: PdfExportOptions = {}): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
@@ -398,18 +441,9 @@ export async function buildSheetPdf(sheet: SheetLayout, opts: PdfExportOptions =
     ? (p: Vec2) => ({ x: (p.x - b.minX) * k + M, y: (b.maxY - p.y) * k + M })
     : (p: Vec2) => ({ x: p.x * k + M, y: H - p.y * k - M });
 
-  for (const block of sheet.blocks) {
-    const rawPrims = block.kind === 'plan-scene'
-      ? (block.primitives ?? (block.level ? planExportPrimitives(block.level) : []))
-      : (block.primitives ?? []);
-    // "Remove material hatches" → emit clean linework: drop hatches AND the
-    // white masking fills (wall shells / hatch backings), clipping the lines
-    // they hid. Same pass the DXF export uses, so the PDF reads identically to
-    // the DXF in CAD — no solid grey shapes on a dark background. With hatches
-    // kept on, draw the full filled presentation (good for white-page viewing).
-    const prims = HIDE_HATCH ? occludePrimitives(rawPrims) : rawPrims;
-    for (const p of prims) drawPrim(doc, p, block, toPdf);
-  }
+  renderBlocksToPdf(doc, sheet.blocks, toPdf, {
+    scale: k, hideHatches: !!opts.hideHatches, lineColor: opts.lineColor ?? null,
+  });
 
   // Scale note (bottom-left of the page, in the margin). Prefer the chosen plot
   // label when it actually fit; otherwise state the exact factor to rescale by.
