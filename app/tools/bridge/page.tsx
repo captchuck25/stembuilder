@@ -9,6 +9,11 @@ import BridgeScene from "./components/BridgeScene";
 import SiteHeader from "@/app/components/SiteHeader";
 import { upsertBridgeDesign, checkBridgeNameExists, fetchBridgeDesignById } from "@/lib/achievements";
 import styles from "./bridge-layout.module.css";
+import {
+  generateTruss,
+  TRUSS_STYLE_INFO,
+  type TrussStyle,
+} from "./engine/trussTemplates";
 
 import {
   type MemberType,
@@ -21,6 +26,7 @@ import {
   UNITS_PER_FOOT,
   INITIAL_SPAN_FEET,
   COST_PER_JOINT,
+  getSiteCost,
   DEFAULT_SNAP_TO_GRID,
   DEFAULT_SNAP_STEP_FEET,
   SUPPORT_X,
@@ -57,6 +63,72 @@ type Tool = "select" | "joint" | "member" | "erase";
 
 type ExportPaperSize = "letter" | "legal";
 type ExportFormat = "pdf" | "png" | "jpeg";
+
+// Costs run in the hundreds of thousands after the 5× rescale — always show
+// thousands separators.
+const fmtMoney = (n: number) =>
+  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Small truss diagram for the setup wizard's style gallery, drawn from the
+// same generator that produces the on-canvas guide.
+function TrussPreview({ style }: { style: TrussStyle | "freestyle" }) {
+  const W = 150;
+  const H = 64;
+  const YD = 52;
+  // Scale to fit the tallest node (arched styles bow above the flat-chord
+  // heights) and center the 40 ft reference span.
+  const tpl = style === "freestyle" ? null : generateTruss(style, 40);
+  const maxY = tpl ? Math.max(...tpl.nodes.map((nd) => nd.y), 10) : 10;
+  const S = Math.min(3.5, 46 / maxY);
+  const X0 = (W - 40 * S) / 2;
+  const px = (ft: number) => X0 + ft * S;
+  const py = (ft: number) => YD - ft * S;
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden style={{ display: "block", margin: "0 auto" }}>
+      <line x1={0} y1={YD} x2={W} y2={YD} stroke="#8a8a8a" strokeWidth={3} />
+      <path d={`M ${px(0)} ${YD + 1} l -6 9 l 12 0 Z`} fill="#9aa0a6" />
+      <path d={`M ${px(40)} ${YD + 1} l -6 9 l 12 0 Z`} fill="#9aa0a6" />
+      {style === "freestyle" ? (
+        <text
+          x={px(20)}
+          y={py(3)}
+          textAnchor="middle"
+          fontSize={26}
+          fontWeight={800}
+          fill="#94a3b8"
+        >
+          ?
+        </text>
+      ) : tpl ? (
+            <g>
+              {tpl.members.map(([a, b], i) => (
+                <line
+                  key={`m${i}`}
+                  x1={px(tpl.nodes[a].x)}
+                  y1={py(tpl.nodes[a].y)}
+                  x2={px(tpl.nodes[b].x)}
+                  y2={py(tpl.nodes[b].y)}
+                  stroke="#334155"
+                  strokeWidth={2.5}
+                  strokeLinecap="round"
+                />
+              ))}
+              {tpl.nodes.map((nd, i) => (
+                <circle
+                  key={`n${i}`}
+                  cx={px(nd.x)}
+                  cy={py(nd.y)}
+                  r={2.6}
+                  fill="#f1f5f9"
+                  stroke="#334155"
+                  strokeWidth={1.4}
+                />
+              ))}
+            </g>
+      ) : null}
+    </svg>
+  );
+}
 
 function BridgeToolPage() {
   const { data: session } = useSession();
@@ -113,7 +185,19 @@ function BridgeToolPage() {
   const [hoverPoint, setHoverPoint] = useState<{ x: number; y: number } | null>(null);
   const [inspectionHasRun, setInspectionHasRun] = useState<boolean>(false);
   const [costExpanded, setCostExpanded] = useState<boolean>(false);
-  const [optionsExpanded, setOptionsExpanded] = useState<boolean>(false);
+  const [optionsExpanded, setOptionsExpanded] = useState<boolean>(true);
+  // Examiner results render as a dropdown overlaying the canvas so they never
+  // push the layout down; dismissible, re-shown on the next run.
+  const [resultsDropdownDismissed, setResultsDropdownDismissed] = useState(false);
+  // Setup wizard (fresh sandbox visits only) + truss-style design guide.
+  const [showSetupWizard, setShowSetupWizard] = useState(false);
+  const [wizardSpan, setWizardSpan] = useState<20 | 40 | 60 | 80 | 100>(
+    INITIAL_SPAN_FEET as 20 | 40 | 60 | 80 | 100
+  );
+  const [wizardLoad, setWizardLoad] = useState<number>(LOAD_TON_OPTIONS[0]);
+  const [wizardStyle, setWizardStyle] = useState<TrussStyle | "freestyle">("freestyle");
+  const [guideStyle, setGuideStyle] = useState<TrussStyle | null>(null);
+  const [guideVisible, setGuideVisible] = useState(true);
   const [materialExpanded, setMaterialExpanded] = useState<boolean>(true);
   const [spanFeet, setSpanFeet] = useState<20 | 40 | 60 | 80 | 100>(
     INITIAL_SPAN_FEET
@@ -253,6 +337,24 @@ function BridgeToolPage() {
     setSvgRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
   }, []);
 
+  // Responsive canvas: the drawing keeps its fixed 1150×650 coordinate space
+  // and is scaled uniformly to fill the available frame width.
+  const viewportFrameRef = useRef<HTMLElement | null>(null);
+  const [canvasScale, setCanvasScale] = useState(1);
+  React.useLayoutEffect(() => {
+    const el = viewportFrameRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w > 0) setCanvasScale(w / 1150);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(pointer: coarse)");
@@ -362,6 +464,35 @@ function BridgeToolPage() {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // Show the setup wizard only on a fresh sandbox visit — never when opening
+  // a saved design (?id=), an assignment (?assignment=), or teacher demo view.
+  useEffect(() => {
+    if (
+      searchParams.get("id") ||
+      searchParams.get("assignment") ||
+      viewAsStudent
+    )
+      return;
+    setShowSetupWizard(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function startFromWizard() {
+    suppressDirtyRef.current = true;
+    if (wizardSpan !== spanFeet) {
+      applySpanFeet(wizardSpan);
+    }
+    setLoadLb(wizardLoad * LB_PER_TON);
+    setGuideStyle(wizardStyle === "freestyle" ? null : wizardStyle);
+    setGuideVisible(true);
+    setShowSetupWizard(false);
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => {
+        suppressDirtyRef.current = false;
+      })
+    );
+  }
 
   useEffect(() => {
     if (isDemoMode) return;
@@ -801,6 +932,15 @@ function BridgeToolPage() {
     setStressTestError(null);
     setBridgeName("");
     setDesignerName("");
+    // Back to the starter screen after a reset — sandbox mode only
+    // (assignments lock span/load and never offer templates).
+    if (!assignmentConfig && !isDemoMode) {
+      setWizardSpan(spanFeet);
+      setWizardLoad(selectedLoadTon);
+      setWizardStyle(guideStyle ?? "freestyle");
+      setGuideStyle(null);
+      setShowSetupWizard(true);
+    }
   }
 
   function getSpanFtFromUI(): number {
@@ -1050,12 +1190,14 @@ function BridgeToolPage() {
   function svgPointFromClient(clientX: number, clientY: number) {
     const svg = svgRef.current;
     if (!svg) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return null;
-    return pt.matrixTransform(ctm.inverse());
+    // Map client px → the fixed 1150×650 viewBox space. Rect-based math stays
+    // exact under the responsive scale transform on the canvas wrapper.
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: ((clientX - rect.left) * 1150) / rect.width,
+      y: ((clientY - rect.top) * 650) / rect.height,
+    };
   }
 
   function onCanvasClick(e: React.MouseEvent<SVGSVGElement>) {
@@ -1405,16 +1547,18 @@ function BridgeToolPage() {
     }
 
     const jointCost = nodes.length * COST_PER_JOINT;
-    const totalCost = memberCostTotal + jointCost;
+    const siteCost = getSiteCost(spanFeet);
+    const totalCost = memberCostTotal + jointCost + siteCost;
 
     return {
       totalFeet,
       memberCostTotal,
       jointCost,
       boxCost,
+      siteCost,
       totalCost,
     };
-  }, [feetPerUnit, members, nodeById, nodes.length]);
+  }, [feetPerUnit, members, nodeById, nodes.length, spanFeet]);
 
   const selectedMemberStats = useMemo(() => {
   
@@ -1731,6 +1875,7 @@ function BridgeToolPage() {
     setStressTestFrames(null);
     stressTestFramesRef.current = null;
     setLiveStressTestResult(null);
+    setResultsDropdownDismissed(false);
   }
 
   function cancelStressTest() {
@@ -1919,6 +2064,7 @@ function BridgeToolPage() {
   function runBridgeExaminer() {
     if (isTesting) return;
     setInspectionHasRun(true);
+    setResultsDropdownDismissed(false);
     if (!inspectionPassRaw) {
       setStressTestResult(null);
       setStressTestError(
@@ -2358,7 +2504,7 @@ function BridgeToolPage() {
   <rect x="${titleX}" y="${titleY}" width="330" height="178" fill="#ffffff" stroke="#111111" stroke-width="2" rx="8" />
   <text x="${titleX + 14}" y="${titleY + 28}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Bridge Name: ${safeBridgeName}</text>
   <text x="${titleX + 14}" y="${titleY + 56}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Designed by: ${safeDesignerName}</text>
-  <text x="${titleX + 14}" y="${titleY + 84}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Cost: $${costSummary.totalCost.toFixed(2)}</text>
+  <text x="${titleX + 14}" y="${titleY + 84}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Cost: $${fmtMoney(costSummary.totalCost)}</text>
   <text x="${titleX + 14}" y="${titleY + 112}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Span &amp; Load: ${spanFeet} ft / ${formatTons(loadLb)}</text>
   <text x="${titleX + 14}" y="${titleY + 140}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Scale: 1 square = 1 ft</text>
   <text x="${titleX + 14}" y="${titleY + 168}" font-family="Arial, sans-serif" font-size="17" fill="#111111">Inspection ${inspectionPass ? "Pass" : "Fail"} / Stress ${safeStressStatus}</text>
@@ -2698,7 +2844,7 @@ function BridgeToolPage() {
         const designerText = designerName.trim() || "";
         pdf.text(`Bridge Name: ${bridgeText}`, titleX + 0.12, titleY + 0.28);
         pdf.text(`Designed by: ${designerText}`, titleX + 0.12, titleY + 0.54);
-        pdf.text(`Cost: $${costSummary.totalCost.toFixed(2)}`, titleX + 0.12, titleY + 0.8);
+        pdf.text(`Cost: $${fmtMoney(costSummary.totalCost)}`, titleX + 0.12, titleY + 0.8);
         pdf.text(
           `Span & Load: ${spanFeet} ft / ${formatTons(loadLb)}`,
           titleX + 0.12,
@@ -2965,9 +3111,10 @@ function BridgeToolPage() {
 
       <main className={styles.main}>
         <div className={styles.frame}>
-          <div className={styles.toolbarStrip}>
-            <div className={styles.toolbarLeft}>
-              <div className={styles.toolbarIcons}>
+          <div className={styles.topBand}>
+            <div className={styles.toolClusterWrap}>
+              <div className={styles.toolCluster}>
+                <div className={styles.toolRow}>
                 {[
                   { src: "save-file-icon.png", label: "Save Design", disabled: false, hidden: isDemoMode },
                   { src: "export-icon.png", label: "Export", disabled: false, hidden: false },
@@ -2990,16 +3137,6 @@ function BridgeToolPage() {
                     <img src={`/ui/${item.src}`} alt={item.label} />
                   </button>
                 ))}
-                {/* Save status feedback */}
-                {saveStatus === "saving" && (
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#888" }}>Saving…</span>
-                )}
-                {saveStatus === "saved" && (
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#16a34a" }}>✓ Saved</span>
-                )}
-                {saveStatus === "error" && (
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#dc2626" }}>Save failed</span>
-                )}
                 <button
                   onClick={undoLastEdit}
                   className={`${styles.toolbarIconButton} ${
@@ -3027,10 +3164,6 @@ function BridgeToolPage() {
                 >
                   <img src="/ui/reset-icon.png" alt="Reset" />
                 </button>
-                <ToolButton id="select" label="Select" />
-                <ToolButton id="joint" label="Joint" />
-                <ToolButton id="member" label="Member" />
-                <ToolButton id="erase" label="Erase" />
                 <button
                   onClick={() => setSnapToGrid((prev) => !prev)}
                   className={`${styles.toolbarIconButton} ${
@@ -3041,6 +3174,12 @@ function BridgeToolPage() {
                 >
                   <img src="/ui/snap-on-icon.png" alt="Snap" />
                 </button>
+                </div>
+                <div className={styles.toolRow}>
+                <ToolButton id="select" label="Select" />
+                <ToolButton id="joint" label="Joint" />
+                <ToolButton id="member" label="Member" />
+                <ToolButton id="erase" label="Erase" />
                 <button
                   onClick={() => setShowGrid((prev) => !prev)}
                   className={`${styles.toolbarIconButton} ${
@@ -3051,18 +3190,15 @@ function BridgeToolPage() {
                 >
                   <img src="/ui/grid-on-icon.png" alt="Grid" />
                 </button>
-                <div
-                  className={styles.toolbarGridSize}
-                  style={{ display: "flex", alignItems: "center", gap: 6 }}
-                >
-                  <span className={styles.toolbarGridLabel}>Grid Size</span>
+                <div className={styles.gridSizePill} title="Grid snap size in feet">
+                  <span className={styles.gridSizeLabel}>Grid</span>
                   <select
                     value={snapStepFeet}
                     onChange={(e) =>
                       setSnapStepFeet(Number(e.target.value) as 0.5 | 1 | 2.5 | 5)
                     }
-                    className={styles.toolbarSelect}
-                    title="Snap increment in feet"
+                    className={styles.gridSizeSelect}
+                    title="Grid snap size in feet"
                   >
                     <option value={0.5}>0.5 ft</option>
                     <option value={1}>1 ft</option>
@@ -3070,18 +3206,604 @@ function BridgeToolPage() {
                     <option value={5}>5 ft</option>
                   </select>
                 </div>
+                </div>
               </div>
+              {saveStatus === "saving" && (
+                <span className={styles.saveStatus} style={{ color: "#888" }}>Saving…</span>
+              )}
+              {saveStatus === "saved" && (
+                <span className={styles.saveStatus} style={{ color: "#16a34a" }}>✓ Saved</span>
+              )}
+              {saveStatus === "error" && (
+                <span className={styles.saveStatus} style={{ color: "#dc2626" }}>Save failed</span>
+              )}
             </div>
+
+            <section className={styles.panelRow}>
+              {assignmentConfig && (
+                <div className={styles.sideCard} style={{ background: assignmentSubmitted ? "#f0fdf4" : "#fffbeb", border: `2px solid ${assignmentSubmitted ? "#86efac" : "#fde68a"}` }}>
+                  <div className={styles.sideCardHeader} style={{ borderBottom: `1px solid ${assignmentSubmitted ? "#86efac" : "#fde68a"}` }}>
+                    <div className={styles.sideCardTitle} style={{ color: assignmentSubmitted ? "#166534" : "#92400e" }}>
+                      {assignmentSubmitted ? "✓ Assignment Submitted" : "🌉 Assignment"}
+                    </div>
+                  </div>
+                  <div className={styles.sideCardBody}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 8 }}>
+                      {assignmentConfig.title || "Bridge Assignment"}
+                    </div>
+                    <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>Span: {assignmentConfig.span_feet} ft (locked)</div>
+                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>Load: {assignmentConfig.load_lb / 2000} ton (locked)</div>
+                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>
+                        Budget: ${fmtMoney(costSummary.totalCost)} / ${fmtMoney(assignmentConfig.max_cost)}
+                        {costSummary.totalCost > assignmentConfig.max_cost && (
+                          <span style={{ color: "#dc2626", marginLeft: 4 }}>— over budget!</span>
+                        )}
+                      </div>
+                    </div>
+                    {isDemoMode ? (
+                      <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
+                        Demo view — submit and save are disabled.
+                      </div>
+                    ) : (
+                      <>
+                        {!assignmentSubmitted && (
+                          assignmentComplete ? (
+                            <button
+                              onClick={handleSubmitAssignment}
+                              disabled={assignmentSubmitting}
+                              style={{ width: "100%", padding: "10px", borderRadius: 8, border: "none",
+                                background: assignmentSubmitting ? "#86efac" : "#16a34a",
+                                color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
+                              {assignmentSubmitting ? "Submitting…" : "Submit Assignment"}
+                            </button>
+                          ) : (
+                            <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
+                              {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : "Over budget — reduce material cost"}
+                            </div>
+                          )
+                        )}
+                        {assignmentSubmitted && (
+                          <>
+                            <div style={{ fontSize: 12, color: "#166534", fontWeight: 700, marginBottom: nodes.length > 0 ? 0 : 8 }}>
+                              Great work! Your bridge passed and was submitted.
+                            </div>
+                            {nodes.length > 0 && assignmentComplete && (
+                              <button
+                                onClick={handleSubmitAssignment}
+                                disabled={assignmentSubmitting}
+                                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 8, border: "none",
+                                  background: assignmentSubmitting ? "#86efac" : "#15803d",
+                                  color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
+                                {assignmentSubmitting ? "Resubmitting…" : "↺ Resubmit Improved Bridge"}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className={styles.sideCard}>
+                <div className={styles.sideCardHeader}>
+                  <div className={styles.sideCardTitle}>Load & Span</div>
+                  <button
+                    className={styles.sideCardToggle}
+                    onClick={() => setOptionsExpanded((v) => !v)}
+                    aria-expanded={optionsExpanded}
+                    aria-label="Toggle Load & Span"
+                  >
+                    {optionsExpanded ? "v" : "^"}
+                  </button>
+                </div>
+                {optionsExpanded ? (
+                  <div className={styles.sideCardBody}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <label style={{ display: "grid", gap: 4 }}>
+                        <span style={{ fontWeight: 600, fontSize: 12, color: "#0d0d0d" }}>
+                          Span
+                        </span>
+                        <select
+                          value={spanFeet}
+                          onChange={(e) =>
+                            applySpanFeet(Number(e.target.value) as 20 | 40 | 60 | 80 | 100)
+                          }
+                          disabled={!!assignmentConfig}
+                          style={{
+                            padding: "6px 8px",
+                            borderRadius: 8,
+                            border: "1px solid #b8b8b8",
+                            background: assignmentConfig ? "#f3f4f6" : "#ffffff",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            opacity: assignmentConfig ? 0.7 : 1,
+                            width: "100%",
+                            minWidth: 0,
+                          }}
+                        >
+                          <option value={20}>20 ft</option>
+                          <option value={40}>40 ft</option>
+                          <option value={60}>60 ft</option>
+                          <option value={80}>80 ft</option>
+                          <option value={100}>100 ft</option>
+                        </select>
+                      </label>
+                      <label style={{ display: "grid", gap: 4 }}>
+                        <span style={{ fontWeight: 600, fontSize: 12, color: "#000" }}>
+                          Load
+                        </span>
+                        <select
+                          value={selectedLoadTon}
+                          onChange={(e) =>
+                            setLoadLb(Number(e.target.value) * LB_PER_TON)
+                          }
+                          disabled={!!assignmentConfig}
+                          style={{
+                            padding: "6px 8px",
+                            borderRadius: 8,
+                            border: "1px solid #b8b8b8",
+                            background: assignmentConfig ? "#f3f4f6" : "#ffffff",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            opacity: assignmentConfig ? 0.7 : 1,
+                            width: "100%",
+                            minWidth: 0,
+                          }}
+                        >
+                          <option value={8}>8 Ton</option>
+                          <option value={15}>15 Ton</option>
+                          <option value={30}>30 Ton</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className={styles.sideCard}>
+                <div className={styles.sideCardHeader}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div className={styles.sideCardTitle}>Material</div>
+                    <button
+                      onClick={() => stepSelectedMemberSizes(1)}
+                      title="Size up"
+                      style={{
+                        border: "1px solid #b8b8b8",
+                        borderRadius: 6,
+                        padding: 2,
+                        background: "transparent",
+                        cursor: "pointer",
+                        lineHeight: 1,
+                      }}
+                    >
+                      <img src="/ui/up-arrow.png" alt="Size up" width={18} height={18} />
+                    </button>
+                    <button
+                      onClick={() => stepSelectedMemberSizes(-1)}
+                      title="Size down"
+                      style={{
+                        border: "1px solid #b8b8b8",
+                        borderRadius: 6,
+                        padding: 2,
+                        background: "transparent",
+                        cursor: "pointer",
+                        lineHeight: 1,
+                      }}
+                    >
+                      <img src="/ui/down-arrow.png" alt="Size down" width={18} height={18} />
+                    </button>
+                  </div>
+                  <span />
+                </div>
+                <div
+                  className={styles.sideCardBody}
+                  style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
+                >
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ fontWeight: 600, fontSize: 12, color: "#0d0d0d" }}>
+                      Grade
+                    </span>
+                    <select
+                      value={selectedGradeMixed ? "mixed" : materialGrade}
+                      onChange={(e) => {
+                        const next: MaterialGrade =
+                          e.target.value === "high" ? "high" : "mild";
+                        setSelectedGradeMixed(false);
+                        setMaterialGrade(next);
+                        if (selectedMemberIds.size > 0) {
+                          setSelectedMemberGrade(next);
+                        }
+                      }}
+                      style={{
+                        padding: "6px 8px",
+                        borderRadius: 8,
+                        border: "1px solid #b8b8b8",
+                        background: "#ffffff",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        width: "100%",
+                        minWidth: 0,
+                      }}
+                    >
+                      {selectedGradeMixed ? (
+                        <option value="mixed">Mixed</option>
+                      ) : null}
+                      <option value="mild">Mild Steel</option>
+                      <option value="high">High Strength Steel</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span style={{ fontWeight: 600, fontSize: 12, color: "#0d0d0d" }}>
+                      Size
+                    </span>
+                      <select
+                        value={selectedSizeMixed ? "mixed" : activeMemberType}
+                        onChange={(e) => {
+                          if (e.target.value === "mixed") return;
+                          const nextType = e.target.value as MemberType;
+                          setSelectedSizeMixed(false);
+                          setActiveMemberType(nextType);
+                          if (selectedMemberIds.size > 0) {
+                            setSelectedMemberType(nextType);
+                          }
+                        }}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          border: "1px solid #b8b8b8",
+                          background: "#ffffff",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          width: "100%",
+                          minWidth: 0,
+                        }}
+                      >
+                        {selectedSizeMixed ? (
+                          <option value="mixed">Mixed</option>
+                        ) : null}
+                        {boxKeys.map((key) => (
+                          <option key={key} value={key}>
+                            {formatMemberSizeNoGauge(key as MemberType)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div className={styles.sideCard}>
+                <div className={styles.sideCardHeader}>
+                  <div className={styles.sideCardTitle}>Cost</div>
+                  <button
+                    className={styles.sideCardToggle}
+                    onClick={() => setCostExpanded((v) => !v)}
+                    aria-expanded={costExpanded}
+                    aria-label="Toggle Cost"
+                  >
+                    {costExpanded ? "v" : "^"}
+                  </button>
+                </div>
+                <div style={{ fontWeight: 700, color: "#1b7f3a", marginBottom: 2 }}>
+                  ${fmtMoney(costSummary.totalCost)}
+                </div>
+                {costExpanded ? (
+                  <div className={`${styles.cardDropdown} ${styles.cardDropdownLeft}`}>
+                    <button
+                      className={styles.cardDropdownClose}
+                      onClick={() => setCostExpanded(false)}
+                      aria-label="Close cost details"
+                    >
+                      ✕
+                    </button>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ fontSize: 11 }}>
+                        Site (deck &amp; supports): ${fmtMoney(costSummary.siteCost)}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#444" }}>
+                        {costSummary.totalFeet.toFixed(2)} ft total
+                      </div>
+                      <div style={{ fontSize: 11 }}>
+                        Joints: ${fmtMoney(costSummary.jointCost)} ({nodes.length})
+                      </div>
+                      <div style={{ fontSize: 11 }}>
+                        Steel Box Beam: ${fmtMoney(costSummary.boxCost)}
+                      </div>
+                      {selectedMemberStats ? (
+                        <div style={{ fontSize: 11, marginTop: 6 }}>
+                          Selected: {selectedMemberStats.ft.toFixed(2)} ft @ $
+                          {selectedMemberStats.rate}/ft = $
+                          {fmtMoney(selectedMemberStats.cost)}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className={styles.sideCard}>
+                <div className={styles.sideCardHeader}>
+                  <div className={styles.sideCardTitle}>Bridge Examiner</div>
+                </div>
+                <div
+                  className={styles.sideCardBody}
+                  style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}
+                >
+                    <button
+                      onClick={runBridgeExaminer}
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        border: "1px solid #b8b8b8",
+                        background: "#eeeeee",
+                        color: "#222",
+                        cursor: isTesting ? "wait" : "pointer",
+                        fontWeight: 700,
+                        fontSize: 12,
+                        width: "fit-content",
+                      }}
+                    >
+                      {isTesting ? "Running Test..." : "Run Bridge Test"}
+                    </button>
+                    <div style={{ display: "grid", gap: 4, flex: "1 1 100px", alignContent: "start" }}>
+                      <div style={{ fontWeight: 800, fontSize: 12 }}>Design Inspection</div>
+                      <div style={{ fontWeight: 700 }}>
+                        {!inspectionHasRun
+                          ? "Not run"
+                          : inspectionPass
+                          ? "Pass"
+                          : "Fail"}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 4, flex: "1.4 1 150px", alignContent: "start" }}>
+                      <div style={{ fontWeight: 800, fontSize: 12 }}>Stress Test</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          onClick={clearStressTest}
+                          style={{
+                            padding: "6px 10px",
+                            borderRadius: 8,
+                            border: "1px solid #b8b8b8",
+                            background: "#ffffff",
+                            color: "#222",
+                            cursor: "pointer",
+                            fontWeight: 600,
+                            fontSize: 12,
+                          }}
+                        >
+                          Clear Stress Test
+                        </button>
+                        {collapseActive && !isTesting ? (
+                          <button
+                            onClick={() => setWreckVisible((v) => !v)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #b8b8b8",
+                              background: "#ffffff",
+                              color: "#222",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              fontSize: 12,
+                            }}
+                          >
+                            {wreckVisible ? "Show Stress Analysis" : "Show Collapse"}
+                          </button>
+                        ) : null}
+                        {isTesting ? (
+                          <button
+                            onClick={cancelStressTest}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #b8b8b8",
+                              background: "#ffffff",
+                              color: "#222",
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              fontSize: 12,
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                      {isTesting ? (
+                        <div style={{ fontSize: 11, color: "#444" }}>Running...</div>
+                      ) : null}
+                    </div>
+                  </div>
+                  {!resultsDropdownDismissed &&
+                  !isTesting &&
+                  ((inspectionHasRun &&
+                    (inspectionFailReasons.length > 0 ||
+                      inspectionWarningItems.length > 0)) ||
+                    activeStressTestResult ||
+                    stressFailReason ||
+                    activeStressTestError) ? (
+                    <div className={styles.cardDropdown}>
+                      <button
+                        className={styles.cardDropdownClose}
+                        onClick={() => setResultsDropdownDismissed(true)}
+                        aria-label="Dismiss results"
+                      >
+                        ✕
+                      </button>
+                      {inspectionHasRun && !inspectionPass ? (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", margin: "0 0 6px" }}>
+                          Bridge cannot be stress tested until it passes its
+                          design inspection.
+                        </div>
+                      ) : stressFailReason ? (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", margin: "0 0 6px" }}>
+                          {stressFailReason}
+                        </div>
+                      ) : activeStressTestError ? (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", margin: "0 0 6px" }}>
+                          {activeStressTestError}
+                        </div>
+                      ) : null}
+                      {inspectionHasRun && inspectionFailReasons.length > 0 ? (
+                        <ul style={{ margin: "0 0 6px", paddingLeft: 18, fontSize: 11 }}>
+                          {inspectionFailReasons.map((reason) => (
+                            <li key={reason}>{reason}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {inspectionHasRun && inspectionWarningItems.length > 0 ? (
+                        <ul
+                          style={{
+                            margin: "0 0 6px",
+                            paddingLeft: 18,
+                            fontSize: 11,
+                            color: "#8a5b00",
+                          }}
+                        >
+                          {inspectionWarningItems.map((warning) => (
+                            <li key={warning.id}>
+                              {warning.text}{" "}
+                              <button
+                                onClick={() => {
+                                  const next = new Set(warning.memberIds);
+                                  setSelectedMemberIds(next);
+                                  setSelectedMemberId(warning.memberIds[0] ?? null);
+                                  setTool("select");
+                                }}
+                                style={{
+                                  fontWeight: 700,
+                                  color: "#c92a2a",
+                                  textShadow: "0 0 6px rgba(255, 77, 77, 0.6)",
+                                  background: "transparent",
+                                  border: "none",
+                                  padding: 0,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                {warning.memberIds.length}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {activeStressTestResult ? (
+                        <>
+                          <div style={{ fontSize: 11 }}>
+                            # of members passed stress:{" "}
+                            <button
+                              onClick={() => {
+                                const failed = new Set(
+                                  stressTestResult?.failedMemberIds ?? []
+                                );
+                                const passed = members
+                                  .filter((m) => !failed.has(m.id))
+                                  .map((m) => m.id);
+                                const next = new Set(passed);
+                                setSelectedMemberIds(next);
+                                setSelectedMemberId(passed[0] ?? null);
+                                setTool("select");
+                              }}
+                              style={{
+                                fontWeight: 700,
+                                color: "#1e8e3e",
+                                textShadow: "0 0 6px rgba(46, 204, 113, 0.6)",
+                                background: "transparent",
+                                border: "none",
+                                padding: 0,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {Math.max(
+                                0,
+                                members.length -
+                                  (stressTestResult?.failedMemberIds.length ?? 0)
+                              )}
+                            </button>
+                          </div>
+                          <div style={{ fontSize: 11 }}>
+                            # of members failed stress:{" "}
+                            <button
+                              onClick={() => {
+                                const failed = stressTestResult?.failedMemberIds ?? [];
+                                const next = new Set(failed);
+                                setSelectedMemberIds(next);
+                                setSelectedMemberId(failed[0] ?? null);
+                                setTool("select");
+                              }}
+                              style={{
+                                fontWeight: 700,
+                                color: "#c92a2a",
+                                textShadow: "0 0 6px rgba(255, 77, 77, 0.6)",
+                                background: "transparent",
+                                border: "none",
+                                padding: 0,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {stressTestResult?.failedMemberIds.length ?? 0}
+                            </button>
+                          </div>
+                          {selectedMemberStress && (
+                            <div
+                              style={{
+                                marginTop: 10,
+                                fontSize: 11,
+                                paddingTop: 8,
+                                borderTop: "1px solid #ddd",
+                              }}
+                            >
+                              <div style={{ fontWeight: 700 }}>Selected member</div>
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  color:
+                                    selectedMemberStress.utilization > 1
+                                      ? "#dc2626"
+                                      : selectedMemberStress.utilization >= 0.9
+                                      ? "#d97706"
+                                      : "#16a34a",
+                                }}
+                              >
+                                {selectedMemberStress.utilization > 1
+                                  ? "FAILED — over capacity"
+                                  : selectedMemberStress.utilization >= 0.9
+                                  ? "Holding — near capacity"
+                                  : "Holding"}
+                              </div>
+                              <div>Mode: {selectedMemberStress.mode}</div>
+                              <div>
+                                Force: {selectedMemberStress.force.toFixed(0)} lb
+                              </div>
+                              <div>Cap: {selectedMemberStress.cap.toFixed(0)} lb</div>
+                              <div>
+                                Utilization:{" "}
+                                {(selectedMemberStress.utilization * 100).toFixed(0)}%
+                                {" of capacity"}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : null}
+                    </div>
+                  ) : null}
+              </div>
+            </section>
           </div>
 
           <main className={styles.content}>
-            <section className={styles.viewportFrame}>
+            <section
+              ref={viewportFrameRef}
+              className={styles.viewportFrame}
+              style={{ height: Math.round(650 * canvasScale) }}
+            >
               <div
                 style={{
                   width: "1150px",
                   height: "650px",
                   overflow: "hidden",
                   position: "relative",
+                  transform: `scale(${canvasScale})`,
+                  transformOrigin: "top left",
                 }}
               >
                 <main style={{ background: "transparent", color: "#222" }}>
@@ -3205,6 +3927,49 @@ function BridgeToolPage() {
               }}
             >
           {renderScene()}
+
+          {/* Truss-style design guide: faint dashed template from the wizard.
+              Pure overlay — measurement-exact feet mapped through the same
+              support/roadway coordinates the real geometry uses. */}
+          {guideStyle && guideVisible && !isTesting && !assignmentConfig
+            ? (() => {
+                const tpl = generateTruss(guideStyle, spanFeet);
+                const leftPx = SUPPORT_X[spanFeet].left;
+                const guidePxPerFt =
+                  (SUPPORT_X[spanFeet].right - leftPx) / spanFeet;
+                const gx = (ft: number) => leftPx + ft * guidePxPerFt;
+                const gy = (ft: number) => ROADWAY_Y - ft * guidePxPerFt;
+                return (
+                  <g pointerEvents="none" opacity={0.35}>
+                    {tpl.members.map(([a, b], i) => (
+                      <line
+                        key={`guide-m-${i}`}
+                        x1={gx(tpl.nodes[a].x)}
+                        y1={gy(tpl.nodes[a].y)}
+                        x2={gx(tpl.nodes[b].x)}
+                        y2={gy(tpl.nodes[b].y)}
+                        stroke="#2563eb"
+                        strokeWidth={3}
+                        strokeDasharray="7 6"
+                        strokeLinecap="round"
+                      />
+                    ))}
+                    {tpl.nodes.map((nd, i) => (
+                      <circle
+                        key={`guide-n-${i}`}
+                        cx={gx(nd.x)}
+                        cy={gy(nd.y)}
+                        r={5}
+                        fill="none"
+                        stroke="#2563eb"
+                        strokeWidth={2}
+                        strokeDasharray="2 3"
+                      />
+                    ))}
+                  </g>
+                );
+              })()
+            : null}
 
         {/* Piers — concrete bearing cap, tapered column, and footing, seated
             into the canyon ledge at full opacity. */}
@@ -3931,6 +4696,31 @@ function BridgeToolPage() {
             </text>
           ) : null}
             </svg>
+            {guideStyle && !assignmentConfig ? (
+              <button
+                onClick={() => setGuideVisible((v) => !v)}
+                title={`${guideVisible ? "Hide" : "Show"} the ${TRUSS_STYLE_INFO[guideStyle].label} guide`}
+                style={{
+                  position: "absolute",
+                  left: 70,
+                  top: 36,
+                  zIndex: 5,
+                  padding: "5px 12px",
+                  borderRadius: 999,
+                  border: "1px solid #2563eb",
+                  background: guideVisible ? "#eff6ff" : "rgba(255,255,255,0.9)",
+                  color: "#1d4ed8",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  opacity: guideVisible ? 1 : 0.6,
+                }}
+              >
+                {guideVisible
+                  ? `Hide ${TRUSS_STYLE_INFO[guideStyle].label} guide`
+                  : `Show ${TRUSS_STYLE_INFO[guideStyle].label} guide`}
+              </button>
+            ) : null}
             <div
               style={{
                 position: "absolute",
@@ -3982,7 +4772,7 @@ function BridgeToolPage() {
                     }}
                   />
                 </div>
-                <div>Cost: ${costSummary.totalCost.toFixed(2)}</div>
+                <div>Cost: ${fmtMoney(costSummary.totalCost)}</div>
                 <div>
                   Span &amp; Load: {spanFeet} ft / {formatTons(loadLb)}
                 </div>
@@ -4000,535 +4790,174 @@ function BridgeToolPage() {
               </div>
             </section>
 
-            <aside className={styles.rightPanel}>
-              {assignmentConfig && (
-                <div className={styles.sideCard} style={{ background: assignmentSubmitted ? "#f0fdf4" : "#fffbeb", border: `2px solid ${assignmentSubmitted ? "#86efac" : "#fde68a"}` }}>
-                  <div className={styles.sideCardHeader} style={{ borderBottom: `1px solid ${assignmentSubmitted ? "#86efac" : "#fde68a"}` }}>
-                    <div className={styles.sideCardTitle} style={{ color: assignmentSubmitted ? "#166534" : "#92400e" }}>
-                      {assignmentSubmitted ? "✓ Assignment Submitted" : "🌉 Assignment"}
-                    </div>
-                  </div>
-                  <div className={styles.sideCardBody}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111", marginBottom: 8 }}>
-                      {assignmentConfig.title || "Bridge Assignment"}
-                    </div>
-                    <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>Span: {assignmentConfig.span_feet} ft (locked)</div>
-                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>Load: {assignmentConfig.load_lb / 2000} ton (locked)</div>
-                      <div style={{ fontSize: 11, color: "#555", fontWeight: 600 }}>
-                        Budget: ${costSummary.totalCost.toFixed(2)} / ${assignmentConfig.max_cost.toFixed(2)}
-                        {costSummary.totalCost > assignmentConfig.max_cost && (
-                          <span style={{ color: "#dc2626", marginLeft: 4 }}>— over budget!</span>
-                        )}
-                      </div>
-                    </div>
-                    {isDemoMode ? (
-                      <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
-                        Demo view — submit and save are disabled.
-                      </div>
-                    ) : (
-                      <>
-                        {!assignmentSubmitted && (
-                          assignmentComplete ? (
-                            <button
-                              onClick={handleSubmitAssignment}
-                              disabled={assignmentSubmitting}
-                              style={{ width: "100%", padding: "10px", borderRadius: 8, border: "none",
-                                background: assignmentSubmitting ? "#86efac" : "#16a34a",
-                                color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
-                              {assignmentSubmitting ? "Submitting…" : "Submit Assignment"}
-                            </button>
-                          ) : (
-                            <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
-                              {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : "Over budget — reduce material cost"}
-                            </div>
-                          )
-                        )}
-                        {assignmentSubmitted && (
-                          <>
-                            <div style={{ fontSize: 12, color: "#166534", fontWeight: 700, marginBottom: nodes.length > 0 ? 0 : 8 }}>
-                              Great work! Your bridge passed and was submitted.
-                            </div>
-                            {nodes.length > 0 && assignmentComplete && (
-                              <button
-                                onClick={handleSubmitAssignment}
-                                disabled={assignmentSubmitting}
-                                style={{ width: "100%", marginTop: 10, padding: "10px", borderRadius: 8, border: "none",
-                                  background: assignmentSubmitting ? "#86efac" : "#15803d",
-                                  color: "#fff", fontWeight: 800, fontSize: 13, cursor: assignmentSubmitting ? "not-allowed" : "pointer" }}>
-                                {assignmentSubmitting ? "Resubmitting…" : "↺ Resubmit Improved Bridge"}
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div className={styles.sideCard}>
-                <div className={styles.sideCardHeader}>
-                  <div className={styles.sideCardTitle}>Load & Span</div>
-                  <button
-                    className={styles.sideCardToggle}
-                    onClick={() => setOptionsExpanded((v) => !v)}
-                    aria-expanded={optionsExpanded}
-                    aria-label="Toggle Load & Span"
-                  >
-                    {optionsExpanded ? "v" : "^"}
-                  </button>
-                </div>
-                {optionsExpanded ? (
-                  <div className={styles.sideCardBody}>
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <label style={{ fontWeight: 600, fontSize: 12, color: "#0d0d0d" }}>
-                        Span
-                      </label>
-                      <select
-                        value={spanFeet}
-                        onChange={(e) =>
-                          applySpanFeet(Number(e.target.value) as 20 | 40 | 60 | 80 | 100)
-                        }
-                        disabled={!!assignmentConfig}
-                        style={{
-                          padding: "6px 8px",
-                          borderRadius: 8,
-                          border: "1px solid #b8b8b8",
-                          background: assignmentConfig ? "#f3f4f6" : "#ffffff",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          opacity: assignmentConfig ? 0.7 : 1,
-                        }}
-                      >
-                        <option value={20}>20 ft</option>
-                        <option value={40}>40 ft</option>
-                        <option value={60}>60 ft</option>
-                        <option value={80}>80 ft</option>
-                        <option value={100}>100 ft</option>
-                      </select>
-
-                      <label
-                        style={{
-                          fontWeight: 600,
-                          fontSize: 12,
-                          marginTop: 4,
-                          color: "#000",
-                        }}
-                      >
-                        Load
-                      </label>
-                      <select
-                        value={selectedLoadTon}
-                        onChange={(e) =>
-                          setLoadLb(Number(e.target.value) * LB_PER_TON)
-                        }
-                        disabled={!!assignmentConfig}
-                        style={{
-                          padding: "6px 8px",
-                          borderRadius: 8,
-                          border: "1px solid #b8b8b8",
-                          background: assignmentConfig ? "#f3f4f6" : "#ffffff",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          opacity: assignmentConfig ? 0.7 : 1,
-                        }}
-                      >
-                        <option value={8}>8 Ton</option>
-                        <option value={15}>15 Ton</option>
-                        <option value={30}>30 Ton</option>
-                      </select>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className={styles.sideCard}>
-                <div className={styles.sideCardHeader}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div className={styles.sideCardTitle}>Material</div>
-                    <button
-                      onClick={() => stepSelectedMemberSizes(1)}
-                      title="Size up"
-                      style={{
-                        border: "1px solid #b8b8b8",
-                        borderRadius: 6,
-                        padding: 2,
-                        background: "transparent",
-                        cursor: "pointer",
-                        lineHeight: 1,
-                      }}
-                    >
-                      <img src="/ui/up-arrow.png" alt="Size up" width={18} height={18} />
-                    </button>
-                    <button
-                      onClick={() => stepSelectedMemberSizes(-1)}
-                      title="Size down"
-                      style={{
-                        border: "1px solid #b8b8b8",
-                        borderRadius: 6,
-                        padding: 2,
-                        background: "transparent",
-                        cursor: "pointer",
-                        lineHeight: 1,
-                      }}
-                    >
-                      <img src="/ui/down-arrow.png" alt="Size down" width={18} height={18} />
-                    </button>
-                  </div>
-                  <span />
-                </div>
-                <div className={styles.sideCardBody} style={{ display: "grid", gap: 10 }}>
-                  <label style={{ display: "grid", gap: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 12, color: "#0d0d0d" }}>
-                      Grade
-                    </span>
-                    <select
-                      value={selectedGradeMixed ? "mixed" : materialGrade}
-                      onChange={(e) => {
-                        const next: MaterialGrade =
-                          e.target.value === "high" ? "high" : "mild";
-                        setSelectedGradeMixed(false);
-                        setMaterialGrade(next);
-                        if (selectedMemberIds.size > 0) {
-                          setSelectedMemberGrade(next);
-                        }
-                      }}
-                      style={{
-                        padding: "6px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #b8b8b8",
-                        background: "#ffffff",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {selectedGradeMixed ? (
-                        <option value="mixed">Mixed</option>
-                      ) : null}
-                      <option value="mild">Mild Steel</option>
-                      <option value="high">High Strength Steel</option>
-                    </select>
-                  </label>
-                  <label style={{ display: "grid", gap: 4 }}>
-                    <span style={{ fontWeight: 600, fontSize: 12, color: "#0d0d0d" }}>
-                      Size
-                    </span>
-                      <select
-                        value={selectedSizeMixed ? "mixed" : activeMemberType}
-                        onChange={(e) => {
-                          if (e.target.value === "mixed") return;
-                          const nextType = e.target.value as MemberType;
-                          setSelectedSizeMixed(false);
-                          setActiveMemberType(nextType);
-                          if (selectedMemberIds.size > 0) {
-                            setSelectedMemberType(nextType);
-                          }
-                        }}
-                        style={{
-                          padding: "6px 8px",
-                          borderRadius: 8,
-                          border: "1px solid #b8b8b8",
-                          background: "#ffffff",
-                          fontSize: 12,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {selectedSizeMixed ? (
-                          <option value="mixed">Mixed</option>
-                        ) : null}
-                        {boxKeys.map((key) => (
-                          <option key={key} value={key}>
-                            {formatMemberSizeNoGauge(key as MemberType)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </div>
-
-              <div className={styles.sideCard}>
-                <div className={styles.sideCardHeader}>
-                  <div className={styles.sideCardTitle}>Cost</div>
-                  <button
-                    className={styles.sideCardToggle}
-                    onClick={() => setCostExpanded((v) => !v)}
-                    aria-expanded={costExpanded}
-                    aria-label="Toggle Cost"
-                  >
-                    {costExpanded ? "v" : "^"}
-                  </button>
-                </div>
-                <div style={{ fontWeight: 700, color: "#1b7f3a", marginBottom: 6 }}>
-                  ${costSummary.totalCost.toFixed(2)}
-                </div>
-                {costExpanded ? (
-                  <div className={styles.sideCardBody} style={{ display: "grid", gap: 6 }}>
-                    <div style={{ fontWeight: 700, color: "#1b7f3a" }}>
-                      ${costSummary.totalCost.toFixed(2)}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#444" }}>
-                      {costSummary.totalFeet.toFixed(2)} ft total
-                    </div>
-                    <div style={{ fontSize: 11 }}>
-                      Joints: ${costSummary.jointCost.toFixed(2)} ({nodes.length})
-                    </div>
-                    <div style={{ fontSize: 11 }}>
-                      Steel Box Beam: ${costSummary.boxCost.toFixed(2)}
-                    </div>
-                    {selectedMemberStats ? (
-                      <div style={{ fontSize: 11, marginTop: 6 }}>
-                        Selected: {selectedMemberStats.ft.toFixed(2)} ft @ $
-                        {selectedMemberStats.rate}/ft = $
-                        {selectedMemberStats.cost.toFixed(2)}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className={styles.sideCard}>
-                <div className={styles.sideCardHeader}>
-                  <div className={styles.sideCardTitle}>Bridge Examiner</div>
-                </div>
-                <div className={styles.sideCardBody} style={{ display: "grid", gap: 12 }}>
-                    <button
-                      onClick={runBridgeExaminer}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #b8b8b8",
-                        background: "#eeeeee",
-                        color: "#222",
-                        cursor: isTesting ? "wait" : "pointer",
-                        fontWeight: 700,
-                        fontSize: 12,
-                        width: "fit-content",
-                      }}
-                    >
-                      {isTesting ? "Running Test..." : "Run Bridge Test"}
-                    </button>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div style={{ fontWeight: 800, fontSize: 12 }}>Design Inspection</div>
-                      <div style={{ fontWeight: 700 }}>
-                        {!inspectionHasRun
-                          ? "Not run"
-                          : inspectionPass
-                          ? "Pass"
-                          : "Fail"}
-                      </div>
-                      {inspectionHasRun && inspectionFailReasons.length > 0 ? (
-                        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11 }}>
-                          {inspectionFailReasons.map((reason) => (
-                            <li key={reason}>{reason}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {inspectionHasRun && inspectionWarningItems.length > 0 ? (
-                        <ul
-                          style={{
-                            margin: 0,
-                            paddingLeft: 18,
-                            fontSize: 11,
-                            color: "#8a5b00",
-                          }}
-                        >
-                          {inspectionWarningItems.map((warning) => (
-                            <li key={warning.id}>
-                              {warning.text}{" "}
-                              <button
-                                onClick={() => {
-                                  const next = new Set(warning.memberIds);
-                                  setSelectedMemberIds(next);
-                                  setSelectedMemberId(warning.memberIds[0] ?? null);
-                                  setTool("select");
-                                }}
-                                style={{
-                                  fontWeight: 700,
-                                  color: "#c92a2a",
-                                  textShadow: "0 0 6px rgba(255, 77, 77, 0.6)",
-                                  background: "transparent",
-                                  border: "none",
-                                  padding: 0,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {warning.memberIds.length}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </div>
-
-                    <div style={{ display: "grid", gap: 8 }}>
-                      <div style={{ fontWeight: 800, fontSize: 12 }}>Stress Test</div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button
-                          onClick={clearStressTest}
-                          style={{
-                            padding: "6px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #b8b8b8",
-                            background: "#ffffff",
-                            color: "#222",
-                            cursor: "pointer",
-                            fontWeight: 600,
-                            fontSize: 12,
-                          }}
-                        >
-                          Clear Stress Test
-                        </button>
-                        {collapseActive && !isTesting ? (
-                          <button
-                            onClick={() => setWreckVisible((v) => !v)}
-                            style={{
-                              padding: "6px 10px",
-                              borderRadius: 8,
-                              border: "1px solid #b8b8b8",
-                              background: "#ffffff",
-                              color: "#222",
-                              cursor: "pointer",
-                              fontWeight: 600,
-                              fontSize: 12,
-                            }}
-                          >
-                            {wreckVisible ? "Show Stress Analysis" : "Show Collapse"}
-                          </button>
-                        ) : null}
-                        {isTesting ? (
-                          <button
-                            onClick={cancelStressTest}
-                            style={{
-                              padding: "6px 10px",
-                              borderRadius: 8,
-                              border: "1px solid #b8b8b8",
-                              background: "#ffffff",
-                              color: "#222",
-                              cursor: "pointer",
-                              fontWeight: 600,
-                              fontSize: 12,
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        ) : null}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#444" }}>
-                        {isTesting
-                          ? "Running..."
-                          : inspectionHasRun && !inspectionPass
-                          ? "Bridge cannot be stress tested until it passes its design inspection."
-                          : stressFailReason
-                          ? stressFailReason
-                          : activeStressTestError
-                          ? activeStressTestError
-                          : ""}
-                      </div>
-                      {activeStressTestResult ? (
-                        <>
-                          <div style={{ fontSize: 11 }}>
-                            # of members passed stress:{" "}
-                            <button
-                              onClick={() => {
-                                const failed = new Set(
-                                  stressTestResult?.failedMemberIds ?? []
-                                );
-                                const passed = members
-                                  .filter((m) => !failed.has(m.id))
-                                  .map((m) => m.id);
-                                const next = new Set(passed);
-                                setSelectedMemberIds(next);
-                                setSelectedMemberId(passed[0] ?? null);
-                                setTool("select");
-                              }}
-                              style={{
-                                fontWeight: 700,
-                                color: "#1e8e3e",
-                                textShadow: "0 0 6px rgba(46, 204, 113, 0.6)",
-                                background: "transparent",
-                                border: "none",
-                                padding: 0,
-                                cursor: "pointer",
-                              }}
-                            >
-                              {Math.max(
-                                0,
-                                members.length -
-                                  (stressTestResult?.failedMemberIds.length ?? 0)
-                              )}
-                            </button>
-                          </div>
-                          <div style={{ fontSize: 11 }}>
-                            # of members failed stress:{" "}
-                            <button
-                              onClick={() => {
-                                const failed = stressTestResult?.failedMemberIds ?? [];
-                                const next = new Set(failed);
-                                setSelectedMemberIds(next);
-                                setSelectedMemberId(failed[0] ?? null);
-                                setTool("select");
-                              }}
-                              style={{
-                                fontWeight: 700,
-                                color: "#c92a2a",
-                                textShadow: "0 0 6px rgba(255, 77, 77, 0.6)",
-                                background: "transparent",
-                                border: "none",
-                                padding: 0,
-                                cursor: "pointer",
-                              }}
-                            >
-                              {stressTestResult?.failedMemberIds.length ?? 0}
-                            </button>
-                          </div>
-                          {selectedMemberStress && (
-                            <div
-                              style={{
-                                marginTop: 10,
-                                fontSize: 11,
-                                paddingTop: 8,
-                                borderTop: "1px solid #ddd",
-                              }}
-                            >
-                              <div style={{ fontWeight: 700 }}>Selected member</div>
-                              <div
-                                style={{
-                                  fontWeight: 700,
-                                  color:
-                                    selectedMemberStress.utilization > 1
-                                      ? "#dc2626"
-                                      : selectedMemberStress.utilization >= 0.9
-                                      ? "#d97706"
-                                      : "#16a34a",
-                                }}
-                              >
-                                {selectedMemberStress.utilization > 1
-                                  ? "FAILED — over capacity"
-                                  : selectedMemberStress.utilization >= 0.9
-                                  ? "Holding — near capacity"
-                                  : "Holding"}
-                              </div>
-                              <div>Mode: {selectedMemberStress.mode}</div>
-                              <div>
-                                Force: {selectedMemberStress.force.toFixed(0)} lb
-                              </div>
-                              <div>Cap: {selectedMemberStress.cap.toFixed(0)} lb</div>
-                              <div>
-                                Utilization:{" "}
-                                {(selectedMemberStress.utilization * 100).toFixed(0)}%
-                                {" of capacity"}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-              </div>
-            </aside>
           </main>
         </div>
       </main>
+
+      {showSetupWizard && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 60,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              border: "2px solid #1f1f1f",
+              borderRadius: 16,
+              padding: "26px 30px",
+              maxWidth: 720,
+              width: "100%",
+              boxShadow: "0 12px 32px rgba(0,0,0,0.3)",
+            }}
+          >
+            <h3 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 900, color: "#111" }}>
+              Plan Your Bridge
+            </h3>
+            <p style={{ margin: "0 0 18px", fontSize: 13, color: "#555", lineHeight: 1.5 }}>
+              Pick your crossing and truck, then choose a truss style to guide
+              your design — or go freestyle. You can change any of this while
+              you build.
+            </p>
+            <div style={{ display: "flex", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 12, color: "#111" }}>Span</span>
+                <select
+                  value={wizardSpan}
+                  onChange={(e) =>
+                    setWizardSpan(Number(e.target.value) as 20 | 40 | 60 | 80 | 100)
+                  }
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #b8b8b8",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    minWidth: 120,
+                    color: "#111111",
+                    background: "#ffffff",
+                  }}
+                >
+                  <option value={20}>20 ft</option>
+                  <option value={40}>40 ft</option>
+                  <option value={60}>60 ft</option>
+                  <option value={80}>80 ft</option>
+                  <option value={100}>100 ft</option>
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 4 }}>
+                <span style={{ fontWeight: 700, fontSize: 12, color: "#111" }}>Truck Load</span>
+                <select
+                  value={wizardLoad}
+                  onChange={(e) => setWizardLoad(Number(e.target.value))}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #b8b8b8",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    minWidth: 120,
+                    color: "#111111",
+                    background: "#ffffff",
+                  }}
+                >
+                  {LOAD_TON_OPTIONS.map((t) => (
+                    <option key={t} value={t}>
+                      {t} Ton
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div
+                style={{
+                  alignSelf: "end",
+                  fontSize: 12,
+                  color: "#475569",
+                  background: "#f1f5f9",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: 8,
+                  padding: "8px 12px",
+                }}
+              >
+                Site cost for this span:{" "}
+                <strong style={{ color: "#111" }}>
+                  ${getSiteCost(wizardSpan).toLocaleString()}
+                </strong>{" "}
+                — deck, excavation &amp; supports, before any steel.
+              </div>
+            </div>
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: "#111" }}>
+              Truss style
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                gap: 10,
+                marginBottom: 22,
+              }}
+            >
+              {(
+                [
+                  "freestyle",
+                  "warren",
+                  "pratt",
+                  "howe",
+                  "ktruss",
+                  "doubleWarren",
+                  "bowstring",
+                ] as const
+              ).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setWizardStyle(s)}
+                  style={{
+                    border: wizardStyle === s ? "3px solid #2563eb" : "1px solid #cbd5e1",
+                    borderRadius: 12,
+                    background: wizardStyle === s ? "#eff6ff" : "#fff",
+                    padding: "10px 8px 6px",
+                    cursor: "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  <TrussPreview style={s} />
+                  <div style={{ fontWeight: 800, fontSize: 13, color: "#111", marginTop: 4 }}>
+                    {s === "freestyle" ? "Freestyle" : TRUSS_STYLE_INFO[s].label}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#64748b", minHeight: 28 }}>
+                    {s === "freestyle"
+                      ? "Design your own way"
+                      : TRUSS_STYLE_INFO[s].caption}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                onClick={startFromWizard}
+                style={{
+                  padding: "10px 24px",
+                  borderRadius: 8,
+                  border: "none",
+                  background: "#2563eb",
+                  color: "#fff",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  cursor: "pointer",
+                }}
+              >
+                Start Designing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {leaveUrl && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",

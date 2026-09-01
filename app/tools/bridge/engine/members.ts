@@ -50,7 +50,19 @@ export type MaterialGrade = "mild" | "high";
 export type Node = { id: string; x: number; y: number };
 export type Member = { id: string; a: string; b: string; type: MemberType; grade?: MaterialGrade };
 
-export const COST_SCALE = 10;
+// 5× rescale 2026-08-31 (was 10): bigger dollar gaps between designs so
+// quality separates on cost. Migration 0027 rescaled stored assignment
+// budgets and submission costs to match — never change this without a
+// matching data migration.
+export const COST_SCALE = 50;
+
+// Fixed site cost (deck, excavation, supports) charged before any steel is
+// placed, scaled per span like the real thing.
+export const SITE_COST_PER_FOOT = 1500;
+
+export function getSiteCost(spanFt: number): number {
+  return spanFt * SITE_COST_PER_FOOT;
+}
 export const BOX_COST_BASE = 1.0 * COST_SCALE;
 export const BOX_COST_OUTER_RATE = 1.8 * COST_SCALE;
 export const BOX_COST_WALL_RATE = 0.15 * COST_SCALE;
