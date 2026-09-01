@@ -218,6 +218,7 @@ export default function BlueprintLabClient() {
   const gradeSubmissionId = searchParams.get('submissionId');
   interface GradingCtx {
     submissionId: string;
+    assignmentId: string;
     autoTiers: Record<string, AutoTierResult>;
     rubric: GradingRubric;
     status: string;
@@ -226,6 +227,16 @@ export default function BlueprintLabClient() {
   const [gradingScores, setGradingScores] = useState<TeacherScores>(emptyTeacherScores());
   const [gradingBusy, setGradingBusy] = useState(false);
   const [gradingNotice, setGradingNotice] = useState<string | null>(null);
+  // Grading roster: every submission for this assignment, so the teacher can
+  // hop student → student from the toolbar chip without going back to the
+  // dashboard. Fetched once per grading session; rows updated in place after
+  // save/return/finalize so the graded checkmarks stay live.
+  interface RosterRow {
+    id: string; student_id: string; student_name: string;
+    status: 'submitted' | 'returned' | 'graded'; grade_total: number | null;
+  }
+  const [roster, setRoster] = useState<RosterRow[] | null>(null);
+  const [rosterOpen, setRosterOpen] = useState(false);
   // Which shell variant got seeded this session — shown in the Requirements
   // panel so the student knows the shell's real dimensions without measuring.
   const [seededVariant, setSeededVariant] = useState<ShellVariant | null>(null);
@@ -298,6 +309,7 @@ export default function BlueprintLabClient() {
               );
               setGrading({
                 submissionId: payload.submission.id,
+                assignmentId: payload.assignment.id,
                 autoTiers: payload.submission.autoTiers ?? {},
                 rubric,
                 status: payload.submission.status,
@@ -509,7 +521,13 @@ export default function BlueprintLabClient() {
         setGradingNotice(action === 'save' ? 'Draft saved.'
           : action === 'return' ? 'Returned to the student for edits.'
           : 'Grade finalized.');
-        if (action !== 'save') setGrading(g => g ? { ...g, status: action === 'return' ? 'returned' : 'graded' } : g);
+        if (action !== 'save') {
+          const status = action === 'return' ? 'returned' as const : 'graded' as const;
+          setGrading(g => g ? { ...g, status } : g);
+          setRoster(rows => rows?.map(r => r.id === grading.submissionId
+            ? { ...r, status, grade_total: action === 'grade' ? (gradeTotal ?? r.grade_total) : r.grade_total }
+            : r) ?? rows);
+        }
       } else {
         const body = await res.json().catch(() => ({}));
         setGradingNotice(body.error ?? 'Action failed.');
@@ -520,6 +538,24 @@ export default function BlueprintLabClient() {
       setGradingBusy(false);
     }
   }, [grading, gradingBusy, gradingScores]);
+
+  // Load the grading roster once the grading context is known.
+  useEffect(() => {
+    if (!grading?.assignmentId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/teacher/blueprint-submissions?assignmentId=${encodeURIComponent(grading.assignmentId)}`);
+        if (!res.ok || !alive) return;
+        const rows = await res.json() as RosterRow[];
+        if (!alive || !Array.isArray(rows)) return;
+        rows.sort((a, b) => (a.student_name || '').localeCompare(b.student_name || ''));
+        setRoster(rows);
+      } catch { /* chip just stays non-interactive */ }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grading?.assignmentId]);
 
   // Track dirty state on project change so the Save button and the
   // beforeunload guard know there's unsaved work. (The old localStorage draft
@@ -1874,14 +1910,81 @@ export default function BlueprintLabClient() {
         />
 
         {isTeacherView ? (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6, height: 30,
-            padding: '0 12px', borderRadius: 6, whiteSpace: 'nowrap',
-            background: T.accentSoft, border: `1px solid ${T.accent}`,
-            color: T.accentInk, fontSize: 12, fontWeight: 600,
-          }}>
-            👁 {grading ? `Grading ${viewingStudent ?? 'student'}'s submission`
-              : viewingStudent ? `Viewing ${viewingStudent}'s design (read-only)` : 'Student design view'}
+          <span style={{ position: 'relative', display: 'inline-flex' }}>
+            <button
+              onClick={() => { if (grading && roster && roster.length > 0) setRosterOpen(o => !o); }}
+              title={grading ? 'Switch to another student’s submission' : undefined}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6, height: 30,
+                padding: '0 12px', borderRadius: 6, whiteSpace: 'nowrap',
+                background: T.accentSoft, border: `1px solid ${T.accent}`,
+                color: T.accentInk, fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                cursor: grading && roster && roster.length > 0 ? 'pointer' : 'default',
+              }}
+            >
+              👁 {grading ? `Grading ${viewingStudent ?? 'student'}'s submission`
+                : viewingStudent ? `Viewing ${viewingStudent}'s design (read-only)` : 'Student design view'}
+              {grading && roster && roster.length > 0 && <span style={{ fontSize: 10 }}>▾</span>}
+            </button>
+            {rosterOpen && grading && roster && (
+              <>
+                <div
+                  onClick={() => setRosterOpen(false)}
+                  style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+                />
+                <div style={{
+                  position: 'absolute', top: 34, left: 0, zIndex: 91,
+                  minWidth: 260, maxHeight: 360, overflowY: 'auto',
+                  background: T.panel, border: `1px solid ${T.lineStrong}`,
+                  borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', padding: 4,
+                }}>
+                  <div style={{
+                    padding: '6px 10px', fontSize: 10.5, fontWeight: 700,
+                    letterSpacing: 0.5, textTransform: 'uppercase', color: T.inkMuted,
+                  }}>
+                    Submissions · {roster.filter(r => r.status === 'graded').length}/{roster.length} graded
+                  </div>
+                  {roster.map(r => {
+                    const current = r.id === grading.submissionId;
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => {
+                          setRosterOpen(false);
+                          if (current) return;
+                          // Full navigation — the grading view loads once per
+                          // mount, and no state may bleed between students.
+                          window.location.href =
+                            `/tools/blueprint-lab?asStudent=${encodeURIComponent(r.student_id)}&submissionId=${encodeURIComponent(r.id)}`;
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          gap: 12, width: '100%', boxSizing: 'border-box',
+                          padding: '7px 10px', borderRadius: 6, border: 'none',
+                          background: current ? T.accentSoft : 'transparent',
+                          color: T.ink, fontSize: 12.5, fontWeight: current ? 700 : 500,
+                          fontFamily: 'inherit', cursor: current ? 'default' : 'pointer', textAlign: 'left',
+                        }}
+                        onMouseEnter={e => { if (!current) e.currentTarget.style.background = T.bg; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = current ? T.accentSoft : 'transparent'; }}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.student_name}
+                        </span>
+                        <span style={{
+                          flexShrink: 0, fontSize: 11, fontWeight: 700,
+                          color: r.status === 'graded' ? T.good : r.status === 'returned' ? '#b7791f' : T.accentInk,
+                        }}>
+                          {r.status === 'graded'
+                            ? `✓ Graded${r.grade_total != null ? ` · ${r.grade_total}` : ''}`
+                            : r.status === 'returned' ? 'Returned' : 'Needs grading'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </span>
         ) : submissionLocked ? (
           <>
