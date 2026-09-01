@@ -20,7 +20,7 @@ import RoomsView from './components/RoomsView';
 import SandboxView from './components/SandboxView';
 import RequirementsPanel from './components/RequirementsPanel';
 import RubricPanel, { emptyTeacherScores } from './components/RubricPanel';
-import { Brief, BRIEFS } from './engine/rubric';
+import { Brief, BRIEFS, doorSwingConflicts } from './engine/rubric';
 import {
   AutoTierResult, GradingRubric, TeacherScores, computeAutoTiers,
   resolveGradingRubric, rubricForDeliverables,
@@ -748,6 +748,13 @@ export default function BlueprintLabClient() {
     () => project.levels.find(l => l.id === project.activeLevelId) ?? project.levels[0],
     [project],
   );
+
+  // Doors whose swing hits furniture — red-ringed on the canvas whenever the
+  // requirements checklist is guiding an assignment.
+  const swingConflictIds = useMemo<string[]>(() => {
+    if (!assignment || !requirementsOpen) return [];
+    return [...doorSwingConflicts(activeLevel)];
+  }, [assignment, requirementsOpen, activeLevel]);
 
   // Live auto tiers for the student rubric modal (pre-submission standing);
   // once submitted, the frozen submission tiers take precedence.
@@ -2202,6 +2209,7 @@ export default function BlueprintLabClient() {
               boundaryDraftRoomId={boundaryDraftRoomId}
               onCommitBoundary={handleCommitBoundary}
               onCancelBoundaryDraft={handleCancelBoundaryDraft}
+              highlightDoorIds={swingConflictIds}
             />
           ) : (
             <PlaceholderView view={view} />

@@ -679,44 +679,55 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
     });
   }
   if (level.doors.some(d => d.doorType === 'room' || d.doorType === 'entry') && level.furniture.length > 0) {
-    let blockedDoors = 0;
-    for (const d of level.doors) {
-      if (d.doorType !== 'room' && d.doorType !== 'entry') continue;
-      const w = level.walls.find(x => x.id === d.wallId);
-      if (!w) continue;
-      const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y;
-      const L = Math.hypot(dx, dy);
-      if (L < 1e-6) continue;
-      const ux = dx / L, uy = dy / L;
-      const nx = -uy, ny = ux;
-      const hingeAlong = d.hingeSide === 'start' ? d.positionAlong - d.width / 2 : d.positionAlong + d.width / 2;
-      const hx = w.start.x + ux * hingeAlong, hy = w.start.y + uy * hingeAlong;
-      const side = d.flipped ? -1 : 1; // which side of the wall the leaf swings into
-      let hit = false;
-      for (const f of level.furniture) {
-        const sideDot = (f.position.x - hx) * nx * side + (f.position.y - hy) * ny * side;
-        if (sideDot <= 0) continue; // furniture on the other side of the wall
-        const c = Math.abs(Math.cos(f.rotation)), s = Math.abs(Math.sin(f.rotation));
-        const fhx = (f.width / 2) * c + (f.depth / 2) * s;
-        const fhy = (f.width / 2) * s + (f.depth / 2) * c;
-        // Nearest point of the furniture's bbox to the hinge.
-        const qx = Math.max(f.position.x - fhx, Math.min(hx, f.position.x + fhx));
-        const qy = Math.max(f.position.y - fhy, Math.min(hy, f.position.y + fhy));
-        if (Math.hypot(qx - hx, qy - hy) < d.width - 1) { hit = true; break; }
-      }
-      if (hit) blockedDoors++;
-    }
+    const blocked = doorSwingConflicts(level);
     checks.push({
       id: 'door-swings', group: 'OVERALL',
       label: 'Door swings clear of furniture',
-      status: blockedDoors === 0 ? 'pass' : 'fail',
-      detail: blockedDoors === 0
+      status: blocked.size === 0 ? 'pass' : 'fail',
+      detail: blocked.size === 0
         ? 'No door hits anything when it opens'
-        : `${blockedDoors} door${blockedDoors > 1 ? 's' : ''} would hit furniture when opened — move the furniture or flip the swing`,
+        : `${blocked.size} door${blocked.size > 1 ? 's' : ''} (marked red on the plan) would hit furniture when opened — move the furniture or flip the swing`,
     });
   }
 
   return checks;
+}
+
+// Doors whose swing ARC would hit furniture — the swept region is the
+// QUARTER disc from the closed leaf (pointing at the latch jamb along the
+// wall) to fully open (perpendicular, on the flipped side). Furniture behind
+// the hinge or outside the sweep never flags. Returns the door ids so the
+// canvas can mark the offenders in red.
+export function doorSwingConflicts(level: Level): Set<string> {
+  const out = new Set<string>();
+  for (const d of level.doors) {
+    if (d.doorType !== 'room' && d.doorType !== 'entry') continue;
+    const w = level.walls.find(x => x.id === d.wallId);
+    if (!w) continue;
+    const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y;
+    const L = Math.hypot(dx, dy);
+    if (L < 1e-6) continue;
+    const ux = dx / L, uy = dy / L;
+    const nx = -uy, ny = ux;
+    const hingeAtStart = d.hingeSide === 'start';
+    const hingeAlong = hingeAtStart ? d.positionAlong - d.width / 2 : d.positionAlong + d.width / 2;
+    const hx = w.start.x + ux * hingeAlong, hy = w.start.y + uy * hingeAlong;
+    const side = d.flipped ? -1 : 1;        // wall side the leaf swings into
+    const latch = hingeAtStart ? 1 : -1;    // along-wall direction toward the latch jamb
+    for (const f of level.furniture) {
+      const rx = f.position.x - hx, ry = f.position.y - hy;
+      // Inside the quarter: on the swing side AND on the latch side.
+      if ((rx * nx + ry * ny) * side <= 0) continue;
+      if ((rx * ux + ry * uy) * latch <= 0) continue;
+      const c = Math.abs(Math.cos(f.rotation)), s = Math.abs(Math.sin(f.rotation));
+      const fhx = (f.width / 2) * c + (f.depth / 2) * s;
+      const fhy = (f.width / 2) * s + (f.depth / 2) * c;
+      const qx = Math.max(f.position.x - fhx, Math.min(hx, f.position.x + fhx));
+      const qy = Math.max(f.position.y - fhy, Math.min(hy, f.position.y + fhy));
+      if (Math.hypot(qx - hx, qy - hy) < d.width - 1) { out.add(d.id); break; }
+    }
+  }
+  return out;
 }
 
 // ─── Signals for the grading rubric's auto-tier placement ────────────────────

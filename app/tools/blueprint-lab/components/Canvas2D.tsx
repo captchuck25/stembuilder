@@ -164,6 +164,9 @@ export interface Canvas2DProps {
   boundaryDraftRoomId: string | null;
   onCommitBoundary: (roomId: string, points: Vec2[]) => void;
   onCancelBoundaryDraft: () => void;
+  // Doors the requirements checker flagged (swing hits furniture) — marked
+  // with red dashed rings so students can find them.
+  highlightDoorIds?: string[];
 }
 
 // True if a free-anchor point `p` rests on wall `w`'s body — within `tol`
@@ -271,6 +274,7 @@ export default function Canvas2D({
   onOffsetDistanceChange,
   sectionCuts, onAddSectionCut, onUpdateSectionCuts, onAutoPlaceSection,
   boundaryDraftRoomId, onCommitBoundary, onCancelBoundaryDraft,
+  highlightDoorIds,
 }: Canvas2DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1668,6 +1672,33 @@ export default function Canvas2D({
       ctx.restore();
     }
 
+    // Doors flagged by the requirements checker (swing hits furniture):
+    // red dashed ring centered on the opening so the student can FIND them.
+    if (highlightDoorIds && highlightDoorIds.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = '#e53e3e';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      for (const id of highlightDoorIds) {
+        const d = level.doors.find(x => x.id === id);
+        if (!d) continue;
+        const w = level.walls.find(x => x.id === d.wallId);
+        if (!w) continue;
+        const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y;
+        const L = Math.hypot(dx, dy);
+        if (L < 1e-6) continue;
+        const cxw = w.start.x + (dx / L) * d.positionAlong;
+        const cyw = w.start.y + (dy / L) * d.positionAlong;
+        const s = worldToScreen({ x: cxw, y: cyw }, viewport);
+        const r = Math.max(14, (d.width / 2 + 6) * viewport.pxPerInch);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     // Wall-tool snap marker: a ring on the endpoint/corner the cursor locked
     // onto (current floor or floor-below ghost). Drawn last so it's always visible.
     if (wallSnapMarker) {
@@ -1705,7 +1736,7 @@ export default function Canvas2D({
       extendHover, mirrorAxis, selections, filletFirst, filletEnds,
       roomLabelDefaultName, selectedStairs, hoveredStairCorner,
       sectionCuts, sectionDraft, boundaryDraftRoomId, boundaryPoints, boundaryCloseHover,
-      boundaryPreviewPoint, boundarySnapHit]);
+      boundaryPreviewPoint, boundarySnapHit, highlightDoorIds]);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
   const getWorld = useCallback((e: React.MouseEvent | MouseEvent): Vec2 => {
