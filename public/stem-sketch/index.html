@@ -1275,6 +1275,7 @@
   <symbol id="i-sketch-on-face" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M3 8L11 4L19 8L19 16L11 20L3 16Z"/><path d="M3 8L11 12L19 8 M11 12L11 20"/><path d="M14 6L20 12L17 15L11 9Z" fill="var(--panel)"/></g></symbol>
   <symbol id="i-fillet-3d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 8L4 18L14 21L20 17L20 9L11 5L4 8Z"/><path d="M4 8L11 11L20 9 M11 11L11 21"/><path d="M11 5 Q 17 5 20 9" stroke-width="2.2"/></g></symbol>
   <symbol id="i-revolve" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L12 21" stroke-dasharray="2 2"/><ellipse cx="12" cy="12" rx="6" ry="3"/><path d="M15 4L18 5L17 8"/></g></symbol>
+  <symbol id="i-soften" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="12" rx="5"/><path d="M8 4 q4 2.6 8 0" opacity="0.55"/></g></symbol>
   <symbol id="i-joint" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12L19 12" stroke-dasharray="2 2"/><path d="M9 7L15 7L15 17L9 17Z"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
@@ -1424,6 +1425,7 @@
         <span class="tool-sep"></span>
         <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
         <button class="tool" data-action="revolve" title="Revolve — spin a sketch profile around its vertical center line into a 3D body. Open a sketch (Front works best), draw the outline with the Line tool, then Revolve."><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
+        <button class="tool" data-action="soften-pick" title="Soften — click near the top or bottom edge of an extruded piece to pick that whole rim (click more edges to add). Then set a radius to round them. Works on pieces inside groups too."><svg class="ico"><use href="#i-soften"/></svg><span class="tool-label">Soften</span></button>
         <!-- 3D Fillet temporarily hidden — the CSG-prism approach (enterBevelPickMode /
              _bevelOnce / applyBevelsBatch) is preserved in the JS but pulled from the
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
@@ -1598,6 +1600,8 @@ const doc = {
   cutMode: null,   // { stage: 'target'|'tool', targetId } during interactive Cut
   curvedPickBody: null, // body id when 6-face bbox picker is active for a curved body
   bevelPickMode: false, // when true, 3D clicks accumulate edges for the Fillet tool
+  softenPickMode: false, // when true, 3D clicks pick extrude rims for Soften
+  softenSelected: [],    // [{ key, child, end:'top'|'bottom', topId, obj }]
   bevelSelected: [],    // [{ bodyId, edge:{p1,p2,n1,n2}, kind:'convex'|'concave' }]
   filletPickMode: false,      // when true, 2D clicks pick polyline / rect corners to fillet
   filletSelectedCorners: [],  // [{ entityId, vertexIdx, x, y }] world-space x/y for highlight render
@@ -7520,6 +7524,20 @@ class Viewer3D {
         }
         return;
       }
+      // Soften pick mode — each click toggles one rim (top/bottom edge
+      // loop of an extruded piece, incl. pieces inside groups via
+      // invisible proxies). Empty-space click opens the radius dialog.
+      if (doc.softenPickMode && e.button === 0) {
+        this.raycaster.setFromCamera(ndc(e), this.camera);
+        const hits = this.raycaster.intersectObjects((_softenPickCtx && _softenPickCtx.hitObjects) || [], true);
+        if (!hits.length) {
+          if (doc.softenSelected.length) openSoftenDialog();
+          else exitSoftenPickMode('Soften cancelled');
+          return;
+        }
+        _softenToggleAt(hits[0]);
+        return;
+      }
       // Bevel-pick mode (Fillet workflow). Each click ADDS one edge to a
       // running selection set so the user can bevel many edges in one
       // operation; click empty space (or Enter) to finish and open the
@@ -9604,16 +9622,28 @@ function buildBodyMesh(body) {
     // shift normalizes to 0..H). No CSG involved; flows into fit checks
     // and exports automatically since they build from this same mesh.
     const soft = Math.max(0, Math.min(body.softR || 0, body.height / 2 - 0.05));
-    if (soft > 0.05) {
-      // Ends BURIED in a sibling piece (grouped parts — flags computed by
-      // _computeSoftBurial at soften time) don't round: a rounded rim at a
-      // mating face reads as an inside-out divot (ssupgrades round 2,
-      // 2026-09-02). Instead the buried end EXTENDS r past the mating
-      // plane, so the union swallows the band and the seam is a clean weld.
-      const burB = !!(body._softBuried && body._softBuried.bottom);
-      const burT = !!(body._softBuried && body._softBuried.top);
-      geo = new THREE.ExtrudeGeometry(shape, {
-        depth: body.height - 2 * soft + (burB ? soft : 0) + (burT ? soft : 0),
+    // Each end is independently 'round' | 'sharp' | 'weld':
+    //   round — free rim, rounded (default when softR is set)
+    //   sharp — rim deselected via the Soften pick tool (body.softEnds)
+    //   weld  — end buried in a grouped sibling (_computeSoftBurial):
+    //           extends r past the mating plane so the union swallows the
+    //           band and the seam is a clean flat joint (no divot ring)
+    const se = body.softEnds;
+    const endB = (body._softBuried && body._softBuried.bottom) ? 'weld' : ((se && !se.bottom) ? 'sharp' : 'round');
+    const endT = (body._softBuried && body._softBuried.top) ? 'weld' : ((se && !se.top) ? 'sharp' : 'round');
+    if (soft > 0.05 && (endB !== 'sharp' || endT !== 'sharp')) {
+      // Concave profile corners fold under the bevel inset ("funky lines")
+      // — pre-round them on a MESH-ONLY copy, never the user's sketch.
+      const meshSketch = _softenProfileCopy(body.sketch, soft);
+      const meshShape = meshSketch === body.sketch ? shape : (sketchToShape(meshSketch) || shape);
+      // Band placement: the straight wall spans [a, H−b] after the +a
+      // shift; each bevel band lands inside the part (round), beyond the
+      // mating plane (weld), or is stripped and re-capped flat (sharp).
+      // Outer dimensions stay exact in every combination.
+      const a = endB === 'round' ? soft : 0;
+      const b = endT === 'round' ? soft : 0;
+      geo = new THREE.ExtrudeGeometry(meshShape, {
+        depth: body.height - a - b,
         bevelEnabled: true,
         bevelThickness: soft,
         bevelSize: soft,
@@ -9621,10 +9651,12 @@ function buildBodyMesh(body) {
         bevelSegments: 5,
         curveSegments: 48,
       });
-      // Recipe spans z ∈ [-r, depth+r]; shifting by +r (unless the bottom
-      // is buried) yields: free/free → [0,H]; buried bottom → [-r,H];
-      // buried top → [0,H+r]; both → [-r,H+r]. Exact outer dims either way.
-      geo.translate(0, 0, burB ? 0 : soft);
+      geo.translate(0, 0, a);
+      if (endB === 'sharp' || endT === 'sharp') {
+        geo = _stripAndCap(geo, meshShape,
+          endB === 'sharp' ? 0 : null,
+          endT === 'sharp' ? body.height : null);
+      }
     } else {
       geo = new THREE.ExtrudeGeometry(shape, {
         depth: body.height,
@@ -10503,6 +10535,88 @@ function regionCentroidOf(region) {
 // Re-run the CSG boolean for a group body (positives unioned, negatives
 // subtracted) and bake the result into group.geometry. Used after any of
 // the group's children's geometry has changed.
+// ── Soften-edges profile fix ─────────────────────────────────────────────────
+// ExtrudeGeometry's bevel insets the outline; at a CONCAVE corner the inset
+// self-intersects and pinches folds ("funky lines", ssissues 2026-09-02).
+// Before meshing a softened body, round the profile's concave corners on a
+// MESH-ONLY copy at just over the soften radius — the inset then stays clean.
+// (Filling an inside corner with a fillet is standard fillet-all behavior.)
+function _softenProfileCopy(sketch, r) {
+  let anyConcave = false;
+  const concaveIdxs = (pts) => {
+    let area = 0;
+    const n = pts.length;
+    for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; area += p.x * q.y - q.x * p.y; }
+    const ccw = area > 0;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
+      const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
+      if (l1 < 1e-6 || l2 < 1e-6) continue;
+      const cosA = ((a.x - b.x) * (c.x - b.x) + (a.y - b.y) * (c.y - b.y)) / (l1 * l2);
+      if (cosA < -0.94) continue; // nearly straight (dense arc run) — not a corner
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (ccw ? cross < 0 : cross > 0) out.push(i);
+    }
+    return out;
+  };
+  for (const e of (sketch?.entities || [])) {
+    if (e.type === 'polyline' && e.closed && (e.points || []).length >= 3 && concaveIdxs(e.points).length) {
+      anyConcave = true;
+      break;
+    }
+  }
+  if (!anyConcave) return sketch;
+  const copy = JSON.parse(JSON.stringify(sketch));
+  for (const e of copy.entities || []) {
+    if (e.type !== 'polyline' || !e.closed || (e.points || []).length < 3) continue;
+    const idxs = concaveIdxs(e.points).sort((a, b) => b - a); // descending: splices don't shift unvisited
+    for (const i of idxs) {
+      try { filletPolylineCorner(e, i, r * 1.02); } catch (_) {}
+    }
+  }
+  return copy;
+}
+
+// Strip everything past a cut plane from an extrude mesh and close it with a
+// flat full-profile cap — how a 'sharp' end coexists with a rounded one (the
+// bevel is symmetric, so the unwanted band is built and then cut off here).
+// cutBottomZ / cutTopZ: plane z (geometry space) or null to leave that end.
+function _stripAndCap(geo, shape, cutBottomZ, cutTopZ) {
+  const src = geo.index ? geo.toNonIndexed() : geo;
+  const pos = src.attributes.position.array;
+  const nor = src.attributes.normal.array;
+  const outP = [], outN = [];
+  for (let i = 0; i < pos.length; i += 9) {
+    const cz = (pos[i + 2] + pos[i + 5] + pos[i + 8]) / 3;
+    if (cutBottomZ !== null && cz <= cutBottomZ + 1e-3) continue;
+    if (cutTopZ !== null && cz >= cutTopZ - 1e-3) continue;
+    for (let k = 0; k < 9; k++) { outP.push(pos[i + k]); outN.push(nor[i + k]); }
+  }
+  const addCap = (z, up) => {
+    const capSrc = new THREE.ShapeGeometry(shape, 48);
+    const cap = capSrc.index ? capSrc.toNonIndexed() : capSrc;
+    const cp = cap.attributes.position.array;
+    for (let i = 0; i < cp.length; i += 9) {
+      // ShapeGeometry triangles face +z; reverse winding for a bottom cap.
+      const order = up ? [0, 1, 2] : [0, 2, 1];
+      for (const o of order) {
+        outP.push(cp[i + o * 3], cp[i + o * 3 + 1], z);
+        outN.push(0, 0, up ? 1 : -1);
+      }
+    }
+    capSrc.dispose();
+  };
+  if (cutBottomZ !== null) addCap(cutBottomZ, false);
+  if (cutTopZ !== null) addCap(cutTopZ, true);
+  if (src !== geo) src.dispose();
+  geo.dispose();
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(outP, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(outN, 3));
+  return out;
+}
+
 // ── Soften-edges burial detection ────────────────────────────────────────────
 // For grouped parts: an extrude end pressed against a sibling must not round
 // (divot) — it extends past the mating face instead (see buildBodyMesh).
@@ -10584,6 +10698,184 @@ function _computeSoftBurial(children) {
     if (buried.bottom || buried.top) c._softBuried = buried;
   }
   for (const m of meshes.values()) { try { m.geometry.dispose(); } catch (_) {} }
+}
+
+// ── Soften pick tool ("pillow") ──────────────────────────────────────────────
+// Charlie's design (ssissues 2026-09-02): a 3D toolbar tool where you click
+// the edges you want softened instead of blanket-rounding everything. One
+// click = one whole rim loop (an extruded piece's top or bottom edge ring,
+// arcs included). Multi-select by clicking more rims; click a picked rim to
+// unpick. Works on pieces inside groups via invisible per-child proxies.
+let _softenPickCtx = null; // { hitObjects: Object3D[], hiGroup: THREE.Group }
+
+function enterSoftenPickMode() {
+  if (doc.mode !== '3d') { showHint('Soften works in 3D — click ← Done first.'); return; }
+  const hasTarget = (bs) => (bs || []).some(b =>
+    (b.type === 'extrude' && b.op !== 'subtract') ||
+    ((b.type === 'group' || b.type === 'combined') && hasTarget(b.children)));
+  if (!hasTarget(doc.bodies)) { showHint('Soften rounds the edges of extruded pieces — extrude a sketch first.'); return; }
+  exitSoftenPickMode();
+  const d2r = THREE.MathUtils.degToRad;
+  const hitObjects = [];
+  const addProxy = (child, parentObj, topId) => {
+    const saved = child.softR;
+    child.softR = 0; // pick against the plain shape — rims are where the true edges are
+    let m = null;
+    try { m = buildBodyMesh(child); } catch (_) {}
+    child.softR = saved;
+    if (!m) return;
+    m.userData = { softTopId: topId, softChild: child };
+    parentObj.add(m);
+  };
+  const buildGroupObj = (g, topId) => {
+    const o = new THREE.Object3D();
+    o.position.set(g.x || 0, g.y || 0, g.z || 0);
+    const gr = g.rotation || {};
+    o.rotation.set(d2r(gr.x || 0), d2r(gr.y || 0), d2r(gr.z || 0));
+    for (const c of g.children || []) {
+      if (c.type === 'extrude' && c.op !== 'subtract') addProxy(c, o, topId);
+      else if (c.type === 'group' || c.type === 'combined') o.add(buildGroupObj(c, topId));
+    }
+    return o;
+  };
+  for (const b of doc.bodies) {
+    if (b.hidden) continue;
+    if (b.type === 'extrude' && b.op !== 'subtract' && b.mesh) {
+      b.mesh.userData.softTopId = b.id;
+      b.mesh.userData.softChild = b;
+      hitObjects.push(b.mesh);
+    } else if (b.type === 'group' || b.type === 'combined') {
+      const o = buildGroupObj(b, b.id);
+      o.updateMatrixWorld(true);
+      if (o.children.length) hitObjects.push(o);
+    }
+  }
+  const hiGroup = new THREE.Group();
+  hiGroup.renderOrder = 999;
+  viewer.scene.add(hiGroup);
+  _softenPickCtx = { hitObjects, hiGroup };
+  doc.softenPickMode = true;
+  doc.softenSelected = [];
+  viewer.canvas.style.cursor = 'crosshair';
+  setStatus('Soften — click near a piece’s top or bottom edge to pick that rim (click more to add, click one again to remove). Click empty space or press Enter to set the size. Esc cancels.');
+}
+
+function exitSoftenPickMode(msg) {
+  doc.softenPickMode = false;
+  doc.softenSelected = [];
+  if (_softenPickCtx) {
+    if (_softenPickCtx.hiGroup) {
+      viewer?.scene?.remove(_softenPickCtx.hiGroup);
+      for (const c of _softenPickCtx.hiGroup.children) { c.geometry?.dispose(); c.material?.dispose(); }
+    }
+    for (const o of _softenPickCtx.hitObjects) {
+      // Proxy trees get disposed; REAL scene meshes (bare extrudes) don't.
+      if (o.isObject3D && !o.isMesh) o.traverse(c => { if (c.isMesh) c.geometry?.dispose(); });
+    }
+    _softenPickCtx = null;
+  }
+  if (viewer) viewer.canvas.style.cursor = '';
+  if (msg) setStatus(msg);
+}
+
+function _softenToggleAt(hit) {
+  const ud = (hit.object && hit.object.userData) || {};
+  const child = ud.softChild;
+  if (!child) return;
+  // Which end? Map the hit point back into the child's extrude space.
+  const inv = new THREE.Matrix4().copy(hit.object.matrixWorld).invert();
+  const planeInv = new THREE.Matrix4().copy(makePlaneMatrix(child.plane || GROUND_PLANE)).invert();
+  const pPlane = hit.point.clone().applyMatrix4(inv).applyMatrix4(planeInv);
+  const end = pPlane.z > child.height / 2 ? 'top' : 'bottom';
+  const key = child.id + ':' + end;
+  const i = doc.softenSelected.findIndex(s => s.key === key);
+  if (i >= 0) doc.softenSelected.splice(i, 1);
+  else doc.softenSelected.push({ key, child, end, topId: ud.softTopId, obj: hit.object });
+  _renderSoftenHighlights();
+  const n = doc.softenSelected.length;
+  setStatus(n
+    ? `Soften — ${n} edge${n === 1 ? '' : 's'} picked. Click empty space or press Enter to set the size.`
+    : 'Soften — selection cleared. Click near a top or bottom edge.');
+}
+
+function _renderSoftenHighlights() {
+  const ctx = _softenPickCtx;
+  if (!ctx) return;
+  while (ctx.hiGroup.children.length) {
+    const c = ctx.hiGroup.children.pop();
+    c.geometry?.dispose(); c.material?.dispose();
+  }
+  for (const sel of doc.softenSelected) {
+    try {
+      const shape = sketchToShape(sel.child.sketch);
+      if (!shape) continue;
+      const z = sel.end === 'top' ? sel.child.height : 0;
+      const planeMat = makePlaneMatrix(sel.child.plane || GROUND_PLANE);
+      const ep = shape.extractPoints(24);
+      for (const loop of [ep.shape, ...(ep.holes || [])]) {
+        if (!loop || loop.length < 2) continue;
+        const pts = loop.map(p =>
+          new THREE.Vector3(p.x, p.y, z).applyMatrix4(planeMat).applyMatrix4(sel.obj.matrixWorld));
+        const g = new THREE.BufferGeometry().setFromPoints(pts);
+        ctx.hiGroup.add(new THREE.LineLoop(g,
+          new THREE.LineBasicMaterial({ color: 0xff9000, depthTest: false })));
+      }
+    } catch (_) {}
+  }
+}
+
+function openSoftenDialog() {
+  const sels = doc.softenSelected.slice();
+  if (!sels.length) return;
+  const u = unitLabel();
+  const withR = sels.find(s => (s.child.softR || 0) > 0.05);
+  const def = withR ? fmtU(withR.child.softR) : (doc.units === 'in' ? '0.1' : '2');
+  openModal({
+    title: `Soften ${sels.length} edge${sels.length === 1 ? '' : 's'}`,
+    body: `<p>Round the picked rim edges. The part's outside size stays exact.</p>
+      <div class="field"><label>Radius (${u})</label><input id="soften-r" type="number" value="${def}" min="0" step="${doc.units === 'in' ? 0.05 : 1}"/></div>
+      <p style="color:var(--ink-soft);font-size:12px">Set 0 to make the picked edges sharp again. One radius per piece — a new value moves the whole piece to it.</p>`,
+    confirmText: 'Apply',
+    onConfirm: () => {
+      const v = parseFloat($('soften-r').value);
+      if (!isFinite(v) || v < 0) return;
+      const r = fromUnit(v);
+      pushUndo();
+      const touchedTops = new Set();
+      for (const sel of sels) {
+        const c = sel.child;
+        if (!c.softEnds) {
+          // First selective touch: freeze the current all-or-nothing state
+          // into per-end flags, then flip just the picked end.
+          const on = (c.softR || 0) > 0.05;
+          c.softEnds = { bottom: on, top: on };
+        }
+        c.softEnds[sel.end] = r > 0.05;
+        if (r > 0.05) c.softR = r;
+        if (!c.softEnds.bottom && !c.softEnds.top) { delete c.softEnds; c.softR = 0; }
+        touchedTops.add(sel.topId);
+      }
+      for (const id of touchedTops) {
+        const top = doc.bodies.find(b => b.id === id);
+        if (!top || (top.type !== 'group' && top.type !== 'combined')) continue;
+        const rebake = (b) => {
+          for (const c of b.children || []) {
+            if (c.type === 'group' || c.type === 'combined') rebake(c);
+          }
+          _computeSoftBurial(b.children);
+          if (b.type === 'group') rebuildGroupGeometry(b);
+          else if (typeof _ensureGroupGeometry === 'function') { b.geometry = null; _ensureGroupGeometry(b); }
+        };
+        rebake(top);
+      }
+      viewer?.rebuildBodies();
+      setDirty(true);
+      renderProps();
+      exitSoftenPickMode(r > 0.05
+        ? `✓ Softened ${sels.length} edge${sels.length === 1 ? '' : 's'} (${fmtUL(r)})`
+        : '✓ Picked edges set back to sharp.');
+    },
+  });
 }
 
 function rebuildGroupGeometry(group) {
@@ -18945,7 +19237,9 @@ function renderProps() {
       const rebake = (b) => {
         let touched = false;
         for (const c of b.children || []) {
-          if (c.type === 'extrude' && c.op !== 'subtract') { c.softR = r; touched = true; }
+          // Bulk apply = every rim: clear any per-rim picks from the
+          // Soften tool so the group field means what it says.
+          if (c.type === 'extrude' && c.op !== 'subtract') { c.softR = r; delete c.softEnds; touched = true; }
           else if (c.type === 'group' || c.type === 'combined') { if (rebake(c)) touched = true; }
         }
         if (touched) {
@@ -23246,6 +23540,7 @@ function init() {
       case 'fillet-2d': enterFilletPickMode(); break;
       case 'fillet-3d': enterBevelPickMode(); break;
       case 'revolve': revolveCurrentSketch(); break;
+      case 'soften-pick': enterSoftenPickMode(); break;
       case 'array-2d': openArrayDialog(); break;
       case 'scale-2d': openScaleDialog(); break;
       case 'offset-2d': startOffsetMode(); break;
@@ -23496,6 +23791,12 @@ function init() {
       openBevelDialog(sels);
       return;
     }
+    // Enter while picking Soften rims = open the radius dialog.
+    if (e.key === 'Enter' && doc.softenPickMode && doc.softenSelected.length) {
+      e.preventDefault();
+      openSoftenDialog();
+      return;
+    }
     // Enter while in 2D fillet pick mode opens the dialog (only if anything
     // is picked — Enter on an empty selection is a no-op, not a cancel).
     if (e.key === 'Enter' && doc.filletPickMode && doc.filletSelectedCorners.length) {
@@ -23514,6 +23815,11 @@ function init() {
       if (doc.orbitMode && typeof toggleOrbitMode === 'function') toggleOrbitMode();
       if (doc.panMode && typeof togglePanMode === 'function') togglePanMode();
       setStatus('Back to select — orbit/pan off.');
+      return;
+    }
+    if (e.key === 'Escape' && doc.softenPickMode) {
+      e.preventDefault();
+      exitSoftenPickMode('Soften cancelled');
       return;
     }
     if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode || doc.filletPickMode)) {
