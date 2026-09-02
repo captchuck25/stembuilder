@@ -16232,9 +16232,33 @@ function ungroupSelected() {
           _ensureGroupGeometry(restored);
         }
         restored.id = doc.nextBodyId++;
-        restored.x = (restored.x || 0) + (group.x || 0);
-        restored.y = (restored.y || 0) + (group.y || 0);
-        restored.z = (restored.z || 0) + (group.z || 0);
+        // Carry the group's FULL transform onto the child, not just the
+        // translation — ungrouping a rotated group used to snap children
+        // back to their pre-rotation pose (ssissues 2026-09-02). Body
+        // transforms are T(pos)∘R(eulerXYZ), so the restored child needs
+        // P_new = P_g + R_g·P_c and R_new = R_g·R_c.
+        const gr = group.rotation;
+        if (gr && (gr.x || gr.y || gr.z)) {
+          const d2r = THREE.MathUtils.degToRad;
+          const gMat = new THREE.Matrix4().makeRotationFromEuler(
+            new THREE.Euler(d2r(gr.x || 0), d2r(gr.y || 0), d2r(gr.z || 0), 'XYZ'));
+          const p = new THREE.Vector3(restored.x || 0, restored.y || 0, restored.z || 0).applyMatrix4(gMat);
+          restored.x = p.x + (group.x || 0);
+          restored.y = p.y + (group.y || 0);
+          restored.z = p.z + (group.z || 0);
+          const cr = restored.rotation || { x: 0, y: 0, z: 0 };
+          const cMat = new THREE.Matrix4().makeRotationFromEuler(
+            new THREE.Euler(d2r(cr.x || 0), d2r(cr.y || 0), d2r(cr.z || 0), 'XYZ'));
+          const out = new THREE.Euler().setFromRotationMatrix(
+            new THREE.Matrix4().multiplyMatrices(gMat, cMat), 'XYZ');
+          const r2d = THREE.MathUtils.radToDeg;
+          restored.rotation = { x: r2d(out.x), y: r2d(out.y), z: r2d(out.z) };
+          delete restored.rotZero; // zero-reference was relative to the old pose
+        } else {
+          restored.x = (restored.x || 0) + (group.x || 0);
+          restored.y = (restored.y || 0) + (group.y || 0);
+          restored.z = (restored.z || 0) + (group.z || 0);
+        }
         delete restored.mesh;
         doc.bodies.push(restored);
         newSelection.push(restored.id);
