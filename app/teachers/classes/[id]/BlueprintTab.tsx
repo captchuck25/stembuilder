@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BRIEFS, Brief, DEFAULT_FURNISHINGS, RoomRequirement } from "@/app/tools/blueprint-lab/engine/rubric";
+import { BRIEFS, Brief, DEFAULT_FURNISHINGS, RoomRequirement, sqFtRangeFor } from "@/app/tools/blueprint-lab/engine/rubric";
 import {
   GradingRubric, TEACHER_CATEGORY_PRESETS, resolveGradingRubric, rubricForDeliverables, rubricMaxPoints,
 } from "@/app/tools/blueprint-lab/engine/gradingRubric";
@@ -56,7 +56,20 @@ const cloneBrief = (b: Brief): Brief => JSON.parse(JSON.stringify(b));
 function resolveConfig(row: AssignmentRow): Brief {
   const base = BRIEFS.find(b => b.id === row.brief_id) ?? BRIEFS[0];
   const cfg = row.config;
-  return cfg && Array.isArray(cfg.rooms) ? { ...cloneBrief(base), ...cfg } as Brief : cloneBrief(base);
+  const brief = cfg && Array.isArray(cfg.rooms) ? { ...cloneBrief(base), ...cfg } as Brief : cloneBrief(base);
+  // Normalize legacy range-only configs to the target+tolerance model so the
+  // editor always shows one number (target inherited from the template would
+  // misstate a stored custom range — recompute from the range itself).
+  if (brief.totalSqFt) {
+    const derived = brief.targetSqFt ? sqFtRangeFor(brief.targetSqFt, brief.sqFtTolerancePct ?? 10) : null;
+    const matches = derived && Math.abs(brief.totalSqFt.min - derived.min) <= 2 && Math.abs(brief.totalSqFt.max - derived.max) <= 2;
+    if (!matches) {
+      const mid = (brief.totalSqFt.min + brief.totalSqFt.max) / 2;
+      brief.targetSqFt = Math.round(mid / 25) * 25;
+      brief.sqFtTolerancePct = Math.max(1, Math.round(((brief.totalSqFt.max - brief.totalSqFt.min) / 2 / mid) * 100));
+    }
+  }
+  return brief;
 }
 
 const ftLabel = (inches?: number) => inches == null ? "" : String(Math.round((inches / 12) * 10) / 10);
@@ -184,7 +197,9 @@ export default function BlueprintTab({ classId }: { classId: string }) {
         id: "custom",
         title: "Custom assignment",
         description: "Teacher-defined design brief.",
-        totalSqFt: { min: 800, max: 1200 },
+        targetSqFt: 1000,
+        sqFtTolerancePct: 10,
+        totalSqFt: sqFtRangeFor(1000, 10),
         rooms: [],
         frontDoor: true,
         backDoor: false,
@@ -252,9 +267,10 @@ export default function BlueprintTab({ classId }: { classId: string }) {
     });
   };
 
-  const sqFtMid = draft?.config.totalSqFt
-    ? (draft.config.totalSqFt.min + draft.config.totalSqFt.max) / 2
-    : 1000;
+  const sqFtMid = draft?.config.targetSqFt
+    ?? (draft?.config.totalSqFt
+      ? (draft.config.totalSqFt.min + draft.config.totalSqFt.max) / 2
+      : 1000);
   const sqRange = draft?.config.totalSqFt ?? { min: 1000, max: 1000 };
 
   // Toggle one concrete version of a shape. Choice mode: include/exclude it
@@ -307,17 +323,33 @@ export default function BlueprintTab({ classId }: { classId: string }) {
               style={{ ...inputStyle, width: 280, marginTop: 4 }} />
           </label>
           <label style={{ fontSize: 12, fontWeight: 700, color: "#444" }}>
-            Total SF min<br />
-            <input type="number" value={draft.config.totalSqFt?.min ?? ""} style={{ ...inputStyle, marginTop: 4 }}
-              onChange={e => setDraft({ ...draft, config: { ...draft.config,
-                totalSqFt: { min: Number(e.target.value) || 0, max: draft.config.totalSqFt?.max ?? 0 } } })} />
+            Total square footage<br />
+            <input type="number" value={draft.config.targetSqFt ?? ""} style={{ ...inputStyle, width: 80, marginTop: 4 }}
+              onChange={e => {
+                const target = Number(e.target.value) || 0;
+                const tol = draft.config.sqFtTolerancePct ?? 10;
+                setDraft({ ...draft, config: { ...draft.config,
+                  targetSqFt: target, sqFtTolerancePct: tol, totalSqFt: sqFtRangeFor(target, tol) } });
+              }} />
           </label>
-          <label style={{ fontSize: 12, fontWeight: 700, color: "#444" }}>
-            Total SF max<br />
-            <input type="number" value={draft.config.totalSqFt?.max ?? ""} style={{ ...inputStyle, marginTop: 4 }}
-              onChange={e => setDraft({ ...draft, config: { ...draft.config,
-                totalSqFt: { min: draft.config.totalSqFt?.min ?? 0, max: Number(e.target.value) || 0 } } })} />
+          <label style={{ fontSize: 12, fontWeight: 700, color: "#444" }}
+            title="How far a design may land from the target and still pass the auto check">
+            Allow ±%<br />
+            <input type="number" min={1} max={50} value={draft.config.sqFtTolerancePct ?? 10}
+              style={{ ...inputStyle, width: 56, marginTop: 4 }}
+              onChange={e => {
+                const tol = Math.min(50, Math.max(1, Number(e.target.value) || 10));
+                const target = draft.config.targetSqFt ?? 1000;
+                setDraft({ ...draft, config: { ...draft.config,
+                  targetSqFt: target, sqFtTolerancePct: tol, totalSqFt: sqFtRangeFor(target, tol) } });
+              }} />
           </label>
+          {draft.config.targetSqFt != null && (
+            <span style={{ fontSize: 11, color: "#888", paddingBottom: 8 }}>
+              passes {sqFtRangeFor(draft.config.targetSqFt, draft.config.sqFtTolerancePct ?? 10).min.toLocaleString()}
+              –{sqFtRangeFor(draft.config.targetSqFt, draft.config.sqFtTolerancePct ?? 10).max.toLocaleString()} SF
+            </span>
+          )}
           <label style={{ fontSize: 12, fontWeight: 700, color: "#444", display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={draft.config.frontDoor}
               onChange={e => setDraft({ ...draft, config: { ...draft.config, frontDoor: e.target.checked } })} />

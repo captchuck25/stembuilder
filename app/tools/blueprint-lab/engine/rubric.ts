@@ -39,11 +39,26 @@ export interface Brief {
   id: string;
   title: string;
   description: string;
+  // Single design target ("~2,250 SF") with a ± tolerance — the way teachers
+  // think about it (2026-09-02 feedback: one number, not a giant range).
+  // `totalSqFt` is the DERIVED pass range, kept alongside for back-compat:
+  // frozen assignment configs, the SF check, and shell-variant sizing all
+  // consume the range.
+  targetSqFt?: number;
+  sqFtTolerancePct?: number;   // default 10
   totalSqFt?: { min: number; max: number };
   rooms: RoomRequirement[];
   frontDoor: boolean;          // ≥1 exterior door (entry / exterior slider)
   backDoor: boolean;           // ≥2 exterior doors
   deliverables: Array<'floor-plan' | 'roof-plan' | 'elevations'>;
+}
+
+// The pass range a target + tolerance implies.
+export function sqFtRangeFor(target: number, tolPct: number): { min: number; max: number } {
+  return {
+    min: Math.round(target * (1 - tolPct / 100)),
+    max: Math.round(target * (1 + tolPct / 100)),
+  };
 }
 
 export interface RubricCheck {
@@ -94,7 +109,9 @@ export const BRIEFS: Brief[] = [
     id: 'studio',
     title: 'Studio apartment',
     description: 'A ~500 sqft studio unit: one main living space, kitchenette, full bath and a closet.',
-    totalSqFt: { min: 400, max: 650 },
+    targetSqFt: 500,
+    sqFtTolerancePct: 10,
+    totalSqFt: { min: 450, max: 550 },
     rooms: [
       { roomType: 'LIVING ROOM', count: 1, minDims: { a: 132, b: 120 }, minWindows: 1, furniture: LIVING_FURNISHINGS },
       { roomType: 'KITCHEN', count: 1, minDims: { a: 96, b: 96 }, furniture: KITCHEN_FIXTURES },
@@ -108,8 +125,10 @@ export const BRIEFS: Brief[] = [
   {
     id: 'condo-2br',
     title: 'Two-bedroom condo',
-    description: 'A ~1,000 sqft two-bedroom condo unit with laundry.',
-    totalSqFt: { min: 850, max: 1200 },
+    description: 'A ~1,100 sqft two-bedroom condo unit with laundry.',
+    targetSqFt: 1100,
+    sqFtTolerancePct: 10,
+    totalSqFt: { min: 990, max: 1210 },
     rooms: [
       {
         roomType: 'BEDROOM', count: 2, minDims: { a: 120, b: 120 },
@@ -126,9 +145,11 @@ export const BRIEFS: Brief[] = [
   },
   {
     id: 'home-2000',
-    title: 'Single-story home (2,000–2,500 sqft)',
+    title: 'Single-story home (~2,250 sqft)',
     description: 'A full single-story house: three bedrooms, two baths, living, dining, kitchen and laundry — with roof plan and elevations.',
-    totalSqFt: { min: 2000, max: 2500 },
+    targetSqFt: 2250,
+    sqFtTolerancePct: 10,
+    totalSqFt: { min: 2025, max: 2475 },
     rooms: [
       {
         roomType: 'MASTER BEDROOM', count: 1, minDims: { a: 144, b: 144 },
@@ -324,8 +345,19 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
     rooms.filter(r => r.label.name.toUpperCase().trim() === type);
 
   // ── Overall section ──
-  if (brief.totalSqFt) {
-    const { min, max } = brief.totalSqFt;
+  if (brief.totalSqFt || brief.targetSqFt) {
+    const derived = brief.targetSqFt
+      ? sqFtRangeFor(brief.targetSqFt, brief.sqFtTolerancePct ?? 10) : null;
+    const { min, max } = brief.totalSqFt ?? derived!;
+    // Target-style briefs read "~2,250 SF (±10%)". Legacy frozen configs
+    // carry their own stored range but INHERIT the template's target on
+    // merge — only use the target wording when it actually matches the
+    // enforced range, else keep the min–max wording.
+    const targetMatches = derived
+      && Math.abs(min - derived.min) <= 2 && Math.abs(max - derived.max) <= 2;
+    const sfLabel = targetMatches
+      ? `Total area ~${brief.targetSqFt!.toLocaleString()} SF (±${brief.sqFtTolerancePct ?? 10}%)`
+      : `Total area ${min.toLocaleString()}–${max.toLocaleString()} SF`;
     const openPlan = rooms.filter(r => r.needsBoundary);
     const tracedFp = buildRoofFootprint(level, 0);
     // With no traceable footprint the total falls back to summing rooms —
@@ -333,7 +365,7 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
     if (!tracedFp && openPlan.length > 0) {
       checks.push({
         id: 'total-sf', group: 'OVERALL',
-        label: `Total area ${min.toLocaleString()}–${max.toLocaleString()} SF`,
+        label: sfLabel,
         status: 'fail',
         detail: `Draw boundaries for open spaces first: ${openPlan.map(r => r.label.name).join(', ')}`,
       });
@@ -378,7 +410,7 @@ export function evaluateBrief(level: Level, brief: Brief): RubricCheck[] {
       }
       checks.push({
         id: 'total-sf', group: 'OVERALL',
-        label: `Total area ${min.toLocaleString()}–${max.toLocaleString()} SF`,
+        label: sfLabel,
         status: total >= min && total <= max ? 'pass' : 'fail',
         detail,
       });
