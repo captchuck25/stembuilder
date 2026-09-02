@@ -9597,11 +9597,31 @@ function buildBodyMesh(body) {
   if (body.type === 'extrude') {
     const shape = sketchToShape(body.sketch);
     if (!shape) return null;
-    geo = new THREE.ExtrudeGeometry(shape, {
-      depth: body.height,
-      bevelEnabled: false,
-      curveSegments: 48,
-    });
+    // Soften edges (ssupgrades 2026-09-02): body.softR rounds the top and
+    // bottom rims parametrically — Three's extrude bevel with an inward
+    // bevelOffset, so the part's OUTER dimensions stay exact (verified
+    // against three r128: lateral bbox unchanged, z spans -r..H-r → +r
+    // shift normalizes to 0..H). No CSG involved; flows into fit checks
+    // and exports automatically since they build from this same mesh.
+    const soft = Math.max(0, Math.min(body.softR || 0, body.height / 2 - 0.05));
+    if (soft > 0.05) {
+      geo = new THREE.ExtrudeGeometry(shape, {
+        depth: body.height - 2 * soft,
+        bevelEnabled: true,
+        bevelThickness: soft,
+        bevelSize: soft,
+        bevelOffset: -soft,
+        bevelSegments: 5,
+        curveSegments: 48,
+      });
+      geo.translate(0, 0, soft);
+    } else {
+      geo = new THREE.ExtrudeGeometry(shape, {
+        depth: body.height,
+        bevelEnabled: false,
+        curveSegments: 48,
+      });
+    }
     // For Negative extrudes, flip extrusion direction so it goes INTO the body
     // (along plane −n) instead of outward — that's the natural "cut a hole" direction.
     if (body.op === 'subtract') geo.translate(0, 0, -body.height);
@@ -18653,7 +18673,8 @@ function renderProps() {
     } else if (body.type === 'extrude') {
       dimFields = `<h4>Extrude</h4>
         <div class="field"><label>Height (${u})</label><input type="number" data-k="height" value="${fmtU(body.height)}" min="0.01" step="0.5"/></div>
-        <div class="hint">Edit the source sketch in 2D to change the profile, then come back.</div>`;
+        <div class="field"><label title="Rounds the top and bottom rims — 0 = sharp edges. The part's outside size stays exact.">Soften edges (${u})</label><input type="number" data-k="softR" value="${fmtU(body.softR || 0)}" min="0" step="${doc.units === 'in' ? 0.05 : 1}"/></div>
+        <div class="hint">Soften rounds every rim edge — try ${doc.units === 'in' ? '0.1' : '2'}. Edit the source sketch in 2D to change the profile, then come back.</div>`;
     } else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
       const headOpts = FASTENER_HEAD_TYPES.map(t =>
