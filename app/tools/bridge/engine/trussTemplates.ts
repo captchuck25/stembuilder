@@ -58,13 +58,15 @@ function panelLayout(
   return { count, length, height };
 }
 
-// Bowstring arch height above interior panel point i of n: a sine profile
-// rounded to the 5 ft grid, so the top chord bows like the chart while every
-// node stays snappable.
+// Bowstring arch height above interior panel point i of n: a TRUE parabolic
+// arch (peak = span/4) rounded to the 1 ft grid. Charlie's 2026-09-02 video:
+// the earlier 5 ft-rounded profile made a flat-topped trapezoid, not an arch
+// — a real arch needs 1 ft resolution (students set Grid to 1 ft to trace it).
 function bowstringHeight(i: number, n: number, spanFt: number): number {
-  const peak = spanFt <= 20 ? 5 : spanFt <= 60 ? 15 : 20;
-  const raw = peak * Math.sin((Math.PI * i) / n);
-  return Math.max(5, Math.round(raw / 5) * 5);
+  const peak = spanFt / 4;
+  const x = (i * spanFt) / n;
+  const raw = (4 * peak * x * (spanFt - x)) / (spanFt * spanFt);
+  return Math.max(1, Math.round(raw));
 }
 
 export function generateTruss(style: TrussStyle, spanFt: number): TrussTemplate {
@@ -134,7 +136,12 @@ export function generateTruss(style: TrussStyle, spanFt: number): TrussTemplate 
 
   if (style === "doubleWarren") {
     // Two Warren systems offset by one panel: both diagonals in every
-    // interior panel form X's (no joint at the crossing, no verticals).
+    // interior panel form X's (no joint at the crossing). End verticals are
+    // required: without them the inclined end post runs parallel to the
+    // first X-leg, leaving an unbraced parallelogram at each end (caught by
+    // Charlie 2026-09-02).
+    members.push([topAt(1), bottom[1]]);
+    if (n - 1 > 1) members.push([topAt(n - 1), bottom[n - 1]]);
     for (let i = 1; i < n - 1; i++) {
       members.push([topAt(i), bottom[i + 1]]);
       members.push([bottom[i], topAt(i + 1)]);

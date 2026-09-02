@@ -486,6 +486,9 @@ function BridgeToolPage() {
     setLoadLb(wizardLoad * LB_PER_TON);
     setGuideStyle(wizardStyle === "freestyle" ? null : wizardStyle);
     setGuideVisible(true);
+    // The bowstring arch uses 1 ft height increments — snap must match or
+    // students can't land joints on the guide.
+    if (wizardStyle === "bowstring") setSnapStepFeet(1);
     setShowSetupWizard(false);
     window.requestAnimationFrame(() =>
       window.requestAnimationFrame(() => {
