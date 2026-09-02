@@ -10,7 +10,9 @@ import { BRIEFS, Brief, DEFAULT_FURNISHINGS, RoomRequirement } from "@/app/tools
 import {
   GradingRubric, TEACHER_CATEGORY_PRESETS, resolveGradingRubric, rubricForDeliverables, rubricMaxPoints,
 } from "@/app/tools/blueprint-lab/engine/gradingRubric";
-import { SHELLS, formatShellStats, shellStats } from "@/app/tools/blueprint-lab/engine/shells";
+import {
+  SHELLS, formatShellStats, parseShellIds, shellOutline, shellStats, shellVariants,
+} from "@/app/tools/blueprint-lab/engine/shells";
 import { ROOM_TYPES } from "@/app/tools/blueprint-lab/engine/types";
 
 const INDIGO = "#4f46e5";
@@ -59,11 +61,15 @@ function resolveConfig(row: AssignmentRow): Brief {
 
 const ftLabel = (inches?: number) => inches == null ? "" : String(Math.round((inches / 12) * 10) / 10);
 
-// Mini SVG preview of a shell outline.
-function ShellPreview({ shellId, sqFt }: { shellId: string; sqFt: number }) {
+// shell_ids entries belonging to one shape family ('ranch' or 'ranch#2').
+const shapeEntries = (ids: string[], shapeId: string) =>
+  ids.filter(x => x === shapeId || x.startsWith(`${shapeId}#`));
+
+// Mini SVG preview of a shell outline (optionally a concrete variant).
+function ShellPreview({ shellId, sqFt, mirror, ratioScale }: { shellId: string; sqFt: number; mirror?: boolean; ratioScale?: number }) {
   const def = SHELLS.find(s => s.id === shellId);
   if (!def) return null;
-  const pts = def.outline(sqFt);
+  const pts = shellOutline({ shellId, sqFt, mirror, ratioScale });
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -249,6 +255,24 @@ export default function BlueprintTab({ classId }: { classId: string }) {
   const sqFtMid = draft?.config.totalSqFt
     ? (draft.config.totalSqFt.min + draft.config.totalSqFt.max) / 2
     : 1000;
+  const sqRange = draft?.config.totalSqFt ?? { min: 1000, max: 1000 };
+
+  // Toggle one concrete version of a shape. Choice mode: include/exclude it
+  // (all four included → stored as the plain shape id; none left → shape
+  // dropped). Fixed mode: radio — the clicked version becomes THE shell.
+  const toggleVariant = (shapeId: string, idx: number) => {
+    setDraft(d => {
+      if (!d) return d;
+      if (d.shellMode === "fixed") return { ...d, shellIds: [`${shapeId}#${idx}`] };
+      const others = d.shellIds.filter(x => x !== shapeId && !x.startsWith(`${shapeId}#`));
+      const choice = parseShellIds(shapeEntries(d.shellIds, shapeId))[0];
+      const cur = new Set(choice?.indices ?? [0, 1, 2, 3]);
+      if (cur.has(idx)) cur.delete(idx); else cur.add(idx);
+      if (cur.size === 0) return { ...d, shellIds: others };
+      if (cur.size === 4) return { ...d, shellIds: [...others, shapeId] };
+      return { ...d, shellIds: [...others, ...[...cur].sort((a, b) => a - b).map(i => `${shapeId}#${i}`)] };
+    });
+  };
 
   // ── Editor ──────────────────────────────────────────────────────────────
   if (draft) {
@@ -426,19 +450,21 @@ export default function BlueprintTab({ classId }: { classId: string }) {
         {draft.shellMode !== "scratch" && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 8 }}>
             {SHELLS.map(s => {
-              const selected = draft.shellIds.includes(s.id);
+              const selected = shapeEntries(draft.shellIds, s.id).length > 0;
               // A shape that needs more area than this brief targets is
               // offered grayed-out (no U-shape studios).
               const tooSmall = sqFtMid < s.minSqFt;
-              const stats = shellStats({ shellId: s.id, sqFt: sqFtMid });
               return (
                 <div key={s.id}
                   onClick={() => {
                     if (tooSmall) return;
                     setDraft(d => {
                       if (!d) return d;
-                      if (d.shellMode === "fixed") return { ...d, shellIds: [s.id] };
-                      return { ...d, shellIds: selected ? d.shellIds.filter(x => x !== s.id) : [...d.shellIds, s.id] };
+                      // Fixed mode preselects Version A; the strip below is a radio.
+                      if (d.shellMode === "fixed") return { ...d, shellIds: [`${s.id}#0`] };
+                      return { ...d, shellIds: selected
+                        ? d.shellIds.filter(x => x !== s.id && !x.startsWith(`${s.id}#`))
+                        : [...d.shellIds, s.id] };
                     });
                   }}
                   title={tooSmall ? `Needs a target of at least ${s.minSqFt.toLocaleString()} SF` : s.describe}
@@ -453,13 +479,57 @@ export default function BlueprintTab({ classId }: { classId: string }) {
                     {s.label}
                   </div>
                   <div style={{ fontSize: 10.5, color: "#888", marginTop: 2 }}>
-                    {tooSmall ? `needs ${s.minSqFt.toLocaleString()}+ SF` : stats ? formatShellStats(stats) : ""}
+                    {tooSmall ? `needs ${s.minSqFt.toLocaleString()}+ SF`
+                      : selected ? "choose versions below" : "4 versions"}
                   </div>
                 </div>
               );
             })}
           </div>
         )}
+        {/* Version narrowing: the exact A–D builds students will be offered
+            (and the paper starter sheets will print) — same generator as the
+            in-app picker, so dimensions here are the real ones. */}
+        {draft.shellMode !== "scratch" && SHELLS.filter(s => shapeEntries(draft.shellIds, s.id).length > 0).map(s => {
+          const choice = parseShellIds(shapeEntries(draft.shellIds, s.id))[0];
+          const fixed = draft.shellMode === "fixed";
+          return (
+            <div key={s.id} style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#312e81", margin: "4px 0 6px" }}>
+                {s.label}
+                <span style={{ fontWeight: 500, color: "#6b7280", marginLeft: 8 }}>
+                  {fixed ? "— pick the one version every student starts from"
+                    : "— uncheck versions you don’t want offered or printed"}
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {shellVariants(s.id, sqRange.min, sqRange.max).map((v, i) => {
+                  const included = fixed
+                    ? (choice.indices?.includes(i) ?? false)
+                    : (choice.indices === null || choice.indices.includes(i));
+                  const stats = shellStats(v);
+                  return (
+                    <div key={i} onClick={() => toggleVariant(s.id, i)}
+                      style={{ width: 118, padding: "8px 8px 6px", borderRadius: 10, cursor: "pointer",
+                        border: included ? `2px solid ${INDIGO}` : "2px solid #e5e7eb",
+                        background: included ? "#eef2ff" : "#fff", opacity: included ? 1 : 0.55,
+                        textAlign: "center" }}>
+                      <div style={{ display: "flex", justifyContent: "center" }}>
+                        <ShellPreview shellId={s.id} sqFt={v.sqFt} mirror={v.mirror} ratioScale={v.ratioScale} />
+                      </div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: included ? "#312e81" : "#666", marginTop: 4 }}>
+                        {included ? "✓ " : ""}Version {String.fromCharCode(65 + i)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#888", marginTop: 1 }}>
+                        {stats ? formatShellStats(stats) : ""}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
         {draft.shellMode !== "scratch" && draft.shellIds.length === 0 && (
           <div style={{ fontSize: 12, color: "#b45309", fontWeight: 600 }}>
             Pick at least one shape.

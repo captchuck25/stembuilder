@@ -18,7 +18,7 @@ import type { jsPDF } from 'jspdf';
 import { FurnitureItem, Level, Project, SectionPrimitive, Vec2 } from './types';
 import { RawBlocks, SheetBlock, SheetBounds, gatherRaw } from './sheet';
 import { ToPdf, renderBlocksToPdf } from './pdf';
-import { SHELLS, ShellVariant, shellOutline, shellStats, shellVariants } from './shells';
+import { SHELLS, ShellVariant, allowedShellVariants, parseShellIds, shellOutline, shellStats } from './shells';
 import { T } from './theme';
 
 export interface PortfolioFields {
@@ -382,11 +382,10 @@ export interface StarterSheetArgs {
   shellIds: string[];
 }
 
-// Grid squares must stay pencil-friendly: the smallest round-foot spacing
-// whose printed box is at least ~0.17".
-function gridFtFor(k: number): number {
-  return [1, 2, 4].find(g => g * 12 * k >= 0.17) ?? 4;
-}
+// One square is ALWAYS one foot (2026-09-02 feedback: a seventh grader must be
+// able to single-count boxes — "a 15-foot room is 15 boxes" beats bigger
+// squares every time, even if the grid runs a little fine at 1/8" scale).
+const GRID_FT = 1;
 
 // Light photocopy-safe grid across the frame, anchored so `anchor` (page
 // coords) is a grid intersection; a slightly darker line every 5 squares.
@@ -424,13 +423,15 @@ export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blo
   const range = args.totalSqFt ?? { min: 1000, max: 1000 };
   const fields: PortfolioFields = { student: '', school: '', project: args.assignmentTitle, date: '' };
 
-  // The concrete variants students will see in the in-app picker.
+  // The concrete variants students will see in the in-app picker — respecting
+  // the teacher's narrowed selection ('ranch#2' entries), with version letters
+  // keyed to the ORIGINAL variant index so paper matches the app.
   const variants: { v: ShellVariant; title: string }[] = args.shellMode === 'scratch' ? [] :
-    args.shellIds.flatMap(id => {
-      const def = SHELLS.find(s => s.id === id);
+    parseShellIds(args.shellIds).flatMap(choice => {
+      const def = SHELLS.find(s => s.id === choice.shellId);
       if (!def) return [];
-      return shellVariants(id, range.min, range.max).map((v, i) => ({
-        v, title: `${def.label} — Version ${String.fromCharCode(65 + i)}`,
+      return allowedShellVariants(choice, range.min, range.max).map(({ v, idx }) => ({
+        v, title: `${def.label} — Version ${String.fromCharCode(65 + idx)}`,
       }));
     });
 
@@ -471,30 +472,27 @@ export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blo
     const frame = pageChrome(doc, fields, `S-${n++}`, title, s.label);
     const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
     const toPdf = toPdfFor(block, inner, s.k);
-    const gridFt = gridFtFor(s.k);
-    // Anchor the grid on the shell's top-left corner so the outline sits on
-    // grid intersections (shell dims snap to 6", so far edges may fall on a
-    // half-square — the printed overall dims are the truth).
+    // Anchor the grid on the shell's top-left corner — shell dims snap to
+    // whole feet, so every edge lands on a grid line.
     const anchor = toPdf({ x: Math.min(...xs), y: -Math.min(...ys) });
-    drawGrid(doc, inner, gridFt * 12 * s.k, anchor);
+    drawGrid(doc, inner, GRID_FT * 12 * s.k, anchor);
     renderBlocksToPdf(doc, [block], toPdf, {
       scale: s.k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
     });
     drawWorksheetHint(doc, inner, 'Sketch your floor plan inside the shell — walls, doors, windows, and room names. Then build it in Blueprint Lab.');
-    drawCaption(doc, inner, `${title.toUpperCase()}  ·  ${stats.sqFt.toLocaleString()} SF  ·  1 SQUARE = ${gridFt}'-0"  ·  SCALE ${s.label}`);
+    drawCaption(doc, inner, `${title.toUpperCase()}  ·  ${stats.sqFt.toLocaleString()} SF  ·  1 SQUARE = 1'-0"  ·  SCALE ${s.label}`);
   }
 
   // Plain graph-paper page — scaled to the brief so a full design fits.
   {
     const big = range.max >= 1400;
     const s = ARCH_SCALES.find(x => x.k === (big ? 1 / 96 : 1 / 64))!;
-    const gridFt = big ? 2 : 1;
     nextPage();
     const frame = pageChrome(doc, fields, `S-${n}`, 'Graph paper', s.label);
     const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
-    drawGrid(doc, inner, gridFt * 12 * s.k, { x: inner.x + inner.w / 2, y: inner.y + inner.h / 2 });
+    drawGrid(doc, inner, GRID_FT * 12 * s.k, { x: inner.x + inner.w / 2, y: inner.y + inner.h / 2 });
     drawWorksheetHint(doc, inner, 'Sketch your floor plan — walls, doors, windows, and room names. Then build it in Blueprint Lab.');
-    drawCaption(doc, inner, `GRAPH PAPER  ·  1 SQUARE = ${gridFt}'-0"  ·  SCALE ${s.label}`);
+    drawCaption(doc, inner, `GRAPH PAPER  ·  1 SQUARE = 1'-0"  ·  SCALE ${s.label}`);
   }
 
   return doc.output('blob');

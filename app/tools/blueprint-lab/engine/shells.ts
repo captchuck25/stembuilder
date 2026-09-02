@@ -36,16 +36,21 @@ export interface ShellVariant {
   ratioScale?: number;
 }
 
-// Solve a rectangle of `ratio` (w:d) whose area is targetSqFt, snapped to 6".
+// Solve a rectangle of `ratio` (w:d) whose area is targetSqFt, snapped to
+// EVEN whole feet — shapes are centered on the origin at ±w/2, so even-foot
+// overall dims put EVERY vertex on a whole foot. That keeps all edges landing
+// on the paper starter sheet's 1-square-=-1-foot grid, so students count whole
+// boxes instead of half-boxing (2026-09-02 feedback).
 function rectFor(targetSqFt: number, ratio: number): { w: number; d: number } {
   const areaIn2 = targetSqFt * 144;
   const d = Math.sqrt(areaIn2 / ratio);
   const w = d * ratio;
-  const snap = (v: number) => Math.round(v / 6) * 6;
+  const snap = (v: number) => Math.round(v / 24) * 24;
   return { w: snap(w), d: snap(d) };
 }
 
-const half = (v: number) => Math.round(v / 12) * 6; // half, snapped to 6"
+const half = (v: number) => Math.round(v / 24) * 12;   // half, snapped to whole feet
+const halfEven = (v: number) => Math.round(v / 48) * 24; // half, snapped to EVEN feet (for ±x/2 symmetric spans)
 
 export const SHELLS: ShellDef[] = [
   {
@@ -99,8 +104,8 @@ export const SHELLS: ShellDef[] = [
     outline: (sf, rs = 1) => {
       // Bar (w × bd) + stem (sw × sd) centered below. Bar 2/3 of area.
       const { w, d: bd } = rectFor(sf * (2 / 3), 2.6 * rs);
-      const sw = half(w);
-      const sd = Math.round(((sf / 3) * 144) / sw / 6) * 6;
+      const sw = halfEven(w);   // stem spans ±sw/2 → must be even feet
+      const sd = Math.round(((sf / 3) * 144) / sw / 12) * 12;
       return [
         { x: -w / 2, y: -bd / 2 }, { x: w / 2, y: -bd / 2 },
         { x: w / 2, y: bd / 2 }, { x: sw / 2, y: bd / 2 },
@@ -118,7 +123,7 @@ export const SHELLS: ShellDef[] = [
       // Full rect minus a centered notch on the front: notch w/3 × d/2.
       // Area = w·d − (w/3)(d/2) = (5/6)·w·d.
       const { w, d } = rectFor(sf / (5 / 6), 1.5 * rs);
-      const nw = Math.round(w / 3 / 6) * 6, nd = half(d);
+      const nw = Math.round(w / 3 / 24) * 24, nd = half(d);   // notch spans ±nw/2 → even feet
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
         { x: w / 2, y: d / 2 }, { x: nw / 2, y: d / 2 },
@@ -136,7 +141,7 @@ export const SHELLS: ShellDef[] = [
     outline: (sf, rs = 1) => {
       // Keeps nw (58% of w); the removed notch is (w−nw) × nd = 0.42·0.4 ≈ 16.8%.
       const { w, d } = rectFor(sf / 0.832, 2.2 * rs);
-      const nw = Math.round(w * 0.58 / 6) * 6, nd = Math.round(d * 0.4 / 6) * 6;
+      const nw = Math.round(w * 0.58 / 12) * 12, nd = Math.round(d * 0.4 / 12) * 12;
       return [
         { x: -w / 2, y: -d / 2 }, { x: w / 2, y: -d / 2 },
         { x: w / 2, y: d / 2 }, { x: -w / 2 + (w - nw), y: d / 2 },
@@ -203,6 +208,44 @@ export function shellVariants(shellId: string, sqFtMin: number, sqFtMax: number)
     { shellId, sqFt: sfB },
     { shellId, sqFt: sfB, ratioScale: 1.4 },
   ];
+}
+
+// ── Assignment shell selections ───────────────────────────────────────────────
+// An assignment's shell_ids entries name either a whole shape family ('ranch'
+// = every variant the picker generates) or one concrete variant ('ranch#2' =
+// index 2 of shellVariants(...)). Teachers narrow the offered/printed set this
+// way with no schema change; old rows (plain ids) keep meaning "all versions".
+
+export interface ShellChoice {
+  shellId: string;
+  indices: number[] | null;   // null = every variant
+}
+
+export function parseShellIds(ids: string[]): ShellChoice[] {
+  const map = new Map<string, number[] | null>();
+  for (const raw of ids) {
+    const m = /^(.+)#(\d+)$/.exec(raw);
+    const id = m ? m[1] : raw;
+    const idx = m ? Number(m[2]) : null;
+    if (!map.has(id)) map.set(id, idx == null ? null : [idx]);
+    else {
+      const cur = map.get(id);
+      if (idx == null) map.set(id, null);          // plain id wins → all variants
+      else if (cur) { if (!cur.includes(idx)) cur.push(idx); }
+      // cur === null → already "all"; a #idx entry can't narrow it back down.
+    }
+  }
+  return [...map].map(([shellId, indices]) => ({
+    shellId,
+    indices: indices ? [...indices].sort((a, b) => a - b) : null,
+  }));
+}
+
+// The concrete variants a selection allows, with each variant's ORIGINAL index
+// (version letters must match the in-app picker: A = index 0, etc.).
+export function allowedShellVariants(choice: ShellChoice, sqFtMin: number, sqFtMax: number): { v: ShellVariant; idx: number }[] {
+  const all = shellVariants(choice.shellId, sqFtMin, sqFtMax).map((v, idx) => ({ v, idx }));
+  return choice.indices ? all.filter(x => choice.indices!.includes(x.idx)) : all;
 }
 
 // Build the exterior wall loop for a shell variant. Same thickness/height as

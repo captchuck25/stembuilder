@@ -26,7 +26,10 @@ import {
   AutoTierResult, GradingRubric, TeacherScores, computeAutoTiers,
   resolveGradingRubric, rubricForDeliverables,
 } from './engine/gradingRubric';
-import { SHELLS, ShellVariant, buildShellWalls, formatShellStats, shellOutline, shellStats, shellVariants } from './engine/shells';
+import {
+  SHELLS, ShellVariant, allowedShellVariants, buildShellWalls, formatShellStats,
+  parseShellIds, shellOutline, shellStats,
+} from './engine/shells';
 
 // Lazy-load the 3D scene so three.js (~600KB gz) only ships when the user
 // switches to the 3D tab.
@@ -902,10 +905,14 @@ export default function BlueprintLabClient() {
     // the picker again; one saved with walls is left alone.
     if (activeLevel.walls.length > 0) return;
     if (assignment.shellMode === 'fixed' && assignment.shellIds[0]) {
-      const sf = assignment.brief.totalSqFt
-        ? (assignment.brief.totalSqFt.min + assignment.brief.totalSqFt.max) / 2
-        : 1000;
-      seedShell({ shellId: assignment.shellIds[0], sqFt: sf });
+      const range = assignment.brief.totalSqFt ?? { min: 1000, max: 1000 };
+      // New-style entries name a concrete version ('ranch#2'); legacy plain
+      // ids seed the mid-range build as before.
+      const choice = parseShellIds(assignment.shellIds)[0];
+      const picked = choice.indices != null
+        ? allowedShellVariants(choice, range.min, range.max)[0]?.v
+        : null;
+      seedShell(picked ?? { shellId: choice.shellId, sqFt: (range.min + range.max) / 2 });
     } else if (assignment.shellMode === 'choice' && assignment.shellIds.length > 0) {
       setShellPickerOpen(true);
     }
@@ -2155,20 +2162,27 @@ export default function BlueprintLabClient() {
                   {(() => {
                     const range = assignment.brief.totalSqFt ?? { min: 1000, max: 1000 };
                     const mid = (range.min + range.max) / 2;
-                    // Stage 1: shape families. Stage 2: concrete variants.
+                    const choices = parseShellIds(assignment.shellIds);
+                    // Stage 1: shape families. Stage 2: the concrete variants
+                    // the TEACHER allowed ('ranch#2' narrowing) — version
+                    // letters keep their original index so they match the
+                    // paper starter sheets.
                     const cards: Array<{ key: string; label: string; sub: string | null; pts: Vec2[]; onPick: () => void }> =
                       pickerShape
-                        ? shellVariants(pickerShape, range.min, range.max).map((v, i) => {
+                        ? allowedShellVariants(
+                            choices.find(c => c.shellId === pickerShape) ?? { shellId: pickerShape, indices: null },
+                            range.min, range.max,
+                          ).map(({ v, idx }) => {
                             const stats = shellStats(v);
                             return {
-                              key: `${pickerShape}-${i}`,
-                              label: `Version ${String.fromCharCode(65 + i)}`,
+                              key: `${pickerShape}-${idx}`,
+                              label: `Version ${String.fromCharCode(65 + idx)}`,
                               sub: stats ? formatShellStats(stats) : null,
                               pts: shellOutline(v),
                               onPick: () => seedShell(v),
                             };
                           })
-                        : assignment.shellIds.flatMap(id => {
+                        : choices.flatMap(({ shellId: id }) => {
                             const s = SHELLS.find(x => x.id === id);
                             if (!s) return [];
                             return [{
