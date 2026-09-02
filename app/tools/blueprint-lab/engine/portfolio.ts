@@ -410,14 +410,6 @@ function drawGrid(doc: jsPDF, frame: Frame, stepIn: number, anchor: Vec2) {
   }
 }
 
-// Small instruction line at the top of the drawing frame.
-function drawWorksheetHint(doc: jsPDF, frame: Frame, text: string) {
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...rgb(T.inkSoft));
-  doc.text(text, frame.x + 0.05, frame.y + 0.02, { align: 'left', baseline: 'top' });
-}
-
 export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const range = args.totalSqFt ?? { min: 1000, max: 1000 };
@@ -479,7 +471,6 @@ export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blo
     renderBlocksToPdf(doc, [block], toPdf, {
       scale: s.k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
     });
-    drawWorksheetHint(doc, inner, 'Sketch your floor plan inside the shell — walls, doors, windows, and room names. Then build it in Blueprint Lab.');
     drawCaption(doc, inner, `${title.toUpperCase()}  ·  ${stats.sqFt.toLocaleString()} SF  ·  1 SQUARE = 1'-0"  ·  SCALE ${s.label}`);
   }
 
@@ -491,7 +482,6 @@ export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blo
     const frame = pageChrome(doc, fields, `S-${n}`, 'Graph paper', s.label);
     const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
     drawGrid(doc, inner, GRID_FT * 12 * s.k, { x: inner.x + inner.w / 2, y: inner.y + inner.h / 2 });
-    drawWorksheetHint(doc, inner, 'Sketch your floor plan — walls, doors, windows, and room names. Then build it in Blueprint Lab.');
     drawCaption(doc, inner, `GRAPH PAPER  ·  1 SQUARE = 1'-0"  ·  SCALE ${s.label}`);
   }
 
