@@ -97,6 +97,29 @@ export default function BlueprintTab({ classId }: { classId: string }) {
   }
   const [subsOpenId, setSubsOpenId] = useState<string | null>(null);
   const [subs, setSubs] = useState<Record<string, SubRow[]>>({});
+  // Paper starter sheets: photocopiable shell worksheets on graph paper.
+  const [sheetsBusyId, setSheetsBusyId] = useState<string | null>(null);
+  const printStarterSheets = async (row: AssignmentRow) => {
+    if (sheetsBusyId) return;
+    setSheetsBusyId(row.id);
+    try {
+      const { buildStarterSheetsPdf } = await import("@/app/tools/blueprint-lab/engine/portfolio");
+      const blob = await buildStarterSheetsPdf({
+        assignmentTitle: row.title,
+        totalSqFt: resolveConfig(row).totalSqFt ?? null,
+        shellMode: row.shell_mode,
+        shellIds: row.shell_ids ?? [],
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${row.title.replace(/[\\/:*?"<>|]+/g, "-")} — paper starter sheets.pdf`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } finally {
+      setSheetsBusyId(null);
+    }
+  };
   const toggleSubs = (aid: string) => {
     if (subsOpenId === aid) { setSubsOpenId(null); return; }
     setSubsOpenId(aid);
@@ -633,6 +656,12 @@ export default function BlueprintTab({ classId }: { classId: string }) {
                   padding: "6px 14px", borderRadius: 999, border: `2px solid ${INDIGO}`, background: "#eef2ff" }}>
                 Preview
               </Link>
+              <button onClick={() => printStarterSheets(a)} disabled={sheetsBusyId === a.id}
+                title="Photocopiable design worksheets — the assignment's shells printed to scale on graph paper, so students sketch on paper first"
+                style={{ fontSize: 12, fontWeight: 800, color: "#4338ca", cursor: sheetsBusyId === a.id ? "default" : "pointer",
+                  padding: "6px 14px", borderRadius: 999, border: `2px solid ${INDIGO}`, background: "#fff" }}>
+                {sheetsBusyId === a.id ? "Building…" : "Paper sheets"}
+              </button>
               <button onClick={() => setStatus(a, a.status === "assigned" ? "draft" : "assigned")}
                 style={{ fontSize: 12, fontWeight: 800, cursor: "pointer",
                   color: a.status === "assigned" ? "#6b7280" : "#15803d",

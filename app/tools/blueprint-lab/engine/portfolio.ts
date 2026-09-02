@@ -18,6 +18,7 @@ import type { jsPDF } from 'jspdf';
 import { FurnitureItem, Level, Project, SectionPrimitive, Vec2 } from './types';
 import { RawBlocks, SheetBlock, SheetBounds, gatherRaw } from './sheet';
 import { ToPdf, renderBlocksToPdf } from './pdf';
+import { SHELLS, ShellVariant, shellOutline, shellStats, shellVariants } from './shells';
 import { T } from './theme';
 
 export interface PortfolioFields {
@@ -109,18 +110,18 @@ function fitK(block: SheetBlock, frame: Frame): number {
   return Math.min(frame.w / spanX, frame.h / spanY);
 }
 
-// Draw one view centered in its frame at scale k, with a caption underneath.
-function drawView(doc: jsPDF, block: SheetBlock, frame: Frame, k: number, caption: string) {
+// Sheet-world → page mapping that centers a block in its frame at scale k.
+function toPdfFor(block: SheetBlock, frame: Frame, k: number): ToPdf {
   const sb = block.sheetBounds;
   const spanX = sb.maxX - sb.minX;
   const spanY = sb.maxY - sb.minY;
   const ox = frame.x + (frame.w - spanX * k) / 2;
   const oy = frame.y + (frame.h - spanY * k) / 2;
-  const toPdf: ToPdf = p => ({ x: ox + (p.x - sb.minX) * k, y: oy + (sb.maxY - p.y) * k });
-  renderBlocksToPdf(doc, [block], toPdf, {
-    scale: k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
-  });
-  // Caption — bold title + scale note, centered under the frame, underlined.
+  return p => ({ x: ox + (p.x - sb.minX) * k, y: oy + (sb.maxY - p.y) * k });
+}
+
+// Caption — bold title + scale note, centered under the frame, underlined.
+function drawCaption(doc: jsPDF, frame: Frame, caption: string) {
   doc.setLineDashPattern([], 0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
@@ -135,8 +136,16 @@ function drawView(doc: jsPDF, block: SheetBlock, frame: Frame, k: number, captio
   doc.setFont('helvetica', 'normal');
 }
 
+// Draw one view centered in its frame at scale k, with a caption underneath.
+function drawView(doc: jsPDF, block: SheetBlock, frame: Frame, k: number, caption: string) {
+  renderBlocksToPdf(doc, [block], toPdfFor(block, frame, k), {
+    scale: k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
+  });
+  drawCaption(doc, frame, caption);
+}
+
 // ── Page chrome: borders + title strip. Returns the drawing content frame. ────
-function pageChrome(doc: jsPDF, fields: PortfolioFields, sheetNo: string, sheetTitle: string): Frame {
+function pageChrome(doc: jsPDF, fields: PortfolioFields, sheetNo: string, sheetTitle: string, scaleNote = 'AS NOTED'): Frame {
   const ink = rgb(T.ink);
   doc.setLineDashPattern([], 0);
   // Double border — thick outside, thin inside (classic drafting sheet).
@@ -166,7 +175,15 @@ function pageChrome(doc: jsPDF, fields: PortfolioFields, sheetNo: string, sheetT
     doc.setTextColor(...rgb(T.inkSoft));
     doc.text(text.toUpperCase(), x, y, { align: 'left', baseline: 'top' });
   };
-  const value = (text: string, x: number, y: number, size = 9.5, bold = false) => {
+  // Empty field → a write-in rule instead of text, so the same chrome serves
+  // the paper starter sheets (students hand-write name/date after photocopying).
+  const value = (text: string, x: number, y: number, size = 9.5, bold = false, blankW = 1.6) => {
+    if (!text) {
+      doc.setDrawColor(...rgb(T.inkSoft));
+      doc.setLineWidth(0.008);
+      doc.line(x, y + 0.14, x + blankW, y + 0.14);
+      return;
+    }
     doc.setFont('helvetica', bold ? 'bold' : 'normal');
     doc.setFontSize(size);
     doc.setTextColor(...ink);
@@ -177,17 +194,17 @@ function pageChrome(doc: jsPDF, fields: PortfolioFields, sheetNo: string, sheetT
   label('Project', BORDER_IN + padX, row1);
   value(fields.project || 'Untitled project', BORDER_IN + padX, row1 + 0.1, 10.5, true);
   label('Designed by', BORDER_IN + padX, row2);
-  value(fields.student || '—', BORDER_IN + padX, row2 + 0.1);
+  value(fields.student, BORDER_IN + padX, row2 + 0.1, 9.5, false, 2.4);
 
   label('School', xSchool + padX, row1);
-  value(fields.school || '—', xSchool + padX, row1 + 0.1);
+  value(fields.school, xSchool + padX, row1 + 0.1, 9.5, false, 2);
   label('Drawn with', xSchool + padX, row2);
   value('StemBuilder — Blueprint Lab', xSchool + padX, row2 + 0.1, 8);
 
   label('Date', xDate + padX, row1);
-  value(fields.date || '—', xDate + padX, row1 + 0.1);
+  value(fields.date, xDate + padX, row1 + 0.1, 9.5, false, 1.4);
   label('Scale', xDate + padX, row2);
-  value('AS NOTED', xDate + padX, row2 + 0.1);
+  value(scaleNote, xDate + padX, row2 + 0.1);
 
   // Sheet cell — big number, title beneath.
   doc.setFont('helvetica', 'bold');
@@ -343,6 +360,141 @@ export async function buildPortfolioPdf(
       const s = pickScale(fitK(block, inner));
       drawView(doc, block, inner, s.k, `ROOF PLAN  ·  SCALE ${s.label}`);
     }
+  }
+
+  return doc.output('blob');
+}
+
+// ═══ Paper starter sheets ═════════════════════════════════════════════════════
+// Photocopiable design worksheets: the assignment's shell outlines printed to
+// scale on light 1-square-= N-feet graph paper, so students sketch their rooms
+// on paper FIRST and then rebuild the plan in Blueprint Lab (paper→computer,
+// same as STEM Sketch's isometric-paper stage). One page per shell variant —
+// the SAME variants (shellVariants) the in-app picker offers, so the paper
+// matches what students will click — plus a plain graph-paper page (which is
+// the whole printout for from-scratch assignments). Name/date print as
+// write-in blanks in the title strip.
+
+export interface StarterSheetArgs {
+  assignmentTitle: string;
+  totalSqFt: { min: number; max: number } | null;
+  shellMode: 'scratch' | 'choice' | 'fixed';
+  shellIds: string[];
+}
+
+// Grid squares must stay pencil-friendly: the smallest round-foot spacing
+// whose printed box is at least ~0.17".
+function gridFtFor(k: number): number {
+  return [1, 2, 4].find(g => g * 12 * k >= 0.17) ?? 4;
+}
+
+// Light photocopy-safe grid across the frame, anchored so `anchor` (page
+// coords) is a grid intersection; a slightly darker line every 5 squares.
+function drawGrid(doc: jsPDF, frame: Frame, stepIn: number, anchor: Vec2) {
+  const first = (a: number, lo: number) => a - Math.ceil((a - lo - 1e-9) / stepIn) * stepIn;
+  const lines: { pos: number; major: boolean; vert: boolean }[] = [];
+  for (let x = first(anchor.x, frame.x); x <= frame.x + frame.w + 1e-9; x += stepIn) {
+    lines.push({ pos: x, major: Math.round((x - anchor.x) / stepIn) % 5 === 0, vert: true });
+  }
+  for (let y = first(anchor.y, frame.y); y <= frame.y + frame.h + 1e-9; y += stepIn) {
+    lines.push({ pos: y, major: Math.round((y - anchor.y) / stepIn) % 5 === 0, vert: false });
+  }
+  doc.setLineDashPattern([], 0);
+  for (const major of [false, true]) {
+    doc.setDrawColor(...(major ? [168, 173, 190] as [number, number, number] : [205, 208, 219] as [number, number, number]));
+    doc.setLineWidth(major ? 0.009 : 0.006);
+    for (const l of lines) {
+      if (l.major !== major) continue;
+      if (l.vert) doc.line(l.pos, frame.y, l.pos, frame.y + frame.h);
+      else doc.line(frame.x, l.pos, frame.x + frame.w, l.pos);
+    }
+  }
+}
+
+// Small instruction line at the top of the drawing frame.
+function drawWorksheetHint(doc: jsPDF, frame: Frame, text: string) {
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...rgb(T.inkSoft));
+  doc.text(text, frame.x + 0.05, frame.y + 0.02, { align: 'left', baseline: 'top' });
+}
+
+export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blob> {
+  const { jsPDF } = await import('jspdf');
+  const range = args.totalSqFt ?? { min: 1000, max: 1000 };
+  const fields: PortfolioFields = { student: '', school: '', project: args.assignmentTitle, date: '' };
+
+  // The concrete variants students will see in the in-app picker.
+  const variants: { v: ShellVariant; title: string }[] = args.shellMode === 'scratch' ? [] :
+    args.shellIds.flatMap(id => {
+      const def = SHELLS.find(s => s.id === id);
+      if (!def) return [];
+      return shellVariants(id, range.min, range.max).map((v, i) => ({
+        v, title: `${def.label} — Version ${String.fromCharCode(65 + i)}`,
+      }));
+    });
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'in', format: 'legal' });
+  doc.setLineCap('butt');
+  doc.setLineJoin('miter');
+
+  let n = 1;
+  let firstPage = true;
+  const nextPage = () => {
+    if (!firstPage) doc.addPage('legal', 'landscape');
+    firstPage = false;
+  };
+
+  for (const { v, title } of variants) {
+    const pts = shellOutline(v);
+    const stats = shellStats(v);
+    if (pts.length === 0 || !stats) continue;
+
+    // Shell bbox (plan coords, Y-down) padded for the overall dims that sit
+    // left of and below the outline.
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const lb: SheetBounds = {
+      minX: Math.min(...xs) - 52, maxX: Math.max(...xs) + 16,
+      minY: Math.min(...ys) - 16, maxY: Math.max(...ys) + 52,
+    };
+    const prims: SectionPrimitive[] = [
+      { id: 'ss-outline', kind: 'polyline', verts: pts, closed: true, style: 'thick' },
+      // Overall dims: width below (sheet-normal points up into the building →
+      // negative offset drops it below), depth to the left (same reasoning).
+      { id: 'ss-dim-w', kind: 'dimLinear', a: { x: Math.min(...xs), y: Math.max(...ys) }, b: { x: Math.max(...xs), y: Math.max(...ys) }, offset: -28 },
+      { id: 'ss-dim-d', kind: 'dimLinear', a: { x: Math.min(...xs), y: Math.min(...ys) }, b: { x: Math.min(...xs), y: Math.max(...ys) }, offset: -28 },
+    ];
+    const block = blockAtOrigin('plan', prims, lb);
+
+    nextPage();
+    const s = pickScale(fitK(block, { x: 0, y: 0, w: PAGE_W - 2 * (BORDER_IN + FRAME_PAD), h: PAGE_H - BORDER_IN - TITLE_H - BORDER_IN - 2 * FRAME_PAD - CAPTION_H }));
+    const frame = pageChrome(doc, fields, `S-${n++}`, title, s.label);
+    const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
+    const toPdf = toPdfFor(block, inner, s.k);
+    const gridFt = gridFtFor(s.k);
+    // Anchor the grid on the shell's top-left corner so the outline sits on
+    // grid intersections (shell dims snap to 6", so far edges may fall on a
+    // half-square — the printed overall dims are the truth).
+    const anchor = toPdf({ x: Math.min(...xs), y: -Math.min(...ys) });
+    drawGrid(doc, inner, gridFt * 12 * s.k, anchor);
+    renderBlocksToPdf(doc, [block], toPdf, {
+      scale: s.k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
+    });
+    drawWorksheetHint(doc, inner, 'Sketch your floor plan inside the shell — walls, doors, windows, and room names. Then build it in Blueprint Lab.');
+    drawCaption(doc, inner, `${title.toUpperCase()}  ·  ${stats.sqFt.toLocaleString()} SF  ·  1 SQUARE = ${gridFt}'-0"  ·  SCALE ${s.label}`);
+  }
+
+  // Plain graph-paper page — scaled to the brief so a full design fits.
+  {
+    const big = range.max >= 1400;
+    const s = ARCH_SCALES.find(x => x.k === (big ? 1 / 96 : 1 / 64))!;
+    const gridFt = big ? 2 : 1;
+    nextPage();
+    const frame = pageChrome(doc, fields, `S-${n}`, 'Graph paper', s.label);
+    const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
+    drawGrid(doc, inner, gridFt * 12 * s.k, { x: inner.x + inner.w / 2, y: inner.y + inner.h / 2 });
+    drawWorksheetHint(doc, inner, 'Sketch your floor plan — walls, doors, windows, and room names. Then build it in Blueprint Lab.');
+    drawCaption(doc, inner, `GRAPH PAPER  ·  1 SQUARE = ${gridFt}'-0"  ·  SCALE ${s.label}`);
   }
 
   return doc.output('blob');
