@@ -9605,8 +9605,15 @@ function buildBodyMesh(body) {
     // and exports automatically since they build from this same mesh.
     const soft = Math.max(0, Math.min(body.softR || 0, body.height / 2 - 0.05));
     if (soft > 0.05) {
+      // Ends BURIED in a sibling piece (grouped parts — flags computed by
+      // _computeSoftBurial at soften time) don't round: a rounded rim at a
+      // mating face reads as an inside-out divot (ssupgrades round 2,
+      // 2026-09-02). Instead the buried end EXTENDS r past the mating
+      // plane, so the union swallows the band and the seam is a clean weld.
+      const burB = !!(body._softBuried && body._softBuried.bottom);
+      const burT = !!(body._softBuried && body._softBuried.top);
       geo = new THREE.ExtrudeGeometry(shape, {
-        depth: body.height - 2 * soft,
+        depth: body.height - 2 * soft + (burB ? soft : 0) + (burT ? soft : 0),
         bevelEnabled: true,
         bevelThickness: soft,
         bevelSize: soft,
@@ -9614,7 +9621,10 @@ function buildBodyMesh(body) {
         bevelSegments: 5,
         curveSegments: 48,
       });
-      geo.translate(0, 0, soft);
+      // Recipe spans z ∈ [-r, depth+r]; shifting by +r (unless the bottom
+      // is buried) yields: free/free → [0,H]; buried bottom → [-r,H];
+      // buried top → [0,H+r]; both → [-r,H+r]. Exact outer dims either way.
+      geo.translate(0, 0, burB ? 0 : soft);
     } else {
       geo = new THREE.ExtrudeGeometry(shape, {
         depth: body.height,
@@ -10493,6 +10503,89 @@ function regionCentroidOf(region) {
 // Re-run the CSG boolean for a group body (positives unioned, negatives
 // subtracted) and bake the result into group.geometry. Used after any of
 // the group's children's geometry has changed.
+// ── Soften-edges burial detection ────────────────────────────────────────────
+// For grouped parts: an extrude end pressed against a sibling must not round
+// (divot) — it extends past the mating face instead (see buildBodyMesh).
+// Sample points across each cap, push them 0.6mm past the end along the
+// extrude axis, and parity-test against every other positive sibling.
+
+function _softCapSamples(c) {
+  const pts = [];
+  const push = (x, y) => { if (pts.length < 16) pts.push({ x, y }); };
+  for (const e of (c.sketch?.entities || [])) {
+    if (e.construction) continue;
+    if (e.type === 'rect') {
+      push(e.x + e.w / 2, e.y + e.h / 2);
+      push(e.x + e.w * 0.25, e.y + e.h * 0.25);
+      push(e.x + e.w * 0.75, e.y + e.h * 0.75);
+      push(e.x + e.w * 0.25, e.y + e.h * 0.75);
+      push(e.x + e.w * 0.75, e.y + e.h * 0.25);
+    } else if (e.type === 'circle') {
+      push(e.cx, e.cy);
+      push(e.cx + e.r * 0.5, e.cy);
+      push(e.cx - e.r * 0.5, e.cy);
+      push(e.cx, e.cy + e.r * 0.5);
+    } else if (e.type === 'polyline' && e.closed && Array.isArray(e.points) && e.points.length >= 3) {
+      let cx = 0, cy = 0;
+      for (const p of e.points) { cx += p.x; cy += p.y; }
+      cx /= e.points.length; cy /= e.points.length;
+      push(cx, cy);
+      const step = Math.max(1, Math.floor(e.points.length / 6));
+      for (let i = 0; i < e.points.length; i += step) {
+        // 60% toward the centroid keeps samples inside concave outlines more
+        // often than the raw vertex would.
+        push(cx + (e.points[i].x - cx) * 0.6, cy + (e.points[i].y - cy) * 0.6);
+      }
+    }
+  }
+  return pts;
+}
+
+function _computeSoftBurial(children) {
+  const positives = (children || []).filter(c => c.type === 'extrude' && c.op !== 'subtract');
+  for (const c of positives) delete c._softBuried;
+  if (positives.length < 2 || typeof THREE === 'undefined') return;
+  // Plain meshes (soften off) so burial reads the true mating faces.
+  const meshes = new Map();
+  for (const c of positives) {
+    const saved = c.softR; c.softR = 0;
+    let m = null;
+    try { m = buildBodyMesh(c); } catch (_) {}
+    c.softR = saved;
+    if (m) { m.updateMatrixWorld(true); meshes.set(c.id, m); }
+  }
+  const rc = new THREE.Raycaster();
+  const dir = new THREE.Vector3(0.5773, 0.5773, 0.5773);
+  const insideAnySibling = (worldPt, selfId) => {
+    for (const c of positives) {
+      if (c.id === selfId) continue;
+      const mesh = meshes.get(c.id);
+      if (!mesh) continue;
+      const mat = mesh.material, prevSide = mat ? mat.side : null;
+      if (mat) mat.side = THREE.DoubleSide;
+      rc.set(worldPt, dir);
+      const crossings = rc.intersectObject(mesh, false).length;
+      if (mat) mat.side = prevSide;
+      if (crossings % 2 === 1) return true;
+    }
+    return false;
+  };
+  for (const c of positives) {
+    const selfMesh = meshes.get(c.id);
+    if (!selfMesh) continue;
+    const planeMat = makePlaneMatrix(c.plane || GROUND_PLANE);
+    const samples = _softCapSamples(c);
+    if (!samples.length) continue;
+    const endBuried = (zLocal) => samples.some(s => {
+      const p = new THREE.Vector3(s.x, s.y, zLocal).applyMatrix4(planeMat).applyMatrix4(selfMesh.matrixWorld);
+      return insideAnySibling(p, c.id);
+    });
+    const buried = { bottom: endBuried(-0.6), top: endBuried(c.height + 0.6) };
+    if (buried.bottom || buried.top) c._softBuried = buried;
+  }
+  for (const m of meshes.values()) { try { m.geometry.dispose(); } catch (_) {} }
+}
+
 function rebuildGroupGeometry(group) {
   if (!group || group.type !== 'group' || !Array.isArray(group.children)) return;
   if (typeof CSG === 'undefined') return;
@@ -18832,6 +18925,10 @@ function renderProps() {
           else if (c.type === 'group' || c.type === 'combined') { if (rebake(c)) touched = true; }
         }
         if (touched) {
+          // Ends pressed against a sibling must not round (divot) — they
+          // extend past the mating face instead. Computed per level, from
+          // the CURRENT arrangement.
+          _computeSoftBurial(b.children);
           if (b.type === 'group') rebuildGroupGeometry(b);
           else if (b.type === 'combined' && typeof _ensureGroupGeometry === 'function') {
             b.geometry = null;
@@ -18844,7 +18941,7 @@ function renderProps() {
       viewer?.rebuildBodies();
       setDirty(true);
       setStatus(r > 0
-        ? `Softened the group's edges (${fmtUL(r)}) — pieces round where they meet, like a molded part.`
+        ? `Softened the group's edges (${fmtUL(r)}) — outside rims round; ends that meet another piece stay welded flat.`
         : 'Group edges back to sharp.');
     });
     const rotZeroBtn = $('rot-zero-btn');
