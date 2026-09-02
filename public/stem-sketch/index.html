@@ -18760,10 +18760,24 @@ function renderProps() {
           bboxStr = `${fmtUL(sz.x)} × ${fmtUL(sz.y)} × ${fmtUL(sz.z)}`;
         }
       }
+      // Soften edges works on groups too (user request 2026-09-02: "we want
+      // the tool to work on either one"): the radius is pushed onto every
+      // POSITIVE extrude descendant and the group re-bakes from them.
+      // (Negative extrudes are cutters — rounding a cutter's rims shrinks
+      // its ends and leaves an unremoved lip in the hole, so they're skipped.)
+      const softTargets = [];
+      (function collectSoft(b) {
+        for (const c of b.children || []) {
+          if (c.type === 'extrude' && c.op !== 'subtract') softTargets.push(c);
+          else if (c.type === 'group' || c.type === 'combined') collectSoft(c);
+        }
+      })(body);
+      const groupSoftVal = softTargets.length ? Math.max(...softTargets.map(c => c.softR || 0)) : 0;
       dimFields = `<h4>Group</h4>
         <div class="field"><label>Size (W×H×D)</label><div>${bboxStr}</div></div>
         <div class="field"><label>Bodies</label><div>${body.children?.length || 0}</div></div>
         <div class="field"><label>Contents</label><div style="font-size:11px;color:var(--ink-soft)">${childList}</div></div>
+        ${softTargets.length ? `<div class="field"><label title="Rounds the top and bottom rims of every extruded piece in the group — 0 = sharp. Outside sizes stay exact.">Soften edges (${u})</label><input id="group-soft-input" type="number" value="${fmtU(groupSoftVal)}" min="0" step="${doc.units === 'in' ? 0.05 : 1}"/></div>` : ''}
         <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear.</div>`;
     }
 
@@ -18802,6 +18816,36 @@ function renderProps() {
         viewer?.rebuildBodies();
         if (typeof checkCollisionWarnings === 'function') checkCollisionWarnings([body.id]);
       });
+    });
+    // Group soften — 'change' (not per-keystroke): the re-bake is a CSG
+    // union of all children, too heavy to run on every digit typed.
+    const groupSoftInp = $('group-soft-input');
+    if (groupSoftInp) groupSoftInp.addEventListener('change', () => {
+      const v = parseFloat(groupSoftInp.value);
+      if (!isFinite(v) || v < 0) return;
+      const r = fromUnit(v);
+      pushUndo();
+      const rebake = (b) => {
+        let touched = false;
+        for (const c of b.children || []) {
+          if (c.type === 'extrude' && c.op !== 'subtract') { c.softR = r; touched = true; }
+          else if (c.type === 'group' || c.type === 'combined') { if (rebake(c)) touched = true; }
+        }
+        if (touched) {
+          if (b.type === 'group') rebuildGroupGeometry(b);
+          else if (b.type === 'combined' && typeof _ensureGroupGeometry === 'function') {
+            b.geometry = null;
+            _ensureGroupGeometry(b);
+          }
+        }
+        return touched;
+      };
+      rebake(body);
+      viewer?.rebuildBodies();
+      setDirty(true);
+      setStatus(r > 0
+        ? `Softened the group's edges (${fmtUL(r)}) — pieces round where they meet, like a molded part.`
+        : 'Group edges back to sharp.');
     });
     const rotZeroBtn = $('rot-zero-btn');
     if (rotZeroBtn) rotZeroBtn.onclick = () => {
