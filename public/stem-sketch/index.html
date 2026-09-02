@@ -12109,6 +12109,18 @@ function extrudeCurrentSketch() {
           setStatus(op === 'subtract'
             ? `${nR} negative extrude${nR === 1 ? '' : 's'} (${fmtUL(h)}) — Shift-click with a body, then Group to cut`
             : `Extruded ${nR} region${nR === 1 ? '' : 's'} to ${fmtUL(h)}`);
+          // Several positive pieces now stand on the workplane from the SAME
+          // sketch (different regions, often different heights). They stay
+          // separate so each height stays editable — but most users want one
+          // part at the end, so point at Group (ssupgrades 2026-09-02).
+          if (op !== 'subtract') {
+            const sketchIds = new Set(made.map(m => m.job.sketch.id));
+            const siblings = doc.bodies.filter(b =>
+              b.type === 'extrude' && b.op !== 'subtract' && sketchIds.has(b.sourceSketchId));
+            if (siblings.length > 1) {
+              showHint(`This sketch has made ${siblings.length} pieces — when the heights are set, Shift-click them all and hit Group to make them one part.`, 5000);
+            }
+          }
         }
       } else {
         // Open lines only + a face boundary used to silently extrude the
@@ -16946,6 +16958,26 @@ function _clearCollisionHighlights() {
 function checkCollisionWarnings(bodyIds) {
   if (!viewer) return false;
   if (_suppressCollisionChecks) return false; // sweep drives poses itself
+  // Collision warnings belong to ARTICULATION (user call, ssupgrades
+  // 2026-09-02): static modeling — rotating a bracket into place, snug
+  // stacks, a part dipped below grade mid-positioning — flashed red and
+  // surfaced the overlap tools with no joint in sight. No joints = no
+  // checks; also clear any leftover red from a just-deleted joint.
+  if (!doc.joints?.length) {
+    if (_activeCollisions.length || _tintedRed.size) {
+      _clearCollisionHighlights();
+      for (const id of Array.from(_tintedRed)) {
+        const body = doc.bodies.find(b => b.id === id);
+        if (body?.mesh?.material?.color) {
+          body.mesh.material.color.setHex(body.op === 'subtract' ? 0xff7070 : 0x9eb6ff);
+        }
+        _tintedRed.delete(id);
+      }
+      _activeCollisions = [];
+      renderProps();
+    }
+    return false;
+  }
   const warnGround = doc.collisionWarnGround !== false;
   const warnBodies = doc.collisionWarnBodies !== false;
   if (!warnGround && !warnBodies) return false;
@@ -18318,7 +18350,7 @@ function renderProps() {
         ${allJoints.length ? `<h4 style="margin-top:6px">Joints${allJoints.length > 1 ? ` (${shownJoints.length} of ${allJoints.length})` : ''}</h4>
         ${jointRows}
         ${(selJoint && allJoints.length > 1) ? '<div class="hint" style="margin-top:4px"><a href="#" id="show-all-joints">Show all joints</a> — or pick a different one in the Joints list on the left.</div>' : ''}` : ''}
-        ${(allJoints.length || (typeof _activeCollisions !== 'undefined' && _activeCollisions.length)) ? `
+        ${allJoints.length ? `
         <h4 style="margin-top:14px">Warnings</h4>
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="warn-ground" style="width:auto;margin:0"${doc.collisionWarnGround !== false ? ' checked' : ''}/>
@@ -19260,6 +19292,27 @@ function enterFilletPickMode() {
 // active sketch as { entityId, vertexIdx, x, y }. Closed polylines expose
 // every vertex; open polylines skip endpoints (they only have one adjacent
 // edge so there's nothing to fillet). Rects expose all 4 corners.
+// Chain tangent at a vertex, walked over ~2mm of arc length in the given
+// direction so dense arc polylines (1-2mm segments) and duplicate points
+// (mirror/trim seams) give a stable direction instead of segment noise.
+// Returns a unit vector pointing AWAY from pts[idx] along the walk, or null.
+function _chainTangentAt(pts, idx, step, wrap) {
+  const n = pts.length;
+  const p0 = pts[idx];
+  let acc = 0, i = idx, last = p0, guard = 0;
+  while (guard++ < n) {
+    i = wrap ? (i + step + n) % n : i + step;
+    if (!wrap && (i < 0 || i >= n)) break;
+    const p = pts[i];
+    acc += Math.hypot(p.x - last.x, p.y - last.y);
+    last = p;
+    if (acc >= 2) break;
+  }
+  const dx = last.x - p0.x, dy = last.y - p0.y;
+  const l = Math.hypot(dx, dy);
+  return l > 1e-9 ? { x: dx / l, y: dy / l } : null;
+}
+
 function _enumerateFilletableCorners() {
   const out = [];
   const ents = (doc.sketch?.entities || []);
@@ -19274,25 +19327,166 @@ function _enumerateFilletableCorners() {
       const n = e.points.length;
       if (n < 3) continue;
       for (let i = 0; i < n; i++) {
-        // Open polyline endpoints have only one adjacent edge → not a corner.
+        // Open polyline endpoints have only one adjacent edge → not a corner
+        // WITHIN this entity (junctions between entities handled below).
         if (!e.closed && (i === 0 || i === n - 1)) continue;
         // Only ACTUAL corners get a pick dot. Arcs and already-filleted
         // corners are dense runs of nearly-collinear vertices — offering
-        // every one of them buried the real corners in dots (user feedback
-        // 2026-08-31: "it's already fillet"). Skip vertices where the two
-        // adjacent edges are within ~20° of a straight line.
-        const prev = e.points[(i - 1 + n) % n], cur = e.points[i], next = e.points[(i + 1) % n];
-        const l1 = Math.hypot(prev.x - cur.x, prev.y - cur.y);
-        const l2 = Math.hypot(next.x - cur.x, next.y - cur.y);
-        if (l1 > 1e-6 && l2 > 1e-6) {
-          const cosA = ((prev.x - cur.x) * (next.x - cur.x) + (prev.y - cur.y) * (next.y - cur.y)) / (l1 * l2);
+        // every one of them buried the real corners in dots. Tangents are
+        // WALKED (~2mm) rather than read from the adjacent segment: a
+        // duplicate point at a mirror/trim seam made a zero-length segment
+        // that bypassed the old angle test and sprouted the nonsense dot at
+        // an arch apex (ssupgrades 2026-09-02).
+        const dirBack = _chainTangentAt(e.points, i, -1, !!e.closed);
+        const dirFwd  = _chainTangentAt(e.points, i, +1, !!e.closed);
+        if (dirBack && dirFwd) {
+          const cosA = dirBack.x * dirFwd.x + dirBack.y * dirFwd.y;
           if (cosA < -0.94) continue; // angle > ~160° — effectively straight
-        }
+        } else continue; // degenerate neighborhood — nothing to fillet
         out.push({ entityId: e.id, vertexIdx: i, x: e.points[i].x, y: e.points[i].y });
       }
     }
   }
+  // CROSS-ENTITY JUNCTIONS (ssupgrades 2026-09-02): where two separate
+  // chains' endpoints meet — a trimmed line ending on a trimmed arc — is
+  // exactly where a designer expects a fillet, and none was offered.
+  // Tangent-smooth meetings (mirrored arc halves at an arch apex) are NOT
+  // corners and get no dot.
+  const chainEnds = [];
+  for (const e of ents) {
+    if (e.construction || e.type !== 'polyline' || e.closed || !Array.isArray(e.points)) continue;
+    if (e.points.length < 2) continue;
+    for (const fromStart of [true, false]) {
+      const idx = fromStart ? 0 : e.points.length - 1;
+      const dir = _chainTangentAt(e.points, idx, fromStart ? +1 : -1, false);
+      if (dir) chainEnds.push({ entityId: e.id, fromStart, x: e.points[idx].x, y: e.points[idx].y, dir });
+    }
+  }
+  const used = new Set();
+  for (let i = 0; i < chainEnds.length; i++) {
+    if (used.has(i)) continue;
+    for (let j = i + 1; j < chainEnds.length; j++) {
+      if (used.has(j)) continue;
+      const a = chainEnds[i], b = chainEnds[j];
+      if (Math.hypot(a.x - b.x, a.y - b.y) > 0.8) continue;
+      const cosA = a.dir.x * b.dir.x + a.dir.y * b.dir.y;
+      if (cosA < -0.94) continue; // smooth continuation, not a corner
+      used.add(i); used.add(j);
+      out.push({
+        entityId: -1,
+        vertexIdx: `j:${a.entityId}:${a.fromStart ? 's' : 'e'}:${b.entityId}:${b.fromStart ? 's' : 'e'}`,
+        junction: { aId: a.entityId, aStart: a.fromStart, bId: b.entityId, bStart: b.fromStart },
+        x: (a.x + b.x) / 2, y: (a.y + b.y) / 2,
+      });
+      break;
+    }
+  }
   return out;
+}
+
+// Walk a chain from one end by `dist` of arc length. Returns the cut point
+// and the surviving points BEYOND the cut (ordered cut-side → far end), or
+// null when the chain is too short.
+function _chainCutAt(pts, fromStart, dist) {
+  const ordered = fromStart ? pts.slice() : pts.slice().reverse(); // [0] = this end
+  let acc = 0;
+  for (let i = 1; i < ordered.length; i++) {
+    const seg = Math.hypot(ordered[i].x - ordered[i - 1].x, ordered[i].y - ordered[i - 1].y);
+    if (seg > 1e-9 && acc + seg >= dist) {
+      const t = (dist - acc) / seg;
+      return {
+        cut: { x: ordered[i - 1].x + (ordered[i].x - ordered[i - 1].x) * t,
+               y: ordered[i - 1].y + (ordered[i].y - ordered[i - 1].y) * t },
+        rest: ordered.slice(i),
+      };
+    }
+    acc += seg;
+  }
+  return null;
+}
+
+// Fillet (or chamfer) ACROSS two chain ends that meet at a junction: trim
+// each chain back along its arc length, bridge with a tangent-ish arc (or a
+// straight cut), and MERGE the two entities into one polyline. Handles the
+// self-junction case (one chain meeting itself → closes the loop).
+function _applyJunctionFillet(j, r, style) {
+  const entA = doc.sketch.entities.find(e => e.id === j.aId);
+  const entB = doc.sketch.entities.find(e => e.id === j.bId);
+  if (!entA || !entB || entA.type !== 'polyline' || entB.type !== 'polyline') return false;
+  const self = entA === entB;
+
+  const dirA = _chainTangentAt(entA.points, j.aStart ? 0 : entA.points.length - 1, j.aStart ? +1 : -1, false);
+  const dirB = _chainTangentAt(entB.points, j.bStart ? 0 : entB.points.length - 1, j.bStart ? +1 : -1, false);
+  if (!dirA || !dirB) return false;
+  const cosT = clamp(dirA.x * dirB.x + dirA.y * dirB.y, -1, 1);
+  const theta = Math.acos(cosT);
+  if (theta < 0.05 || theta > Math.PI - 0.05) return false;
+  const d = r / Math.tan(theta / 2);
+
+  const pA = j.aStart ? entA.points[0] : entA.points[entA.points.length - 1];
+  const pB = j.bStart ? entB.points[0] : entB.points[entB.points.length - 1];
+  const corner = { x: (pA.x + pB.x) / 2, y: (pA.y + pB.y) / 2 };
+
+  let cutA, cutB;
+  if (self) {
+    // Nearly-closed chain meeting itself: trim BOTH ends of the same array.
+    const first = _chainCutAt(entA.points, true, d);
+    if (!first) return false;
+    const mid = [first.cut, ...first.rest];
+    const second = _chainCutAt(mid, false, d);
+    if (!second) return false;
+    cutA = { cut: first.cut, rest: first.rest };
+    cutB = second;
+    // Rebuild the middle from second's ordering (far→cut reversed below).
+  } else {
+    cutA = _chainCutAt(entA.points, j.aStart, d);
+    cutB = _chainCutAt(entB.points, j.bStart, d);
+    if (!cutA || !cutB) return false;
+  }
+
+  const TA = cutA.cut, TB = cutB.cut;
+  // Bridge points between TA and TB.
+  let bridge = [];
+  if (style !== 'chamfer') {
+    const bis = { x: dirA.x + dirB.x, y: dirA.y + dirB.y };
+    const bl = Math.hypot(bis.x, bis.y);
+    if (bl < 1e-9) return false;
+    const center = { x: corner.x + (bis.x / bl) * (r / Math.sin(theta / 2)),
+                     y: corner.y + (bis.y / bl) * (r / Math.sin(theta / 2)) };
+    let a1 = Math.atan2(TA.y - center.y, TA.x - center.x);
+    let a2 = Math.atan2(TB.y - center.y, TB.x - center.x);
+    let span = a2 - a1;
+    while (span > Math.PI) span -= 2 * Math.PI;
+    while (span < -Math.PI) span += 2 * Math.PI;
+    const N = 16;
+    for (let i = 1; i < N; i++) {
+      const t = a1 + span * (i / N);
+      bridge.push({ x: center.x + Math.cos(t) * r, y: center.y + Math.sin(t) * r });
+    }
+  }
+
+  if (self) {
+    // Loop closes: [TA … mid beyond both cuts … TB] as a CLOSED polyline;
+    // the bridge spans TB→TA, so append it after TB.
+    const middle = [...cutB.rest].reverse(); // far-side ordering → TA-side → TB-side
+    entA.points = [TA, ...middle, TB, ...[...bridge].reverse()];
+    entA.closed = true;
+  } else {
+    // farA → … → TA → bridge → TB → … → farB, as ONE open chain.
+    const partA = [...cutA.rest].reverse(); // farA … just-beyond-cut
+    const partB = cutB.rest;                // just-beyond-cut … farB
+    entA.points = [...partA, TA, ...bridge, TB, ...partB];
+    // If the far ends themselves touch, the outline is now a closed loop.
+    const f1 = entA.points[0], f2 = entA.points[entA.points.length - 1];
+    if (Math.hypot(f1.x - f2.x, f1.y - f2.y) < 0.8) {
+      entA.points.pop();
+      entA.closed = true;
+    } else {
+      entA.closed = false;
+    }
+    doc.sketch.entities = doc.sketch.entities.filter(e => e.id !== entB.id);
+  }
+  return true;
 }
 
 // Find the nearest filletable corner to (wx, wy) within snap distance.
@@ -19360,9 +19554,13 @@ function openFilletDialog() {
       // Group selected corners by entity so we can convert each rect ONCE
       // and process its corners in DESCENDING vertex order (so the
       // splice-in-place inside the corner replacers doesn't shift indices
-      // we haven't visited yet).
+      // we haven't visited yet). Cross-entity JUNCTION picks are handled
+      // separately (after — they merge chains, which would invalidate
+      // vertex indices recorded on those chains).
+      const junctionCorners = corners.filter(c => c.junction);
       const byEnt = new Map();
       for (const c of corners) {
+        if (c.junction) continue;
         if (!byEnt.has(c.entityId)) byEnt.set(c.entityId, []);
         byEnt.get(c.entityId).push(c.vertexIdx);
       }
@@ -19396,6 +19594,14 @@ function openFilletDialog() {
             : filletPolylineCorner(ent, i, r);
           if (ok) processed++;
         }
+      }
+      // Junctions AFTER vertex work: they merge chains, and vertex fillets
+      // only INSERT points mid-chain — endpoint walks stay valid, while the
+      // reverse order would break recorded vertex indices.
+      for (const jc of junctionCorners) {
+        try {
+          if (_applyJunctionFillet(jc.junction, r, style)) processed++;
+        } catch (err) { console.warn('junction fillet failed:', err); }
       }
       _exitFilletPickMode(null);
       sketchEng.render(); renderProps();
