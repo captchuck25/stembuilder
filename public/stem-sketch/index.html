@@ -10842,14 +10842,13 @@ function _resolveSoftSegRuns(shape, segs) {
 
 function _buildSegSoftGeo(shape, H, runsByLoop) {
   const rawLoops = _softCanonLoops(shape);
-  const K = 4; // band arc steps (thinned — dense meshes were hitting the autosave limit)
+  const K = 4; // band arc steps
   const posOut = [], normOut = [];
-  // Emit a triangle with the winding that agrees with the requested normal.
   const tri = (p1, p2, p3, nrm) => {
     const ux = p2[0] - p1[0], uy = p2[1] - p1[1], uz = p2[2] - p1[2];
     const vx = p3[0] - p1[0], vy = p3[1] - p1[1], vz = p3[2] - p1[2];
     const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
-    if (Math.abs(cx) + Math.abs(cy) + Math.abs(cz) < 1e-12) return; // degenerate
+    if (Math.abs(cx) + Math.abs(cy) + Math.abs(cz) < 1e-12) return;
     const flip = (cx * nrm[0] + cy * nrm[1] + cz * nrm[2]) < 0;
     const a = p1, b = flip ? p3 : p2, c = flip ? p2 : p3;
     posOut.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
@@ -10861,63 +10860,76 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     const loop = rawLoops[li]; // canonical: outer CCW, holes CW (left = material)
     const runs = runsByLoop.get(li) || { top: [], bottom: [] };
     const maxR = Math.max(0.5, ...runs.top.map(r => r.r), ...runs.bottom.map(r => r.r));
-    const rs = _softResampleLoop(loop, Math.max(1.2, maxR / 2.5));
+    // Samples = original vertices + a split ~1.5r from each sharp corner, so
+    // the column next to a corner is long enough to host a termination notch.
+    const rs = _softSplitNearCorners(loop, 1.5 * maxR);
     const m = rs.pts.length;
-    // Radius is PER COLUMN (segment c → c+1), constant along a run — no
-    // fades. Terminations are handled by explicit stop faces below.
     const rFor = (t, list) => {
       let best = 0;
       for (const run of list) {
         let tt = t;
-        if (run.endLen > rs.total && tt < run.startLen) tt += rs.total; // wrapping run
+        if (run.endLen > rs.total && tt < run.startLen) tt += rs.total;
         if (tt >= run.startLen - 1e-6 && tt <= run.endLen + 1e-6) best = Math.max(best, run.r);
       }
       return Math.min(best, H / 2 - 0.05);
     };
-    const rT = [], rB = [], sn = [];
+    const RT = [], RB = [], sn = [], tg = [], len = [];
     for (let c = 0; c < m; c++) {
       const a = rs.pts[c], b = rs.pts[(c + 1) % m];
       const dx = b.x - a.x, dy = b.y - a.y;
       const l = Math.hypot(dx, dy) || 1e-9;
-      sn.push([-dy / l, dx / l]);
+      len.push(l);
+      tg.push([dx / l, dy / l]);
+      sn.push([-dy / l, dx / l]); // LEFT normal = into material
       const mid = (rs.arcPos[c] + (c + 1 < m ? rs.arcPos[c + 1] : rs.total)) / 2;
-      rT.push(rFor(mid, runs.top));
-      rB.push(rFor(mid, runs.bottom));
+      RT.push(rFor(mid, runs.top));
+      RB.push(rFor(mid, runs.bottom));
     }
-    const turnAt = (s) => {
-      const n1 = sn[(s - 1 + m) % m], n2 = sn[s];
-      return Math.acos(Math.max(-1, Math.min(1, n1[0] * n2[0] + n1[1] * n2[1])));
-    };
+    const turnAt = (s) => Math.acos(Math.max(-1, Math.min(1, sn[(s - 1 + m) % m][0] * sn[s][0] + sn[(s - 1 + m) % m][1] * sn[s][1])));
     const convexAt = (s) => {
       const a = rs.pts[(s - 1 + m) % m], b = rs.pts[s], c = rs.pts[(s + 1) % m];
       return ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > 0;
     };
-    // REFLEX (concave) corner with rounding on BOTH sides: the two bands
-    // would sweep through each other and break the mesh (the sections-
-    // missing failure). Leave the two columns touching that corner sharp —
-    // a tiny crisp interruption, never a broken solid.
+    // Reflex corner rounded on both sides: the two bands would sweep through
+    // each other. The (short, corner-adjacent) columns touching it go sharp
+    // and each rounded neighbour terminates into them with a notch.
     for (let s = 0; s < m; s++) {
       if (turnAt(s) > D25 && !convexAt(s)) {
         const cp = (s - 1 + m) % m, cn = s;
-        if (rT[cp] > 0 && rT[cn] > 0) { rT[cp] = 0; rT[cn] = 0; }
-        if (rB[cp] > 0 && rB[cn] > 0) { rB[cp] = 0; rB[cn] = 0; }
+        if (RT[cp] > 0 && RT[cn] > 0) { RT[cp] = 0; RT[cn] = 0; }
+        if (RB[cp] > 0 && RB[cn] > 0) { RB[cp] = 0; RB[cn] = 0; }
       }
     }
-    // Offset direction at a column endpoint: MITERED (averaged, length-
-    // corrected, capped) only where the round continues through the sample
-    // with the same radius; otherwise the column's own normal — a clean
-    // perpendicular stop.
-    const dirAt = (c, atStart, rArr) => {
+    // Per-endpoint termination for one end (top or bottom) of column c.
+    // Returns { r, dir } where dir is the in-plane offset direction of the
+    // profile points (into the material) — mitered when the round continues,
+    // the neighbour's tangent when it terminates against a sharp column.
+    const endInfo = (R, c, atStart) => {
       const s = atStart ? c : (c + 1) % m;
-      const other = atStart ? (c - 1 + m) % m : (c + 1) % m;
-      const cont = rArr[c] > 0 && Math.abs(rArr[c] - rArr[other]) < 1e-6;
-      if (!cont) return { x: sn[c][0], y: sn[c][1] };
-      const n1 = sn[(s - 1 + m) % m], n2 = sn[s];
-      let ax = n1[0] + n2[0], ay = n1[1] + n2[1];
-      const al = Math.hypot(ax, ay) || 1e-9;
-      ax /= al; ay /= al;
-      const miter = Math.min(1.6, 1 / Math.max(Math.cos(turnAt(s) / 2), 1e-3));
-      return { x: ax * miter, y: ay * miter };
+      const nb = atStart ? (c - 1 + m) % m : (c + 1) % m; // neighbouring column
+      const mine = R[c], theirs = R[nb];
+      if (mine > 0 && theirs > 0) {
+        const rj = Math.min(mine, theirs);
+        const n1 = sn[(s - 1 + m) % m], n2 = sn[s];
+        let ax = n1[0] + n2[0], ay = n1[1] + n2[1];
+        const al = Math.hypot(ax, ay) || 1e-9;
+        ax /= al; ay /= al;
+        const miter = Math.min(1.6, 1 / Math.max(Math.cos(turnAt(s) / 2), 1e-3));
+        return { r: rj, dir: { x: ax * miter, y: ay * miter } };
+      }
+      if (mine > 0) {
+        // terminates against sharp neighbour: profile lies in ITS wall plane
+        const rn = Math.min(mine, len[nb] * 0.95);
+        const d = atStart ? { x: -tg[nb][0], y: -tg[nb][1] } : { x: tg[nb][0], y: tg[nb][1] };
+        return { r: rn, dir: d };
+      }
+      if (theirs > 0) {
+        // this sharp column receives a notch from the rounded neighbour
+        const rn = Math.min(theirs, len[c] * 0.95);
+        const d = atStart ? { x: tg[c][0], y: tg[c][1] } : { x: -tg[c][0], y: -tg[c][1] };
+        return { r: rn, dir: d, notch: true };
+      }
+      return { r: 0, dir: { x: sn[c][0], y: sn[c][1] } };
     };
     const bandPt = (P, d, r, k, top) => {
       const phi = (k / K) * Math.PI / 2;
@@ -10932,61 +10944,69 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     for (let c = 0; c < m; c++) {
       const j = (c + 1) % m;
       const A = rs.pts[c], B = rs.pts[j];
-      const dAT = dirAt(c, true, rT), dBT = dirAt(c, false, rT);
-      const dAB = dirAt(c, true, rB), dBB = dirAt(c, false, rB);
-      const wn = [-sn[c][0], -sn[c][1], 0]; // outward = right normal (material is on the LEFT)
-      // Wall: this column's own z-span (crisp ends where r changes).
-      tri([A.x, A.y, rB[c]], [B.x, B.y, rB[c]], [B.x, B.y, H - rT[c]], wn);
-      tri([A.x, A.y, rB[c]], [B.x, B.y, H - rT[c]], [A.x, A.y, H - rT[c]], wn);
-      for (let k = 0; k < K; k++) {
-        if (rT[c] > 0) {
-          tri(bandPt(A, dAT, rT[c], k, true), bandPt(B, dBT, rT[c], k, true), bandPt(B, dBT, rT[c], k + 1, true), bandN(c, k, true));
-          tri(bandPt(A, dAT, rT[c], k, true), bandPt(B, dBT, rT[c], k + 1, true), bandPt(A, dAT, rT[c], k + 1, true), bandN(c, k + 1, true));
-        }
-        if (rB[c] > 0) {
-          tri(bandPt(A, dAB, rB[c], k, false), bandPt(B, dBB, rB[c], k, false), bandPt(B, dBB, rB[c], k + 1, false), bandN(c, k, false));
-          tri(bandPt(A, dAB, rB[c], k, false), bandPt(B, dBB, rB[c], k + 1, false), bandPt(A, dAB, rB[c], k + 1, false), bandN(c, k + 1, false));
-        }
-      }
-      const sT = bandPt(A, dAT, rT[c], K, true), eT = bandPt(B, dBT, rT[c], K, true);
-      ringT.push(new THREE.Vector2(sT[0], sT[1]), new THREE.Vector2(eT[0], eT[1]));
-      const sB = bandPt(A, dAB, rB[c], K, false), eB = bandPt(B, dBB, rB[c], K, false);
-      ringB.push(new THREE.Vector2(sB[0], sB[1]), new THREE.Vector2(eB[0], eB[1]));
-    }
-    // STOP FACES: where adjacent columns' radii differ, close the gap at the
-    // shared sample with a strip between the two end profiles — the flat
-    // end a real CAD partial fillet has, instead of a fading bump. When one
-    // side is sharp its profile collapses to the corner point (a fan).
-    for (let s = 0; s < m; s++) {
-      const cp = (s - 1 + m) % m, cn = s;
-      const P = rs.pts[s];
-      const tx = sn[cn][1], ty = -sn[cn][0]; // forward tangent of the next column
-      const pairs = [[rT, true], [rB, false]];
-      for (let q = 0; q < 2; q++) {
-        const rArr = pairs[q][0], top = pairs[q][1];
-        if (Math.abs(rArr[cp] - rArr[cn]) < 1e-6) continue;
-        const dPrev = dirAt(cp, false, rArr), dNext = dirAt(cn, true, rArr);
-        const nrm = rArr[cp] > rArr[cn] ? [-tx, -ty, 0] : [tx, ty, 0];
+      const wn = [-sn[c][0], -sn[c][1], 0];
+      const aT = endInfo(RT, c, true), bT = endInfo(RT, c, false);
+      const aB = endInfo(RB, c, true), bB = endInfo(RB, c, false);
+      const roundedT = RT[c] > 0, roundedB = RB[c] > 0;
+      // Bands for rounded ends.
+      if (roundedT) {
         for (let k = 0; k < K; k++) {
-          const a0 = bandPt(P, dPrev, rArr[cp], k, top), a1 = bandPt(P, dPrev, rArr[cp], k + 1, top);
-          const b0 = bandPt(P, dNext, rArr[cn], k, top), b1 = bandPt(P, dNext, rArr[cn], k + 1, top);
-          tri(a0, b0, b1, nrm);
-          tri(a0, b1, a1, nrm);
+          tri(bandPt(A, aT.dir, aT.r, k, true), bandPt(B, bT.dir, bT.r, k, true), bandPt(B, bT.dir, bT.r, k + 1, true), bandN(c, k, true));
+          tri(bandPt(A, aT.dir, aT.r, k, true), bandPt(B, bT.dir, bT.r, k + 1, true), bandPt(A, aT.dir, aT.r, k + 1, true), bandN(c, k + 1, true));
         }
       }
+      if (roundedB) {
+        for (let k = 0; k < K; k++) {
+          tri(bandPt(A, aB.dir, aB.r, k, false), bandPt(B, bB.dir, bB.r, k, false), bandPt(B, bB.dir, bB.r, k + 1, false), bandN(c, k, false));
+          tri(bandPt(A, aB.dir, aB.r, k, false), bandPt(B, bB.dir, bB.r, k + 1, false), bandPt(A, aB.dir, aB.r, k + 1, false), bandN(c, k + 1, false));
+        }
+      }
+      // Wall polygon (counter-clockwise in the wall plane), with notch
+      // profiles on sharp ends that a rounded neighbour terminates into.
+      const poly = [];
+      const pushProfile = (P, info, top, fromK, toK) => {
+        const step = fromK < toK ? 1 : -1;
+        for (let k = fromK; step > 0 ? k <= toK : k >= toK; k += step) poly.push(bandPt(P, info.dir, info.r, k, top));
+      };
+      // A side, bottom → top
+      if (roundedB) poly.push([A.x, A.y, aB.r]);
+      else if (aB.notch) pushProfile(A, aB, false, K, 0); // (A+d·r,0) … (A,r)
+      else poly.push([A.x, A.y, 0]);
+      if (roundedT) poly.push([A.x, A.y, H - aT.r]);
+      else if (aT.notch) pushProfile(A, aT, true, 0, K);  // (A,H−r) … (A+d·r,H)
+      else poly.push([A.x, A.y, H]);
+      // B side, top → bottom (reverse order so the polygon stays a loop)
+      if (roundedT) poly.push([B.x, B.y, H - bT.r]);
+      else if (bT.notch) pushProfile(B, bT, true, K, 0);  // (B−d·r,H) … (B,H−r)
+      else poly.push([B.x, B.y, H]);
+      if (roundedB) poly.push([B.x, B.y, bB.r]);
+      else if (bB.notch) pushProfile(B, bB, false, 0, K); // (B,r) … (B−d·r,0)
+      else poly.push([B.x, B.y, 0]);
+      // Fan from the polygon centroid (star-shaped for small notches).
+      let cx = 0, cy = 0, cz = 0;
+      for (const p of poly) { cx += p[0]; cy += p[1]; cz += p[2]; }
+      const ctr = [cx / poly.length, cy / poly.length, cz / poly.length];
+      for (let i = 0; i < poly.length; i++) tri(ctr, poly[i], poly[(i + 1) % poly.length], wn);
+      // Cap ring points for this column (start, end) at each end.
+      const capT = (P, info) => { const p = bandPt(P, info.dir, info.r, K, true); return new THREE.Vector2(p[0], p[1]); };
+      const capB = (P, info) => { const p = bandPt(P, info.dir, info.r, K, false); return new THREE.Vector2(p[0], p[1]); };
+      ringT.push(capT(A, aT), capT(B, bT));
+      ringB.push(capB(A, aB), capB(B, bB));
     }
     if (li === 0) { capOuter.push(...ringT); capOuterB.push(...ringB); }
     else { capHoles.push(ringT); capHolesB.push(ringB); }
   }
-  // Caps from the per-column rings (top z=H normal +z; bottom z=0, -z).
+  // Caps: earcut drops collinear ring points — split any cap edge that skips
+  // ring points along a straight boundary into a fan so the cap shares every
+  // wall/band vertex (no T-junctions for the CSG engine).
   const capTri = (outer, holes, z, up) => {
     const clean = (ring) => {
       const out = [];
       for (const p of ring) {
         const last = out[out.length - 1];
-        if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 0.05) out.push(p);
+        if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 0.02) out.push(p);
       }
-      while (out.length > 1 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= 0.05) out.pop();
+      while (out.length > 1 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= 0.02) out.pop();
       return out;
     };
     const outerV = clean(outer);
@@ -10995,9 +11015,42 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     let tris;
     try { tris = THREE.ShapeUtils.triangulateShape(outerV, holeVs); } catch (_) { return; }
     const all = outerV.concat(...holeVs);
+    const ringOf = new Array(all.length);
+    let base = 0;
+    for (const ring of [outerV, ...holeVs]) { for (let i = 0; i < ring.length; i++) ringOf[base + i] = [base, ring.length]; base += ring.length; }
     const nrm = [0, 0, up ? 1 : -1];
+    const collinearBetween = (i, j, dir) => {
+      const [b, L] = ringOf[i];
+      const out = [];
+      const pi = all[i], pj = all[j];
+      const dx = pj.x - pi.x, dy = pj.y - pi.y;
+      const ln = Math.hypot(dx, dy) || 1e-9;
+      let k = i;
+      for (let step = 0; step < L; step++) {
+        k = b + (((k - b) + dir + L) % L);
+        if (k === j) return out;
+        const p = all[k];
+        if (Math.abs((p.x - pi.x) * dy - (p.y - pi.y) * dx) / ln > 0.02) return null;
+        out.push(k);
+      }
+      return null;
+    };
+    const emit = (ia, ib, ic) => tri([all[ia].x, all[ia].y, z], [all[ib].x, all[ib].y, z], [all[ic].x, all[ic].y, z], nrm);
     for (const t of tris) {
-      tri([all[t[0]].x, all[t[0]].y, z], [all[t[1]].x, all[t[1]].y, z], [all[t[2]].x, all[t[2]].y, z], nrm);
+      let split = false;
+      for (let e = 0; e < 3 && !split; e++) {
+        const i = t[e], j = t[(e + 1) % 3], c = t[(e + 2) % 3];
+        if (!ringOf[i] || !ringOf[j] || ringOf[i][0] !== ringOf[j][0]) continue;
+        const L = ringOf[i][1];
+        const df = ((j - i) % L + L) % L;
+        if (df === 1 || df === L - 1) continue;
+        const mids = collinearBetween(i, j, 1) || collinearBetween(i, j, -1);
+        if (!mids || !mids.length) continue;
+        const chain = [i, ...mids, j];
+        for (let q = 0; q < chain.length - 1; q++) emit(chain[q], chain[q + 1], c);
+        split = true;
+      }
+      if (!split) emit(t[0], t[1], t[2]);
     }
   };
   if (capOuter.length >= 3) {
@@ -11008,6 +11061,37 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
   out.setAttribute('position', new THREE.Float32BufferAttribute(posOut, 3));
   out.setAttribute('normal', new THREE.Float32BufferAttribute(normOut, 3));
   return out;
+}
+
+// Samples for the builder: the loop's own vertices plus a split point ~d
+// before and after every sharp corner (on segments long enough), so the
+// column beside a corner can host a termination notch and the reflex rule
+// blanks only a short stub, never a whole edge.
+function _softSplitNearCorners(loop, d) {
+  const n = loop.length;
+  const turnDeg = (i) => {
+    const a = loop[(i - 1 + n) % n], b = loop[i], c = loop[(i + 1) % n];
+    const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
+    if (l1 < 1e-9 || l2 < 1e-9) return 0;
+    const cosA = Math.max(-1, Math.min(1, ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (l1 * l2)));
+    return THREE.MathUtils.radToDeg(Math.acos(cosA));
+  };
+  const sharp = [];
+  for (let i = 0; i < n; i++) sharp.push(turnDeg(i) > 25);
+  const pts = [], arcPos = [];
+  let acc = 0;
+  for (let i = 0; i < n; i++) {
+    const a = loop[i], b = loop[(i + 1) % n];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    pts.push({ x: a.x, y: a.y }); arcPos.push(acc);
+    if (L > 2.2 * d) {
+      const ux = (b.x - a.x) / L, uy = (b.y - a.y) / L;
+      if (sharp[i]) { pts.push({ x: a.x + ux * d, y: a.y + uy * d }); arcPos.push(acc + d); }
+      if (sharp[(i + 1) % n]) { pts.push({ x: b.x - ux * d, y: b.y - uy * d }); arcPos.push(acc + L - d); }
+    }
+    acc += L;
+  }
+  return { pts, arcPos, total: acc };
 }
 
 // ── Soften-edges burial detection ────────────────────────────────────────────
@@ -11101,10 +11185,58 @@ function _computeSoftBurial(children) {
 // unpick. Works on pieces inside groups via invisible per-child proxies.
 let _softenPickCtx = null; // { hitObjects: Object3D[], hiGroup: THREE.Group }
 
+// Primitives the Soften tool can treat as extrusions: a cube is a rectangle
+// extruded up, a (round) cylinder a circle. The pick tool builds proxies
+// from this descriptor; on Apply the body is CONVERTED to a real extrude in
+// place (undoable), so segment records and re-bakes work uniformly.
+function _softPrimitiveToExtrude(body) {
+  if (!body || body.op === 'subtract') return null;
+  let sketch = null;
+  if (body.type === 'cube') {
+    sketch = { entities: [{ id: 1, type: 'rect', x: -body.w / 2, y: -body.d / 2, w: body.w, h: body.d }] };
+  } else if (body.type === 'cylinder' && Math.abs(body.w - body.d) < 0.05) {
+    sketch = { entities: [{ id: 1, type: 'circle', cx: 0, cy: 0, r: body.w / 2 }] };
+  } else return null;
+  const h = body.h;
+  // Box/cylinder meshes rotate about their CENTER (x, y+h/2, z); an extrude
+  // rotates about its base origin. Same pose ⇒ origin = C − R·(0, h/2, 0).
+  let x = body.x || 0, y = body.y || 0, z = body.z || 0;
+  const rot = body.rotation && (body.rotation.x || body.rotation.y || body.rotation.z) ? { ...body.rotation } : null;
+  if (rot) {
+    const d2r = THREE.MathUtils.degToRad;
+    const R = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(d2r(rot.x || 0), d2r(rot.y || 0), d2r(rot.z || 0), 'XYZ'));
+    const half = new THREE.Vector3(0, h / 2, 0).applyMatrix4(R);
+    x = x - half.x; y = (y + h / 2) - half.y; z = z - half.z;
+  }
+  return {
+    id: body.id, type: 'extrude', sketch,
+    plane: JSON.parse(JSON.stringify(GROUND_PLANE)),
+    height: h, x, y, z, op: 'add',
+    ...(rot ? { rotation: rot } : {}),
+    _primitiveOf: body,
+  };
+}
+// Turn the original primitive into that extrude, in place (keeps identity,
+// name, visibility; drops the primitive dimensions).
+function _softConvertPrimitive(desc) {
+  const b = desc._primitiveOf;
+  if (!b || b.type === 'extrude') return b;
+  for (const k of ['w', 'h', 'd', 'filletRadius', 'filletEdges', 'r', 'tube']) delete b[k];
+  b.type = 'extrude';
+  b.sketch = JSON.parse(JSON.stringify(desc.sketch));
+  b.plane = JSON.parse(JSON.stringify(desc.plane));
+  b.height = desc.height;
+  b.x = desc.x; b.y = desc.y; b.z = desc.z;
+  if (desc.rotation) b.rotation = { ...desc.rotation }; else delete b.rotation;
+  delete b.mesh;
+  return b;
+}
+
 function enterSoftenPickMode() {
   if (doc.mode !== '3d') { showHint('Soften works in 3D — click ← Done first.'); return; }
   const hasTarget = (bs) => (bs || []).some(b =>
     (b.type === 'extrude' && b.op !== 'subtract') ||
+    !!_softPrimitiveToExtrude(b) ||
     ((b.type === 'group' || b.type === 'combined') && hasTarget(b.children)));
   if (!hasTarget(doc.bodies)) { showHint('Soften rounds the edges of extruded pieces — extrude a sketch first.'); return; }
   exitSoftenPickMode();
@@ -11131,6 +11263,7 @@ function enterSoftenPickMode() {
     for (const c of _coalesceSoftSiblings(g.children, { forPick: true })) {
       if (c.type === 'extrude' && c.op !== 'subtract') addProxy(c, o, topId);
       else if (c.type === 'group' || c.type === 'combined') o.add(buildGroupObj(c, topId));
+      else { const desc = _softPrimitiveToExtrude(c); if (desc) addProxy(desc, o, topId); }
     }
     return o;
   };
@@ -11144,6 +11277,13 @@ function enterSoftenPickMode() {
       const o = buildGroupObj(b, b.id);
       o.updateMatrixWorld(true);
       if (o.children.length) hitObjects.push(o);
+    } else {
+      const desc = _softPrimitiveToExtrude(b);
+      if (desc) {
+        let pm = null;
+        try { pm = buildBodyMesh(desc); } catch (_) {}
+        if (pm) { pm.updateMatrixWorld(true); pm.userData = { softTopId: b.id, softChild: desc }; hitObjects.push(pm); }
+      }
     }
   }
   // Per-top-level-body roster of (child, proxy) pairs — one click on a
@@ -11180,8 +11320,10 @@ function exitSoftenPickMode(msg) {
       for (const c of _softenPickCtx.hiGroup.children) { c.geometry?.dispose(); c.material?.dispose(); }
     }
     for (const o of _softenPickCtx.hitObjects) {
-      // Proxy trees get disposed; REAL scene meshes (bare extrudes) don't.
+      // Proxy trees and primitive proxies get disposed; REAL scene meshes
+      // (bare extrudes, identified by userData.bodyId) don't.
       if (o.isObject3D && !o.isMesh) o.traverse(c => { if (c.isMesh) c.geometry?.dispose(); });
+      else if (o.isMesh && o.userData && o.userData.softChild && o.userData.softChild._primitiveOf) o.geometry?.dispose();
     }
     _softenPickCtx = null;
   }
@@ -11312,6 +11454,9 @@ function openSoftenDialog() {
       pushUndo();
       const touchedTops = new Set();
       for (const sel of sels) {
+        // A picked primitive (cube / round cylinder) becomes a real extrude
+        // now — same pose, undoable — so the record has a profile to match.
+        if (sel.child && sel.child._primitiveOf) _softConvertPrimitive(sel.child);
         // Segment records live on the TOP-LEVEL body (bare extrude or the
         // group) and re-match to profile feature edges at bake time.
         const top = doc.bodies.find(b => b.id === sel.topId);
