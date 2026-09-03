@@ -11229,10 +11229,14 @@ function _softenToggleAt(hit, rayDir) {
     if (!an) continue;
     const m = an.pts.length;
     for (const e of an.edges) {
+      // Distance to the edge's SEGMENTS, not its vertices — a long straight
+      // side only has vertices at its ends, so a mid-edge click used to snap
+      // to whatever dense-vertex edge was nearer (the circle, an arch, a
+      // fillet): "grabs the wrong edge" (ssupgrades 2026-09-03).
       let d = Infinity;
-      for (let i = e.i0; i <= e.i1; i++) {
-        const p = an.pts[i % m];
-        d = Math.min(d, Math.hypot(p.x - pPlane.x, p.y - pPlane.y));
+      for (let i = e.i0; i < e.i1; i++) {
+        const p = an.pts[i % m], q = an.pts[(i + 1) % m];
+        d = Math.min(d, pointSegDist(pPlane.x, pPlane.y, p.x, p.y, q.x, q.y));
       }
       if (d < bestD) { bestD = d; best = { edge: e, analyze: an }; bestLi = li; }
     }
