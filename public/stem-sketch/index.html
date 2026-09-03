@@ -9638,6 +9638,26 @@ function buildBodyMesh(body) {
     const segRuns = (Array.isArray(segSrc) && segSrc.length) ? _resolveSoftSegRuns(shape, segSrc) : null;
     if (segRuns) {
       geo = _buildSegSoftGeo(shape, body.height, segRuns);
+      // SAFETY NET: a soften glitch must never eat the part ("both sections
+      // missing", ssupgrades round 4). The softened solid's volume must sit
+      // just under the plain prism's — anything else means the surface
+      // folded; fall back to the unsoftened prism and say so.
+      try {
+        const loops = _softCanonLoops(shape);
+        let a2 = 0;
+        for (let li = 0; li < loops.length; li++) {
+          const aa = Math.abs(THREE.ShapeUtils.area(loops[li]));
+          a2 += li === 0 ? aa : -aa;
+        }
+        const plainVol = a2 * body.height;
+        const v = _geoVolume(geo);
+        if (!(isFinite(v) && v > plainVol * 0.85 && v < plainVol * 1.005)) {
+          console.warn(`soften fallback: softened volume ${Math.round(v)} vs plain ${Math.round(plainVol)} — building sharp.`);
+          geo.dispose();
+          geo = new THREE.ExtrudeGeometry(shape, { depth: body.height, bevelEnabled: false, curveSegments: 48 });
+          setStatus('⚠ That soften size folds this shape — those edges were left sharp. Try a smaller radius.');
+        }
+      } catch (_) {}
     } else if (soft > 0.05 && (endB !== 'sharp' || endT !== 'sharp')) {
       // Concave profile corners fold under the bevel inset ("funky lines")
       // — pre-round them on a MESH-ONLY copy, never the user's sketch.
@@ -10652,12 +10672,19 @@ function _softLoopAnalyze(rawPts) {
   const total = lens[n];
   if (total < 1e-6) return null;
   const corners = [];
+  const cornerMeta = []; // aligned with corners: { len, convex }
   for (let i = 0; i < n; i++) {
     const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
     const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
     if (l1 < 1e-9 || l2 < 1e-9) continue;
     const cosA = ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (l1 * l2);
-    if (cosA < Math.cos(THREE.MathUtils.degToRad(25))) corners.push(i); // turn > 25°
+    if (cosA < Math.cos(THREE.MathUtils.degToRad(25))) { // turn > 25°
+      corners.push(i);
+      // Canonical winding puts material on the LEFT, so a left turn
+      // (cross > 0) is a CONVEX material corner for outers AND holes.
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      cornerMeta.push({ len: lens[i], convex: cross > 0 });
+    }
   }
   const edges = [];
   const midAt = (startLen, endLen) => {
@@ -10686,7 +10713,7 @@ function _softLoopAnalyze(rawPts) {
       edges.push({ i0, i1: i1 > i0 ? i1 : i1 + n, startLen, endLen, ...midAt(startLen, endLen) });
     }
   }
-  return { pts, lens, total, edges };
+  return { pts, lens, total, edges, corners: cornerMeta };
 }
 
 // Resample a loop so no segment exceeds maxStep, KEEPING every original
@@ -10782,8 +10809,21 @@ function _resolveSoftSegRuns(shape, segs) {
   // MERGE adjacent selected runs (same loop/end/radius, sharing a corner) —
   // separate fades at a shared corner left fins/notches there (ssupgrades
   // round 3): merged, the round carries through the corner continuously.
+  // ONLY across CONVEX corners: a continuous offset ring through a CONCAVE
+  // corner self-intersects and the broken mesh made whole sections vanish
+  // in the CSG (ssupgrades round 4, "both sections missing"). Concave
+  // junctions keep separate runs — the fades keep them safe.
   for (const [li, ends] of map) {
-    const total = analyzed[li] ? analyzed[li].total : 0;
+    const an = analyzed[li];
+    const total = an ? an.total : 0;
+    const convexAt = (len) => {
+      let t = len;
+      if (total > 0) { t = t % total; if (t < 0) t += total; }
+      for (const c of (an?.corners || [])) {
+        if (Math.abs(c.len - t) < 0.5 || Math.abs(c.len - t + total) < 0.5 || Math.abs(c.len - t - total) < 0.5) return c.convex;
+      }
+      return false; // unknown junction — don't risk the merge
+    };
     for (const key of ['top', 'bottom']) {
       let runs = ends[key];
       if (runs.length < 2) continue;
@@ -10791,14 +10831,14 @@ function _resolveSoftSegRuns(shape, segs) {
       const merged = [runs[0]];
       for (let i = 1; i < runs.length; i++) {
         const prev = merged[merged.length - 1], cur = runs[i];
-        if (cur.startLen - prev.endLen < 1 && Math.abs(cur.r - prev.r) < 0.01) {
+        if (cur.startLen - prev.endLen < 1 && Math.abs(cur.r - prev.r) < 0.01 && convexAt(cur.startLen)) {
           prev.endLen = Math.max(prev.endLen, cur.endLen);
         } else merged.push(cur);
       }
       // Wrap-around: the last run ending at the loop seam joining the first.
       if (merged.length > 1 && total > 0) {
         const first = merged[0], last = merged[merged.length - 1];
-        if ((first.startLen + total) - last.endLen < 1 && Math.abs(first.r - last.r) < 0.01) {
+        if ((first.startLen + total) - last.endLen < 1 && Math.abs(first.r - last.r) < 0.01 && convexAt(first.startLen)) {
           last.endLen = first.endLen + total; // wrapping range (rAt handles it)
           merged.shift();
         }
@@ -10864,6 +10904,28 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
       capRing.push({ x: rs.pts[i].x + ax * rT[i], y: rs.pts[i].y + ay * rT[i], nx: ax, ny: ay });
       capRingB.push({ x: rs.pts[i].x + ax * rB[i], y: rs.pts[i].y + ay * rB[i], nx: ax, ny: ay });
     }
+    // Anti-fold: where an offset ring segment reverses against its base
+    // segment (offset > local feature size — tight fades, near-corner
+    // pinches), pull both endpoints' offsets in until it stops folding.
+    const unfold = (ring) => {
+      for (let pass = 0; pass < 3; pass++) {
+        let folded = false;
+        for (let i = 0; i < m; i++) {
+          const j = (i + 1) % m;
+          const bx = rs.pts[j].x - rs.pts[i].x, by = rs.pts[j].y - rs.pts[i].y;
+          const ox = ring[j].x - ring[i].x, oy = ring[j].y - ring[i].y;
+          if (bx * ox + by * oy < 0) {
+            folded = true;
+            for (const k of [i, j]) {
+              ring[k].x = (ring[k].x + rs.pts[k].x) / 2;
+              ring[k].y = (ring[k].y + rs.pts[k].y) / 2;
+            }
+          }
+        }
+        if (!folded) break;
+      }
+    };
+    unfold(capRing); unfold(capRingB);
     if (li === 0) {
       capOuter.push(...capRing.map(p => new THREE.Vector2(p.x, p.y)));
       capOuterB.push(...capRingB.map(p => new THREE.Vector2(p.x, p.y)));
