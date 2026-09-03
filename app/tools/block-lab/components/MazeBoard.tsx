@@ -256,21 +256,32 @@ const MazeBoard = forwardRef<MazeBoardHandle, Props>(({ level, speed = 1, onWin,
         </div>
       )}
       {fail && !won && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-2xl"
-          style={{ background: 'rgba(0,0,0,0.4)' }}>
-          <div className="bg-white rounded-2xl px-8 py-6 text-center shadow-2xl"
-            style={{ animation: 'blocklab-banner-in 300ms ease-out both', maxWidth: '85%' }}>
-            <div style={{ fontSize: 44 }}>{fail === 'bump' ? '💥' : '🤔'}</div>
-            <div className="text-2xl font-bold mt-2 text-gray-800">
-              {fail === 'bump' ? 'Crash!' : 'Not there yet!'}
+        /* Slim strip along the bottom edge — the board stays visible so the
+           student can SEE how far STEM Bot got. "Keep looking" dismisses without
+           resetting; "Try Again" resets to the start. */
+        <div className="absolute left-0 right-0 bottom-0 flex justify-center px-3 pb-3" style={{ pointerEvents: 'none' }}>
+          <div className="rounded-2xl shadow-2xl"
+            style={{ pointerEvents: 'auto', animation: 'blocklab-banner-in 300ms ease-out both', background: 'rgba(17,24,39,0.93)',
+              border: `1px solid ${fail === 'bump' ? 'rgba(239,68,68,0.55)' : 'rgba(251,191,36,0.55)'}`,
+              padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12, maxWidth: '96%' }}>
+            <div style={{ fontSize: 28, lineHeight: 1 }}>{fail === 'bump' ? '💥' : '🤔'}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 900, fontSize: 15, color: '#f1f5f9' }}>
+                {fail === 'bump' ? 'Crash!' : 'Not there yet!'}
+                <span style={{ fontWeight: 600, fontSize: 12, color: '#94a3b8', marginLeft: 8 }}>STEM Bot stopped where you see it.</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#cbd5e1', marginTop: 2 }}>
+                {fail === 'bump'
+                  ? 'It hit a wall and the program stopped. Which block sent it the wrong way?'
+                  : 'The script finished before reaching the flag. Add or fix some blocks and run again.'}
+              </div>
             </div>
-            <div className="text-gray-500 mt-1 text-sm">
-              {fail === 'bump'
-                ? 'STEM Bot hit a wall and the program stopped. Check which block sent it the wrong way.'
-                : 'The script finished, but STEM Bot never reached the flag. Add or fix some blocks and run it again.'}
-            </div>
+            <button onClick={() => setFail(null)} title="Hide this and keep looking at the maze"
+              style={{ padding: '8px 12px', background: 'rgba(255,255,255,0.08)', color: '#cbd5e1', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 10, fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              👀 Keep looking
+            </button>
             <button onClick={doReset}
-              style={{ marginTop: 14, padding: '10px 26px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+              style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
               ↺ Try Again
             </button>
           </div>
