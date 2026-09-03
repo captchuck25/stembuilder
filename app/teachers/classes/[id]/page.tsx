@@ -162,11 +162,17 @@ export default function ClassDetailPage() {
   const fetchedRef = useRef<Set<string>>(new Set());
 
   // Bridge assignments state
-  interface BridgeAssignment { id: string; title: string; span_feet: number; load_lb: number; max_cost: number; completionCount: number; created_at: string; }
+  interface BridgeAssignment { id: string; title: string; span_feet: number; load_lb: number; max_cost: number; style_requirement?: string; completionCount: number; created_at: string; }
+  const BRIDGE_STYLE_LABELS: Record<string, string> = {
+    triangles: "Triangles (superstructure only)",
+    xbrace: "X's (superstructure only)",
+    substructure: "Super + substructure",
+    arch: "Arch",
+  };
   interface BridgeSubmissionRow { rank: number; student_id: string; name: string; email: string; cost: number; submitted_at: string; }
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
   const [showBridgeForm, setShowBridgeForm] = useState(false);
-  const [bridgeForm, setBridgeForm] = useState({ title: "", spanFeet: 40, loadTon: 8, maxCost: "" });
+  const [bridgeForm, setBridgeForm] = useState({ title: "", spanFeet: 40, loadTon: 8, maxCost: "", styleRequirement: "none" });
   const [bridgeFormSaving, setBridgeFormSaving] = useState(false);
   const [bridgeFormError, setBridgeFormError] = useState("");
   const [deletingBridgeId, setDeletingBridgeId] = useState<string | null>(null);
@@ -439,13 +445,14 @@ export default function ClassDetailPage() {
         spanFeet: bridgeForm.spanFeet,
         loadLb: bridgeForm.loadTon * 2000,
         maxCost: maxCostNum,
+        styleRequirement: bridgeForm.styleRequirement,
       }),
     });
     if (res.ok) {
       const data = await res.json();
       setBridgeAssignments(prev => [data, ...prev]);
       setShowBridgeForm(false);
-      setBridgeForm({ title: "", spanFeet: 40, loadTon: 8, maxCost: "" });
+      setBridgeForm({ title: "", spanFeet: 40, loadTon: 8, maxCost: "", styleRequirement: "none" });
     } else {
       const e = await res.json();
       setBridgeFormError(e.error ?? "Failed to create assignment");
@@ -1337,6 +1344,7 @@ export default function ClassDetailPage() {
                     <div style={{ color: "#92400e", fontWeight: 900 }}>{a.title || "Bridge Assignment"}</div>
                     <div style={{ fontSize: 10, color: "#888", fontWeight: 600, marginTop: 2 }}>
                       {a.span_feet} ft · {a.load_lb / 2000} ton · ${Number(a.max_cost).toFixed(0)} budget
+                      {a.style_requirement && a.style_requirement !== "none" ? ` · ${BRIDGE_STYLE_LABELS[a.style_requirement] ?? a.style_requirement}` : ""}
                     </div>
                   </th>
                 ))}
@@ -2399,6 +2407,23 @@ export default function ClassDetailPage() {
                       </label>
                     </div>
                     <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                      Design Requirement (optional)
+                      <select
+                        value={bridgeForm.styleRequirement}
+                        onChange={e => setBridgeForm(f => ({ ...f, styleRequirement: e.target.value }))}
+                        style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                          borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                        <option value="none">None — any design</option>
+                        <option value="triangles">Superstructure only — must use triangles</option>
+                        <option value="xbrace">Superstructure only — must include X&apos;s</option>
+                        <option value="substructure">Must have superstructure AND substructure</option>
+                        <option value="arch">Must include an arch across the superstructure</option>
+                      </select>
+                      <span style={{ display: "block", marginTop: 4, fontSize: 11, fontWeight: 500, color: "#888" }}>
+                        The Bridge Examiner checks this automatically — students can&apos;t submit until their design meets it.
+                      </span>
+                    </label>
+                    <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
                       Max Total Cost ($)
                       <input
                         value={bridgeForm.maxCost}
@@ -2457,6 +2482,11 @@ export default function ClassDetailPage() {
                               <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Span: {a.span_feet} ft</span>
                               <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Load: {a.load_lb / 2000} ton</span>
                               <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>Budget: ${Number(a.max_cost).toFixed(2)}</span>
+                              {a.style_requirement && a.style_requirement !== "none" ? (
+                                <span style={{ fontSize: 12, color: "#7c3aed", fontWeight: 700 }}>
+                                  Requirement: {BRIDGE_STYLE_LABELS[a.style_requirement] ?? a.style_requirement}
+                                </span>
+                              ) : null}
                               <span style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
                                 ✓ {a.completionCount} student{a.completionCount !== 1 ? "s" : ""} passed
                               </span>

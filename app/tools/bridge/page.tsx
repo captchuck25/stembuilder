@@ -14,6 +14,11 @@ import {
   TRUSS_STYLE_INFO,
   type TrussStyle,
 } from "./engine/trussTemplates";
+import {
+  checkStyleRequirement,
+  STYLE_REQUIREMENT_INFO,
+  type StyleRequirement,
+} from "./engine/styleChecker";
 
 import {
   type MemberType,
@@ -241,7 +246,7 @@ function BridgeToolPage() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   // Assignment mode
-  interface AssignmentConfig { id: string; title: string; span_feet: 20 | 40 | 60 | 80 | 100; load_lb: number; max_cost: number; }
+  interface AssignmentConfig { id: string; title: string; span_feet: 20 | 40 | 60 | 80 | 100; load_lb: number; max_cost: number; style_requirement?: StyleRequirement; }
   const [assignmentConfig, setAssignmentConfig] = useState<AssignmentConfig | null>(null);
   const [assignmentSubmitted, setAssignmentSubmitted] = useState(false);
   const [assignmentSubmitting, setAssignmentSubmitting] = useState(false);
@@ -1844,10 +1849,22 @@ function BridgeToolPage() {
       : "Fail"
     : "Pending";
 
+  const styleRequirement: StyleRequirement =
+    assignmentConfig?.style_requirement ?? "none";
+  const styleCheck = useMemo(
+    () =>
+      styleRequirement === "none"
+        ? null
+        : checkStyleRequirement(styleRequirement, nodes, members, spanFeet),
+    [styleRequirement, nodes, members, spanFeet]
+  );
+  const styleOk = styleCheck === null || styleCheck.ok;
+
   const assignmentComplete = assignmentConfig !== null
     && stressTestPass
     && inspectionPass
     && stressTestResult !== null
+    && styleOk
     && costSummary.totalCost <= assignmentConfig.max_cost;
 
   function runStressTest() {
@@ -3243,6 +3260,35 @@ function BridgeToolPage() {
                           <span style={{ color: "#dc2626", marginLeft: 4 }}>— over budget!</span>
                         )}
                       </div>
+                      {styleRequirement !== "none" && styleCheck ? (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: styleCheck.ok ? "#166534" : "#92400e",
+                          }}
+                        >
+                          {styleCheck.ok ? "✓ " : "◻ "}
+                          {STYLE_REQUIREMENT_INFO[styleRequirement].studentLabel}
+                          {!styleCheck.ok && styleCheck.reasons[0] ? (
+                            <div style={{ fontWeight: 500, fontStyle: "italic", marginTop: 2 }}>
+                              {styleCheck.reasons[0]}
+                            </div>
+                          ) : null}
+                          {styleCheck.ok && styleCheck.tips[0] ? (
+                            <div
+                              style={{
+                                fontWeight: 500,
+                                fontStyle: "italic",
+                                marginTop: 2,
+                                color: "#2563eb",
+                              }}
+                            >
+                              {styleCheck.tips[0]}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
                     {isDemoMode ? (
                       <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
@@ -3262,7 +3308,7 @@ function BridgeToolPage() {
                             </button>
                           ) : (
                             <div style={{ fontSize: 11, color: "#92400e", fontStyle: "italic" }}>
-                              {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : "Over budget — reduce material cost"}
+                              {!inspectionPass ? "Run inspection first" : !stressTestResult ? "Run stress test to verify" : !stressTestPass ? "Bridge failed stress test" : !styleOk ? "Design doesn't meet the assignment requirement yet" : "Over budget — reduce material cost"}
                             </div>
                           )
                         )}

@@ -13,7 +13,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { data, error } = await db
     .from('bridge_assignments')
-    .select('id, title, span_feet, load_lb, max_cost, class_id')
+    .select('id, title, span_feet, load_lb, max_cost, style_requirement, class_id')
     .eq('id', id)
     .single()
 

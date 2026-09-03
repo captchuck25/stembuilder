@@ -43,9 +43,11 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const { classId, title, spanFeet, loadLb, maxCost } = await req.json()
+  const { classId, title, spanFeet, loadLb, maxCost, styleRequirement } = await req.json()
   if (!classId || !spanFeet || !loadLb || !maxCost)
     return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
+  const VALID_STYLES = ['none', 'triangles', 'xbrace', 'substructure', 'arch']
+  const style = VALID_STYLES.includes(styleRequirement) ? styleRequirement : 'none'
 
   const db = adminDb()
   const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
@@ -54,7 +56,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await db
     .from('bridge_assignments')
-    .insert({ class_id: classId, teacher_id: session.user.id, title: title?.trim() || 'Bridge Assignment', span_feet: spanFeet, load_lb: loadLb, max_cost: maxCost })
+    .insert({ class_id: classId, teacher_id: session.user.id, title: title?.trim() || 'Bridge Assignment', span_feet: spanFeet, load_lb: loadLb, max_cost: maxCost, style_requirement: style })
     .select()
     .single()
 
