@@ -977,8 +977,10 @@ Same idea, same words. You already know how it works.`,
       par: 20,
       // The lone mid-maze stair forces a separate Function 1: merging
       // stair+Move+Move into one body costs 22. Single-function 22.
+      // Repeat included per the palette rule: once a block family is
+      // introduced in this unit's ramp (L4+), it stays available.
       maxBlocks: 21,
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
       hint: 'Function 1 = the stair (Move, Turn Right, Move, Turn Left, Collect). Function 2 = Call Function 1, then Move, Move — a bigger pattern built FROM a smaller one! Call Function 2 for each long drop… and when a lone stair appears with no runway after it, call Function 1 by itself.',
       grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,1,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,0,0,0],[1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
       startX:0, startY:1, startDir:'right', exitX:13, exitY:6,

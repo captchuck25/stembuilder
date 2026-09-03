@@ -662,9 +662,13 @@ function ChallengeView({
             </div>
 
             {/* Notes tab */}
-            <div style={{ flex: 1, overflowY: 'auto', display: leftTab === 'notes' ? 'block' : 'none' }}>
-              <LessonPanel text={unit.introNotes} itemName={theme.itemName} />
-            </div>
+            {/* Mounted only while visible: Blockly figures injected into a
+                display:none container get zero metrics and render clipped */}
+            {leftTab === 'notes' && (
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                <LessonPanel text={unit.introNotes} itemName={theme.itemName} />
+              </div>
+            )}
           </div>
 
           {/* Right panel: maze */}
