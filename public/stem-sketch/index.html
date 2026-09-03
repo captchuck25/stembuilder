@@ -1425,7 +1425,8 @@
         <span class="tool-sep"></span>
         <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
         <button class="tool" data-action="revolve" title="Revolve — spin a sketch profile around its vertical center line into a 3D body. Open a sketch (Front works best), draw the outline with the Line tool, then Revolve."><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
-        <button class="tool" data-action="soften-pick" title="Soften — click near the top or bottom edge of an extruded piece to pick that whole rim (click more edges to add). Then set a radius to round them. Works on pieces inside groups too."><svg class="ico"><use href="#i-soften"/></svg><span class="tool-label">Soften</span></button>
+        <!-- Soften tucked away 2026-09-03 (Charlie: "it needs to either work or not work") — engine stays so saved designs still render -->
+        <button class="tool" data-action="soften-pick" hidden title="Soften — click near the top or bottom edge of an extruded piece to pick that whole rim (click more edges to add). Then set a radius to round them. Works on pieces inside groups too."><svg class="ico"><use href="#i-soften"/></svg><span class="tool-label">Soften</span></button>
         <!-- 3D Fillet temporarily hidden — the CSG-prism approach (enterBevelPickMode /
              _bevelOnce / applyBevelsBatch) is preserved in the JS but pulled from the
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
@@ -20251,7 +20252,7 @@ function renderProps() {
       // 3D toolbar's Soften pick tool only.
       dimFields = `<h4>Extrude</h4>
         <div class="field"><label>Height (${u})</label><input type="number" data-k="height" value="${fmtU(body.height)}" min="0.01" step="0.5"/></div>
-        <div class="hint">Edit the source sketch in 2D to change the profile, then come back. Round edges with the <b>Soften</b> tool in the toolbar.</div>`;
+        <div class="hint">Edit the source sketch in 2D to change the profile, then come back.</div>`;
     } else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
       const headOpts = FASTENER_HEAD_TYPES.map(t =>
@@ -20354,7 +20355,7 @@ function renderProps() {
         <div class="field"><label>Size (W×H×D)</label><div>${bboxStr}</div></div>
         <div class="field"><label>Bodies</label><div>${body.children?.length || 0}</div></div>
         <div class="field"><label>Contents</label><div style="font-size:11px;color:var(--ink-soft)">${childList}</div></div>
-        <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear.${softTargets.length ? ' Round edges with the <b>Soften</b> tool in the toolbar.' : ''}</div>`;
+        <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear.</div>`;
     }
 
     const opField = `
