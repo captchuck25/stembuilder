@@ -199,7 +199,7 @@ function pageChrome(doc: jsPDF, fields: PortfolioFields, sheetNo: string, sheetT
   label('School', xSchool + padX, row1);
   value(fields.school, xSchool + padX, row1 + 0.1, 9.5, false, 2);
   label('Drawn with', xSchool + padX, row2);
-  value('stembuilder.io', xSchool + padX, row2 + 0.1, 8);
+  value('stembuilder.io', xSchool + padX, row2 + 0.1, 9.5, true);
 
   label('Date', xDate + padX, row1);
   value(fields.date, xDate + padX, row1 + 0.1, 9.5, false, 1.4);

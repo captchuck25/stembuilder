@@ -10732,7 +10732,10 @@ function enterSoftenPickMode() {
     o.position.set(g.x || 0, g.y || 0, g.z || 0);
     const gr = g.rotation || {};
     o.rotation.set(d2r(gr.x || 0), d2r(gr.y || 0), d2r(gr.z || 0));
-    for (const c of g.children || []) {
+    // Proxies use the MERGED coplanar profiles (forPick) so the highlight
+    // traces the part's real outline, not each original piece's — and one
+    // rim pick lands on every member via _members.
+    for (const c of _coalesceSoftSiblings(g.children, { forPick: true })) {
       if (c.type === 'extrude' && c.op !== 'subtract') addProxy(c, o, topId);
       else if (c.type === 'group' || c.type === 'combined') o.add(buildGroupObj(c, topId));
     }
@@ -10885,16 +10888,20 @@ function openSoftenDialog() {
       const touchedTops = new Set();
       for (const sel of sels) {
         for (const part of sel.parts) {
-          const c = part.child;
-          if (!c.softEnds) {
-            // First selective touch: freeze the current all-or-nothing state
-            // into per-end flags, then flip just the picked end.
-            const on = (c.softR || 0) > 0.05;
-            c.softEnds = { bottom: on, top: on };
+          // A merged coplanar proxy carries its original pieces in
+          // _members — the settings land on each of THEM (the proxy is
+          // transient; the doc's bodies are the members).
+          for (const c of (part.child._members || [part.child])) {
+            if (!c.softEnds) {
+              // First selective touch: freeze the current all-or-nothing
+              // state into per-end flags, then flip just the picked end.
+              const on = (c.softR || 0) > 0.05;
+              c.softEnds = { bottom: on, top: on };
+            }
+            c.softEnds[part.end] = r > 0.05;
+            if (r > 0.05) c.softR = r;
+            if (!c.softEnds.bottom && !c.softEnds.top) { delete c.softEnds; c.softR = 0; }
           }
-          c.softEnds[part.end] = r > 0.05;
-          if (r > 0.05) c.softR = r;
-          if (!c.softEnds.bottom && !c.softEnds.top) { delete c.softEnds; c.softR = 0; }
         }
         touchedTops.add(sel.topId);
       }
@@ -10921,11 +10928,126 @@ function openSoftenDialog() {
   });
 }
 
+// Merge coplanar, same-height, same-transform sibling extrudes into ONE
+// transient extrude whose profile is the 2D UNION of theirs (Manifold
+// CrossSection). Two reasons (ssissues follow-ups 2026-09-02):
+//  * softening per-piece rounds the SHARED seam between touching coplanar
+//    pieces into a groove across what reads as one flat face;
+//  * the Soften pick highlight traced each original piece's outline —
+//    "the tool is grabbing the original bodies separately".
+// Un-softened groups keep the exact old build path (bucket only activates
+// when 2+ members coalesce AND one is softened, or forPick). Originals are
+// never mutated — the merged stand-in carries `_members` back to them.
+function _coalesceSoftSiblings(children, opts) {
+  const forPick = !!(opts && opts.forPick);
+  const CS = window.__manifold && window.__manifold.CrossSection;
+  if (!CS) return children;
+  const rest = [];
+  const buckets = new Map();
+  for (const c of children || []) {
+    if (c.type === 'extrude' && c.op !== 'subtract' && c.sketch) {
+      const p = c.plane || GROUND_PLANE;
+      const q = (v) => (v || [0, 0, 0]).map(n => Math.round(n * 100)).join(',');
+      const r = c.rotation || {};
+      const key = [q(p.origin), q(p.u), q(p.v), q(p.n),
+        Math.round((c.height || 0) * 100),
+        Math.round((c.x || 0) * 100), Math.round((c.y || 0) * 100), Math.round((c.z || 0) * 100),
+        Math.round((r.x || 0) * 10), Math.round((r.y || 0) * 10), Math.round((r.z || 0) * 10)].join('|');
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(c);
+    } else rest.push(c);
+  }
+  const out = [];
+  let changed = false;
+  for (const members of buckets.values()) {
+    const active = members.length > 1 && (forPick || members.some(m => (m.softR || 0) > 0.05));
+    if (!active) { out.push(...members); continue; }
+    let merged = null;
+    let cs = null;
+    const scratch = [];
+    try {
+      let ok = true;
+      for (const m of members) {
+        const shape = sketchToShape(m.sketch);
+        if (!shape) { ok = false; break; }
+        const ep = shape.extractPoints(48);
+        const contours = [ep.shape, ...(ep.holes || [])]
+          .filter(l => l && l.length >= 3)
+          .map(l => l.map(pt => [pt.x, pt.y]));
+        if (!contours.length) { ok = false; break; }
+        const one = new CS(contours, 'EvenOdd');
+        scratch.push(one);
+        if (!cs) cs = one;
+        else { const u = cs.add(one); scratch.push(u); cs = u; }
+      }
+      if (ok && cs) {
+        const polys = cs.toPolygons();
+        const signedArea = (pts) => {
+          let a = 0;
+          for (let i = 0; i < pts.length; i++) {
+            const p1 = pts[i], p2 = pts[(i + 1) % pts.length];
+            a += p1[0] * p2[1] - p2[0] * p1[1];
+          }
+          return a / 2;
+        };
+        // sketchToShape models ONE outer + holes — if the union is still
+        // disjoint islands, the pieces don't touch and have no shared
+        // seams; keep them separate.
+        const outers = polys.filter(pl => pl && pl.length >= 3 && signedArea(pl) > 0);
+        if (outers.length === 1) {
+          const entities = [];
+          let nid = 1;
+          for (const poly of polys) {
+            if (!poly || poly.length < 3) continue;
+            entities.push({ id: nid++, type: 'polyline', closed: true,
+              points: poly.map(pt => ({ x: pt[0], y: pt[1] })) });
+          }
+          const base = members.find(m => (m.softR || 0) > 0.05) || members[0];
+          let softEnds;
+          if (members.every(m => m.softEnds)) {
+            softEnds = { bottom: members.some(m => m.softEnds.bottom), top: members.some(m => m.softEnds.top) };
+          }
+          const bur = members.some(m => m._softBuried) ? {
+            bottom: members.some(m => m._softBuried && m._softBuried.bottom),
+            top: members.some(m => m._softBuried && m._softBuried.top),
+          } : undefined;
+          merged = {
+            id: base.id, type: 'extrude',
+            sketch: { entities },
+            plane: JSON.parse(JSON.stringify(base.plane || GROUND_PLANE)),
+            height: base.height,
+            x: base.x || 0, y: base.y || 0, z: base.z || 0,
+            ...(base.rotation ? { rotation: { ...base.rotation } } : {}),
+            op: 'add',
+            softR: Math.max(...members.map(m => m.softR || 0)),
+            ...(softEnds ? { softEnds } : {}),
+            ...(bur ? { _softBuried: bur } : {}),
+            _members: members,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('profile union failed — keeping pieces separate:', err);
+      merged = null;
+    } finally {
+      for (const s of scratch) { try { s.delete(); } catch (_) {} }
+    }
+    if (merged) { out.push(merged); changed = true; }
+    else out.push(...members);
+  }
+  if (!changed) return children;
+  out.push(...rest);
+  return out;
+}
+
 function rebuildGroupGeometry(group) {
   if (!group || group.type !== 'group' || !Array.isArray(group.children)) return;
   if (typeof CSG === 'undefined') return;
-  const positives = group.children.filter(c => c.op !== 'subtract');
-  const negatives = group.children.filter(c => c.op === 'subtract');
+  // Softened coplanar siblings CSG as one merged profile (see above);
+  // untouched groups get back the same array and the exact old path.
+  const kids = _coalesceSoftSiblings(group.children);
+  const positives = kids.filter(c => c.op !== 'subtract');
+  const negatives = kids.filter(c => c.op === 'subtract');
   if (!positives.length) return;
   // Build fresh meshes for each child (none of them are in the scene).
   // Fasteners MUST use the smooth CSG envelope (buildFastenerCSGMesh), not
@@ -10938,7 +11060,7 @@ function rebuildGroupGeometry(group) {
   };
   const tempScene = new THREE.Scene();
   const meshes = [];
-  for (const c of group.children) {
+  for (const c of kids) {
     const m = buildMeshFor(c);
     if (m) { tempScene.add(m); meshes.push({ child: c, mesh: m }); }
   }
