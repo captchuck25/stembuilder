@@ -9631,7 +9631,14 @@ function buildBodyMesh(body) {
     const se = body.softEnds;
     const endB = (body._softBuried && body._softBuried.bottom) ? 'weld' : ((se && !se.bottom) ? 'sharp' : 'round');
     const endT = (body._softBuried && body._softBuried.top) ? 'weld' : ((se && !se.top) ? 'sharp' : 'round');
-    if (soft > 0.05 && (endB !== 'sharp' || endT !== 'sharp')) {
+    // SEGMENT-level soften (the current model): per-edge records win over
+    // the legacy whole-rim fields. _groupSoftSegs is the transient slice a
+    // group re-bake hands its (possibly coalesced) children.
+    const segSrc = body._groupSoftSegs || body.softSegs;
+    const segRuns = (Array.isArray(segSrc) && segSrc.length) ? _resolveSoftSegRuns(shape, segSrc) : null;
+    if (segRuns) {
+      geo = _buildSegSoftGeo(shape, body.height, segRuns);
+    } else if (soft > 0.05 && (endB !== 'sharp' || endT !== 'sharp')) {
       // Concave profile corners fold under the bevel inset ("funky lines")
       // — pre-round them on a MESH-ONLY copy, never the user's sketch.
       const meshSketch = _softenProfileCopy(body.sketch, soft);
@@ -10617,6 +10624,284 @@ function _stripAndCap(geo, shape, cutBottomZ, cutTopZ) {
   return out;
 }
 
+// ── Segment-level soften (the real pillow tool) ──────────────────────────────
+// Charlie's final design (ssissues 2026-09-02 night): softening is EDGE
+// SELECTION — click one straight side or one arch of a rim and round just
+// that run. The geometry is built by hand (walls + quarter-round bands +
+// mixed caps), because the extrude-bevel recipe is all-or-nothing per face.
+// Selected runs fade back to sharp at their end corners (r ramps to 0), the
+// way real CAD terminates a partial fillet.
+
+// Split a closed profile loop into FEATURE EDGES: runs between real corners
+// (tangent turn > ~25°). A circle has no corners → the whole loop is one
+// edge; a dense arc run counts as one edge; each straight side is its own.
+// Returns { pts, lens (cumulative arc length per pt), total, edges:
+// [{i0, i1, startLen, endLen, mx, my}] } — i1 may wrap past the end.
+function _softLoopAnalyze(rawPts) {
+  let pts = rawPts.map(p => ({ x: p.x, y: p.y }));
+  if (pts.length > 1 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 1e-6) {
+    pts = pts.slice(0, -1);
+  }
+  const n = pts.length;
+  if (n < 3) return null;
+  const lens = [0];
+  for (let i = 1; i <= n; i++) {
+    const a = pts[i - 1], b = pts[i % n];
+    lens.push(lens[i - 1] + Math.hypot(b.x - a.x, b.y - a.y));
+  }
+  const total = lens[n];
+  if (total < 1e-6) return null;
+  const corners = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
+    const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
+    if (l1 < 1e-9 || l2 < 1e-9) continue;
+    const cosA = ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (l1 * l2);
+    if (cosA < Math.cos(THREE.MathUtils.degToRad(25))) corners.push(i); // turn > 25°
+  }
+  const edges = [];
+  const midAt = (startLen, endLen) => {
+    let t = (startLen + endLen) / 2;
+    if (t >= total) t -= total;
+    // locate sample at arc length t
+    for (let i = 1; i <= n; i++) {
+      if (lens[i] >= t) {
+        const seg = lens[i] - lens[i - 1] || 1e-9;
+        const f = (t - lens[i - 1]) / seg;
+        const a = pts[i - 1], b = pts[i % n];
+        return { mx: a.x + (b.x - a.x) * f, my: a.y + (b.y - a.y) * f };
+      }
+    }
+    return { mx: pts[0].x, my: pts[0].y };
+  };
+  if (!corners.length) {
+    edges.push({ i0: 0, i1: n, startLen: 0, endLen: total, ...midAt(0, total) });
+  } else {
+    for (let k = 0; k < corners.length; k++) {
+      const i0 = corners[k];
+      const i1 = corners[(k + 1) % corners.length];
+      const startLen = lens[i0];
+      const endLen = i1 > i0 ? lens[i1] : lens[i1] + total;
+      if (endLen - startLen < 0.5) continue; // degenerate sliver
+      edges.push({ i0, i1: i1 > i0 ? i1 : i1 + n, startLen, endLen, ...midAt(startLen, endLen) });
+    }
+  }
+  return { pts, lens, total, edges };
+}
+
+// Resample a loop so no segment exceeds maxStep, KEEPING every original
+// vertex (corners stay measurement-exact). Returns { pts, arcPos }.
+function _softResampleLoop(pts, maxStep) {
+  const n = pts.length;
+  const out = [], pos = [];
+  let acc = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    const seg = Math.hypot(b.x - a.x, b.y - a.y);
+    out.push({ x: a.x, y: a.y }); pos.push(acc);
+    if (seg > maxStep) {
+      const k = Math.ceil(seg / maxStep);
+      for (let j = 1; j < k; j++) {
+        const f = j / k;
+        out.push({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+        pos.push(acc + seg * f);
+      }
+    }
+    acc += seg;
+  }
+  return { pts: out, arcPos: pos, total: acc };
+}
+
+// Build the softened solid for one extrude profile with per-run radii.
+// runsByLoop: Map(loopIdx → { top: [{startLen,endLen,r}], bottom: [...] }).
+// Loops: 0 = outer (CCW), 1.. = holes (CW) — the LEFT normal of the
+// traversal points into the material for both, so hole edges round the
+// correct way (outward flare) for free.
+// Canonical profile loops: outer CCW, holes CW (left normal of traversal =
+// into the material), last==first duplicate removed. EVERY consumer of
+// arc-length positions (analyze, resolve, build, picking) must use this so
+// the positions line up.
+function _softCanonLoops(shape) {
+  const ep = shape.extractPoints(48);
+  const raw = [ep.shape, ...(ep.holes || [])];
+  const area = (pts) => {
+    let s = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      s += a.x * b.y - b.x * a.y;
+    }
+    return s / 2;
+  };
+  const out = [];
+  for (let li = 0; li < raw.length; li++) {
+    let loop = raw[li].map(p => ({ x: p.x, y: p.y }));
+    if (loop.length > 1 && Math.hypot(loop[0].x - loop[loop.length - 1].x, loop[0].y - loop[loop.length - 1].y) < 1e-6) loop = loop.slice(0, -1);
+    if (loop.length < 3) continue;
+    const wantCCW = li === 0;
+    if ((area(loop) > 0) !== wantCCW) loop = loop.slice().reverse();
+    out.push(loop);
+  }
+  return out;
+}
+
+// Stable identity for "this extrude face plane" — segment selections are
+// stored per top-level body and re-matched to profiles at bake time.
+function _softPlaneKeyOf(c) {
+  const p = c.plane || GROUND_PLANE;
+  const q = (v) => (v || [0, 0, 0]).map(n => Math.round(n * 100)).join(',');
+  const r = c.rotation || {};
+  return [q(p.origin), q(p.u), q(p.v), q(p.n),
+    Math.round((c.height || 0) * 100),
+    Math.round((c.x || 0) * 100), Math.round((c.y || 0) * 100), Math.round((c.z || 0) * 100),
+    Math.round((r.x || 0) * 10), Math.round((r.y || 0) * 10), Math.round((r.z || 0) * 10)].join('|');
+}
+
+// Match a body's stored softSegs records against its profile's feature
+// edges → Map(loopIdx → {top:[{startLen,endLen,r}], bottom:[...]}).
+function _resolveSoftSegRuns(shape, segs) {
+  const live = (segs || []).filter(s => s && s.r > 0.05);
+  if (!live.length) return null;
+  const loops = _softCanonLoops(shape);
+  const map = new Map();
+  for (const s of live) {
+    let best = null, bestD = 3, bestLi = -1;
+    for (let li = 0; li < loops.length; li++) {
+      const an = _softLoopAnalyze(loops[li]);
+      if (!an) continue;
+      for (const e of an.edges) {
+        const d = Math.hypot(e.mx - s.mx, e.my - s.my);
+        if (d < bestD) { bestD = d; best = e; bestLi = li; }
+      }
+    }
+    if (!best) continue; // profile changed under the selection — drop silently
+    if (!map.has(bestLi)) map.set(bestLi, { top: [], bottom: [] });
+    map.get(bestLi)[s.end === 'top' ? 'top' : 'bottom']
+      .push({ startLen: best.startLen, endLen: best.endLen, r: s.r });
+  }
+  return map.size ? map : null;
+}
+
+function _buildSegSoftGeo(shape, H, runsByLoop) {
+  const rawLoops = _softCanonLoops(shape);
+  const K = 5; // band arc steps
+  const posOut = [], normOut = [];
+  const pushTri = (p1, n1, p2, n2, p3, n3) => {
+    posOut.push(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]);
+    normOut.push(n1[0], n1[1], n1[2], n2[0], n2[1], n2[2], n3[0], n3[1], n3[2]);
+  };
+  const capOuter = []; const capHoles = [];
+  const capOuterB = []; const capHolesB = [];
+  for (let li = 0; li < rawLoops.length; li++) {
+    const loop = rawLoops[li]; // already canonical (outer CCW, holes CW)
+    const runs = runsByLoop.get(li) || { top: [], bottom: [] };
+    const maxR = Math.max(0.5, ...runs.top.map(r => r.r), ...runs.bottom.map(r => r.r));
+    const rs = _softResampleLoop(loop, Math.max(1, maxR / 2));
+    const m = rs.pts.length;
+    const rAt = (t, list) => {
+      let best = 0;
+      for (const run of list) {
+        let tt = t;
+        if (run.endLen > rs.total && tt < run.startLen) tt += rs.total; // wrapping run
+        if (tt < run.startLen || tt > run.endLen) continue;
+        const fadeLen = Math.min(run.r * 1.2, (run.endLen - run.startLen) * 0.25);
+        const d = Math.min(tt - run.startLen, run.endLen - tt);
+        const f = fadeLen > 1e-6 ? Math.min(1, d / fadeLen) : 1;
+        best = Math.max(best, run.r * f);
+      }
+      return best;
+    };
+    const rT = [], rB = [], nrm = [];
+    for (let i = 0; i < m; i++) {
+      rT.push(rAt(rs.arcPos[i], runs.top));
+      rB.push(rAt(rs.arcPos[i], runs.bottom));
+    }
+    // Per-SEGMENT left normal (flat walls stay crisp; arcs vary smoothly).
+    for (let i = 0; i < m; i++) {
+      const a = rs.pts[i], b = rs.pts[(i + 1) % m];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const l = Math.hypot(dx, dy) || 1e-9;
+      nrm.push([-dy / l, dx / l]);
+    }
+    const capRing = [], capRingB = [];
+    for (let i = 0; i < m; i++) {
+      // Per-SAMPLE normal (average of adjacent segment normals) for offsets.
+      const n1 = nrm[(i - 1 + m) % m], n2 = nrm[i];
+      let ax = n1[0] + n2[0], ay = n1[1] + n2[1];
+      const al = Math.hypot(ax, ay) || 1e-9;
+      ax /= al; ay /= al;
+      capRing.push({ x: rs.pts[i].x + ax * rT[i], y: rs.pts[i].y + ay * rT[i], nx: ax, ny: ay });
+      capRingB.push({ x: rs.pts[i].x + ax * rB[i], y: rs.pts[i].y + ay * rB[i], nx: ax, ny: ay });
+    }
+    if (li === 0) {
+      capOuter.push(...capRing.map(p => new THREE.Vector2(p.x, p.y)));
+      capOuterB.push(...capRingB.map(p => new THREE.Vector2(p.x, p.y)));
+    } else {
+      capHoles.push(capRing.map(p => new THREE.Vector2(p.x, p.y)));
+      capHolesB.push(capRingB.map(p => new THREE.Vector2(p.x, p.y)));
+    }
+    // Surface strips per segment column i → i+1.
+    for (let i = 0; i < m; i++) {
+      const j = (i + 1) % m;
+      const sn = nrm[i]; // flat column normal
+      const A = rs.pts[i], B = rs.pts[j];
+      const colA = (ring) => ring[i], colB = (ring) => ring[j];
+      // wall: z from rB to H - rT at each column end
+      const wall = (P, rb, rt) => [[P.x, P.y, rb], [P.x, P.y, H - rt]];
+      const [a0, a1] = wall(A, rB[i], rT[i]);
+      const [b0, b1] = wall(B, rB[j], rT[j]);
+      const wn = [sn[0], sn[1], 0];
+      pushTri(a0, wn, b0, wn, b1, wn);
+      pushTri(a0, wn, b1, wn, a1, wn);
+      // top band: k = 0..K from wall top to cap ring
+      const bandPt = (P, C, r, k, top) => {
+        const phi = (k / K) * Math.PI / 2;
+        const off = r * (1 - Math.cos(phi));
+        const x = P.x + C.nx * off, y = P.y + C.ny * off;
+        const z = top ? (H - r + r * Math.sin(phi)) : (r - r * Math.sin(phi));
+        return [x, y, z];
+      };
+      const bandN = (k, top) => {
+        const phi = (k / K) * Math.PI / 2;
+        return [sn[0] * Math.cos(phi), sn[1] * Math.cos(phi), (top ? 1 : -1) * Math.sin(phi)];
+      };
+      for (let k = 0; k < K; k++) {
+        // top
+        let p1 = bandPt(A, capRing[i], rT[i], k, true), p2 = bandPt(B, capRing[j], rT[j], k, true);
+        let p3 = bandPt(B, capRing[j], rT[j], k + 1, true), p4 = bandPt(A, capRing[i], rT[i], k + 1, true);
+        pushTri(p1, bandN(k, true), p2, bandN(k, true), p3, bandN(k + 1, true));
+        pushTri(p1, bandN(k, true), p3, bandN(k + 1, true), p4, bandN(k + 1, true));
+        // bottom (reverse winding so faces point outward/down)
+        p1 = bandPt(A, capRingB[i], rB[i], k, false); p2 = bandPt(B, capRingB[j], rB[j], k, false);
+        p3 = bandPt(B, capRingB[j], rB[j], k + 1, false); p4 = bandPt(A, capRingB[i], rB[i], k + 1, false);
+        pushTri(p1, bandN(k, false), p3, bandN(k + 1, false), p2, bandN(k, false));
+        pushTri(p1, bandN(k, false), p4, bandN(k + 1, false), p3, bandN(k + 1, false));
+      }
+    }
+  }
+  // Caps from the offset rings (top at z=H normal +z; bottom at z=0, −z).
+  const capTri = (outer, holes, z, up) => {
+    const outerV = outer, holeVs = holes.filter(h => h && h.length >= 3);
+    let tris;
+    try { tris = THREE.ShapeUtils.triangulateShape(outerV, holeVs); } catch (_) { return; }
+    const all = outerV.concat(...holeVs);
+    const nz = up ? 1 : -1;
+    for (const t of tris) {
+      const [ia, ib, ic] = up ? [t[0], t[1], t[2]] : [t[0], t[2], t[1]];
+      pushTri([all[ia].x, all[ia].y, z], [0, 0, nz],
+              [all[ib].x, all[ib].y, z], [0, 0, nz],
+              [all[ic].x, all[ic].y, z], [0, 0, nz]);
+    }
+  };
+  if (capOuter.length >= 3) {
+    capTri(capOuter, capHoles, H, true);
+    capTri(capOuterB, capHolesB, 0, false);
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(posOut, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(normOut, 3));
+  return out;
+}
+
 // ── Soften-edges burial detection ────────────────────────────────────────────
 // For grouped parts: an extrude end pressed against a sibling must not round
 // (divot) — it extends past the mating face instead (see buildBodyMesh).
@@ -10796,47 +11081,59 @@ function exitSoftenPickMode(msg) {
   if (msg) setStatus(msg);
 }
 
-function _softenCapNormalWorld(child, obj, end) {
-  const m = new THREE.Matrix4().multiplyMatrices(obj.matrixWorld, makePlaneMatrix(child.plane || GROUND_PLANE));
-  return new THREE.Vector3(0, 0, end === 'top' ? 1 : -1).transformDirection(m);
-}
-
+// One click = one FEATURE EDGE (a straight side, or a whole arch) of one
+// rim — Charlie's final design: individually selected edge segments, so
+// inner edges are simply never picked unless you pick them.
 function _softenToggleAt(hit) {
   const ud = (hit.object && hit.object.userData) || {};
   const child = ud.softChild;
   if (!child) return;
-  // Which end? Map the hit point back into the child's extrude space.
+  // Map the hit point into the child's extrude space (planeMat is baked
+  // into extrude geometry, so undo mesh transform THEN plane).
   const inv = new THREE.Matrix4().copy(hit.object.matrixWorld).invert();
   const planeInv = new THREE.Matrix4().copy(makePlaneMatrix(child.plane || GROUND_PLANE)).invert();
   const pPlane = hit.point.clone().applyMatrix4(inv).applyMatrix4(planeInv);
   const end = pPlane.z > child.height / 2 ? 'top' : 'bottom';
-  // A grouped part is ONE body to the user: the click gangs up every rim in
-  // the same top-level body that faces the same way (all the "front" rims
-  // in one click). A bare extrude is a gang of one.
-  const clickedN = _softenCapNormalWorld(child, hit.object, end);
-  let parts = [{ child, end, obj: hit.object }];
-  const roster = _softenPickCtx?.byTop?.get(ud.softTopId);
-  if (roster && (ud.softTopId !== child.id || roster.length > 1)) {
-    parts = [];
-    for (const entry of roster) {
-      for (const e2 of ['bottom', 'top']) {
-        if (_softenCapNormalWorld(entry.child, entry.obj, e2).dot(clickedN) > 0.999) {
-          parts.push({ child: entry.child, end: e2, obj: entry.obj });
-        }
+  const shape = sketchToShape(child.sketch);
+  if (!shape) return;
+  const loops = _softCanonLoops(shape);
+  let best = null, bestD = Infinity, bestLi = -1;
+  for (let li = 0; li < loops.length; li++) {
+    const an = _softLoopAnalyze(loops[li]);
+    if (!an) continue;
+    const m = an.pts.length;
+    for (const e of an.edges) {
+      let d = Infinity;
+      for (let i = e.i0; i <= e.i1; i++) {
+        const p = an.pts[i % m];
+        d = Math.min(d, Math.hypot(p.x - pPlane.x, p.y - pPlane.y));
       }
+      if (d < bestD) { bestD = d; best = { edge: e, analyze: an }; bestLi = li; }
     }
-    if (!parts.length) parts = [{ child, end, obj: hit.object }];
   }
-  const key = ud.softTopId + ':' +
-    [clickedN.x, clickedN.y, clickedN.z].map(v => Math.round(v * 100)).join(',');
+  if (!best) return;
+  const key = `${ud.softTopId}:${end}:${bestLi}:${Math.round(best.edge.mx * 10)}:${Math.round(best.edge.my * 10)}`;
   const i = doc.softenSelected.findIndex(s => s.key === key);
   if (i >= 0) doc.softenSelected.splice(i, 1);
-  else doc.softenSelected.push({ key, parts, topId: ud.softTopId });
+  else doc.softenSelected.push({
+    key,
+    topId: ud.softTopId,
+    child, obj: hit.object, end,
+    loopIdx: bestLi,
+    edge: best.edge,
+    edgePts: (() => {
+      const m = best.analyze.pts.length;
+      const pts = [];
+      for (let k = best.edge.i0; k <= best.edge.i1; k++) pts.push(best.analyze.pts[k % m]);
+      return pts;
+    })(),
+    pk: _softPlaneKeyOf(child),
+  });
   _renderSoftenHighlights();
   const n = doc.softenSelected.length;
   setStatus(n
-    ? `Soften — ${n} edge${n === 1 ? '' : 's'} picked. Click empty space or press Enter to set the size.`
-    : 'Soften — selection cleared. Click near a top or bottom edge.');
+    ? `Soften — ${n} edge${n === 1 ? '' : 's'} picked. Click more edges to add, a picked edge to remove. Empty space or Enter sets the size.`
+    : 'Soften — selection cleared. Click near an edge of a rim.');
 }
 
 function _renderSoftenHighlights() {
@@ -10847,33 +11144,31 @@ function _renderSoftenHighlights() {
     c.geometry?.dispose(); c.material?.dispose();
   }
   for (const sel of doc.softenSelected) {
-    for (const part of sel.parts) {
-      try {
-        const shape = sketchToShape(part.child.sketch);
-        if (!shape) continue;
-        const z = part.end === 'top' ? part.child.height : 0;
-        const planeMat = makePlaneMatrix(part.child.plane || GROUND_PLANE);
-        const ep = shape.extractPoints(24);
-        for (const loop of [ep.shape, ...(ep.holes || [])]) {
-          if (!loop || loop.length < 2) continue;
-          const pts = loop.map(p =>
-            new THREE.Vector3(p.x, p.y, z).applyMatrix4(planeMat).applyMatrix4(part.obj.matrixWorld));
-          const g = new THREE.BufferGeometry().setFromPoints(pts);
-          ctx.hiGroup.add(new THREE.LineLoop(g,
-            new THREE.LineBasicMaterial({ color: 0xff9000, depthTest: false })));
-        }
-      } catch (_) {}
-    }
+    try {
+      const z = sel.end === 'top' ? sel.child.height : 0;
+      const planeMat = makePlaneMatrix(sel.child.plane || GROUND_PLANE);
+      const pts = sel.edgePts.map(p =>
+        new THREE.Vector3(p.x, p.y, z).applyMatrix4(planeMat).applyMatrix4(sel.obj.matrixWorld));
+      if (pts.length < 2) continue;
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      ctx.hiGroup.add(new THREE.Line(g,
+        new THREE.LineBasicMaterial({ color: 0xff9000, depthTest: false })));
+    } catch (_) {}
   }
 }
 
 function openSoftenDialog() {
   const sels = doc.softenSelected.slice();
   if (!sels.length) return;
-  const allParts = sels.flatMap(s => s.parts);
   const u = unitLabel();
-  const withR = allParts.find(p => (p.child.softR || 0) > 0.05);
-  const def = withR ? fmtU(withR.child.softR) : (doc.units === 'in' ? '0.1' : '2');
+  // Default radius: an existing record on any picked edge, else 0.1in/2mm.
+  let def = doc.units === 'in' ? '0.1' : '2';
+  for (const sel of sels) {
+    const top = doc.bodies.find(b => b.id === sel.topId);
+    const hitRec = (top?.softSegs || []).find(s => s.end === sel.end && s.pk === sel.pk &&
+      Math.hypot(s.mx - sel.edge.mx, s.my - sel.edge.my) < 3);
+    if (hitRec) { def = fmtU(hitRec.r); break; }
+  }
   openModal({
     title: `Soften ${sels.length} edge${sels.length === 1 ? '' : 's'}`,
     body: `<p>Round the picked rim edges. The part's outside size stays exact.</p>
@@ -10887,22 +11182,20 @@ function openSoftenDialog() {
       pushUndo();
       const touchedTops = new Set();
       for (const sel of sels) {
-        for (const part of sel.parts) {
-          // A merged coplanar proxy carries its original pieces in
-          // _members — the settings land on each of THEM (the proxy is
-          // transient; the doc's bodies are the members).
-          for (const c of (part.child._members || [part.child])) {
-            if (!c.softEnds) {
-              // First selective touch: freeze the current all-or-nothing
-              // state into per-end flags, then flip just the picked end.
-              const on = (c.softR || 0) > 0.05;
-              c.softEnds = { bottom: on, top: on };
-            }
-            c.softEnds[part.end] = r > 0.05;
-            if (r > 0.05) c.softR = r;
-            if (!c.softEnds.bottom && !c.softEnds.top) { delete c.softEnds; c.softR = 0; }
-          }
+        // Segment records live on the TOP-LEVEL body (bare extrude or the
+        // group) and re-match to profile feature edges at bake time.
+        const top = doc.bodies.find(b => b.id === sel.topId);
+        if (!top) continue;
+        if (!Array.isArray(top.softSegs)) top.softSegs = [];
+        const idx = top.softSegs.findIndex(s => s.end === sel.end && s.pk === sel.pk &&
+          Math.hypot(s.mx - sel.edge.mx, s.my - sel.edge.my) < 3);
+        if (r > 0.05) {
+          const rec = { end: sel.end, mx: sel.edge.mx, my: sel.edge.my, pk: sel.pk, r };
+          if (idx >= 0) top.softSegs[idx] = rec; else top.softSegs.push(rec);
+        } else if (idx >= 0) {
+          top.softSegs.splice(idx, 1);
         }
+        if (!top.softSegs.length) delete top.softSegs;
         touchedTops.add(sel.topId);
       }
       for (const id of touchedTops) {
@@ -11045,7 +11338,19 @@ function rebuildGroupGeometry(group) {
   if (typeof CSG === 'undefined') return;
   // Softened coplanar siblings CSG as one merged profile (see above);
   // untouched groups get back the same array and the exact old path.
-  const kids = _coalesceSoftSiblings(group.children);
+  // A group with segment selections forces coalescing so the selections
+  // land on the same merged outline the pick tool showed.
+  const hasSegs = Array.isArray(group.softSegs) && group.softSegs.length > 0;
+  const kids = _coalesceSoftSiblings(group.children, hasSegs ? { forPick: true } : undefined);
+  if (hasSegs) {
+    for (const k of kids) {
+      if (k.type === 'extrude' && k.op !== 'subtract') {
+        const pk = _softPlaneKeyOf(k);
+        const mine = group.softSegs.filter(s => s.pk === pk);
+        if (mine.length) k._groupSoftSegs = mine;
+      }
+    }
+  }
   const positives = kids.filter(c => c.op !== 'subtract');
   const negatives = kids.filter(c => c.op === 'subtract');
   if (!positives.length) return;
@@ -11107,6 +11412,10 @@ function rebuildGroupGeometry(group) {
     }
   } catch (err) {
     console.error(`rebuildGroupGeometry failed for group id=${group.id}:`, err);
+  } finally {
+    // _groupSoftSegs is bake-transient; a REAL (uncoalesced) child must not
+    // carry it into its next standalone render.
+    for (const k of kids) { if (k && k._groupSoftSegs) delete k._groupSoftSegs; }
   }
 }
 
