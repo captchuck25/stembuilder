@@ -924,92 +924,77 @@ Same idea, same words. You already know how it works.`,
       startX:0, startY:1, startDir:'right', exitX:5, exitY:4,
       collectibles:[{x:1,y:2},{x:2,y:3},{x:3,y:4}],
     },
-    // ── Levels 4-10: motif-in-noise redesign (2026-08-06) ──────────────────
-    // Design rule: an identical motif (Collect baked inside) recurs at
-    // NON-CONTIGUOUS spots, separated by irregular connectors — the shape
-    // where a Repeat structurally fails and a named function shines. Repeat
-    // is deliberately IN the palette from here on: trying the loop and
-    // watching it die at the first irregular gap IS the lesson. Every level
-    // was audited against cheat solutions (all-inline, single-function,
-    // padded/merged super-functions, Repeat-of-motif): each cheat either
-    // bumps a wall or exceeds maxBlocks.
+    // ── Levels 4-9: big-board redesign (2026-09-04) ─────────────────────────
+    // Principle (user): a loop is "the same thing again RIGHT NOW"; a function
+    // is "the same thing again SOMEWHERE ELSE". So each level is a large board
+    // where a LONG motif (the 9-block dip/bump, or the while-hallway) recurs
+    // 4-6 times far apart, separated by straight runs of varying length that
+    // loops handle. The motif is mandatory (a wall over the notch means the
+    // road can't be walked straight through). Every level is generated and
+    // machine-verified (scratchpad fngen.py / fnlevels.py): the intended
+    // function+loops program wins with every chip at exactly par, and the
+    // rival strategies are priced far above the limit -- typically
+    // function-only ~+9, loops-only ~+20, all-inline ~+30 blocks. No hand-
+    // tuned cheat audits: the gap is structural.
     {
-      // NOTE: "The Loop Trap" is taken by a While & If level — keep titles
-      // unique across units (tests + students both find levels by name).
-      title: 'Stairs in the Wild',
-      par: 15,
-      // Cheat audit: inline-all 21; padded stair+FF merge 17; Repeat[stair]
-      // bumps after stair 1 (flats of length 2/1/3 between stairs).
-      maxBlocks: 16,
+      title: 'Dips in the Road',
+      par: 30,
+      maxBlocks: 33,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'Repeat is back — but watch out! These three stairs DON\'T touch: flat hallways of different lengths sit between them, and a Repeat can\'t skip a hallway. A function can be CALLED anywhere. Define the stair (Move, Turn Right, Move, Turn Left, Collect) and call it in all three places.',
-      grid: [[1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1],[1,0,0,0,0,1,1,1,1,1],[1,1,1,1,0,0,0,1,1,1],[1,1,1,1,1,1,0,0,0,0],[1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:9, exitY:4,
-      collectibles:[{x:1,y:2},{x:4,y:3},{x:6,y:4}],
+      hint: 'Four dips in the road, far apart, with straight stretches of different lengths between them. Define the dip ONCE (Turn Right, Move, Turn Left, Move, Collect, Move, Turn Left, Move, Turn Right) and call it at every dip. Let Repeat walk the straights: loops for the LENGTH, functions for the SHAPE.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,1],[1,1,1,1,0,0,0,1,1,1,0,0,0,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,0,0,0,1,1,1,1,0,0,0,1,1,0,1],[1,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:2, startY:1, startDir:'right', exitX:1, exitY:5,
+      collectibles:[{x:5,y:2},{x:11,y:2},{x:11,y:4},{x:4,y:4}],
     },
     {
-      title: 'Two Patterns, Scattered',
-      par: 21,
-      // Climb starts with a TURN (Turn Left, Move, Turn Right, Move, Collect)
-      // so flats can't blur into it. Cheat audit: single-function 23,
-      // inline-all 25; the x=7 gap in the top row forces the second descent.
-      maxBlocks: 22,
+      title: 'Dips and Bumps',
+      par: 40,
+      maxBlocks: 43,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'TWO shapes hide here, and neither ever repeats back-to-back. The DOWN-stair: Move, Turn Right, Move, Turn Left, Collect. The UP-climb: Turn Left, Move, Turn Right, Move, Collect. Define both, then call whichever shape the maze shows next.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,1,0,0,0,0,1,0,0,1],[1,0,0,0,1,1,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:9, exitY:1,
-      collectibles:[{x:1,y:2},{x:4,y:1},{x:6,y:2},{x:9,y:1}],
+      hint: 'Two shapes: the dip below the road and the bump above it — the same moves mirrored (bump: Turn Left, Move, Turn Right, Move, Collect, Move, Turn Right, Move, Turn Left). Define both, then call whichever shape the road shows next. On the way back, your dip function still works — facing the other way!',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,1],[1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1],[1,1,1,0,0,0,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,0,0,1,1,0,1],[1,1,0,0,0,1,0,0,0,0,1,0,0,0,0,1],[1,1,1,1,0,0,0,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:2, startDir:'right', exitX:2, exitY:6,
+      collectibles:[{x:4,y:3},{x:9,y:1},{x:10,y:5},{x:5,y:7}],
     },
     {
       title: 'Loop Meets Function',
-      par: 14,
-      // 15 forces the loop: five plain calls cost 16. Repeat 5 bumps (the
-      // walkway interrupts after stair 4), so it must be Repeat 4 + call.
-      maxBlocks: 15,
+      par: 24,
+      maxBlocks: 27,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'FOUR identical stairs in a row — perfect for a Call Function INSIDE a Repeat 4. But look past the walkway: one LAST stair waits at the end. The loop can\'t reach it… another call can. Loop for the run, call for the stray.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1,1],[1,1,0,0,1,1,1,1,1,1,1],[1,1,1,0,0,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1,1],[1,1,1,1,1,1,1,0,0,0,0],[1,1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:10, exitY:6,
-      collectibles:[{x:1,y:2},{x:2,y:3},{x:3,y:4},{x:4,y:5},{x:7,y:6}],
+      hint: 'Four dips in a row, one step apart — a job for Repeat 4 { Call Function 1, Move }. Then a long straight… and one lonely dip on the way home. The loop can\'t reach it; one more call can.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,0,0,1,0,0,1,0,0,1,0,0,1],[1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,0,0,0,1,1,1,1,0,1],[1,1,1,1,1,0,0,0,0,1,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:5, exitY:5,
+      collectibles:[{x:4,y:2},{x:7,y:2},{x:10,y:2},{x:13,y:2},{x:9,y:4}],
     },
     {
       title: 'A Function Calls a Function',
-      par: 20,
-      // The lone mid-maze stair forces a separate Function 1: merging
-      // stair+Move+Move into one body costs 22. Single-function 22.
-      // Repeat included per the palette rule: once a block family is
-      // introduced in this unit's ramp (L4+), it stays available.
-      maxBlocks: 21,
+      par: 26,
+      maxBlocks: 29,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'Function 1 = the stair (Move, Turn Right, Move, Turn Left, Collect). Function 2 = Call Function 1, then Move, Move — a bigger pattern built FROM a smaller one! Call Function 2 for each long drop… and when a lone stair appears with no runway after it, call Function 1 by itself.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,1,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,0,0,0],[1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:13, exitY:6,
-      collectibles:[{x:1,y:2},{x:4,y:4},{x:6,y:5},{x:11,y:6}],
+      hint: 'Look closely: a dip followed by a 3-step straight, again and again. Function 2 = Call Function 1, then Repeat 3 { Move } — a bigger pattern built from a smaller one. Call Function 2 four times, then Function 1 alone for the odd dip at the end.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,1,0,0,0,0,1,0,0,0,0,1],[1,1,1,1,0,0,0,1,1,0,0,0,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,0,0,0,1,1,0,0,0,1,1,0,0,0,1],[1,0,0,1,0,0,0,0,1,0,0,0,0,1,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:2, startY:1, startDir:'right', exitX:1, exitY:5,
+      collectibles:[{x:5,y:2},{x:10,y:2},{x:13,y:4},{x:8,y:4},{x:3,y:4}],
     },
     {
       title: 'Hallways in the Wild',
-      par: 14,
-      // Cheat audit: inline whiles 18; hallway+connector merges die because
-      // every connector differs (M,M,TL / M,TL / M). Repeat of the hallway
-      // function scrambles direction after hallway 1.
-      maxBlocks: 15,
+      par: 18,
+      maxBlocks: 21,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'One function walks ANY hallway: While path ahead { Move, Collect }, then Turn Right. Three hallways of different lengths hide in this maze — with twisty connectors between them that YOU steer. Call the function three times.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[0,0,0,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,0,1,1,1,1,1,1,1],[1,1,1,1,1,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:11, exitY:5,
-      collectibles:[{x:2,y:1},{x:4,y:1},{x:6,y:3},{x:8,y:3},{x:10,y:4}],
+      hint: 'One function walks ANY hallway: While path ahead { Move, Collect }, then Turn Right. Five hallways spiral inward — plus two little jogs (Move, Turn Left, Move, Turn Right) that you steer by hand.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,0,0,1],[1,1,0,0,0,0,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,1,1,0,1],[1,1,0,1,1,1,1,1,1,1,0,1],[1,1,0,0,1,1,1,1,1,1,0,1],[1,1,1,0,0,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:5, exitY:3,
+      collectibles:[{x:3,y:1},{x:6,y:1},{x:10,y:5},{x:8,y:7},{x:4,y:7},{x:2,y:4},{x:5,y:3}],
     },
     {
       title: 'Down and Around',
-      par: 22,
-      // Exit sits ON the last stair's chip so "stair+Move" can't merge a
-      // third time (it bumps); merged routes cost 26. Full toolbox level.
-      maxBlocks: 24,
+      par: 31,
+      maxBlocks: 34,
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Stairs AND hallways, scattered through one maze — nothing repeats back-to-back. Define the stair as Function 1 and the hallway (While path ahead { Move, Collect }, Turn Right) as Function 2. Call each where its shape appears, and steer with single blocks in between.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[0,0,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,1,1,1],[1,1,1,1,1,1,1,1,0,1,1,1],[1,1,1,1,1,1,1,1,0,0,1,1],[1,1,1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:9, exitY:7,
-      collectibles:[{x:1,y:2},{x:3,y:3},{x:5,y:3},{x:8,y:4},{x:9,y:7}],
+      hint: 'Everything at once: dips on the road, hallways around the corner. Define the dip AND the hallway, loop the straights, and steer with single blocks in between.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,0,0,0,1,0,0,0,0,1,1],[1,1,1,0,0,0,1,0,0,0,1,1,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,0,1,1],[1,1,1,0,0,0,1,1,0,0,0,1,0,1,1],[1,0,0,0,1,0,0,0,0,1,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:5,
+      collectibles:[{x:4,y:2},{x:8,y:2},{x:11,y:1},{x:12,y:3},{x:12,y:5},{x:9,y:4},{x:4,y:4}],
     },
     {
       title: 'Graduation Day',

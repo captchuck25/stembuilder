@@ -227,7 +227,7 @@ const MazeBoard = forwardRef<MazeBoardHandle, Props>(({ level, speed = 1, onWin,
         ref={canvasRef}
         width={canvasW}
         height={canvasH}
-        style={{ display: 'block', borderRadius: 14 }}
+        style={{ display: 'block', borderRadius: 14, maxWidth: '100%', height: 'auto' }}
       />
       {won && (
         <div className="absolute inset-0 flex items-center justify-center rounded-2xl"

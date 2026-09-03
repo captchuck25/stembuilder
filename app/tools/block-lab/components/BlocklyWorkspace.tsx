@@ -2,7 +2,7 @@
 import { useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
 import * as Blockly from 'blockly';
 import { BlockDef } from '../engine/blocks';
-import { ScriptNode } from '../engine/runtime';
+import { ScriptNode, countBlocks } from '../engine/runtime';
 import { registerBlockDefs, buildToolbox, workspaceToScript, getDarkTheme } from '../engine/blocklyDefs';
 
 export interface BlocklyWorkspaceHandle {
@@ -19,10 +19,14 @@ interface Props {
   disabled?: boolean;
   /** Theme's collectible name — the sensor block's label matches the art */
   itemName?: string;
+  /** Live block count as the student edits (for the par/limit counter) */
+  onBlockCount?: (n: number) => void;
 }
 
 const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
-  ({ availableBlocks, initialXml, disabled, itemName = 'crystal' }, ref) => {
+  ({ availableBlocks, initialXml, disabled, itemName = 'crystal', onBlockCount }, ref) => {
+    const onCountRef = useRef(onBlockCount);
+    onCountRef.current = onBlockCount;
     const containerRef = useRef<HTMLDivElement>(null);
     const workspaceRef = useRef<Blockly.WorkspaceSvg | null>(null);
 
@@ -46,6 +50,11 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
       });
 
       workspaceRef.current = workspace;
+      // Live block count — mirrors countBlocks on the compiled script so the
+      // number the student sees is the number par/limit judge
+      const report = () => onCountRef.current?.(countBlocks(workspaceToScript(workspace)));
+      workspace.addChangeListener((e: Blockly.Events.Abstract) => { if (!e.isUiEvent) report(); });
+      setTimeout(report, 0);
 
       if (initialXml) {
         try {

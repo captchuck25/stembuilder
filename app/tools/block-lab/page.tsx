@@ -444,6 +444,7 @@ function ChallengeView({
   const [solved, setSolved] = useState(progress.completedChallenges[chalKey(ui, ci)] ?? false);
   const [bumpFlash, setBumpFlash] = useState(false);
   const [limitMsg, setLimitMsg] = useState<string | null>(null);
+  const [blockCount, setBlockCount] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [muted, setMutedState] = useState(() => (typeof window === 'undefined' ? false : isMuted()));
 
@@ -620,6 +621,7 @@ function ChallengeView({
                   initialXml={progress.savedXml[chalKey(ui, ci)]}
                   disabled={running}
                   itemName={theme.itemName}
+                  onBlockCount={setBlockCount}
                 />
               </div>
 
@@ -686,6 +688,13 @@ function ChallengeView({
                     Limit: {ch.maxBlocks}
                   </span>
                 )}
+                {/* Live counter: the savings from a loop or a function show WHILE refactoring */}
+                <span title="Blocks in your script right now"
+                  style={{ fontSize: 11, fontWeight: 800, borderRadius: 12, padding: '2px 10px', background: 'rgba(255,255,255,0.06)',
+                    color: ch.maxBlocks != null && blockCount > ch.maxBlocks ? '#fca5a5' : blockCount <= ch.par ? '#4ade80' : '#e2e8f0',
+                    border: ch.maxBlocks != null && blockCount > ch.maxBlocks ? '1px solid rgba(239,68,68,0.45)' : '1px solid rgba(255,255,255,0.15)' }}>
+                  Your blocks: {blockCount}
+                </span>
                 {bestStars > 0 && (
                   <span style={{ fontSize: 13, letterSpacing: 1 }}>
                     {'⭐'.repeat(bestStars)}<span style={{ filter: 'grayscale(1) opacity(0.35)' }}>{'⭐'.repeat(3 - bestStars)}</span>
