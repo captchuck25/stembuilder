@@ -10847,6 +10847,24 @@ function _resolveSoftSegRuns(shape, segs) {
   const analyzed = loops.map(l => _softLoopAnalyze(l));
   const map = new Map();
   for (const s of live) {
+    // A trimmed record (exposed run inside a group) names its span in loop
+    // arc-length; use it as long as the profile is still the same loop.
+    if (s.s0 != null && s.s1 != null && s.tot != null) {
+      let hitLi = -1;
+      for (let li = 0; li < analyzed.length; li++) {
+        const an = analyzed[li];
+        if (!an || Math.abs(an.total - s.tot) > 0.5) continue;
+        const m = an.pts.length;
+        let d = Infinity;
+        for (let i = 0; i < m; i++) { const a = an.pts[i], b = an.pts[(i + 1) % m]; d = Math.min(d, pointSegDist(s.mx, s.my, a.x, a.y, b.x, b.y)); }
+        if (d < 1.5) { hitLi = li; break; }
+      }
+      if (hitLi >= 0) {
+        if (!map.has(hitLi)) map.set(hitLi, { top: [], bottom: [] });
+        map.get(hitLi)[s.end === 'top' ? 'top' : 'bottom'].push({ startLen: s.s0, endLen: s.s1, r: s.r });
+        continue;
+      }
+    }
     let best = null, bestD = Math.max(3, s.r), bestLi = -1;
     for (let li = 0; li < analyzed.length; li++) {
       const an = analyzed[li];
@@ -10889,7 +10907,10 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     if (list) list.push(p); else grid.set(k, [p]);
     return p;
   };
-  const tri = (p1r, p2r, p3r, nrm) => {
+  // nrm: face normal used to fix the winding. vn (optional): per-vertex
+  // normals — bands shade smoothly along the round instead of showing a
+  // sawtooth of flat triangles ("crooked looking", ssupgrades evening).
+  const tri = (p1r, p2r, p3r, nrm, vn) => {
     const p1 = canon(p1r[0], p1r[1], p1r[2]), p2 = canon(p2r[0], p2r[1], p2r[2]), p3 = canon(p3r[0], p3r[1], p3r[2]);
     if (p1 === p2 || p2 === p3 || p1 === p3) return;
     const ux = p2[0] - p1[0], uy = p2[1] - p1[1], uz = p2[2] - p1[2];
@@ -10899,7 +10920,12 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     const flip = (cx * nrm[0] + cy * nrm[1] + cz * nrm[2]) < 0;
     const a = p1, b = flip ? p3 : p2, c = flip ? p2 : p3;
     posOut.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-    normOut.push(nrm[0], nrm[1], nrm[2], nrm[0], nrm[1], nrm[2], nrm[0], nrm[1], nrm[2]);
+    if (vn) {
+      const na = vn[0], nb = flip ? vn[2] : vn[1], nc = flip ? vn[1] : vn[2];
+      normOut.push(na[0], na[1], na[2], nb[0], nb[1], nb[2], nc[0], nc[1], nc[2]);
+    } else {
+      normOut.push(nrm[0], nrm[1], nrm[2], nrm[0], nrm[1], nrm[2], nrm[0], nrm[1], nrm[2]);
+    }
   };
   const capOuter = [], capHoles = [], capOuterB = [], capHolesB = [];
   const D25 = THREE.MathUtils.degToRad(25);
@@ -10907,7 +10933,10 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     const loop = rawLoops[li]; // canonical: outer CCW, holes CW (left = material)
     const runs = runsByLoop.get(li) || { top: [], bottom: [] };
     const maxR = Math.max(0.5, ...runs.top.map(r => r.r), ...runs.bottom.map(r => r.r));
-    const rs = _softSplitNearCorners(loop, 1.5 * maxR);
+    // Run boundaries that fall mid-edge (an exposed run in a group) become
+    // samples too, so a column can end exactly where the round must stop.
+    const extra = [...runs.top, ...runs.bottom].flatMap(r => [r.startLen, r.endLen]);
+    const rs = _softSplitNearCorners(loop, 1.5 * maxR, extra);
     const m = rs.pts.length;
     const rFor = (t, list) => {
       let best = 0;
@@ -10957,7 +10986,7 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
         const al = Math.hypot(ax, ay) || 1e-9;
         ax /= al; ay /= al;
         const miter = Math.min(1.6, 1 / Math.max(Math.cos(turnAt(s) / 2), 1e-3));
-        return { r: Math.min(mine, theirs), dir: { x: ax * miter, y: ay * miter } };
+        return { r: Math.min(mine, theirs), dir: { x: ax * miter, y: ay * miter }, nd: { x: ax, y: ay } };
       }
       if (mine > 0) {
         const rn = Math.min(mine, len[nb] * 0.95);
@@ -10982,10 +11011,16 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     // Ring assembly: per column [start, end], with corner-blend arc points
     // appended after a column's end when the next column is rounded too.
     const ringT = [], ringB = [];
-    const emitBand = (A, dA, rA, B, dB, rB, c, top) => {
+    const emitBand = (A, dA, rA, B, dB, rB, c, top, nA, nB) => {
+      // shading normals per end: the unit profile direction (mitered ends
+      // blend across the seam), the column normal otherwise
+      const unit = (d) => { const l = Math.hypot(d.x, d.y) || 1; return { x: d.x / l, y: d.y / l }; };
+      const uA = nA ? unit(nA) : { x: sn[c][0], y: sn[c][1] };
+      const uB = nB ? unit(nB) : { x: sn[c][0], y: sn[c][1] };
       for (let k = 0; k < K; k++) {
-        tri(bandPt(A, dA, rA, k, top), bandPt(B, dB, rB, k, top), bandPt(B, dB, rB, k + 1, top), bandN(c, k, top));
-        tri(bandPt(A, dA, rA, k, top), bandPt(B, dB, rB, k + 1, top), bandPt(A, dA, rA, k + 1, top), bandN(c, k + 1, top));
+        const a0 = bandNd(uA, k, top), a1 = bandNd(uA, k + 1, top), b0 = bandNd(uB, k, top), b1 = bandNd(uB, k + 1, top);
+        tri(bandPt(A, dA, rA, k, top), bandPt(B, dB, rB, k, top), bandPt(B, dB, rB, k + 1, top), bandN(c, k, top), [a0, b0, b1]);
+        tri(bandPt(A, dA, rA, k, top), bandPt(B, dB, rB, k + 1, top), bandPt(A, dA, rA, k + 1, top), bandN(c, k + 1, top), [a0, b1, a1]);
       }
     };
     for (let c = 0; c < m; c++) {
@@ -10995,8 +11030,8 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
       const aT = endInfo(RT, c, true), bT = endInfo(RT, c, false);
       const aB = endInfo(RB, c, true), bB = endInfo(RB, c, false);
       const roundedT = RT[c] > 0, roundedB = RB[c] > 0;
-      if (roundedT) emitBand(A, aT.dir, aT.r, B, bT.dir, bT.r, c, true);
-      if (roundedB) emitBand(A, aB.dir, aB.r, B, bB.dir, bB.r, c, false);
+      if (roundedT) emitBand(A, aT.dir, aT.r, B, bT.dir, bT.r, c, true, aT.nd, bT.nd);
+      if (roundedB) emitBand(A, aB.dir, aB.r, B, bB.dir, bB.r, c, false, aB.nd, bB.nd);
       // Wall polygon with notch profiles where a rounded neighbour ends.
       const poly = [];
       const pushProfile = (P, info, top, fromK, toK) => {
@@ -11117,7 +11152,7 @@ function _softMeshIsClosed(geo) {
 // before and after every sharp corner (on segments long enough), so the
 // column beside a corner can host a termination notch and the reflex rule
 // blanks only a short stub, never a whole edge.
-function _softSplitNearCorners(loop, d) {
+function _softSplitNearCorners(loop, d, extra) {
   const n = loop.length;
   const turnDeg = (i) => {
     const a = loop[(i - 1 + n) % n], b = loop[i], c = loop[(i + 1) % n];
@@ -11140,6 +11175,20 @@ function _softSplitNearCorners(loop, d) {
       if (sharp[(i + 1) % n]) { pts.push({ x: b.x - ux * d, y: b.y - uy * d }); arcPos.push(acc + L - d); }
     }
     acc += L;
+  }
+  // Extra split positions (loop arc-length), e.g. where an exposed run of a
+  // grouped part's edge starts or stops mid-edge.
+  for (const ev of (extra || [])) {
+    if (!isFinite(ev)) continue;
+    let v = ev % acc; if (v < 0) v += acc;
+    let i = 0;
+    while (i + 1 < pts.length && arcPos[i + 1] <= v) i++;
+    const next = i + 1 < pts.length ? arcPos[i + 1] : acc;
+    if (v - arcPos[i] < 0.05 || next - v < 0.05) continue;
+    const a = pts[i], b = i + 1 < pts.length ? pts[i + 1] : pts[0];
+    const f = (v - arcPos[i]) / Math.max(next - arcPos[i], 1e-9);
+    pts.splice(i + 1, 0, { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+    arcPos.splice(i + 1, 0, v);
   }
   return { pts, arcPos, total: acc };
 }
@@ -11396,17 +11445,9 @@ function _softHoleIsFilled(child, obj, loopPts, topId) {
   cx /= loopPts.length; cy /= loopPts.length;
   const planeMat = makePlaneMatrix(child.plane || GROUND_PLANE);
   const wp = new THREE.Vector3(cx, cy, child.height / 2).applyMatrix4(planeMat).applyMatrix4(obj.matrixWorld);
-  const rc = new THREE.Raycaster();
-  const dir = new THREE.Vector3(0.5773, 0.5773, 0.5773);
   for (const entry of roster) {
     if (entry.obj === obj) continue;
-    const mesh = entry.obj;
-    const mat = mesh.material, prevSide = mat ? mat.side : null;
-    if (mat) mat.side = THREE.DoubleSide;
-    rc.set(wp, dir);
-    const crossings = rc.intersectObject(mesh, false).length;
-    if (mat) mat.side = prevSide;
-    if (crossings % 2 === 1) return true;
+    if (_softPointInMesh(entry.obj, wp)) return true;
   }
   return false;
 }
@@ -11467,6 +11508,90 @@ function _softAutoIncludeArcs(top) {
       }
     }
   }
+}
+
+// Parity test: is world point wp inside this (closed) proxy mesh? Three
+// irrational ray directions, majority vote — a single (1,1,1) ray from
+// round-number probe points kept passing exactly through box edges and
+// mis-counted (x=35 inside a 30..70 box read as outside).
+const _SOFT_PARITY_DIRS = [
+  new THREE.Vector3(0.3713, 0.5411, 0.7550).normalize(),
+  new THREE.Vector3(-0.6231, 0.4297, 0.6533).normalize(),
+  new THREE.Vector3(0.5165, -0.7402, 0.4306).normalize(),
+];
+function _softPointInMesh(mesh, wp) {
+  const rc = new THREE.Raycaster();
+  const mat = mesh.material, prevSide = mat ? mat.side : null;
+  if (mat) mat.side = THREE.DoubleSide;
+  let votes = 0;
+  for (const d of _SOFT_PARITY_DIRS) {
+    rc.set(wp, d);
+    if (rc.intersectObject(mesh, false).length % 2 === 1) votes++;
+  }
+  if (mat) mat.side = prevSide;
+  return votes >= 2;
+}
+
+// Point + OUTWARD normal at arc-length s along an analyzed canonical loop
+// (left normal is into material, so outward = (dy, -dx)).
+function _softPointAtLen(an, s) {
+  const n = an.pts.length;
+  let t = s % an.total; if (t < 0) t += an.total;
+  for (let i = 0; i < n; i++) {
+    const a = an.pts[i], b = an.pts[(i + 1) % n];
+    const l0 = an.lens[i], l1 = an.lens[i + 1];
+    if (t <= l1 + 1e-9 || i === n - 1) {
+      const L = Math.max(l1 - l0, 1e-9);
+      const f = Math.max(0, Math.min(1, (t - l0) / L));
+      const dx = (b.x - a.x) / L, dy = (b.y - a.y) / L;
+      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, ox: dy, oy: -dx };
+    }
+  }
+  return { x: an.pts[0].x, y: an.pts[0].y, ox: 0, oy: 0 };
+}
+
+// In a GROUP, the part of a member's rim that runs inside a sibling piece
+// is not an edge of the part (the plate edge continuing "all the way
+// underneath" the base; a dowel flush in its hole — ssupgrades 2026-09-03
+// evening). Returns the EXPOSED sub-runs [{s0, s1}] of an edge in loop
+// arc-length, or null when the piece has no siblings.
+function _softExposedRuns(child, obj, an, edge, end, topId) {
+  const roster = _softenPickCtx && _softenPickCtx.byTop ? _softenPickCtx.byTop.get(topId) : null;
+  if (!roster) return null;
+  const sibs = roster.filter(e => e.obj !== obj).map(e => e.obj);
+  if (!sibs.length) return null;
+  const M = new THREE.Matrix4().multiplyMatrices(obj.matrixWorld, makePlaneMatrix(child.plane || GROUND_PLANE));
+  const H = child.height, eps = 0.4;
+  const zin = end === 'top' ? H - eps : eps, zout = end === 'top' ? H + eps : -eps;
+  const buried = (sv) => {
+    const p = _softPointAtLen(an, sv);
+    const wall = new THREE.Vector3(p.x + p.ox * eps, p.y + p.oy * eps, zin).applyMatrix4(M);
+    const cap = new THREE.Vector3(p.x - p.ox * eps, p.y - p.oy * eps, zout).applyMatrix4(M);
+    return sibs.some(m => _softPointInMesh(m, wall) || _softPointInMesh(m, cap));
+  };
+  const len = edge.endLen - edge.startLen;
+  if (len < 0.5) return [];
+  const N = Math.max(2, Math.min(300, Math.ceil(len / 2) + 1));
+  const inset = Math.min(0.3, len * 0.05); // stay off the corner vertices themselves
+  const runs = [];
+  let cur = null, prevS = null, prevB = null;
+  for (let k = 0; k <= N; k++) {
+    let sv = edge.startLen + len * k / N;
+    if (k === 0) sv += inset; else if (k === N) sv -= inset;
+    const b = buried(sv);
+    if (prevS !== null && b !== prevB) {
+      let lo = prevS, hi = sv;
+      for (let it = 0; it < 6; it++) { const mid = (lo + hi) / 2; if (buried(mid) === prevB) lo = mid; else hi = mid; }
+      const x = (lo + hi) / 2;
+      if (!b) cur = { s0: x, s1: sv };
+      else if (cur) { cur.s1 = x; runs.push(cur); cur = null; }
+    } else if (!b) {
+      if (!cur) cur = { s0: k === 0 ? edge.startLen : sv, s1: sv }; else cur.s1 = sv;
+    }
+    prevS = sv; prevB = b;
+  }
+  if (cur) { cur.s1 = edge.endLen; runs.push(cur); }
+  return runs.filter(r => r.s1 - r.s0 > 1.0);
 }
 
 function _softenToggleAt(hit, rayDir) {
@@ -11559,7 +11684,27 @@ function _softenToggleAt(hit, rayDir) {
       return;
     }
   }
-  const key = `${ud.softTopId}:${end}:${bestLi}:${Math.round(best.edge.mx * 10)}:${Math.round(best.edge.my * 10)}`;
+  // Grouped part: only the EXPOSED run of that edge (nearest the click).
+  let edgeSel = best.edge, subRun = null;
+  const exposed = _softExposedRuns(child, hit.object, best.analyze, best.edge, end, ud.softTopId);
+  if (exposed) {
+    if (!exposed.length) { setStatus('Soften — that edge is inside another piece of the group, so there is nothing to round there.'); return; }
+    let bestRun = null, bestRd = Infinity;
+    for (const run of exposed) {
+      const NS = Math.max(2, Math.ceil((run.s1 - run.s0) / 2));
+      for (let k = 0; k <= NS; k++) {
+        const p = _softPointAtLen(best.analyze, run.s0 + (run.s1 - run.s0) * k / NS);
+        const d = Math.hypot(p.x - pPlane.x, p.y - pPlane.y);
+        if (d < bestRd) { bestRd = d; bestRun = run; }
+      }
+    }
+    if (bestRun && (bestRun.s1 - bestRun.s0) < (best.edge.endLen - best.edge.startLen) - 0.5) {
+      const mid = _softPointAtLen(best.analyze, (bestRun.s0 + bestRun.s1) / 2);
+      edgeSel = { ...best.edge, startLen: bestRun.s0, endLen: bestRun.s1, mx: mid.x, my: mid.y };
+      subRun = { s0: bestRun.s0, s1: bestRun.s1, tot: best.analyze.total };
+    }
+  }
+  const key = `${ud.softTopId}:${end}:${bestLi}:${Math.round(edgeSel.mx * 10)}:${Math.round(edgeSel.my * 10)}`;
   const i = doc.softenSelected.findIndex(s => s.key === key);
   if (i >= 0) doc.softenSelected.splice(i, 1);
   else doc.softenSelected.push({
@@ -11567,10 +11712,16 @@ function _softenToggleAt(hit, rayDir) {
     topId: ud.softTopId,
     child, obj: hit.object, end,
     loopIdx: bestLi,
-    edge: best.edge,
+    edge: edgeSel,
+    sub: subRun,
     edgePts: (() => {
-      const m = best.analyze.pts.length;
       const pts = [];
+      if (subRun) {
+        const NS = Math.max(2, Math.ceil((subRun.s1 - subRun.s0) / 1.5));
+        for (let k = 0; k <= NS; k++) { const p = _softPointAtLen(best.analyze, subRun.s0 + (subRun.s1 - subRun.s0) * k / NS); pts.push({ x: p.x, y: p.y }); }
+        return pts;
+      }
+      const m = best.analyze.pts.length;
       for (let k = best.edge.i0; k <= best.edge.i1; k++) pts.push(best.analyze.pts[k % m]);
       return pts;
     })(),
@@ -11666,7 +11817,8 @@ function openSoftenDialog() {
         const idx = top.softSegs.findIndex(s => s.end === sel.end && s.pk === sel.pk &&
           Math.hypot(s.mx - sel.edge.mx, s.my - sel.edge.my) < 3);
         if (r > 0.05) {
-          const rec = { end: sel.end, mx: sel.edge.mx, my: sel.edge.my, pk: sel.pk, r };
+          const rec = { end: sel.end, mx: sel.edge.mx, my: sel.edge.my, pk: sel.pk, r,
+            ...(sel.sub ? { s0: sel.sub.s0, s1: sel.sub.s1, tot: sel.sub.tot } : {}) };
           if (idx >= 0) top.softSegs[idx] = rec; else top.softSegs.push(rec);
         } else if (idx >= 0) {
           top.softSegs.splice(idx, 1);
