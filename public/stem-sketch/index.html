@@ -10988,11 +10988,20 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
         const miter = Math.min(1.6, 1 / Math.max(Math.cos(turnAt(s) / 2), 1e-3));
         return { r: Math.min(mine, theirs), dir: { x: ax * miter, y: ay * miter }, nd: { x: ax, y: ay } };
       }
+      // Rounded meets sharp at an INSIDE (reflex) corner: the round simply
+      // ends flush against the neighbour's wall, with a quarter-disc stop
+      // face on its OWN side. (Cutting the stop face into the neighbour's
+      // wall plane put it inside solid material — overlapping faces on the
+      // L test, ssupgrades 2026-09-03 night.)
+      const sAt = atStart ? c : (c + 1) % m;
+      const reflex = turnAt(sAt) > D25 && !convexAt(sAt);
       if (mine > 0) {
+        if (reflex) return { r: mine, dir: { x: sn[c][0], y: sn[c][1] }, reflexStop: true };
         const rn = Math.min(mine, len[nb] * 0.95);
         return { r: rn, dir: atStart ? { x: -tg[nb][0], y: -tg[nb][1] } : { x: tg[nb][0], y: tg[nb][1] } };
       }
       if (theirs > 0) {
+        if (reflex) return { r: theirs, dir: { x: sn[nb][0], y: sn[nb][1] }, notch: true, reflexStop: true };
         const rn = Math.min(theirs, len[c] * 0.95);
         return { r: rn, dir: atStart ? { x: tg[c][0], y: tg[c][1] } : { x: -tg[c][0], y: -tg[c][1] }, notch: true };
       }
@@ -11036,8 +11045,28 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
       const poly = [];
       const pushProfile = (P, info, top, fromK, toK) => {
         const step = fromK < toK ? 1 : -1;
+        if (info.reflexStop) {
+          // the neighbour's wall stays a plain rectangle, just with the
+          // stop face's corner vertex on its edge (keeps it watertight)
+          const zs = top ? [H - info.r, H] : [info.r, 0];
+          if (step > 0) { poly.push([P.x, P.y, zs[0]], [P.x, P.y, zs[1]]); }
+          else { poly.push([P.x, P.y, zs[1]], [P.x, P.y, zs[0]]); }
+          return;
+        }
         for (let k = fromK; step > 0 ? k <= toK : k >= toK; k += step) poly.push(bandPt(P, info.dir, info.r, k, top));
       };
+      // Quarter-disc stop face where a round ends flush at an inside corner.
+      const stopFace = (P, info, top, outward) => {
+        // Fan from the CORNER: the crescent between the arc and the corner is
+        // concave (its centroid sits inside the arc), but the whole quarter
+        // arc is visible from the corner point.
+        const apex = [P.x, P.y, top ? H : 0];
+        for (let k = 0; k < K; k++) tri(apex, bandPt(P, info.dir, info.r, k, top), bandPt(P, info.dir, info.r, k + 1, top), outward);
+      };
+      if (roundedT && aT.reflexStop) stopFace(A, aT, true, [tg[c][0], tg[c][1], 0]);
+      if (roundedT && bT.reflexStop) stopFace(B, bT, true, [-tg[c][0], -tg[c][1], 0]);
+      if (roundedB && aB.reflexStop) stopFace(A, aB, false, [tg[c][0], tg[c][1], 0]);
+      if (roundedB && bB.reflexStop) stopFace(B, bB, false, [-tg[c][0], -tg[c][1], 0]);
       if (roundedB) poly.push([A.x, A.y, aB.r]); else if (aB.notch) pushProfile(A, aB, false, K, 0); else poly.push([A.x, A.y, 0]);
       if (roundedT) poly.push([A.x, A.y, H - aT.r]); else if (aT.notch) pushProfile(A, aT, true, 0, K); else poly.push([A.x, A.y, H]);
       if (roundedT) poly.push([B.x, B.y, H - bT.r]); else if (bT.notch) pushProfile(B, bT, true, K, 0); else poly.push([B.x, B.y, H]);
@@ -11046,7 +11075,10 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
       for (const p of poly) { cx += p[0]; cy += p[1]; cz += p[2]; }
       const ctr = [cx / poly.length, cy / poly.length, cz / poly.length];
       for (let i = 0; i < poly.length; i++) tri(ctr, poly[i], poly[(i + 1) % poly.length], wn);
-      const capPt = (P, info, top) => { const p = bandPt(P, info.dir, info.r, K, top); return new THREE.Vector2(p[0], p[1]); };
+      const capPt = (P, info, top) => {
+        if (info.notch && info.reflexStop) return new THREE.Vector2(P.x, P.y); // sharp side keeps its corner
+        const p = bandPt(P, info.dir, info.r, K, top); return new THREE.Vector2(p[0], p[1]);
+      };
       ringT.push(capPt(A, aT, true), capPt(B, bT, true));
       ringB.push(capPt(A, aB, false), capPt(B, bB, false));
     }
@@ -11070,6 +11102,28 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     let tris;
     try { tris = THREE.ShapeUtils.triangulateShape(outerV, holeVs); } catch (_) { return; }
     const all = outerV.concat(...holeVs);
+    // earcut can emit a ZERO-AREA triangle when a ring vertex lies exactly on
+    // a diagonal (the L's inside corner sits on the diagonal between two
+    // rounded corners). Skipping it leaves its edges unmatched — instead
+    // split the partner triangle across the long edge at that vertex.
+    const area2 = (t) => { const A = all[t[0]], B = all[t[1]], C = all[t[2]]; return (B.x - A.x) * (C.y - A.y) - (B.y - A.y) * (C.x - A.x); };
+    for (let guard = 0; guard < 64; guard++) {
+      const di = tris.findIndex(t => Math.abs(area2(t)) < 1e-6);
+      if (di < 0) break;
+      const t = tris[di];
+      tris.splice(di, 1);
+      let lng = null;
+      for (let e = 0; e < 3; e++) {
+        const i = t[e], j = t[(e + 1) % 3], k = t[(e + 2) % 3];
+        const L2 = (all[i].x - all[j].x) ** 2 + (all[i].y - all[j].y) ** 2;
+        if (!lng || L2 > lng.L2) lng = { i, j, k, L2 };
+      }
+      const pi = tris.findIndex(u => u.includes(lng.i) && u.includes(lng.j));
+      if (pi < 0) continue;
+      const u = tris[pi];
+      const cc = u.find(v => v !== lng.i && v !== lng.j);
+      tris.splice(pi, 1, [lng.i, lng.k, cc], [lng.k, lng.j, cc]);
+    }
     const used = new Set();
     for (const t of tris) { used.add(t[0]); used.add(t[1]); used.add(t[2]); }
     const ringOf = new Array(all.length);
