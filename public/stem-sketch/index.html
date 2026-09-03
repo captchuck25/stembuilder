@@ -7535,7 +7535,7 @@ class Viewer3D {
           else exitSoftenPickMode('Soften cancelled');
           return;
         }
-        _softenToggleAt(hits[0]);
+        _softenToggleAt(hits[0], this.raycaster.ray.direction);
         return;
       }
       // Bevel-pick mode (Fillet workflow). Each click ADDS one edge to a
@@ -10762,11 +10762,12 @@ function _resolveSoftSegRuns(shape, segs) {
   const live = (segs || []).filter(s => s && s.r > 0.05);
   if (!live.length) return null;
   const loops = _softCanonLoops(shape);
+  const analyzed = loops.map(l => _softLoopAnalyze(l));
   const map = new Map();
   for (const s of live) {
     let best = null, bestD = 3, bestLi = -1;
-    for (let li = 0; li < loops.length; li++) {
-      const an = _softLoopAnalyze(loops[li]);
+    for (let li = 0; li < analyzed.length; li++) {
+      const an = analyzed[li];
       if (!an) continue;
       for (const e of an.edges) {
         const d = Math.hypot(e.mx - s.mx, e.my - s.my);
@@ -10777,6 +10778,33 @@ function _resolveSoftSegRuns(shape, segs) {
     if (!map.has(bestLi)) map.set(bestLi, { top: [], bottom: [] });
     map.get(bestLi)[s.end === 'top' ? 'top' : 'bottom']
       .push({ startLen: best.startLen, endLen: best.endLen, r: s.r });
+  }
+  // MERGE adjacent selected runs (same loop/end/radius, sharing a corner) —
+  // separate fades at a shared corner left fins/notches there (ssupgrades
+  // round 3): merged, the round carries through the corner continuously.
+  for (const [li, ends] of map) {
+    const total = analyzed[li] ? analyzed[li].total : 0;
+    for (const key of ['top', 'bottom']) {
+      let runs = ends[key];
+      if (runs.length < 2) continue;
+      runs.sort((a, b) => a.startLen - b.startLen);
+      const merged = [runs[0]];
+      for (let i = 1; i < runs.length; i++) {
+        const prev = merged[merged.length - 1], cur = runs[i];
+        if (cur.startLen - prev.endLen < 1 && Math.abs(cur.r - prev.r) < 0.01) {
+          prev.endLen = Math.max(prev.endLen, cur.endLen);
+        } else merged.push(cur);
+      }
+      // Wrap-around: the last run ending at the loop seam joining the first.
+      if (merged.length > 1 && total > 0) {
+        const first = merged[0], last = merged[merged.length - 1];
+        if ((first.startLen + total) - last.endLen < 1 && Math.abs(first.r - last.r) < 0.01) {
+          last.endLen = first.endLen + total; // wrapping range (rAt handles it)
+          merged.shift();
+        }
+      }
+      ends[key] = merged;
+    }
   }
   return map.size ? map : null;
 }
@@ -10795,7 +10823,8 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     const loop = rawLoops[li]; // already canonical (outer CCW, holes CW)
     const runs = runsByLoop.get(li) || { top: [], bottom: [] };
     const maxR = Math.max(0.5, ...runs.top.map(r => r.r), ...runs.bottom.map(r => r.r));
-    const rs = _softResampleLoop(loop, Math.max(1, maxR / 2));
+    const step = Math.max(0.8, maxR / 3);
+    const rs = _softResampleLoop(loop, step);
     const m = rs.pts.length;
     const rAt = (t, list) => {
       let best = 0;
@@ -10803,9 +10832,12 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
         let tt = t;
         if (run.endLen > rs.total && tt < run.startLen) tt += rs.total; // wrapping run
         if (tt < run.startLen || tt > run.endLen) continue;
-        const fadeLen = Math.min(run.r * 1.2, (run.endLen - run.startLen) * 0.25);
+        // Smoothstep fade over at least a few samples — a linear ramp over
+        // 1-2 samples pinched the band into visible fins at terminations.
+        const fadeLen = Math.max(step * 2.5, Math.min(run.r * 1.2, (run.endLen - run.startLen) * 0.25));
         const d = Math.min(tt - run.startLen, run.endLen - tt);
-        const f = fadeLen > 1e-6 ? Math.min(1, d / fadeLen) : 1;
+        let f = fadeLen > 1e-6 ? Math.min(1, d / fadeLen) : 1;
+        f = f * f * (3 - 2 * f);
         best = Math.max(best, run.r * f);
       }
       return best;
@@ -10880,7 +10912,21 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
   }
   // Caps from the offset rings (top at z=H normal +z; bottom at z=0, −z).
   const capTri = (outer, holes, z, up) => {
-    const outerV = outer, holeVs = holes.filter(h => h && h.length >= 3);
+    // Dedupe near-coincident ring points — offset rings pinch together in
+    // fade zones and duplicate points glitch the triangulator ("weird
+    // shape on the circle edge", ssupgrades round 3).
+    const clean = (ring) => {
+      const out = [];
+      for (const p of ring) {
+        const last = out[out.length - 1];
+        if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 0.05) out.push(p);
+      }
+      while (out.length > 1 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= 0.05) out.pop();
+      return out;
+    };
+    const outerV = clean(outer);
+    const holeVs = holes.map(clean).filter(h => h && h.length >= 3);
+    if (outerV.length < 3) return;
     let tris;
     try { tris = THREE.ShapeUtils.triangulateShape(outerV, holeVs); } catch (_) { return; }
     const all = outerV.concat(...holeVs);
@@ -11084,16 +11130,34 @@ function exitSoftenPickMode(msg) {
 // One click = one FEATURE EDGE (a straight side, or a whole arch) of one
 // rim — Charlie's final design: individually selected edge segments, so
 // inner edges are simply never picked unless you pick them.
-function _softenToggleAt(hit) {
+function _softenToggleAt(hit, rayDir) {
   const ud = (hit.object && hit.object.userData) || {};
   const child = ud.softChild;
   if (!child) return;
   // Map the hit point into the child's extrude space (planeMat is baked
   // into extrude geometry, so undo mesh transform THEN plane).
   const inv = new THREE.Matrix4().copy(hit.object.matrixWorld).invert();
-  const planeInv = new THREE.Matrix4().copy(makePlaneMatrix(child.plane || GROUND_PLANE)).invert();
+  const planeMat = makePlaneMatrix(child.plane || GROUND_PLANE);
+  const planeInv = new THREE.Matrix4().copy(planeMat).invert();
   const pPlane = hit.point.clone().applyMatrix4(inv).applyMatrix4(planeInv);
-  const end = pPlane.z > child.height / 2 ? 'top' : 'bottom';
+  // WHICH RIM? Clicking a cap face names its rim outright. Wall/through-hole
+  // hits used the raw hit z, which grabbed the BACK rim when clicking
+  // through the circle or at glancing angles (ssupgrades round 3) — those
+  // now prefer the rim FACING THE CAMERA unless the click is decisively
+  // near the far one.
+  const nWorld = new THREE.Vector3(0, 0, 1)
+    .transformDirection(new THREE.Matrix4().multiplyMatrices(hit.object.matrixWorld, planeMat));
+  const faceN = hit.face && hit.face.normal
+    ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : null;
+  let end;
+  if (faceN && Math.abs(faceN.dot(nWorld)) > 0.8) {
+    end = faceN.dot(nWorld) > 0 ? 'top' : 'bottom';
+  } else {
+    const zEnd = pPlane.z > child.height / 2 ? 'top' : 'bottom';
+    const facingEnd = (rayDir && nWorld.dot(rayDir) < 0) ? 'top' : 'bottom';
+    const rimFrac = Math.min(pPlane.z, child.height - pPlane.z) / Math.max(child.height, 1e-6);
+    end = (!rayDir || zEnd === facingEnd || rimFrac < 0.2) ? zEnd : facingEnd;
+  }
   const shape = sketchToShape(child.sketch);
   if (!shape) return;
   const loops = _softCanonLoops(shape);
