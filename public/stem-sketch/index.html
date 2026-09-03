@@ -19245,10 +19245,12 @@ function renderProps() {
         <div class="field"><label>Height (${u})</label><input type="number" data-k="h" value="${fmtU(body.h)}" min="0.01" step="1"/></div>
         <div class="field"><label>Depth (${u})</label><input type="number" data-k="d" value="${fmtU(body.d)}" min="0.01" step="1"/></div>`;
     } else if (body.type === 'extrude') {
+      // Soften moved OUT of Properties (user call, ssissues 2026-09-02
+      // evening): edge rounding is edge SELECTION work — it lives in the
+      // 3D toolbar's Soften pick tool only.
       dimFields = `<h4>Extrude</h4>
         <div class="field"><label>Height (${u})</label><input type="number" data-k="height" value="${fmtU(body.height)}" min="0.01" step="0.5"/></div>
-        <div class="field"><label title="Rounds the top and bottom rims — 0 = sharp edges. The part's outside size stays exact.">Soften edges (${u})</label><input type="number" data-k="softR" value="${fmtU(body.softR || 0)}" min="0" step="${doc.units === 'in' ? 0.05 : 1}"/></div>
-        <div class="hint">Soften rounds every rim edge — try ${doc.units === 'in' ? '0.1' : '2'}. Edit the source sketch in 2D to change the profile, then come back.</div>`;
+        <div class="hint">Edit the source sketch in 2D to change the profile, then come back. Round edges with the <b>Soften</b> tool in the toolbar.</div>`;
     } else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
       const headOpts = FASTENER_HEAD_TYPES.map(t =>
@@ -19351,8 +19353,7 @@ function renderProps() {
         <div class="field"><label>Size (W×H×D)</label><div>${bboxStr}</div></div>
         <div class="field"><label>Bodies</label><div>${body.children?.length || 0}</div></div>
         <div class="field"><label>Contents</label><div style="font-size:11px;color:var(--ink-soft)">${childList}</div></div>
-        ${softTargets.length ? `<div class="field"><label title="Rounds the top and bottom rims of every extruded piece in the group — 0 = sharp. Outside sizes stay exact.">Soften edges (${u})</label><input id="group-soft-input" type="number" value="${fmtU(groupSoftVal)}" min="0" step="${doc.units === 'in' ? 0.05 : 1}"/></div>` : ''}
-        <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear.</div>`;
+        <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear.${softTargets.length ? ' Round edges with the <b>Soften</b> tool in the toolbar.' : ''}</div>`;
     }
 
     const opField = `
