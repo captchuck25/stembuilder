@@ -10671,26 +10671,57 @@ function _softLoopAnalyze(rawPts) {
   }
   const total = lens[n];
   if (total < 1e-6) return null;
-  const corners = [];
-  const cornerMeta = []; // aligned with corners: { len, convex }
+  // Per-vertex turn (deg) and convexity under canonical winding (material
+  // on the LEFT ⇒ a left turn, cross > 0, is a CONVEX material corner).
+  const turn = new Array(n).fill(0), cross = new Array(n).fill(0);
   for (let i = 0; i < n; i++) {
     const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
     const l1 = Math.hypot(b.x - a.x, b.y - a.y), l2 = Math.hypot(c.x - b.x, c.y - b.y);
     if (l1 < 1e-9 || l2 < 1e-9) continue;
-    const cosA = ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (l1 * l2);
-    if (cosA < Math.cos(THREE.MathUtils.degToRad(25))) { // turn > 25°
+    const cosA = Math.max(-1, Math.min(1, ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (l1 * l2)));
+    turn[i] = THREE.MathUtils.radToDeg(Math.acos(cosA));
+    cross[i] = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+  }
+  // Per-SEGMENT class. Arc chords from extractPoints come in RUNS of
+  // similar-length segments with gentle, similar turns; a straight side is
+  // one long segment between them (its end turns may be gentle too, where
+  // it meets a tangent fillet). So: a segment is 'arcish' when its ends are
+  // gentle turns (or one end is a sharp corner) AND it is no longer than
+  // ~2.5x a neighbouring chord; 'arc' = arcish with an arcish neighbour.
+  // Feature edges split at sharp corners AND line<->arc transitions, so a
+  // tangent fillet or an apex arch is its own edge, while a dense arc run
+  // (or two mirrored arc halves) stays ONE edge. Scale-independent.
+  const segLenAt = (i) => lens[i + 1] - lens[i];
+  const smooth = turn.map(t => t > 0.5 && t < 25);
+  const sharpV = turn.map(t => t >= 25);
+  const arcish = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const s0 = smooth[i], s1 = smooth[j];
+    if (!((s0 && s1) || (s0 && sharpV[j]) || (sharpV[i] && s1))) continue;
+    const L = segLenAt(i);
+    const lp = segLenAt((i - 1 + n) % n), ln = segLenAt(j);
+    const ref = (s0 && s1) ? Math.max(lp, ln) : (s0 ? lp : ln);
+    arcish[i] = L <= 2.5 * ref;
+  }
+  const segClass = new Array(n);
+  for (let i = 0; i < n; i++) {
+    segClass[i] = (arcish[i] && (arcish[(i - 1 + n) % n] || arcish[(i + 1) % n])) ? 'arc' : 'line';
+  }
+  const corners = [];
+  const cornerMeta = [];
+  for (let i = 0; i < n; i++) {
+    const sharp = turn[i] > 25;
+    const transition = segClass[(i - 1 + n) % n] !== segClass[i];
+    if (sharp || transition) {
       corners.push(i);
-      // Canonical winding puts material on the LEFT, so a left turn
-      // (cross > 0) is a CONVEX material corner for outers AND holes.
-      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-      cornerMeta.push({ len: lens[i], convex: cross > 0 });
+      cornerMeta.push({ len: lens[i], convex: cross[i] > 0, sharp });
     }
   }
   const edges = [];
   const midAt = (startLen, endLen) => {
     let t = (startLen + endLen) / 2;
     if (t >= total) t -= total;
-    // locate sample at arc length t
     for (let i = 1; i <= n; i++) {
       if (lens[i] >= t) {
         const seg = lens[i] - lens[i - 1] || 1e-9;
@@ -10806,177 +10837,149 @@ function _resolveSoftSegRuns(shape, segs) {
     map.get(bestLi)[s.end === 'top' ? 'top' : 'bottom']
       .push({ startLen: best.startLen, endLen: best.endLen, r: s.r });
   }
-  // MERGE adjacent selected runs (same loop/end/radius, sharing a corner) —
-  // separate fades at a shared corner left fins/notches there (ssupgrades
-  // round 3): merged, the round carries through the corner continuously.
-  // ONLY across CONVEX corners: a continuous offset ring through a CONCAVE
-  // corner self-intersects and the broken mesh made whole sections vanish
-  // in the CSG (ssupgrades round 4, "both sections missing"). Concave
-  // junctions keep separate runs — the fades keep them safe.
-  for (const [li, ends] of map) {
-    const an = analyzed[li];
-    const total = an ? an.total : 0;
-    const convexAt = (len) => {
-      let t = len;
-      if (total > 0) { t = t % total; if (t < 0) t += total; }
-      for (const c of (an?.corners || [])) {
-        if (Math.abs(c.len - t) < 0.5 || Math.abs(c.len - t + total) < 0.5 || Math.abs(c.len - t - total) < 0.5) return c.convex;
-      }
-      return false; // unknown junction — don't risk the merge
-    };
-    for (const key of ['top', 'bottom']) {
-      let runs = ends[key];
-      if (runs.length < 2) continue;
-      runs.sort((a, b) => a.startLen - b.startLen);
-      const merged = [runs[0]];
-      for (let i = 1; i < runs.length; i++) {
-        const prev = merged[merged.length - 1], cur = runs[i];
-        if (cur.startLen - prev.endLen < 1 && Math.abs(cur.r - prev.r) < 0.01 && convexAt(cur.startLen)) {
-          prev.endLen = Math.max(prev.endLen, cur.endLen);
-        } else merged.push(cur);
-      }
-      // Wrap-around: the last run ending at the loop seam joining the first.
-      if (merged.length > 1 && total > 0) {
-        const first = merged[0], last = merged[merged.length - 1];
-        if ((first.startLen + total) - last.endLen < 1 && Math.abs(first.r - last.r) < 0.01 && convexAt(first.startLen)) {
-          last.endLen = first.endLen + total; // wrapping range (rAt handles it)
-          merged.shift();
-        }
-      }
-      ends[key] = merged;
-    }
-  }
   return map.size ? map : null;
 }
 
 function _buildSegSoftGeo(shape, H, runsByLoop) {
   const rawLoops = _softCanonLoops(shape);
-  const K = 5; // band arc steps
+  const K = 4; // band arc steps (thinned — dense meshes were hitting the autosave limit)
   const posOut = [], normOut = [];
-  const pushTri = (p1, n1, p2, n2, p3, n3) => {
-    posOut.push(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], p3[0], p3[1], p3[2]);
-    normOut.push(n1[0], n1[1], n1[2], n2[0], n2[1], n2[2], n3[0], n3[1], n3[2]);
+  // Emit a triangle with the winding that agrees with the requested normal.
+  const tri = (p1, p2, p3, nrm) => {
+    const ux = p2[0] - p1[0], uy = p2[1] - p1[1], uz = p2[2] - p1[2];
+    const vx = p3[0] - p1[0], vy = p3[1] - p1[1], vz = p3[2] - p1[2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    if (Math.abs(cx) + Math.abs(cy) + Math.abs(cz) < 1e-12) return; // degenerate
+    const flip = (cx * nrm[0] + cy * nrm[1] + cz * nrm[2]) < 0;
+    const a = p1, b = flip ? p3 : p2, c = flip ? p2 : p3;
+    posOut.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+    normOut.push(nrm[0], nrm[1], nrm[2], nrm[0], nrm[1], nrm[2], nrm[0], nrm[1], nrm[2]);
   };
-  const capOuter = []; const capHoles = [];
-  const capOuterB = []; const capHolesB = [];
+  const capOuter = [], capHoles = [], capOuterB = [], capHolesB = [];
+  const D25 = THREE.MathUtils.degToRad(25);
   for (let li = 0; li < rawLoops.length; li++) {
-    const loop = rawLoops[li]; // already canonical (outer CCW, holes CW)
+    const loop = rawLoops[li]; // canonical: outer CCW, holes CW (left = material)
     const runs = runsByLoop.get(li) || { top: [], bottom: [] };
     const maxR = Math.max(0.5, ...runs.top.map(r => r.r), ...runs.bottom.map(r => r.r));
-    const step = Math.max(0.8, maxR / 3);
-    const rs = _softResampleLoop(loop, step);
+    const rs = _softResampleLoop(loop, Math.max(1.2, maxR / 2.5));
     const m = rs.pts.length;
-    const rAt = (t, list) => {
+    // Radius is PER COLUMN (segment c → c+1), constant along a run — no
+    // fades. Terminations are handled by explicit stop faces below.
+    const rFor = (t, list) => {
       let best = 0;
       for (const run of list) {
         let tt = t;
         if (run.endLen > rs.total && tt < run.startLen) tt += rs.total; // wrapping run
-        if (tt < run.startLen || tt > run.endLen) continue;
-        // Smoothstep fade over at least a few samples — a linear ramp over
-        // 1-2 samples pinched the band into visible fins at terminations.
-        const fadeLen = Math.max(step * 2.5, Math.min(run.r * 1.2, (run.endLen - run.startLen) * 0.25));
-        const d = Math.min(tt - run.startLen, run.endLen - tt);
-        let f = fadeLen > 1e-6 ? Math.min(1, d / fadeLen) : 1;
-        f = f * f * (3 - 2 * f);
-        best = Math.max(best, run.r * f);
+        if (tt >= run.startLen - 1e-6 && tt <= run.endLen + 1e-6) best = Math.max(best, run.r);
       }
-      return best;
+      return Math.min(best, H / 2 - 0.05);
     };
-    const rT = [], rB = [], nrm = [];
-    for (let i = 0; i < m; i++) {
-      rT.push(rAt(rs.arcPos[i], runs.top));
-      rB.push(rAt(rs.arcPos[i], runs.bottom));
-    }
-    // Per-SEGMENT left normal (flat walls stay crisp; arcs vary smoothly).
-    for (let i = 0; i < m; i++) {
-      const a = rs.pts[i], b = rs.pts[(i + 1) % m];
+    const rT = [], rB = [], sn = [];
+    for (let c = 0; c < m; c++) {
+      const a = rs.pts[c], b = rs.pts[(c + 1) % m];
       const dx = b.x - a.x, dy = b.y - a.y;
       const l = Math.hypot(dx, dy) || 1e-9;
-      nrm.push([-dy / l, dx / l]);
+      sn.push([-dy / l, dx / l]);
+      const mid = (rs.arcPos[c] + (c + 1 < m ? rs.arcPos[c + 1] : rs.total)) / 2;
+      rT.push(rFor(mid, runs.top));
+      rB.push(rFor(mid, runs.bottom));
     }
-    const capRing = [], capRingB = [];
-    for (let i = 0; i < m; i++) {
-      // Per-SAMPLE normal (average of adjacent segment normals) for offsets.
-      const n1 = nrm[(i - 1 + m) % m], n2 = nrm[i];
+    const turnAt = (s) => {
+      const n1 = sn[(s - 1 + m) % m], n2 = sn[s];
+      return Math.acos(Math.max(-1, Math.min(1, n1[0] * n2[0] + n1[1] * n2[1])));
+    };
+    const convexAt = (s) => {
+      const a = rs.pts[(s - 1 + m) % m], b = rs.pts[s], c = rs.pts[(s + 1) % m];
+      return ((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > 0;
+    };
+    // REFLEX (concave) corner with rounding on BOTH sides: the two bands
+    // would sweep through each other and break the mesh (the sections-
+    // missing failure). Leave the two columns touching that corner sharp —
+    // a tiny crisp interruption, never a broken solid.
+    for (let s = 0; s < m; s++) {
+      if (turnAt(s) > D25 && !convexAt(s)) {
+        const cp = (s - 1 + m) % m, cn = s;
+        if (rT[cp] > 0 && rT[cn] > 0) { rT[cp] = 0; rT[cn] = 0; }
+        if (rB[cp] > 0 && rB[cn] > 0) { rB[cp] = 0; rB[cn] = 0; }
+      }
+    }
+    // Offset direction at a column endpoint: MITERED (averaged, length-
+    // corrected, capped) only where the round continues through the sample
+    // with the same radius; otherwise the column's own normal — a clean
+    // perpendicular stop.
+    const dirAt = (c, atStart, rArr) => {
+      const s = atStart ? c : (c + 1) % m;
+      const other = atStart ? (c - 1 + m) % m : (c + 1) % m;
+      const cont = rArr[c] > 0 && Math.abs(rArr[c] - rArr[other]) < 1e-6;
+      if (!cont) return { x: sn[c][0], y: sn[c][1] };
+      const n1 = sn[(s - 1 + m) % m], n2 = sn[s];
       let ax = n1[0] + n2[0], ay = n1[1] + n2[1];
       const al = Math.hypot(ax, ay) || 1e-9;
       ax /= al; ay /= al;
-      capRing.push({ x: rs.pts[i].x + ax * rT[i], y: rs.pts[i].y + ay * rT[i], nx: ax, ny: ay });
-      capRingB.push({ x: rs.pts[i].x + ax * rB[i], y: rs.pts[i].y + ay * rB[i], nx: ax, ny: ay });
-    }
-    // Anti-fold: where an offset ring segment reverses against its base
-    // segment (offset > local feature size — tight fades, near-corner
-    // pinches), pull both endpoints' offsets in until it stops folding.
-    const unfold = (ring) => {
-      for (let pass = 0; pass < 3; pass++) {
-        let folded = false;
-        for (let i = 0; i < m; i++) {
-          const j = (i + 1) % m;
-          const bx = rs.pts[j].x - rs.pts[i].x, by = rs.pts[j].y - rs.pts[i].y;
-          const ox = ring[j].x - ring[i].x, oy = ring[j].y - ring[i].y;
-          if (bx * ox + by * oy < 0) {
-            folded = true;
-            for (const k of [i, j]) {
-              ring[k].x = (ring[k].x + rs.pts[k].x) / 2;
-              ring[k].y = (ring[k].y + rs.pts[k].y) / 2;
-            }
-          }
-        }
-        if (!folded) break;
-      }
+      const miter = Math.min(1.6, 1 / Math.max(Math.cos(turnAt(s) / 2), 1e-3));
+      return { x: ax * miter, y: ay * miter };
     };
-    unfold(capRing); unfold(capRingB);
-    if (li === 0) {
-      capOuter.push(...capRing.map(p => new THREE.Vector2(p.x, p.y)));
-      capOuterB.push(...capRingB.map(p => new THREE.Vector2(p.x, p.y)));
-    } else {
-      capHoles.push(capRing.map(p => new THREE.Vector2(p.x, p.y)));
-      capHolesB.push(capRingB.map(p => new THREE.Vector2(p.x, p.y)));
-    }
-    // Surface strips per segment column i → i+1.
-    for (let i = 0; i < m; i++) {
-      const j = (i + 1) % m;
-      const sn = nrm[i]; // flat column normal
-      const A = rs.pts[i], B = rs.pts[j];
-      const colA = (ring) => ring[i], colB = (ring) => ring[j];
-      // wall: z from rB to H - rT at each column end
-      const wall = (P, rb, rt) => [[P.x, P.y, rb], [P.x, P.y, H - rt]];
-      const [a0, a1] = wall(A, rB[i], rT[i]);
-      const [b0, b1] = wall(B, rB[j], rT[j]);
-      const wn = [sn[0], sn[1], 0];
-      pushTri(a0, wn, b0, wn, b1, wn);
-      pushTri(a0, wn, b1, wn, a1, wn);
-      // top band: k = 0..K from wall top to cap ring
-      const bandPt = (P, C, r, k, top) => {
-        const phi = (k / K) * Math.PI / 2;
-        const off = r * (1 - Math.cos(phi));
-        const x = P.x + C.nx * off, y = P.y + C.ny * off;
-        const z = top ? (H - r + r * Math.sin(phi)) : (r - r * Math.sin(phi));
-        return [x, y, z];
-      };
-      const bandN = (k, top) => {
-        const phi = (k / K) * Math.PI / 2;
-        return [sn[0] * Math.cos(phi), sn[1] * Math.cos(phi), (top ? 1 : -1) * Math.sin(phi)];
-      };
+    const bandPt = (P, d, r, k, top) => {
+      const phi = (k / K) * Math.PI / 2;
+      const off = r * (1 - Math.cos(phi));
+      return [P.x + d.x * off, P.y + d.y * off, top ? (H - r + r * Math.sin(phi)) : (r - r * Math.sin(phi))];
+    };
+    const bandN = (c, k, top) => {
+      const phi = (k / K) * Math.PI / 2;
+      return [-sn[c][0] * Math.cos(phi), -sn[c][1] * Math.cos(phi), (top ? 1 : -1) * Math.sin(phi)];
+    };
+    const ringT = [], ringB = [];
+    for (let c = 0; c < m; c++) {
+      const j = (c + 1) % m;
+      const A = rs.pts[c], B = rs.pts[j];
+      const dAT = dirAt(c, true, rT), dBT = dirAt(c, false, rT);
+      const dAB = dirAt(c, true, rB), dBB = dirAt(c, false, rB);
+      const wn = [-sn[c][0], -sn[c][1], 0]; // outward = right normal (material is on the LEFT)
+      // Wall: this column's own z-span (crisp ends where r changes).
+      tri([A.x, A.y, rB[c]], [B.x, B.y, rB[c]], [B.x, B.y, H - rT[c]], wn);
+      tri([A.x, A.y, rB[c]], [B.x, B.y, H - rT[c]], [A.x, A.y, H - rT[c]], wn);
       for (let k = 0; k < K; k++) {
-        // top
-        let p1 = bandPt(A, capRing[i], rT[i], k, true), p2 = bandPt(B, capRing[j], rT[j], k, true);
-        let p3 = bandPt(B, capRing[j], rT[j], k + 1, true), p4 = bandPt(A, capRing[i], rT[i], k + 1, true);
-        pushTri(p1, bandN(k, true), p2, bandN(k, true), p3, bandN(k + 1, true));
-        pushTri(p1, bandN(k, true), p3, bandN(k + 1, true), p4, bandN(k + 1, true));
-        // bottom (reverse winding so faces point outward/down)
-        p1 = bandPt(A, capRingB[i], rB[i], k, false); p2 = bandPt(B, capRingB[j], rB[j], k, false);
-        p3 = bandPt(B, capRingB[j], rB[j], k + 1, false); p4 = bandPt(A, capRingB[i], rB[i], k + 1, false);
-        pushTri(p1, bandN(k, false), p3, bandN(k + 1, false), p2, bandN(k, false));
-        pushTri(p1, bandN(k, false), p4, bandN(k + 1, false), p3, bandN(k + 1, false));
+        if (rT[c] > 0) {
+          tri(bandPt(A, dAT, rT[c], k, true), bandPt(B, dBT, rT[c], k, true), bandPt(B, dBT, rT[c], k + 1, true), bandN(c, k, true));
+          tri(bandPt(A, dAT, rT[c], k, true), bandPt(B, dBT, rT[c], k + 1, true), bandPt(A, dAT, rT[c], k + 1, true), bandN(c, k + 1, true));
+        }
+        if (rB[c] > 0) {
+          tri(bandPt(A, dAB, rB[c], k, false), bandPt(B, dBB, rB[c], k, false), bandPt(B, dBB, rB[c], k + 1, false), bandN(c, k, false));
+          tri(bandPt(A, dAB, rB[c], k, false), bandPt(B, dBB, rB[c], k + 1, false), bandPt(A, dAB, rB[c], k + 1, false), bandN(c, k + 1, false));
+        }
+      }
+      const sT = bandPt(A, dAT, rT[c], K, true), eT = bandPt(B, dBT, rT[c], K, true);
+      ringT.push(new THREE.Vector2(sT[0], sT[1]), new THREE.Vector2(eT[0], eT[1]));
+      const sB = bandPt(A, dAB, rB[c], K, false), eB = bandPt(B, dBB, rB[c], K, false);
+      ringB.push(new THREE.Vector2(sB[0], sB[1]), new THREE.Vector2(eB[0], eB[1]));
+    }
+    // STOP FACES: where adjacent columns' radii differ, close the gap at the
+    // shared sample with a strip between the two end profiles — the flat
+    // end a real CAD partial fillet has, instead of a fading bump. When one
+    // side is sharp its profile collapses to the corner point (a fan).
+    for (let s = 0; s < m; s++) {
+      const cp = (s - 1 + m) % m, cn = s;
+      const P = rs.pts[s];
+      const tx = sn[cn][1], ty = -sn[cn][0]; // forward tangent of the next column
+      const pairs = [[rT, true], [rB, false]];
+      for (let q = 0; q < 2; q++) {
+        const rArr = pairs[q][0], top = pairs[q][1];
+        if (Math.abs(rArr[cp] - rArr[cn]) < 1e-6) continue;
+        const dPrev = dirAt(cp, false, rArr), dNext = dirAt(cn, true, rArr);
+        const nrm = rArr[cp] > rArr[cn] ? [-tx, -ty, 0] : [tx, ty, 0];
+        for (let k = 0; k < K; k++) {
+          const a0 = bandPt(P, dPrev, rArr[cp], k, top), a1 = bandPt(P, dPrev, rArr[cp], k + 1, top);
+          const b0 = bandPt(P, dNext, rArr[cn], k, top), b1 = bandPt(P, dNext, rArr[cn], k + 1, top);
+          tri(a0, b0, b1, nrm);
+          tri(a0, b1, a1, nrm);
+        }
       }
     }
+    if (li === 0) { capOuter.push(...ringT); capOuterB.push(...ringB); }
+    else { capHoles.push(ringT); capHolesB.push(ringB); }
   }
-  // Caps from the offset rings (top at z=H normal +z; bottom at z=0, −z).
+  // Caps from the per-column rings (top z=H normal +z; bottom z=0, -z).
   const capTri = (outer, holes, z, up) => {
-    // Dedupe near-coincident ring points — offset rings pinch together in
-    // fade zones and duplicate points glitch the triangulator ("weird
-    // shape on the circle edge", ssupgrades round 3).
     const clean = (ring) => {
       const out = [];
       for (const p of ring) {
@@ -10992,12 +10995,9 @@ function _buildSegSoftGeo(shape, H, runsByLoop) {
     let tris;
     try { tris = THREE.ShapeUtils.triangulateShape(outerV, holeVs); } catch (_) { return; }
     const all = outerV.concat(...holeVs);
-    const nz = up ? 1 : -1;
+    const nrm = [0, 0, up ? 1 : -1];
     for (const t of tris) {
-      const [ia, ib, ic] = up ? [t[0], t[1], t[2]] : [t[0], t[2], t[1]];
-      pushTri([all[ia].x, all[ia].y, z], [0, 0, nz],
-              [all[ib].x, all[ib].y, z], [0, 0, nz],
-              [all[ic].x, all[ic].y, z], [0, 0, nz]);
+      tri([all[t[0]].x, all[t[0]].y, z], [all[t[1]].x, all[t[1]].y, z], [all[t[2]].x, all[t[2]].y, z], nrm);
     }
   };
   if (capOuter.length >= 3) {
