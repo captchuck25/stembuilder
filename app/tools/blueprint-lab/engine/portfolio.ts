@@ -388,32 +388,68 @@ export interface StarterSheetArgs {
 const GRID_FT = 1;
 
 // Light photocopy-safe grid across the frame, anchored so `anchor` (page
-// coords) is a grid intersection; a slightly darker line every 5 squares.
+// coords) is a grid intersection. UNIFORM lines — a darker every-5th line was
+// tried and cut (2026-09-03: shells don't start on the darker lines, so the
+// emphasis misleads more than it helps counting).
 function drawGrid(doc: jsPDF, frame: Frame, stepIn: number, anchor: Vec2) {
   const first = (a: number, lo: number) => a - Math.ceil((a - lo - 1e-9) / stepIn) * stepIn;
-  const lines: { pos: number; major: boolean; vert: boolean }[] = [];
+  doc.setLineDashPattern([], 0);
+  doc.setDrawColor(196, 200, 214);
+  doc.setLineWidth(0.0065);
   for (let x = first(anchor.x, frame.x); x <= frame.x + frame.w + 1e-9; x += stepIn) {
-    lines.push({ pos: x, major: Math.round((x - anchor.x) / stepIn) % 5 === 0, vert: true });
+    doc.line(x, frame.y, x, frame.y + frame.h);
   }
   for (let y = first(anchor.y, frame.y); y <= frame.y + frame.h + 1e-9; y += stepIn) {
-    lines.push({ pos: y, major: Math.round((y - anchor.y) / stepIn) % 5 === 0, vert: false });
+    doc.line(frame.x, y, frame.x + frame.w, y);
   }
+}
+
+// Slim worksheet chrome — the drawing needs every vertical inch (a printed
+// 1/8"-scale sheet proved hard to draw on), so the starter sheets trade the
+// full title strip for one short row: a DESIGNED BY write-in, the site, and
+// the sheet number. Shell name/SF live in the caption under the drawing.
+const SLIM_STRIP_H = 0.42;
+function slimChrome(doc: jsPDF, sheetNo: string): Frame {
+  const ink = rgb(T.ink);
   doc.setLineDashPattern([], 0);
-  for (const major of [false, true]) {
-    doc.setDrawColor(...(major ? [168, 173, 190] as [number, number, number] : [205, 208, 219] as [number, number, number]));
-    doc.setLineWidth(major ? 0.009 : 0.006);
-    for (const l of lines) {
-      if (l.major !== major) continue;
-      if (l.vert) doc.line(l.pos, frame.y, l.pos, frame.y + frame.h);
-      else doc.line(frame.x, l.pos, frame.x + frame.w, l.pos);
-    }
-  }
+  doc.setDrawColor(...ink);
+  doc.setLineWidth(0.03);
+  doc.rect(BORDER_OUT, BORDER_OUT, PAGE_W - 2 * BORDER_OUT, PAGE_H - 2 * BORDER_OUT, 'S');
+  doc.setLineWidth(0.011);
+  doc.rect(BORDER_IN, BORDER_IN, PAGE_W - 2 * BORDER_IN, PAGE_H - 2 * BORDER_IN, 'S');
+
+  const stripY = PAGE_H - BORDER_IN - SLIM_STRIP_H;
+  doc.setLineWidth(0.02);
+  doc.line(BORDER_IN, stripY, PAGE_W - BORDER_IN, stripY);
+
+  const midY = stripY + SLIM_STRIP_H / 2;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...rgb(T.inkSoft));
+  doc.text('DESIGNED BY', BORDER_IN + 0.14, midY, { align: 'left', baseline: 'middle' });
+  doc.setDrawColor(...rgb(T.inkSoft));
+  doc.setLineWidth(0.008);
+  doc.line(BORDER_IN + 0.85, midY + 0.09, BORDER_IN + 5.4, midY + 0.09);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(...ink);
+  doc.text(sheetNo, PAGE_W - BORDER_IN - 0.14, midY, { align: 'right', baseline: 'middle' });
+  doc.setFontSize(9.5);
+  doc.text('stembuilder.io', PAGE_W - BORDER_IN - 1.1, midY, { align: 'right', baseline: 'middle' });
+  doc.setFont('helvetica', 'normal');
+
+  return {
+    x: BORDER_IN + FRAME_PAD,
+    y: BORDER_IN + FRAME_PAD,
+    w: PAGE_W - 2 * (BORDER_IN + FRAME_PAD),
+    h: stripY - BORDER_IN - 2 * FRAME_PAD,
+  };
 }
 
 export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blob> {
   const { jsPDF } = await import('jspdf');
   const range = args.totalSqFt ?? { min: 1000, max: 1000 };
-  const fields: PortfolioFields = { student: '', school: '', project: args.assignmentTitle, date: '' };
 
   // The concrete variants students will see in the in-app picker — respecting
   // the teacher's narrowed selection ('ranch#2' entries), with version letters
@@ -460,29 +496,37 @@ export async function buildStarterSheetsPdf(args: StarterSheetArgs): Promise<Blo
     const block = blockAtOrigin('plan', prims, lb);
 
     nextPage();
-    const s = pickScale(fitK(block, { x: 0, y: 0, w: PAGE_W - 2 * (BORDER_IN + FRAME_PAD), h: PAGE_H - BORDER_IN - TITLE_H - BORDER_IN - 2 * FRAME_PAD - CAPTION_H }));
-    const frame = pageChrome(doc, fields, `S-${n++}`, title, s.label);
+    const frame = slimChrome(doc, `S-${n++}`);
     const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
-    const toPdf = toPdfFor(block, inner, s.k);
+    // MAXIMIZE the drawing rather than snapping down to a standard plot scale
+    // (2026-09-03: a 1/8"-scale printout was too small to draw on, and 3/16
+    // doesn't fit the big shells even with the slim strip). The grid is the
+    // measuring tool on this worksheet — count squares, not ruler inches — so
+    // the caption states the square size and skips the scale note. Capped at
+    // 1/2" = 1' so tiny studios don't print comically large.
+    const k = Math.min(fitK(block, inner), 1 / 24);
+    const toPdf = toPdfFor(block, inner, k);
     // Anchor the grid on the shell's top-left corner — shell dims snap to
     // whole feet, so every edge lands on a grid line.
     const anchor = toPdf({ x: Math.min(...xs), y: -Math.min(...ys) });
-    drawGrid(doc, inner, GRID_FT * 12 * s.k, anchor);
+    drawGrid(doc, inner, GRID_FT * 12 * k, anchor);
     renderBlocksToPdf(doc, [block], toPdf, {
-      scale: s.k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
+      scale: k, minLwInPerPx: PRINT_MIN_LW, minTextIn: PRINT_MIN_TEXT,
     });
-    drawCaption(doc, inner, `${title.toUpperCase()}  ·  ${stats.sqFt.toLocaleString()} SF  ·  1 SQUARE = 1'-0"  ·  SCALE ${s.label}`);
+    drawCaption(doc, inner, `${title.toUpperCase()}  ·  ${stats.sqFt.toLocaleString()} SF  ·  1 SQUARE = 1'-0"`);
   }
 
-  // Plain graph-paper page — scaled to the brief so a full design fits.
+  // Plain graph-paper page — box size maximized for a typical footprint at the
+  // brief's target (generous 2.5:1 rectangle plus slack), capped at 3/16".
   {
-    const big = range.max >= 1400;
-    const s = ARCH_SCALES.find(x => x.k === (big ? 1 / 96 : 1 / 64))!;
     nextPage();
-    const frame = pageChrome(doc, fields, `S-${n}`, 'Graph paper', s.label);
+    const frame = slimChrome(doc, `S-${n}`);
     const inner: Frame = { ...frame, h: frame.h - CAPTION_H };
-    drawGrid(doc, inner, GRID_FT * 12 * s.k, { x: inner.x + inner.w / 2, y: inner.y + inner.h / 2 });
-    drawCaption(doc, inner, `GRAPH PAPER  ·  1 SQUARE = 1'-0"  ·  SCALE ${s.label}`);
+    const wFt = Math.sqrt(range.max * 2.5) * 1.08;
+    const hFt = wFt / 2.5 * 1.15;
+    const box = Math.min(3 / 16, inner.w / wFt, inner.h / hFt);
+    drawGrid(doc, inner, box, { x: inner.x + inner.w / 2, y: inner.y + inner.h / 2 });
+    drawCaption(doc, inner, `GRAPH PAPER  ·  1 SQUARE = 1'-0"`);
   }
 
   return doc.output('blob');
