@@ -2494,6 +2494,14 @@ export default function ClassDetailPage() {
                           </div>
                           <div style={{ display: "flex", gap: 8 }}>
                             <button
+                              onClick={() => window.open(`/tools/bridge?assignment=${a.id}&demo=teacher`, "_blank")}
+                              title="Try this assignment yourself — nothing is saved or submitted"
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #2563eb",
+                                background: "#fff", color: "#1d4ed8",
+                                fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                              ▶ Demo
+                            </button>
+                            <button
                               onClick={() => toggleLeaderboard(a.id)}
                               style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #d97706",
                                 background: isExpanded ? "#d97706" : "#fff", color: isExpanded ? "#fff" : "#92400e",

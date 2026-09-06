@@ -144,7 +144,11 @@ function BridgeToolPage() {
   // student's saved design read-only — saves, autosave, submit, and the leave guard
   // all skip so nothing persists back to the student's record.
   const viewAsStudent = searchParams.get("asStudent");
-  const isDemoMode = !!viewAsStudent;
+  // Teacher trying the assignment themselves: full student experience (locked
+  // span/load, budget, style requirement, live checker) but nothing is saved
+  // or submitted.
+  const teacherDemo = searchParams.get("demo") === "teacher";
+  const isDemoMode = !!viewAsStudent || teacherDemo;
   const [viewingStudent, setViewingStudent] = useState<{ name: string; email: string } | null>(null);
   const [demoDesignFound, setDemoDesignFound] = useState<boolean | null>(null);
   // Name of the cloud design currently open — saves go back to this record
@@ -412,7 +416,9 @@ function BridgeToolPage() {
     const aid = searchParams.get("assignment");
     if (!aid) return;
     type DesignRow = { nodes: unknown[]; members: unknown[]; span_feet: number; load_lb: number; name: string; designer_name: string | null };
-    const designPromise: Promise<DesignRow | null> = viewAsStudent
+    const designPromise: Promise<DesignRow | null> = teacherDemo
+      ? Promise.resolve(null) // teacher demo starts from a blank canvas
+      : viewAsStudent
       ? fetch(`/api/teacher/student-work/bridge?studentId=${encodeURIComponent(viewAsStudent)}&assignmentId=${aid}`)
           .then(r => r.ok ? r.json() : null)
           .then((payload: { design: (DesignRow & { id?: string }) | null; student: { name: string; email: string } | null } | null) => {
@@ -425,7 +431,7 @@ function BridgeToolPage() {
             return null;
           })
       : fetch(`/api/bridge/by-assignment?assignmentId=${aid}`).then(r => r.ok ? r.json() : null);
-    const submissionPromise = viewAsStudent
+    const submissionPromise = viewAsStudent || teacherDemo
       ? Promise.resolve(null)
       : fetch(`/api/bridge-submissions/mine?assignmentId=${aid}`).then(r => r.ok ? r.json() : null);
     Promise.all([
@@ -476,7 +482,8 @@ function BridgeToolPage() {
     if (
       searchParams.get("id") ||
       searchParams.get("assignment") ||
-      viewAsStudent
+      viewAsStudent ||
+      teacherDemo
     )
       return;
     setShowSetupWizard(true);
@@ -3108,7 +3115,9 @@ function BridgeToolPage() {
           gap: 16, flexWrap: "wrap", fontFamily: "system-ui,sans-serif",
         }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>
-            👁 Viewing {viewingStudent?.name || "student"}&apos;s work — changes won&apos;t be saved
+            {teacherDemo
+              ? "🔧 Demo mode — try the assignment yourself; nothing is saved or submitted"
+              : <>👁 Viewing {viewingStudent?.name || "student"}&apos;s work — changes won&apos;t be saved</>}
             {demoDesignFound === false && (
               <span style={{ marginLeft: 12, padding: "2px 10px", borderRadius: 999,
                 background: "#fde68a", color: "#7c2d12", fontSize: 12, fontWeight: 800 }}>
