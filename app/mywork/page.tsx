@@ -122,7 +122,7 @@ const BLOCK_MODULES = [
   { id: 2, title: "Loops",      color: "#16A34A", challenges: 10, quizTotal: 5 },
   { id: 3, title: "Nested Loops", color: "#0D9488", challenges: 10, quizTotal: 5 },
   { id: 4, title: "While & If",   color: "#7C3AED", challenges: 10, quizTotal: 5 },
-  { id: 5, title: "Functions",    color: "#DB2777", challenges: 10, quizTotal: 5 },
+  { id: 5, title: "Functions",    color: "#DB2777", challenges: 6,  quizTotal: 5 },
 ];
 
 function BlockLabSection({ rows }: { rows: ProgressRow[] }) {

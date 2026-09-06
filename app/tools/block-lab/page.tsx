@@ -9,7 +9,7 @@ import { UNITS, chalKey, countCompleted, BlockUnit } from './units';
 import { blocksForLevel, BLOCK_MAP } from './engine/blocks';
 import { ScriptNode, countBlocks } from './engine/runtime';
 import * as Blockly from 'blockly';
-import { registerBlockDefs, getDarkTheme } from './engine/blocklyDefs';
+import { registerBlockDefs, getDarkTheme, setFunctionLibraryNames } from './engine/blocklyDefs';
 import { THEMES, Theme } from './engine/themes';
 import { STEMBotAnimator } from './engine/animation';
 import { renderBot } from './engine/mazeRenderer';
@@ -25,9 +25,56 @@ interface Progress {
   savedXml: Record<string, string>;
   /** Best star rating (1-3) per challenge key */
   stars: Record<string, number>;
+  /** 📚 My Functions: name → the Define block's XML. Every function a
+   *  student defines is saved here when they beat a level, and loads into
+   *  every later challenge for free. */
+  library: Record<string, string>;
 }
 function emptyProgress(): Progress {
-  return { completedChallenges: {}, completedUnits: {}, savedXml: {}, stars: {} };
+  return { completedChallenges: {}, completedUnits: {}, savedXml: {}, stars: {}, library: {} };
+}
+// The library rides one cloud row per student: challenge_idx -2 on the
+// Functions unit's level, saved_code = JSON of the name→XML map.
+const LIBRARY_ROW = { level_idx: 4, challenge_idx: -2 };
+async function syncLibrary(lib: Record<string, string>) {
+  await fetch('/api/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: 'block-lab', ...LIBRARY_ROW, completed: false, saved_code: JSON.stringify(lib) }),
+  });
+}
+/** Pull every top-level definition out of a workspace's XML: name → block XML */
+function extractDefinitions(xml: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (typeof DOMParser === 'undefined' || !xml) return out;
+  try {
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const root = doc.documentElement;
+    for (const el of Array.from(root.children)) {
+      if (el.tagName !== 'block' || el.getAttribute('type') !== 'define_trick') continue;
+      const nameEl = Array.from(el.children).find(c => c.tagName === 'field' && c.getAttribute('name') === 'NAME');
+      const name = (nameEl?.textContent ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 12);
+      if (name) out[name] = el.outerHTML;
+    }
+  } catch { /* ignore malformed XML */ }
+  return out;
+}
+/** Library definitions as collapsed, stacked workspace XML (merged into a saved script if given) */
+function withLibrary(savedXml: string | undefined, lib: Record<string, string>): string | undefined {
+  const names = Object.keys(lib);
+  if (names.length === 0) return savedXml;
+  const already = savedXml ? extractDefinitions(savedXml) : {};
+  const missing = names.filter(n => !(n in already));
+  const defs = missing.map((n, i) => lib[n].replace('<block ', `<block collapsed="true" x="20" y="${20 + i * 64}" `)).join('');
+  if (!savedXml) return `<xml xmlns="https://developers.google.com/blockly/xml">${defs}</xml>`;
+  return savedXml.replace('</xml>', defs + '</xml>');
+}
+/** countBlocks, but library-provided definitions cost nothing */
+function countFree(nodes: ScriptNode[], free: Set<string>): number {
+  return nodes.reduce((sum, n) => {
+    if (n.blockId === 'define_trick' && free.has(String(n.params.trick ?? ''))) return sum;
+    return sum + countBlocks([n]);
+  }, 0);
 }
 const STORAGE_KEY = 'block_lab_progress';
 function loadProgress(): Progress {
@@ -69,6 +116,8 @@ async function loadFromCloud(_userId: string): Promise<Progress> {
       if (row.completed) p.completedChallenges[key] = true;
       if (row.saved_code?.startsWith('<xml')) p.savedXml[key] = row.saved_code;
       if (typeof row.quiz_score === 'number' && row.quiz_score > 0) p.stars[key] = Math.min(3, row.quiz_score);
+    } else if (row.challenge_idx === LIBRARY_ROW.challenge_idx && row.level_idx === LIBRARY_ROW.level_idx) {
+      try { const lib = JSON.parse(row.saved_code ?? '{}'); if (lib && typeof lib === 'object') p.library = lib; } catch { /* ignore */ }
     } else if (row.completed) {
       p.completedUnits[row.level_idx] = true;
     }
@@ -133,9 +182,9 @@ function noteBlockFor(spec: string): Omit<StackNode, 'children'> | null {
   const s = spec.trim().toLowerCase();
   let m = s.match(/^repeat (\d+)$/);
   if (m) return { type: 'repeat', fields: { TIMES: m[1] }, container: true };
-  m = s.match(/^define (\d)$/);
+  m = s.match(/^define ([a-z0-9_]+)$/);
   if (m) return { type: 'define_trick', fields: { NAME: m[1] }, container: true };
-  m = s.match(/^call (\d)$/);
+  m = s.match(/^call ([a-z0-9_]+)$/);
   if (m) return { type: 'do_trick', fields: { NAME: m[1] }, container: false };
   const map: Record<string, [string, boolean]> = {
     'move': ['move_forward', false], 'turn left': ['turn_left', false], 'turn right': ['turn_right', false],
@@ -445,7 +494,10 @@ function ChallengeView({
   const [bumpFlash, setBumpFlash] = useState(false);
   const [limitMsg, setLimitMsg] = useState<string | null>(null);
   const [blockCount, setBlockCount] = useState(0);
-  const [speed, setSpeed] = useState(1);
+  // 📚 Library functions available on this challenge cost 0 blocks
+  const freeNames = useMemo(() => new Set(Object.keys(progress.library)), [progress.library]);
+  useEffect(() => { setFunctionLibraryNames([...freeNames]); }, [freeNames]);
+  const [speed, setSpeed] = useState(ui === 4 ? 2 : 1);
   const [muted, setMutedState] = useState(() => (typeof window === 'undefined' ? false : isMuted()));
 
   const boardRef = useRef<MazeBoardHandle>(null);
@@ -467,10 +519,10 @@ function ChallengeView({
   const handleRun = useCallback(() => {
     if (running) return;
     const script = editorRef.current?.getScript() ?? [];
+    const used = countFree(script, freeNames);
     // Hard block limit: too many blocks means brute force — nudge toward the
     // unit's concept instead of running
     if (ch.maxBlocks != null) {
-      const used = countBlocks(script);
       if (used > ch.maxBlocks) {
         setLimitMsg(`🧱 Block limit is ${ch.maxBlocks} — you're using ${used}. Find the repeating pattern and shrink your program!`);
         setTimeout(() => setLimitMsg(null), 4500);
@@ -480,8 +532,8 @@ function ChallengeView({
     setLimitMsg(null);
     setRunning(true);
     setBumpFlash(false);
-    boardRef.current?.run(script);
-  }, [running, ch.maxBlocks]);
+    boardRef.current?.run(script, used);
+  }, [running, ch.maxBlocks, freeNames]);
 
   const handleStop = useCallback(() => {
     boardRef.current?.stop();
@@ -618,12 +670,23 @@ function ChallengeView({
                   key={chalKey(ui, ci)}
                   ref={editorRef}
                   availableBlocks={availableBlocks}
-                  initialXml={progress.savedXml[chalKey(ui, ci)]}
+                  initialXml={withLibrary(progress.savedXml[chalKey(ui, ci)], progress.library)}
                   disabled={running}
                   itemName={theme.itemName}
-                  onBlockCount={setBlockCount}
+                  onScriptChange={s => setBlockCount(countFree(s, freeNames))}
                 />
               </div>
+
+              {/* 📚 My Functions — saved when a level is beaten; free to call on every later level */}
+              {freeNames.size > 0 && (
+                <div style={{ padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(219,39,119,0.08)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#f9a8d4', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📚 My Functions</span>
+                  {[...freeNames].map(n => (
+                    <span key={n} style={{ fontSize: 12, fontWeight: 800, color: '#fff', background: '#DB2777', borderRadius: 8, padding: '2px 10px' }}>{n}</span>
+                  ))}
+                  <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>already in your workspace · free to call</span>
+                </div>
+              )}
 
               {/* Run / Stop / Speed / Reset / Clear / Mute */}
               <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', flexShrink: 0, display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -905,6 +968,7 @@ export default function BlockLabPage() {
           stars: Object.fromEntries(
             [...starKeys].map(k => [k, Math.max(local.stars[k] ?? 0, cloud.stars[k] ?? 0)]),
           ),
+          library: { ...local.library, ...cloud.library },
         };
         setProgress(merged);
         progressRef.current = merged;
@@ -934,13 +998,20 @@ export default function BlockLabPage() {
   const handleSolve = useCallback((ui: number, ci: number, xml: string, stars?: number) => {
     const key = chalKey(ui, ci);
     const best = Math.max(progressRef.current.stars[key] ?? 0, stars ?? 0);
+    // Beating a level saves every function on the workspace to 📚 My Functions
+    const learned = extractDefinitions(xml);
+    const libraryChanged = Object.keys(learned).some(n => progressRef.current.library[n] !== learned[n]);
     const next = updateProgress(p => ({
       ...p,
       completedChallenges: { ...p.completedChallenges, [key]: true },
       savedXml: { ...p.savedXml, [key]: xml },
       stars: best > 0 ? { ...p.stars, [key]: best } : p.stars,
+      library: { ...p.library, ...learned },
     }));
-    if (userId) syncToCloud(userId, ui, ci, true, xml, best > 0 ? best : undefined);
+    if (userId) {
+      syncToCloud(userId, ui, ci, true, xml, best > 0 ? best : undefined);
+      if (libraryChanged) syncLibrary(next.library);
+    }
     return next;
   }, [updateProgress, userId]);
 

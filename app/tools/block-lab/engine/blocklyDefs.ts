@@ -110,31 +110,81 @@ const BLOCKLY_JSON_DEFS = [
   },
   {
     // No prev/next connectors: a definition stands alone on the workspace,
-    // it never runs where it sits — only "Call Function" runs it
+    // it never runs where it sits — only "Call Function" runs it. The student
+    // NAMES it (letters/digits/_, up to 12 chars) — see the fn_name_field
+    // extension; when they beat the level it is saved to their library.
     type: 'define_trick',
     message0: '🎓 Define Function %1',
-    args0: [{
-      type: 'field_dropdown', name: 'NAME',
-      options: [['1', '1'], ['2', '2'], ['3', '3']],
-    }],
+    args0: [{ type: 'field_input', name: 'NAME', text: 'step', spellcheck: false }],
     message1: 'do: %1',
     args1: [{ type: 'input_statement', name: 'BODY' }],
     colour: '#DB2777',
-    tooltip: 'Define a function — a named set of blocks. Defining does NOTHING by itself; use "Call Function" to run it.',
+    extensions: ['fn_name_field'],
+    tooltip: 'Define a function — a named set of blocks. Defining does NOTHING by itself; use "Call Function" to run it. Beat the level and it joins your library.',
   },
   {
     type: 'do_trick',
     message0: 'Call Function %1',
-    args0: [{
-      type: 'field_dropdown', name: 'NAME',
-      options: [['1', '1'], ['2', '2'], ['3', '3']],
-    }],
+    args0: [{ type: 'input_dummy', name: 'NAMEIN' }],
     previousStatement: null,
     nextStatement: null,
     colour: '#DB2777',
-    tooltip: 'Run the function with this name. A call counts as ONE block, no matter how big the function is!',
+    extensions: ['fn_call_dropdown'],
+    tooltip: 'Run the function with this name. A call counts as ONE block, no matter how big the function is — and library functions are free!',
   },
 ];
+
+// ─── Named-function support ───────────────────────────────────────────────────
+
+/** Names in the student's saved library — dropdowns list these first */
+let libraryNames: string[] = [];
+export function setFunctionLibraryNames(names: string[]) {
+  libraryNames = [...names];
+}
+
+export function cleanFunctionName(raw: string): string {
+  return String(raw ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 12);
+}
+
+/** Dropdown that lists every known function name and tolerates values that
+ *  aren't in the list yet (e.g. a saved call loaded before its definition). */
+class FnNameDropdown extends Blockly.FieldDropdown {
+  constructor() {
+    super(function (this: Blockly.FieldDropdown) {
+      const names = new Set<string>(libraryNames);
+      const ws = this.getSourceBlock()?.workspace;
+      ws?.getBlocksByType('define_trick', false).forEach(b => {
+        const n = cleanFunctionName(String(b.getFieldValue('NAME') ?? ''));
+        if (n) names.add(n);
+      });
+      const cur = this.getValue();
+      if (cur) names.add(String(cur));
+      if (names.size === 0) names.add('step');
+      return [...names].map(n => [n, n] as [string, string]);
+    });
+  }
+  protected override doClassValidation_(newValue?: string): string | null {
+    const v = cleanFunctionName(String(newValue ?? ''));
+    return v || null;
+  }
+  protected override getText_(): string | null {
+    const v = this.getValue();
+    return v == null ? null : String(v);
+  }
+}
+
+let extensionsRegistered = false;
+function registerFunctionExtensions() {
+  if (extensionsRegistered) return;
+  extensionsRegistered = true;
+  Blockly.Extensions.register('fn_name_field', function (this: Blockly.Block) {
+    const f = this.getField('NAME');
+    f?.setValidator((v: string) => cleanFunctionName(v) || null);
+  });
+  Blockly.Extensions.register('fn_call_dropdown', function (this: Blockly.Block) {
+    this.getInput('NAMEIN')?.appendField(new FnNameDropdown() as unknown as Blockly.Field, 'NAME');
+  });
+}
 
 // The collect-sensor's label matches the current world's collectible
 // (desert crystals, forest acorns, space data chips) — re-registering with a
@@ -142,6 +192,7 @@ const BLOCKLY_JSON_DEFS = [
 // scripts load everywhere.
 let registeredItemName: string | null = null;
 export function registerBlockDefs(itemName = 'crystal') {
+  registerFunctionExtensions();
   if (registeredItemName === itemName) return;
   const article = /^[aeiou]/i.test(itemName) ? 'an' : 'a';
   const defs = BLOCKLY_JSON_DEFS.map(d => d.type === 'if_on_item'
@@ -243,7 +294,7 @@ function blockToNode(block: Blockly.Block): ScriptNode {
     params.times = Math.max(1, Math.min(20, Number(raw) || 3));
   }
   if (blockId === 'define_trick' || blockId === 'do_trick') {
-    params.trick = String(block.getFieldValue('NAME') ?? '1');
+    params.trick = cleanFunctionName(String(block.getFieldValue('NAME') ?? '')) || 'step';
   }
 
   const bodyBlock = block.getInputTargetBlock('BODY');
@@ -277,7 +328,7 @@ export function workspaceToScript(workspace: Blockly.WorkspaceSvg): ScriptNode[]
   // reusing a trick costs one block, exactly like calling a function.
   const defs: Record<string, ScriptNode[]> = {};
   for (const node of script) {
-    if (node.blockId === 'define_trick') defs[String(node.params.trick ?? '1')] = node.children ?? [];
+    if (node.blockId === 'define_trick') defs[String(node.params.trick ?? 'step')] = node.children ?? [];
   }
   if (Object.keys(defs).length === 0 && !script.some(n => n.blockId === 'do_trick')) return script;
 
@@ -285,7 +336,7 @@ export function workspaceToScript(workspace: Blockly.WorkspaceSvg): ScriptNode[]
     nodes.map(n => {
       if (n.blockId === 'do_trick') {
         // Depth cap: a trick that performs itself (or a cycle) stops quietly
-        const body = depth < 3 ? (defs[String(n.params.trick ?? '1')] ?? []) : [];
+        const body = depth < 3 ? (defs[String(n.params.trick ?? 'step')] ?? []) : [];
         return { ...n, children: expand(body, depth + 1) };
       }
       if (n.children) return { ...n, children: expand(n.children, depth) };

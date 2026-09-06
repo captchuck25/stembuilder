@@ -27,7 +27,7 @@ import type { BlockChallenge } from '../units';
 const CELL = 52;
 
 export interface MazeBoardHandle {
-  run: (script: ScriptNode[]) => void;
+  run: (script: ScriptNode[], blocksUsedOverride?: number) => void;
   stop: () => void;
   reset: () => void;
 }
@@ -132,9 +132,10 @@ const MazeBoard = forwardRef<MazeBoardHandle, Props>(({ level, speed = 1, onWin,
   }, [level, theme, canvasW, canvasH]);
 
   useImperativeHandle(ref, () => ({
-    run(script: ScriptNode[]) {
+    run(script: ScriptNode[], blocksUsedOverride?: number) {
       doReset();
-      const blocksUsed = countBlocks(script);
+      // Library functions are free: the caller passes the count that excludes them
+      const blocksUsed = blocksUsedOverride ?? countBlocks(script);
       wonRef.current = false;
       bumpedRef.current = false;
       userStopRef.current = false;
