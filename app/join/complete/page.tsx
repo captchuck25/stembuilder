@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -21,13 +21,19 @@ function Complete() {
   const { status, update } = useSession();
   const code = params.get("code") ?? "";
   const [error, setError] = useState("");
+  // Latch so the enrollment runs exactly once per mount. useSession().update()
+  // flips `status` to "loading" and back to "authenticated" while it refetches,
+  // which re-fires this effect; without the latch the re-fire cancelled the
+  // pending redirect, re-POSTed the enrollment (409), called update() again,
+  // and looped forever on "Adding you to your class…" (seen in class 2026-09-08).
+  const started = useRef(false);
 
   useEffect(() => {
-    if (status === "loading") return;
+    if (status === "loading" || started.current) return;
     // Not signed in (e.g. they cancelled Google) — send them back to the code screen.
     if (status !== "authenticated") { router.replace(`/join${code ? `?code=${code}` : ""}`); return; }
+    started.current = true;
 
-    let cancelled = false;
     (async () => {
       // Goes through the onboarding gate: a FIRST-TIME Google user gets their
       // student profile + enrollment created atomically here (origin
@@ -38,17 +44,18 @@ function Complete() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "student", path: "class_code", code }),
       });
-      if (cancelled) return;
       if (res.ok || res.status === 409) {
-        // Refresh the JWT so it picks up the newly created profile.
-        await update();
-        if (!cancelled) router.replace("/student/dashboard");
+        // Refresh the JWT so it picks up the newly created profile (auth.ts jwt
+        // callback adopts it on any pass while needsOnboarding). Even if this
+        // refresh is skipped, the middleware's own auth() pass on the next
+        // navigation performs the same adoption, so the redirect is unconditional.
+        try { await update(); } catch { /* fall through — redirect regardless */ }
+        router.replace("/student/dashboard");
         return;
       }
       const data = await res.json().catch(() => ({}));
       setError(data.error ?? "We couldn't add you to that class. Ask your teacher for your class code.");
     })();
-    return () => { cancelled = true; };
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

@@ -99,7 +99,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       return true
     },
-    async jwt({ token, user, account, trigger }) {
+    async jwt({ token, user, account }) {
       if (account?.provider === 'google') token.googleSub = account.providerAccountId
 
       if (user) {
@@ -120,9 +120,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return token
       }
 
-      // Onboarding just completed (client called useSession().update()):
-      // adopt the freshly created profile into this session's token.
-      if (trigger === 'update' && token.needsOnboarding) {
+      // Signed in via Google but no profile yet: on every jwt pass, check
+      // whether onboarding has since created one and adopt it into the token.
+      // Runs only while needsOnboarding is true, so it costs one lookup per
+      // request for a user mid-onboarding and nothing afterwards. Deliberately
+      // NOT gated on trigger === "update": the client's useSession().update()
+      // with no data is a GET to /api/auth/session, which Auth.js does not
+      // flag as an update, so that gate left new users stuck as needsOnboarding.
+      if (token.needsOnboarding) {
         const filters = [
           token.googleSub ? `google_id.eq.${token.googleSub}` : null,
           token.email ? `email.eq.${token.email}` : null,
