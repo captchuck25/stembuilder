@@ -77,7 +77,6 @@ export const PLANS: PricingPlan[] = [
       "Our growing curriculum & project library included",
       "Admin dashboard & usage reporting",
       "Rostering — Google Classroom",
-      "Signed data privacy agreement (NDPA)",
       "A free trial to start",
     ],
     ctas: [
