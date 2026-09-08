@@ -30,9 +30,9 @@ const DELTA: Record<Dir, [number, number]> = { right: [1, 0], left: [-1, 0], up:
 
 // The library a student has built by the end of the unit
 const LIBRARY: Record<string, Tok[]> = {
-  step: [M, TR, M, TL, C],
-  hallway: [wh([M, C]), TR],
-  bigstep: [call("step"), repeat(3, [M])],
+  step: [M, TR, M, C, TL, M],                 // over, down onto the chip, over
+  horseshoe: [M, M, TR, M, M, C, TR, M, M],   // a U-turn with the chip at the bottom
+  hallway: [wh([M, C]), TR],                  // walks any hallway, then turns right
 };
 
 function simulate(ch: BlockChallenge, main: Tok[]) {
@@ -84,39 +84,39 @@ function countTok(toks: Tok[]): number {
 }
 const defCost = (name: string) => 1 + countTok(LIBRARY[name]);
 
-const FN_UNIT = UNITS.find((u) => u.challenges.some((c) => c.title === "Any Hallway"))!;
+const FN_UNIT = UNITS.find((u) => u.challenges.some((c) => c.title === "Your First Function"))!;
 const level = (title: string) => FN_UNIT.challenges.find((c) => c.title === title)!;
 
 const INTENDED: { title: string; newDefs: string[]; main: Tok[] }[] = [
   {
-    title: "One Function, Two Places",
+    title: "Your First Function",
     newDefs: ["step"],
-    main: [call("step"), M, M, call("step"), M],
+    main: [call("step")],
   },
   {
-    title: "Step Down",
+    title: "Step, Step, Step",
     newDefs: [],
-    main: [M, repeat(5, [call("step")]), M, M, call("step"), M],
+    main: [repeat(5, [call("step")])],
   },
   {
-    title: "Any Hallway",
+    title: "The Horseshoe",
+    newDefs: ["horseshoe"],
+    main: [M, call("horseshoe")],
+  },
+  {
+    title: "Steps and Horseshoes",
+    newDefs: [],
+    main: [call("step"), call("step"), call("horseshoe"), TL, TL, call("step"), call("step"), call("horseshoe")],
+  },
+  {
+    title: "The Hallway",
     newDefs: ["hallway"],
-    main: [call("hallway"), call("hallway"), call("hallway"), call("hallway"), call("hallway")],
+    main: [call("hallway"), call("hallway"), call("hallway")],
   },
   {
-    title: "Mix and Match",
+    title: "Three Tools",
     newDefs: [],
-    main: [M, call("step"), M, M, call("step"), call("hallway"), call("hallway"), M, M, call("step"), repeat(3, [M]), call("step"), M],
-  },
-  {
-    title: "Build on What You Have",
-    newDefs: ["bigstep"],
-    main: [M, call("bigstep"), call("bigstep"), call("bigstep"), TR, repeat(4, [M]), TR, call("bigstep"), call("step"), M],
-  },
-  {
-    title: "Graduation Day",
-    newDefs: [],
-    main: [M, call("bigstep"), call("step"), call("hallway"), call("hallway"), M, call("step"), M, M, call("bigstep"), M],
+    main: [call("hallway"), M, call("step"), call("step"), call("horseshoe"), TL, TL, call("step"), call("hallway"), call("horseshoe")],
   },
 ];
 
@@ -138,7 +138,8 @@ describe("Functions unit — intended solutions win with every chip, exactly at 
 describe("Functions unit — writing every motif out by hand blows the limit", () => {
   const inlineOf = (toks: Tok[]): Tok[] => toks.flatMap((t) =>
     t.t === "call" ? inlineOf(LIBRARY[t.fn]) : t.t === "repeat" ? Array.from({ length: t.n }, () => inlineOf(t.body)).flat() : [t]);
-  for (const { title, main } of INTENDED) {
+  for (const { title, main, newDefs } of INTENDED) {
+    if (newDefs.length) continue; // build levels are deliberately tiny
     it(`${title}: all-inline costs more than the limit`, () => {
       const ch = level(title);
       expect(countTok(inlineOf(main))).toBeGreaterThan(ch.maxBlocks!);

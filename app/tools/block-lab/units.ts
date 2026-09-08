@@ -828,24 +828,18 @@ const U5: BlockUnit = {
   introNotes: `# Unit 5 — Functions
 
 ## The Problem Functions Solve
-Look at this program for a maze with the same stair pattern in two different places:
+Here is one stair step for STEM Bot — over, down onto the chip, over:
 
 :::blocks
 move
 turn right
 move
-turn left
 collect
-move
-move
-move
-turn right
-move
 turn left
-collect
+move
 :::
 
-**12 blocks — and the stair is written twice.** A Repeat can't help: the two stairs aren't next to each other. What we need is a way to write the stair ONCE, give it a name, and use the name in both places.
+Six blocks. A staircase of five steps would be **thirty**. And the next maze has stairs too, and the one after that… Writing the same six blocks over and over is exactly what programmers refuse to do.
 
 ## Define, Name, Call
 That is exactly what a **function** is: a named set of blocks.
@@ -855,22 +849,22 @@ That is exactly what a **function** is: a named set of blocks.
 | **🎓 Define Function** | Give a NAME to the blocks inside — this runs NOTHING by itself |
 | **Call Function** | Run the named function, wherever you are, as many times as you like |
 
-You choose the name. Pick one that says what it does — \`step\`, \`hallway\`, \`zigzag\` (letters, numbers, and _ only, up to 12 characters).
+A new Define block has **no name** until you give it one — click the box and type. Pick a name that says what it does — \`step\`, \`hallway\`, \`horseshoe\` (letters, numbers, and _ only, up to 12 characters). The Call block's menu lists every name you have made.
 
 :::blocks
 define step
   move
   turn right
   move
-  turn left
   collect
+  turn left
+  move
 call step
-move
-move
+call step
 call step
 :::
 
-Same maze, and the stair is written **once**. Fewer blocks, and the program reads like a story: "step, walk, step."
+Three stairs, and the step is written **once**. The program reads like a story: "step, step, step."
 
 ## Defining ≠ Calling
 This is the big idea — and the #1 beginner mistake. **A definition alone does nothing when you press Run.** It just gets the function ready. The blocks only run when a **Call Function** block asks for them. A program that is all definitions and no calls sits perfectly still!
@@ -878,12 +872,14 @@ This is the big idea — and the #1 beginner mistake. **A definition alone does 
 ## 📚 My Functions — Your Library
 Here is the best part. **Every function you define is saved when you beat the level.** On every level after that, it is already sitting in your workspace, ready to call — and it costs **zero blocks**. You wrote \`step\` once; you will never write it again.
 
-That is what functions are FOR. Real programmers keep libraries of things they have already solved, and build new programs by *calling* them. By the end of this unit your library will have \`step\`, \`hallway\`, and \`bigstep\` — and the final maze is solved with nothing but calls.
+The **📚 My Functions** bar under your workspace lists everything you have built. Forgot what \`horseshoe\` does? Click its name to see the blocks. Deleted it by mistake? Put it back with one click.
+
+That is what functions are FOR. Real programmers keep libraries of things they have already solved, and build new programs by *calling* them. By the end of this unit your library will have \`step\`, \`horseshoe\`, and \`hallway\` — and the final maze is solved with nothing but calls.
 
 ## Why Programmers Use Functions Everywhere
 - **Write once, use anywhere:** a call counts as ONE block, no matter how big the function is — and library functions are free.
 - **One fix repairs every call:** mistake inside the function? Fix the definition — all the calls are instantly correct.
-- **Build on what you have:** a function can call another function. \`bigstep\` is just \`step\` plus a short walk.
+- **Readable programs:** \`step, step, horseshoe\` tells the story better than thirty raw blocks.
 
 ## The Real Vocabulary
 You are learning the exact words programmers use: you **define** a function, then **call** it. Next year in Python it looks like this:
@@ -899,88 +895,86 @@ Same idea, same words. You already know how it works.`,
   ],
 
   challenges: [
-    // ── Six levels + a persistent function LIBRARY (2026-09-05) ─────────────
-    // User: ten function mazes were monotonous, and re-dragging the same
-    // definition every level is the opposite of what functions are for.
-    // Now: every function a student defines is saved to 📚 My Functions when
-    // they beat a level, loads (collapsed) into every later challenge, and
-    // costs 0 blocks there. Par/limit count only NEW definitions + the main
-    // program. Boards are medium-sized; playback defaults to 2x here.
-    // Generated + verified by scratchpad fnlevels2.py; vitest covers at-par.
+    // ── Six levels, the user's progression (2026-09-08) ─────────────────────
+    // build step -> reuse step -> build horseshoe -> reuse both -> build
+    // hallway -> all three from the library. Every motif chains with ZERO
+    // glue where it repeats (the step is over-down-over, so stairs are just
+    // step, step, step). Library functions cost 0; only the function BUILT
+    // on a level is counted. Build levels are deliberately tiny.
+    // Generated + verified by scratchpad fnlevels3.py; vitest covers at-par.
     {
-      title: 'One Function, Two Places',
-      par: 11,
-      maxBlocks: 12,
-      // The only level where the definition itself is paid for: nothing is in
-      // the library yet. Beat it and `step` is saved forever.
+      title: 'Your First Function',
+      par: 8,
+      maxBlocks: 11,
+      // Builds `step` here (its definition is counted). Main program = 1 blocks, all-inline = 6.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'define_trick', 'do_trick'],
-      hint: 'The stair pattern appears in TWO different spots — a Repeat can\'t jump the gap between them. Define the stair (Move, Turn Right, Move, Turn Left, Collect) and NAME it: step. Call step in both places. Beat the level and step is saved to 📚 My Functions — forever.',
-      grid: [[1,1,1,1,1,1,1],[0,0,1,1,1,1,1],[1,0,0,0,0,1,1],[1,1,1,1,0,0,1],[1,1,1,1,1,1,1]],
-      startX:0, startY:1, startDir:'right', exitX:5, exitY:3,
-      collectibles:[{x:1,y:2},{x:4,y:3}],
+      hint: 'Build ONE step: Move, Turn Right, Move, Collect, Turn Left, Move. Put those inside 🎓 Define Function, click its name box and NAME it (try step), then Call step. That is the whole level — beat it and step is saved to 📚 My Functions.',
+      grid: [[1,1,1,1,1],[1,0,0,1,1],[1,1,0,0,1],[1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:3, exitY:2,
+      collectibles:[{x:2,y:2}],
     },
     {
-      title: 'Step Down',
-      par: 7,
-      maxBlocks: 10,
-      // Nothing new defined; library functions ['step'] are free. Main program = 7 blocks, all-inline = 34.
+      title: 'Step, Step, Step',
+      par: 2,
+      maxBlocks: 5,
+      // Nothing new built; library functions are free. Main program = 2 blocks, all-inline = 30.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'Look at your workspace: step is already there, from last level — you never write it again, and it costs 0 blocks. Five stairs in a row: Repeat 5 { Call step }. Then two steps across, one more step, and home.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,0,0,1,1,1,1,1,1],[1,1,1,1,1,1,0,0,1,1,1,1,1],[1,1,1,1,1,1,1,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:11, exitY:7,
-      collectibles:[{x:3,y:2},{x:4,y:3},{x:5,y:4},{x:6,y:5},{x:7,y:6},{x:10,y:7}],
+      hint: 'Look: step is already on your workspace, and it costs 0 blocks. Five stairs, back to back — Repeat 5 { Call step } and you are done.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,1,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,1,1,1,1],[1,1,1,1,1,1,1,1,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:11, exitY:6,
+      collectibles:[{x:2,y:2},{x:4,y:3},{x:6,y:4},{x:8,y:5},{x:10,y:6}],
     },
     {
-      title: 'Any Hallway',
+      title: 'The Horseshoe',
+      par: 12,
+      maxBlocks: 15,
+      // Builds `horseshoe` here (its definition is counted). Main program = 2 blocks, all-inline = 10.
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
+      hint: 'A new shape to build once: Move, Move, Turn Right, Move, Move, Collect, Turn Right, Move, Move — a U-turn with the chip at the bottom. Name it horseshoe. One Move to reach it, one call to run it.',
+      grid: [[1,1,1,1,1,1],[1,0,0,0,0,1],[1,1,1,1,0,1],[1,1,0,0,0,1],[1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:2, exitY:3,
+      collectibles:[{x:4,y:3}],
+    },
+    {
+      title: 'Steps and Horseshoes',
+      par: 8,
+      maxBlocks: 11,
+      // Nothing new built; library functions are free. Main program = 8 blocks, all-inline = 44.
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
+      hint: 'Nothing new to build. Read the maze: step, step, horseshoe, turn around (Turn Left, Turn Left), step, step, horseshoe. Call the right one where its shape appears — click a name in 📚 My Functions if you forget what it does.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,1,0,1,1,1,1,1],[1,1,1,1,1,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,1,1,1,1],[1,1,1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:9, exitY:9,
+      collectibles:[{x:2,y:2},{x:4,y:3},{x:7,y:5},{x:6,y:6},{x:8,y:7},{x:11,y:9}],
+    },
+    {
+      title: 'The Hallway',
+      par: 8,
+      maxBlocks: 11,
+      // Builds `hallway` here (its definition is counted). Main program = 3 blocks, all-inline = 23.
+      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
+      hint: 'Your third tool: hallway = While path ahead { Move, Collect }, then Turn Right. It walks a hallway of ANY length. Three hallways spiral inward — call it three times (or loop it).',
+      grid: [[1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:2, exitY:5,
+      collectibles:[{x:3,y:1},{x:6,y:1},{x:7,y:4},{x:5,y:5},{x:3,y:5}],
+    },
+    {
+      title: 'Three Tools',
       par: 10,
       maxBlocks: 13,
-      // Defines `hallway` here (counted); library functions ['hallway'] are free. Main program = 5 blocks, all-inline = 38.
+      // Nothing new built; library functions are free. Main program = 10 blocks, all-inline = 53.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'A new tool for your library. Define it and name it hallway: While path ahead { Move, Collect }, then Turn Right. Five hallways of different lengths spiral inward — call hallway five times (or loop it!).',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,1,1,1,0,1,1],[1,1,0,1,1,1,1,1,1,0,1,1],[1,1,0,1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:5, exitY:3,
-      collectibles:[{x:3,y:1},{x:6,y:1},{x:9,y:4},{x:7,y:6},{x:3,y:6},{x:2,y:4},{x:5,y:3}],
-    },
-    {
-      title: 'Mix and Match',
-      par: 14,
-      maxBlocks: 17,
-      // Nothing new defined; library functions ['hallway', 'step'] are free. Main program = 14 blocks, all-inline = 41.
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Nothing new to write! Your library has step AND hallway. Read the maze — stair, stair, hallway, hallway, stair, stair — and call the right one where its shape appears. Steer with single Moves in between.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,0,1,1],[1,0,0,1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,0,1,1,0,1,1],[1,1,1,1,1,1,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:1, exitY:5,
-      collectibles:[{x:3,y:2},{x:6,y:3},{x:8,y:3},{x:9,y:5},{x:9,y:7},{x:6,y:6},{x:2,y:5}],
-    },
-    {
-      title: 'Build on What You Have',
-      par: 15,
-      maxBlocks: 18,
-      // Defines `bigstep` here (counted); library functions ['bigstep', 'step'] are free. Main program = 11 blocks, all-inline = 45.
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'See the pattern? A step followed by a 3-step straight, four times over. Define bigstep = Call step, then Repeat 3 { Move } — a function built FROM a library function. Call bigstep four times, then step alone for the last one.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,0,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,0,0,0,0,0,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,0,0,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:8, exitY:6,
-      collectibles:[{x:3,y:2},{x:7,y:3},{x:11,y:4},{x:13,y:7},{x:9,y:6}],
-    },
-    {
-      title: 'Graduation Day',
-      par: 11,
-      maxBlocks: 14,
-      // Nothing new defined; library functions ['bigstep', 'hallway', 'step'] are free. Main program = 11 blocks, all-inline = 44.
-      blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Your whole library — step, hallway, bigstep — and nothing new to write. Plan the route, call the right function at each shape, steer between them. This is what real programming feels like.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,1,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,1,1,1,0,1,1],[1,0,0,0,0,0,1,1,1,1,0,1,1],[1,1,1,1,1,0,0,0,0,1,0,1,1],[1,1,1,1,1,1,1,1,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:1, exitY:6,
-      collectibles:[{x:3,y:2},{x:7,y:3},{x:9,y:3},{x:10,y:5},{x:10,y:7},{x:8,y:7},{x:5,y:6}],
+      hint: 'Everything from your library — hallway, step, horseshoe — and nothing new to write. Plan the route: hallway, one Move, step, step, horseshoe, turn around, step, hallway, horseshoe. Real programming: calling things you already built.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,0,1,1],[1,1,1,1,1,1,1,0,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,0,1,0,1,1,1,1],[1,1,1,0,0,1,0,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,0,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1]],
+      startX:3, startY:1, startDir:'right', exitX:3, exitY:10,
+      collectibles:[{x:5,y:1},{x:7,y:1},{x:7,y:3},{x:6,y:5},{x:4,y:8},{x:3,y:7},{x:3,y:10},{x:1,y:10}],
     },
   ],
 
   quiz: [
     {
       question: 'Your whole program is ONLY this definition. What happens when you press Run?',
-      blocks: 'define step\n  move\n  move\n  turn right\n  move\n  collect',
-      options: ['The 5 blocks run once', 'The 5 blocks run over and over', 'Nothing — defining a function does not run it', 'STEM Bot crashes'],
+      blocks: 'define step\n  move\n  turn right\n  move\n  collect\n  turn left\n  move',
+      options: ['The 6 blocks run once', 'The 6 blocks run over and over', 'Nothing — defining a function does not run it', 'STEM Bot crashes'],
       answer: 2,
       explanation: 'A definition just names the blocks and waits. Nothing runs until a "Call Function" block asks for it. Define, THEN call.',
     },

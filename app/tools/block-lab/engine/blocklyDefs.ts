@@ -115,7 +115,7 @@ const BLOCKLY_JSON_DEFS = [
     // extension; when they beat the level it is saved to their library.
     type: 'define_trick',
     message0: '🎓 Define Function %1',
-    args0: [{ type: 'field_input', name: 'NAME', text: 'step', spellcheck: false }],
+    args0: [{ type: 'field_input', name: 'NAME', text: '', spellcheck: false }],
     message1: 'do: %1',
     args1: [{ type: 'input_statement', name: 'BODY' }],
     colour: '#DB2777',
@@ -159,13 +159,12 @@ class FnNameDropdown extends Blockly.FieldDropdown {
       });
       const cur = this.getValue();
       if (cur) names.add(String(cur));
-      if (names.size === 0) names.add('step');
+      if (names.size === 0) return [['— name a function first —', '']] as [string, string][];
       return [...names].map(n => [n, n] as [string, string]);
     });
   }
   protected override doClassValidation_(newValue?: string): string | null {
-    const v = cleanFunctionName(String(newValue ?? ''));
-    return v || null;
+    return cleanFunctionName(String(newValue ?? ''));
   }
   protected override getText_(): string | null {
     const v = this.getValue();
@@ -179,7 +178,7 @@ function registerFunctionExtensions() {
   extensionsRegistered = true;
   Blockly.Extensions.register('fn_name_field', function (this: Blockly.Block) {
     const f = this.getField('NAME');
-    f?.setValidator((v: string) => cleanFunctionName(v) || null);
+    f?.setValidator((v: string) => cleanFunctionName(v));
   });
   Blockly.Extensions.register('fn_call_dropdown', function (this: Blockly.Block) {
     this.getInput('NAMEIN')?.appendField(new FnNameDropdown() as unknown as Blockly.Field, 'NAME');
@@ -294,7 +293,7 @@ function blockToNode(block: Blockly.Block): ScriptNode {
     params.times = Math.max(1, Math.min(20, Number(raw) || 3));
   }
   if (blockId === 'define_trick' || blockId === 'do_trick') {
-    params.trick = cleanFunctionName(String(block.getFieldValue('NAME') ?? '')) || 'step';
+    params.trick = cleanFunctionName(String(block.getFieldValue('NAME') ?? ''));
   }
 
   const bodyBlock = block.getInputTargetBlock('BODY');
@@ -328,7 +327,7 @@ export function workspaceToScript(workspace: Blockly.WorkspaceSvg): ScriptNode[]
   // reusing a trick costs one block, exactly like calling a function.
   const defs: Record<string, ScriptNode[]> = {};
   for (const node of script) {
-    if (node.blockId === 'define_trick') defs[String(node.params.trick ?? 'step')] = node.children ?? [];
+    if (node.blockId === 'define_trick' && node.params.trick) defs[String(node.params.trick)] = node.children ?? [];
   }
   if (Object.keys(defs).length === 0 && !script.some(n => n.blockId === 'do_trick')) return script;
 
@@ -336,7 +335,7 @@ export function workspaceToScript(workspace: Blockly.WorkspaceSvg): ScriptNode[]
     nodes.map(n => {
       if (n.blockId === 'do_trick') {
         // Depth cap: a trick that performs itself (or a cycle) stops quietly
-        const body = depth < 3 ? (defs[String(n.params.trick ?? 'step')] ?? []) : [];
+        const body = depth < 3 ? (defs[String(n.params.trick ?? '')] ?? []) : [];
         return { ...n, children: expand(body, depth + 1) };
       }
       if (n.children) return { ...n, children: expand(n.children, depth) };

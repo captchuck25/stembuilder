@@ -238,10 +238,10 @@ function stackXml(nodes: StackNode[]): string {
   return `<xml xmlns="https://developers.google.com/blockly/xml">${placed.join('')}</xml>`;
 }
 
-function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string }) {
+function BlockStack({ lines, xml, itemName }: { lines?: string[]; xml?: string; itemName?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [h, setH] = useState(140);
-  const linesKey = lines.join('\n');
+  const linesKey = xml ?? (lines ?? []).join('\n');
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -256,7 +256,8 @@ function BlockStack({ lines, itemName }: { lines: string[]; itemName?: string })
       zoom: { startScale: 0.75 },
     });
     try {
-      Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(stackXml(parseStack(linesKey.split('\n')))), ws);
+      const src = xml ? `<xml xmlns="https://developers.google.com/blockly/xml">${xml}</xml>` : stackXml(parseStack(linesKey.split('\n')));
+      Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(src), ws);
       // Deterministic column layout with real rendered heights
       let colY = 8;
       for (const b of ws.getTopBlocks(true)) {
@@ -465,7 +466,7 @@ function UnitIntro({ ui, onStart }: { ui: number; onStart: () => void }) {
 
 function ChallengeView({
   ui, ci, progress, lockedCis,
-  onSolve, onNext, onFinish, onBack, onJump, onAdminReset,
+  onSolve, onNext, onFinish, onBack, onJump, onAdminReset, onForgetFunction, onAdminResetLibrary,
 }: {
   ui: number; ci: number; progress: Progress; lockedCis?: Set<number>;
   onSolve: (xml: string, stars: number) => void;
@@ -475,6 +476,10 @@ function ChallengeView({
   onJump: (ci: number, xml: string) => void;
   /** Present only for admins on a completed challenge — renders the review reset button. */
   onAdminReset?: () => void;
+  /** 📚 Remove one function from the library (student action, confirmed) */
+  onForgetFunction: (name: string) => void;
+  /** Admin: wipe the whole library */
+  onAdminResetLibrary?: () => void;
 }) {
   const unit = UNITS[ui];
   const levelLocked = lockedCis?.has(-1) ?? false;
@@ -496,6 +501,7 @@ function ChallengeView({
   const [blockCount, setBlockCount] = useState(0);
   // 📚 Library functions available on this challenge cost 0 blocks
   const freeNames = useMemo(() => new Set(Object.keys(progress.library)), [progress.library]);
+  const [previewFn, setPreviewFn] = useState<string | null>(null);
   useEffect(() => { setFunctionLibraryNames([...freeNames]); }, [freeNames]);
   const [speed, setSpeed] = useState(ui === 4 ? 2 : 1);
   const [muted, setMutedState] = useState(() => (typeof window === 'undefined' ? false : isMuted()));
@@ -519,6 +525,11 @@ function ChallengeView({
   const handleRun = useCallback(() => {
     if (running) return;
     const script = editorRef.current?.getScript() ?? [];
+    if (script.some(n => n.blockId === 'define_trick' && !String(n.params.trick ?? '').trim())) {
+      setLimitMsg('✏️ Give your function a name first — click the box on the Define block and type one (like step).');
+      setTimeout(() => setLimitMsg(null), 4500);
+      return;
+    }
     const used = countFree(script, freeNames);
     // Hard block limit: too many blocks means brute force — nudge toward the
     // unit's concept instead of running
@@ -674,17 +685,47 @@ function ChallengeView({
                   disabled={running}
                   itemName={theme.itemName}
                   onScriptChange={s => setBlockCount(countFree(s, freeNames))}
+                  libraryXml={progress.library}
                 />
               </div>
 
-              {/* 📚 My Functions — saved when a level is beaten; free to call on every later level */}
-              {freeNames.size > 0 && (
-                <div style={{ padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(219,39,119,0.08)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: '#f9a8d4', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📚 My Functions</span>
-                  {[...freeNames].map(n => (
-                    <span key={n} style={{ fontSize: 12, fontWeight: 800, color: '#fff', background: '#DB2777', borderRadius: 8, padding: '2px 10px' }}>{n}</span>
-                  ))}
-                  <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>already in your workspace · free to call</span>
+              {/* 📚 My Functions — every function the student has built. Click a
+                  name to SEE it as real blocks; re-add it if it went missing;
+                  forget it if they want to rebuild. Saved when a level is beaten. */}
+              {(freeNames.size > 0 || unit.id === 5) && (
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(219,39,119,0.08)', flexShrink: 0 }}>
+                  <div style={{ padding: '6px 12px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: '#f9a8d4', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📚 My Functions</span>
+                    {freeNames.size === 0 && <span style={{ fontSize: 11, color: '#94a3b8' }}>empty — beat a level with a named function and it lands here</span>}
+                    {[...freeNames].map(n => (
+                      <button key={n} onClick={() => setPreviewFn(previewFn === n ? null : n)} title="Show me this function"
+                        style={{ fontSize: 12, fontWeight: 800, color: '#fff', background: previewFn === n ? '#be185d' : '#DB2777', border: previewFn === n ? '2px solid #fbcfe8' : '2px solid transparent', borderRadius: 8, padding: '2px 10px', cursor: 'pointer' }}>
+                        {previewFn === n ? '▾ ' : ''}{n}
+                      </button>
+                    ))}
+                    {freeNames.size > 0 && <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>free to call · click a name to see it</span>}
+                  </div>
+                  {previewFn && progress.library[previewFn] && (
+                    <div style={{ padding: '0 12px 8px' }}>
+                      <BlockStack xml={progress.library[previewFn]} itemName={theme.itemName} />
+                      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                        <button onClick={() => editorRef.current?.insertXml(progress.library[previewFn])}
+                          style={{ padding: '5px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'rgba(255,255,255,0.08)', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                          ➕ Put it back on my workspace
+                        </button>
+                        <button onClick={() => { if (window.confirm(`Forget "${previewFn}"? You can always build it again.`)) { onForgetFunction(previewFn); setPreviewFn(null); } }}
+                          style={{ padding: '5px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.3)', cursor: 'pointer' }}>
+                          🗑 Forget it
+                        </button>
+                        {onAdminResetLibrary && (
+                          <button onClick={onAdminResetLibrary}
+                            style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, background: 'rgba(220,38,38,0.12)', color: '#f87171', border: '1px solid rgba(248,113,113,0.45)', cursor: 'pointer' }}>
+                            ↺ Reset library (admin)
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1036,6 +1077,22 @@ export default function BlockLabPage() {
     if (userId) deleteCloudProgress(ui, ci);
   }, [updateProgress, userId]);
 
+  const forgetFunction = useCallback((name: string) => {
+    const next = updateProgress(p => {
+      const library = { ...p.library };
+      delete library[name];
+      return { ...p, library };
+    });
+    if (userId) syncLibrary(next.library);
+  }, [updateProgress, userId]);
+
+  const resetLibrary = useCallback(() => {
+    if (!window.confirm('Wipe your whole 📚 My Functions library? (Admin review only — every later level will start without them.)')) return;
+    const next = updateProgress(p => ({ ...p, library: {} }));
+    if (userId) syncLibrary(next.library);
+    setResetNonce(n => n + 1);
+  }, [updateProgress, userId]);
+
   const resetQuiz = useCallback((ui: number) => {
     if (!window.confirm(`Reset your quiz result for Unit ${UNITS[ui].id}? (Admin review only — later units re-lock until you pass it again.)`)) return;
     updateProgress(p => {
@@ -1066,6 +1123,8 @@ export default function BlockLabPage() {
         key={`cv:${resetNonce}`}
         ui={ui} ci={ci} progress={progress} lockedCis={lockedCis}
         onAdminReset={admin && progress.completedChallenges[chalKey(ui, ci)] ? () => resetChallenge(ui, ci) : undefined}
+        onForgetFunction={forgetFunction}
+        onAdminResetLibrary={admin ? resetLibrary : undefined}
         onSolve={(xml, stars) => handleSolve(ui, ci, xml, stars)}
         onNext={xml => {
           handleSolve(ui, ci, xml);

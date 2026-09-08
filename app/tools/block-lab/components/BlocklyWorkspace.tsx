@@ -9,6 +9,8 @@ export interface BlocklyWorkspaceHandle {
   getScript: () => ScriptNode[];
   getXml: () => string;
   clear: () => void;
+  /** Drop a block's XML onto the workspace (used to re-add a library function) */
+  insertXml: (xml: string) => void;
   /** Highlight the currently executing block (null clears the highlight) */
   highlight: (id: string | null) => void;
 }
@@ -21,10 +23,23 @@ interface Props {
   itemName?: string;
   /** Live script as the student edits (the page counts it, library-aware) */
   onScriptChange?: (script: ScriptNode[]) => void;
+  /** 📚 Library definitions (name → XML): loaded collapsed + undeletable, survive Clear */
+  libraryXml?: Record<string, string>;
+}
+
+/** Library definitions can be opened and edited, but not deleted by accident */
+function lockLibraryDefs(ws: Blockly.WorkspaceSvg, lib?: Record<string, string>) {
+  if (!lib) return;
+  for (const b of ws.getBlocksByType('define_trick', false)) {
+    const name = String(b.getFieldValue('NAME') ?? '');
+    if (name && name in lib) b.setDeletable(false);
+  }
 }
 
 const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
-  ({ availableBlocks, initialXml, disabled, itemName = 'crystal', onScriptChange }, ref) => {
+  ({ availableBlocks, initialXml, disabled, itemName = 'crystal', onScriptChange, libraryXml }, ref) => {
+    const libraryRef = useRef(libraryXml);
+    libraryRef.current = libraryXml;
     const onScriptRef = useRef(onScriptChange);
     onScriptRef.current = onScriptChange;
     const containerRef = useRef<HTMLDivElement>(null);
@@ -64,6 +79,7 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
           // ignore invalid XML — start with empty workspace
         }
       }
+      lockLibraryDefs(workspace, libraryRef.current);
 
       return () => {
         workspace.dispose();
@@ -73,6 +89,15 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
     }, []); // initialize once; key prop handles challenge changes
 
     useImperativeHandle(ref, () => ({
+      insertXml: (xml: string) => {
+        const ws = workspaceRef.current;
+        if (!ws) return;
+        try {
+          const dom = Blockly.utils.xml.textToDom(`<xml xmlns="https://developers.google.com/blockly/xml">${xml}</xml>`);
+          Blockly.Xml.domToWorkspace(dom, ws);
+          lockLibraryDefs(ws, libraryRef.current);
+        } catch { /* ignore */ }
+      },
       getScript: () =>
         workspaceRef.current ? workspaceToScript(workspaceRef.current) : [],
       getXml: () => {
@@ -80,7 +105,18 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
         const dom = Blockly.Xml.workspaceToDom(workspaceRef.current);
         return Blockly.Xml.domToText(dom);
       },
-      clear: () => workspaceRef.current?.clear(),
+      clear: () => {
+        // Clear wipes the student's program but keeps their library on the canvas
+        const ws = workspaceRef.current;
+        if (!ws) return;
+        ws.clear();
+        const lib = libraryRef.current ?? {};
+        const defs = Object.keys(lib).map((n, i) => lib[n].replace('<block ', `<block collapsed="true" x="20" y="${20 + i * 64}" `)).join('');
+        if (defs) {
+          try { Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(`<xml xmlns="https://developers.google.com/blockly/xml">${defs}</xml>`), ws); } catch { /* ignore */ }
+          lockLibraryDefs(ws, lib);
+        }
+      },
       highlight: (id: string | null) => workspaceRef.current?.highlightBlock(id),
     }));
 
