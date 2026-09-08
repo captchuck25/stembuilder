@@ -69,6 +69,18 @@ function withLibrary(savedXml: string | undefined, lib: Record<string, string>):
   if (!savedXml) return `<xml xmlns="https://developers.google.com/blockly/xml">${defs}</xml>`;
   return savedXml.replace('</xml>', defs + '</xml>');
 }
+/** Saved scripts are stamped with the level they were written for. A script
+ *  from a redesigned or different maze must never load into this one — it
+ *  would carry stale definitions that get charged as new blocks. */
+function levelSlug(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
+function stampXml(xml: string, slug: string): string {
+  return xml.replace(/^<xml /, `<xml data-level="${slug}" `);
+}
+function savedFor(xml: string | undefined, slug: string): string | undefined {
+  return xml && xml.includes(`data-level="${slug}"`) ? xml : undefined;
+}
 /** countBlocks, but library-provided definitions cost nothing */
 function countFree(nodes: ScriptNode[], free: Set<string>): number {
   return nodes.reduce((sum, n) => {
@@ -500,6 +512,7 @@ function ChallengeView({
   const [limitMsg, setLimitMsg] = useState<string | null>(null);
   const [blockCount, setBlockCount] = useState(0);
   // 📚 Library functions available on this challenge cost 0 blocks
+  const slug = levelSlug(ch.title);
   const freeNames = useMemo(() => new Set(Object.keys(progress.library)), [progress.library]);
   const [previewFn, setPreviewFn] = useState<string | null>(null);
   useEffect(() => { setFunctionLibraryNames([...freeNames]); }, [freeNames]);
@@ -565,7 +578,7 @@ function ChallengeView({
   const handleWin = useCallback((result: WinResult) => {
     setRunning(false);
     setSolved(true);
-    onSolve(editorRef.current?.getXml() ?? '', result.stars);
+    onSolve(stampXml(editorRef.current?.getXml() ?? '', slug), result.stars);
   }, [onSolve]);
 
   const handleBump = useCallback(() => {
@@ -646,7 +659,7 @@ function ChallengeView({
             const dotLocked = levelLocked || (lockedCis?.has(idx) ?? false);
             return (
               <div key={idx}
-                onClick={() => !dotLocked && onJump(idx, editorRef.current?.getXml() ?? '')}
+                onClick={() => !dotLocked && onJump(idx, stampXml(editorRef.current?.getXml() ?? '', slug))}
                 title={dotLocked ? 'Locked by teacher' : undefined}
                 style={{ padding: '5px 12px', borderRadius: 16, fontSize: 12, fontWeight: 700,
                   cursor: dotLocked ? 'not-allowed' : 'pointer',
@@ -681,7 +694,7 @@ function ChallengeView({
                   key={chalKey(ui, ci)}
                   ref={editorRef}
                   availableBlocks={availableBlocks}
-                  initialXml={withLibrary(progress.savedXml[chalKey(ui, ci)], progress.library)}
+                  initialXml={withLibrary(savedFor(progress.savedXml[chalKey(ui, ci)], slug), progress.library)}
                   disabled={running}
                   itemName={theme.itemName}
                   onScriptChange={s => setBlockCount(countFree(s, freeNames))}
@@ -832,12 +845,12 @@ function ChallengeView({
                   <div style={{ fontSize: 13, color: '#86efac' }}>{isLast ? 'All challenges done — take the quiz!' : 'Ready for the next one?'}</div>
                 </div>
                 {isLast ? (
-                  <button onClick={() => onFinish(editorRef.current?.getXml() ?? '')}
+                  <button onClick={() => onFinish(stampXml(editorRef.current?.getXml() ?? '', slug))}
                     style={{ padding: '10px 22px', background: unit.color, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
                     Take Quiz →
                   </button>
                 ) : (
-                  <button onClick={() => onNext(editorRef.current?.getXml() ?? '')}
+                  <button onClick={() => onNext(stampXml(editorRef.current?.getXml() ?? '', slug))}
                     style={{ padding: '10px 22px', background: unit.color, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
                     Next →
                   </button>

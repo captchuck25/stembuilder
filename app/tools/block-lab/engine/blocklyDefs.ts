@@ -143,7 +143,8 @@ export function setFunctionLibraryNames(names: string[]) {
 }
 
 export function cleanFunctionName(raw: string): string {
-  return String(raw ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 12);
+  // lowercase letters/digits/_ only, must START with a letter (like real languages), max 12
+  return String(raw ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '').replace(/^[^a-z]+/, '').slice(0, 12);
 }
 
 /** Dropdown that lists every known function name and tolerates values that
