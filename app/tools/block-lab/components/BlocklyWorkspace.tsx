@@ -88,6 +88,20 @@ const BlocklyWorkspace = forwardRef<BlocklyWorkspaceHandle, Props>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // initialize once; key prop handles challenge changes
 
+    // Library changes while the workspace is open (Forget / Reset library):
+    // still-library defs stay locked; a def that WAS locked but is no longer
+    // in the library was injected from it — remove it from the canvas.
+    useEffect(() => {
+      const ws = workspaceRef.current;
+      if (!ws) return;
+      const lib = libraryXml ?? {};
+      for (const b of ws.getBlocksByType('define_trick', false)) {
+        const name = String(b.getFieldValue('NAME') ?? '');
+        if (name && name in lib) b.setDeletable(false);
+        else if (!b.isDeletable()) b.dispose(true);
+      }
+    }, [libraryXml]);
+
     useImperativeHandle(ref, () => ({
       insertXml: (xml: string) => {
         const ws = workspaceRef.current;

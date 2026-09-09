@@ -64,6 +64,23 @@ function extractDefinitions(xml: string): Record<string, string> {
   } catch { /* ignore malformed XML */ }
   return out;
 }
+/** Remove top-level definitions of the given names from a script's XML.
+ *  Library functions live in the library, not in each level's save — so
+ *  forgetting one removes it everywhere, and edits flow through the library. */
+function stripDefinitions(xml: string, names: Set<string>): string {
+  if (typeof DOMParser === 'undefined' || !xml || names.size === 0) return xml;
+  try {
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const root = doc.documentElement;
+    for (const el of Array.from(root.children)) {
+      if (el.tagName !== 'block' || el.getAttribute('type') !== 'define_trick') continue;
+      const nameEl = Array.from(el.children).find(c => c.tagName === 'field' && c.getAttribute('name') === 'NAME');
+      const name = (nameEl?.textContent ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 12);
+      if (names.has(name)) root.removeChild(el);
+    }
+    return new XMLSerializer().serializeToString(root);
+  } catch { return xml; }
+}
 /** Library definitions as collapsed, stacked workspace XML (merged into a saved script if given) */
 function withLibrary(savedXml: string | undefined, lib: Record<string, string>): string | undefined {
   const names = Object.keys(lib);
@@ -1061,15 +1078,17 @@ export default function BlockLabPage() {
     // Beating a level saves every function on the workspace to 📚 My Functions
     const learned = extractDefinitions(xml);
     const libraryChanged = Object.keys(learned).some(n => progressRef.current.library[n] !== learned[n]);
+    const libraryNames = new Set(Object.keys({ ...progressRef.current.library, ...learned }));
     const next = updateProgress(p => ({
       ...p,
       completedChallenges: { ...p.completedChallenges, [key]: true },
-      savedXml: { ...p.savedXml, [key]: xml },
+      // the level keeps only the program; library functions are re-injected on load
+      savedXml: { ...p.savedXml, [key]: stripDefinitions(xml, libraryNames) },
       stars: best > 0 ? { ...p.stars, [key]: best } : p.stars,
       library: { ...p.library, ...learned },
     }));
     if (userId) {
-      syncToCloud(userId, ui, ci, true, xml, best > 0 ? best : undefined);
+      syncToCloud(userId, ui, ci, true, stripDefinitions(xml, libraryNames), best > 0 ? best : undefined);
       if (libraryChanged) syncLibrary(next.library);
     }
     return next;
@@ -1155,7 +1174,7 @@ export default function BlockLabPage() {
         }}
         onBack={() => setPhase({ tag: 'overview' })}
         onJump={(newCi, xml) => {
-          updateProgress(p => ({ ...p, savedXml: { ...p.savedXml, [chalKey(ui, ci)]: xml } }));
+          updateProgress(p => ({ ...p, savedXml: { ...p.savedXml, [chalKey(ui, ci)]: stripDefinitions(xml, new Set(Object.keys(p.library))) } }));
           setPhase({ tag: 'challenge', ui, ci: newCi });
         }}
       />
