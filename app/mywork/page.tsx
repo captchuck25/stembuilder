@@ -6,7 +6,6 @@ import { useSession } from "next-auth/react";
 import SiteHeader from "@/app/components/SiteHeader";
 import { fetchCodeLabProgress, fetchBlockLabProgress, fetchToolScores, fetchBridgeDesigns, deleteBridgeDesign, fetchTurtleSubmissions, fetchStemSketchDesigns, deleteStemSketchDesign, fetchBlueprintLabDesigns, deleteBlueprintLabDesign, ProgressRow, ScoreRow, BridgeDesign, TurtleSubmission, StemSketchDesign, BlueprintLabDesign } from "@/lib/achievements";
 import { runTurtleBackfillOnce } from "@/lib/turtle-backfill";
-import { fetchTowerDesigns, deleteTowerDesign, type TowerDesign } from "@/lib/towerDesigns";
 import { CHALLENGES as TURTLE_CHALLENGES } from "@/app/tools/code-lab/turtle/challenges";
 import { SKETCH_TUTORIALS, TUTORIAL_UNIT_META } from "@/lib/stem-sketch/tutorials";
 import { GameDef, TILE, VIEW_W, VIEW_H, validDims } from "@/app/tools/arcade-lab/engine/types";
@@ -499,146 +498,6 @@ function CodeLabSection({ rows }: { rows: ProgressRow[] }) {
           );
         })}
       </div>
-    </div>
-  );
-}
-
-// ─── Tower section ────────────────────────────────────────────────────────────
-
-function TowerSection({ designs, onDeleted }: { designs: TowerDesign[]; onDeleted: (id: string) => void }) {
-  const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState(false);
-
-  async function handleDelete() {
-    if (!confirmId) return;
-    setDeleting(true);
-    await deleteTowerDesign(confirmId);
-    onDeleted(confirmId);
-    setConfirmId(null);
-    setDeleting(false);
-  }
-
-  const confirmDesign = designs.find(d => d.id === confirmId);
-
-  return (
-    <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
-      <SectionHeader icon="🗼" title="Tower Builder" href="/tools/tower" linkLabel="Open Builder" />
-
-      {confirmId && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-          display: "grid", placeItems: "center", zIndex: 50 }}>
-          <div style={{ background: "#fff", border: "2px solid #1f1f1f", borderRadius: 16,
-            padding: "28px 32px", maxWidth: 400, width: "90%", textAlign: "center",
-            boxShadow: "0 12px 32px rgba(0,0,0,0.25)" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 900, color: "#111" }}>
-              Delete this tower?
-            </h3>
-            <p style={{ margin: "0 0 24px", fontSize: 14, color: "#555" }}>
-              <strong>&quot;{confirmDesign?.name}&quot;</strong> will be permanently deleted. This cannot be undone.
-            </p>
-            <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-              <button onClick={() => setConfirmId(null)}
-                style={{ padding: "10px 24px", borderRadius: 8, border: "1px solid #d1d5db",
-                  background: "#fff", color: "#111", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-                Cancel
-              </button>
-              <button onClick={handleDelete} disabled={deleting}
-                style={{ padding: "10px 24px", borderRadius: 8, border: "none",
-                  background: deleting ? "#fca5a5" : "#dc2626", color: "#fff",
-                  fontWeight: 700, fontSize: 14, cursor: deleting ? "not-allowed" : "pointer" }}>
-                {deleting ? "Deleting…" : "Delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {designs.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "24px 0", color: "#aaa" }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🏗️</div>
-          <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>No designs saved yet.</p>
-          <Link href="/tools/tower" style={{ fontSize: 13, color: "#7c3aed", fontWeight: 700,
-            textDecoration: "none" }}>Build your first tower →</Link>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {designs.map(d => {
-            const isAssignment = d.name.startsWith('asgn_');
-            const displayName = isAssignment ? '🗼 Assignment Tower' : d.name;
-            return (
-            <div key={d.id} style={{ background: isAssignment ? "#f0fdfa" : "#fafafa",
-              border: `2px solid ${isAssignment ? "#99f6e4" : "#e5e7eb"}`,
-              borderRadius: 12, padding: "14px 18px", transition: "border-color 150ms" }}
-              onMouseEnter={e => (e.currentTarget.style.borderColor = isAssignment ? "#0f766e" : "#7c3aed")}
-              onMouseLeave={e => (e.currentTarget.style.borderColor = isAssignment ? "#99f6e4" : "#e5e7eb")}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
-                {d.thumbnail && (
-                  <Link href={`/tools/tower?id=${d.id}`} style={{ flexShrink: 0 }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={d.thumbnail} alt={displayName}
-                      style={{ width: 120, height: 70, objectFit: "contain",
-                        borderRadius: 8, border: `1px solid ${isAssignment ? "#99f6e4" : "#e5e7eb"}`,
-                        background: "#fff", display: "block" }} />
-                  </Link>
-                )}
-                <Link href={`/tools/tower?id=${d.id}`} style={{ textDecoration: "none", flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 900, color: "#111", marginBottom: 6 }}>
-                    {displayName}
-                  </div>
-                  <div style={{ display: "flex", gap: 10, flexWrap: "nowrap", alignItems: "center",
-                    overflow: "hidden" }}>
-                    {d.height_feet != null && <>
-                      <span style={{ ...SECTION_LABEL }}>Height</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>{d.height_feet} ft</span>
-                    </>}
-                    {d.footprint_feet != null && <>
-                      <span style={{ ...SECTION_LABEL }}>Footprint</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>{d.footprint_feet} ft</span>
-                    </>}
-                    {d.load_lb != null && <>
-                      <span style={{ ...SECTION_LABEL }}>Load</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>{d.load_lb.toLocaleString()} lb</span>
-                    </>}
-                    <span style={{ ...SECTION_LABEL }}>Members</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#333" }}>{(d.members as unknown[]).length}</span>
-                    {d.cost != null && <>
-                      <span style={{ ...SECTION_LABEL }}>Cost</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#333", whiteSpace: "nowrap" }}>${Number(d.cost).toFixed(2)}</span>
-                    </>}
-                    {d.passed != null && (
-                      <span style={{
-                        fontSize: 11, fontWeight: 800, padding: "2px 7px", borderRadius: 6,
-                        whiteSpace: "nowrap", flexShrink: 0,
-                        background: d.passed ? "#f0fdf4" : "#fef2f2",
-                        color: d.passed ? "#16a34a" : "#dc2626",
-                      }}>
-                        {d.passed ? "✓ Passed" : "✗ Failed"}
-                      </span>
-                    )}
-                  </div>
-                  {d.designer_name && (
-                    <div style={{ fontSize: 12, color: "#aaa", marginTop: 4 }}>Designer: {d.designer_name}</div>
-                  )}
-                </Link>
-                <div style={{ display: "flex", gap: 12, alignItems: "center", flexShrink: 0, marginLeft: 16 }}>
-                  <Link href={`/tools/tower?id=${d.id}`}
-                    style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", textDecoration: "none" }}>
-                    Open →
-                  </Link>
-                  <button onClick={() => setConfirmId(d.id)}
-                    style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", background: "none",
-                      border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px",
-                      cursor: "pointer" }}>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -1226,7 +1085,6 @@ export default function AchievementsPage() {
   const [blockLabRows,   setBlockLabRows]   = useState<ProgressRow[]>([]);
   const [measScores,     setMeasScores]     = useState<ScoreRow[]>([]);
   const [bridgeDesigns,  setBridgeDesigns]  = useState<BridgeDesign[]>([]);
-  const [towerDesigns,   setTowerDesigns]   = useState<TowerDesign[]>([]);
   const [sketchDesigns,  setSketchDesigns]  = useState<StemSketchDesign[]>([]);
   const [bpDesigns,      setBpDesigns]      = useState<BlueprintLabDesign[]>([]);
   const [dataLoading,    setDataLoading]    = useState(true);
@@ -1255,13 +1113,11 @@ export default function AchievementsPage() {
       fetchTurtleSubmissions(uid),
       fetchStemSketchDesigns(),
       fetchBlueprintLabDesigns(),
-      fetchTowerDesigns(),
-    ]).then(([cl, bl, ms, bd, ts, sk, bp, td]) => {
+    ]).then(([cl, bl, ms, bd, ts, sk, bp]) => {
       setCodeLabRows(cl);
       setBlockLabRows(bl);
       setMeasScores(ms);
       setBridgeDesigns(bd);
-      setTowerDesigns(td);
       setTurtleSubmissions(ts);
       setSketchDesigns(sk);
       setBpDesigns(bp);
@@ -1321,10 +1177,6 @@ export default function AchievementsPage() {
               <BridgeSection
                 designs={bridgeDesigns}
                 onDeleted={id => setBridgeDesigns(prev => prev.filter(d => d.id !== id))}
-              />
-              <TowerSection
-                designs={towerDesigns}
-                onDeleted={id => setTowerDesigns(prev => prev.filter(d => d.id !== id))}
               />
               <StemSketchSection
                 designs={sketchDesigns}
