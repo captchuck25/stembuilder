@@ -101,22 +101,22 @@ const INTENDED: { title: string; newDefs: string[]; main: Tok[] }[] = [
   {
     title: "The Horseshoe",
     newDefs: ["horseshoe"],
-    main: [M, call("horseshoe")],
+    main: [call("horseshoe")],
   },
   {
-    title: "Steps and Horseshoes",
+    title: "Horseshoes",
     newDefs: [],
-    main: [call("step"), call("step"), call("horseshoe"), TL, TL, call("step"), call("step"), call("horseshoe")],
+    main: [repeat(3, [call("horseshoe"), TL, TL])],
   },
   {
-    title: "The Hallway",
+    title: "Straightaways",
     newDefs: ["hallway"],
     main: [call("hallway"), call("hallway"), call("hallway")],
   },
   {
     title: "Three Tools",
     newDefs: [],
-    main: [call("hallway"), M, call("step"), call("step"), call("horseshoe"), TL, TL, call("step"), call("hallway"), call("horseshoe")],
+    main: [call("hallway"), call("step"), call("step"), call("horseshoe"), TL, TL, call("step"), call("hallway"), call("horseshoe")],
   },
 ];
 
@@ -149,4 +149,26 @@ describe("Functions unit — writing every motif out by hand blows the limit", (
 
 describe("Functions unit — the unit has exactly six challenges", () => {
   it("six", () => { expect(FN_UNIT.challenges.length).toBe(6); });
+});
+
+describe("Functions unit — a hallway built from fixed Moves works everywhere a While one does", () => {
+  const FIXED_HALLWAY: Tok[] = [M, M, C, M, M, C, TR];
+  for (const { title, main, newDefs } of INTENDED) {
+    if (!main.some((t) => t.t === "call" && t.fn === "hallway")) continue;
+    it(`${title}: fixed-Move hallway`, () => {
+      const ch = level(title);
+      const saved = LIBRARY.hallway;
+      LIBRARY.hallway = FIXED_HALLWAY;
+      try {
+        const result = simulate(ch, main);
+        expect(result.bumped).toBe(false);
+        expect(result.atExit).toBe(true);
+        expect(result.chipsLeft).toBe(0);
+        const blocks = countTok(main) + newDefs.reduce((s, n) => s + 1 + countTok(LIBRARY[n]), 0);
+        expect(blocks).toBeLessThanOrEqual(ch.maxBlocks!);
+      } finally {
+        LIBRARY.hallway = saved;
+      }
+    });
+  }
 });

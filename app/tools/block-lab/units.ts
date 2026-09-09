@@ -895,13 +895,13 @@ Same idea, same words. You already know how it works.`,
   ],
 
   challenges: [
-    // ── Six levels, the user's progression (2026-09-08) ─────────────────────
-    // build step -> reuse step -> build horseshoe -> reuse both -> build
-    // hallway -> all three from the library. Every motif chains with ZERO
-    // glue where it repeats (the step is over-down-over, so stairs are just
-    // step, step, step). Library functions cost 0; only the function BUILT
-    // on a level is counted. Build levels are deliberately tiny.
-    // Generated + verified by scratchpad fnlevels3.py; vitest covers at-par.
+    // ── Six levels, the user's progression (2026-09-08, rev 2) ─────────────
+    // build step -> reuse step -> build horseshoe (the maze IS the shape) ->
+    // horseshoes only -> build a straightaway -> all three. Every shape is
+    // IDENTICAL wherever it appears, including straightaways of length 4
+    // with chips on squares 2 and 4, so a hallway built from fixed Moves
+    // works as well as a While. Library functions cost 0; only the function
+    // BUILT on a level is counted. Generated + verified by fnlevels3.py.
     {
       title: 'Your First Function',
       par: 8,
@@ -926,47 +926,47 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'The Horseshoe',
-      par: 12,
-      maxBlocks: 15,
-      // Builds `horseshoe` here (its definition is counted). Main program = 2 blocks, all-inline = 10.
+      par: 11,
+      maxBlocks: 14,
+      // Builds `horseshoe` here (its definition is counted). Main program = 1 blocks, all-inline = 9.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'A new shape to build once: Move, Move, Turn Right, Move, Move, Collect, Turn Right, Move, Move — a U-turn with the chip at the bottom. Name it horseshoe. One Move to reach it, one call to run it.',
-      grid: [[1,1,1,1,1,1],[1,0,0,0,0,1],[1,1,1,1,0,1],[1,1,0,0,0,1],[1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:2, exitY:3,
-      collectibles:[{x:4,y:3}],
+      hint: 'This whole maze IS one horseshoe — start to finish. Build it: Move, Move, Turn Right, Move, Move, Collect, Turn Right, Move, Move. Name it horseshoe, call it once. (Keep it exactly this shape — you will reuse it.)',
+      grid: [[1,1,1,1,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:3,
+      collectibles:[{x:3,y:3}],
     },
     {
-      title: 'Steps and Horseshoes',
-      par: 8,
-      maxBlocks: 11,
-      // Nothing new built; library functions are free. Main program = 8 blocks, all-inline = 44.
+      title: 'Horseshoes',
+      par: 4,
+      maxBlocks: 7,
+      // Nothing new built; library functions are free. Main program = 4 blocks, all-inline = 33.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'Nothing new to build. Read the maze: step, step, horseshoe, turn around (Turn Left, Turn Left), step, step, horseshoe. Call the right one where its shape appears — click a name in 📚 My Functions if you forget what it does.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,1,1,1,1,1,1,1,1,1,1],[1,1,0,0,0,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,1,0,1,1,1,1,1],[1,1,1,1,1,0,0,0,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,1,1,1,1],[1,1,1,1,1,1,1,1,0,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,0,1],[1,1,1,1,1,1,1,1,1,0,0,0,1],[1,1,1,1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:9, exitY:9,
-      collectibles:[{x:2,y:2},{x:4,y:3},{x:7,y:5},{x:6,y:6},{x:8,y:7},{x:11,y:9}],
+      hint: 'Three horseshoes, stacked. Each one ends facing backwards, so turn around between them: Repeat 3 { Call horseshoe, Turn Left, Turn Left }. Your horseshoe is free — you built it last level.',
+      grid: [[1,1,1,1,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:7,
+      collectibles:[{x:3,y:3},{x:3,y:5},{x:3,y:7}],
     },
     {
-      title: 'The Hallway',
+      title: 'Straightaways',
       par: 8,
       maxBlocks: 11,
-      // Builds `hallway` here (its definition is counted). Main program = 3 blocks, all-inline = 23.
+      // Builds `hallway` here (its definition is counted). Main program = 3 blocks, all-inline = 21.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Your third tool: hallway = While path ahead { Move, Collect }, then Turn Right. It walks a hallway of ANY length. Three hallways spiral inward — call it three times (or loop it).',
-      grid: [[1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:2, exitY:5,
-      collectibles:[{x:3,y:1},{x:6,y:1},{x:7,y:4},{x:5,y:5},{x:3,y:5}],
+      hint: 'Your third tool: a straightaway with chips on squares 2 and 4, then Turn Right. Build it as While path ahead { Move, Collect }, then Turn Right — or with Moves and Collects. Name it (try hallway). Every straightaway in this unit is exactly this long, so it works everywhere.',
+      grid: [[1,1,1,1,1,1,1,1,1],[1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]],
+      startX:2, startY:1, startDir:'right', exitX:2, exitY:5,
+      collectibles:[{x:4,y:1},{x:6,y:1},{x:6,y:3},{x:6,y:5},{x:4,y:5},{x:2,y:5}],
     },
     {
       title: 'Three Tools',
-      par: 10,
-      maxBlocks: 13,
-      // Nothing new built; library functions are free. Main program = 10 blocks, all-inline = 53.
+      par: 9,
+      maxBlocks: 12,
+      // Nothing new built; library functions are free. Main program = 9 blocks, all-inline = 52.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Everything from your library — hallway, step, horseshoe — and nothing new to write. Plan the route: hallway, one Move, step, step, horseshoe, turn around, step, hallway, horseshoe. Real programming: calling things you already built.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,0,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,0,0,1,1],[1,1,1,1,1,1,1,0,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,0,1,0,1,1,1,1],[1,1,1,0,0,1,0,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,0,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1]],
-      startX:3, startY:1, startDir:'right', exitX:3, exitY:10,
-      collectibles:[{x:5,y:1},{x:7,y:1},{x:7,y:3},{x:6,y:5},{x:4,y:8},{x:3,y:7},{x:3,y:10},{x:1,y:10}],
+      hint: 'Everything from your library — hallway, step, horseshoe — and nothing new to write. Read the maze: hallway, step, step, horseshoe, turn around, step, hallway, horseshoe. Click a name in 📚 My Functions if you forget what one does.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,0,0,1,1],[1,1,1,1,1,1,1,0,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,0,1,0,1,1,1,1],[1,1,1,0,0,1,0,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,0,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1]],
+      startX:4, startY:1, startDir:'right', exitX:3, exitY:9,
+      collectibles:[{x:6,y:1},{x:8,y:1},{x:7,y:2},{x:6,y:4},{x:4,y:7},{x:3,y:6},{x:3,y:9},{x:3,y:11},{x:1,y:9}],
     },
   ],
 

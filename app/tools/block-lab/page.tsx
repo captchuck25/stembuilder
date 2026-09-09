@@ -54,7 +54,12 @@ function extractDefinitions(xml: string): Record<string, string> {
       if (el.tagName !== 'block' || el.getAttribute('type') !== 'define_trick') continue;
       const nameEl = Array.from(el.children).find(c => c.tagName === 'field' && c.getAttribute('name') === 'NAME');
       const name = (nameEl?.textContent ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 12);
-      if (name) out[name] = el.outerHTML;
+      if (name) {
+        // store the definition open and unpositioned: it is re-collapsed when
+        // injected into a workspace, and rendered OPEN in the library preview
+        el.removeAttribute('collapsed'); el.removeAttribute('x'); el.removeAttribute('y');
+        out[name] = el.outerHTML;
+      }
     }
   } catch { /* ignore malformed XML */ }
   return out;
@@ -270,6 +275,7 @@ function BlockStack({ lines, xml, itemName }: { lines?: string[]; xml?: string; 
     try {
       const src = xml ? `<xml xmlns="https://developers.google.com/blockly/xml">${xml}</xml>` : stackXml(parseStack(linesKey.split('\n')));
       Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(src), ws);
+      for (const b of ws.getAllBlocks(false)) b.setCollapsed(false); // previews always show the blocks
       // Deterministic column layout with real rendered heights
       let colY = 8;
       for (const b of ws.getTopBlocks(true)) {
