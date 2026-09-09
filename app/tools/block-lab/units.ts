@@ -895,13 +895,15 @@ Same idea, same words. You already know how it works.`,
   ],
 
   challenges: [
-    // ── Six levels, the user's progression (2026-09-08, rev 2) ─────────────
+    // ── Six levels, the user's progression (2026-09-08, rev 3) ─────────────
     // build step -> reuse step -> build horseshoe (the maze IS the shape) ->
     // horseshoes only -> build a straightaway -> all three. Every shape is
     // IDENTICAL wherever it appears, including straightaways of length 4
     // with chips on squares 2 and 4, so a hallway built from fixed Moves
     // works as well as a While. Library functions cost 0; only the function
-    // BUILT on a level is counted. Generated + verified by fnlevels3.py.
+    // BUILT on a level is counted. Generated + verified by fnlevels3.py, which
+    // also proves every shape is MANDATORY: the shortest path through the
+    // maze equals the intended walk, so no straight-through bypass exists.
     {
       title: 'Your First Function',
       par: 8,
@@ -937,14 +939,14 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'Horseshoes',
-      par: 4,
-      maxBlocks: 7,
-      // Nothing new built; library functions are free. Main program = 4 blocks, all-inline = 33.
+      par: 6,
+      maxBlocks: 9,
+      // Nothing new built; library functions are free. Main program = 6 blocks, all-inline = 39.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'define_trick', 'do_trick'],
-      hint: 'Three horseshoes, stacked. Each one ends facing backwards, so turn around between them: Repeat 3 { Call horseshoe, Turn Left, Turn Left }. Your horseshoe is free — you built it last level.',
-      grid: [[1,1,1,1,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,1,1,1,1]],
-      startX:1, startY:1, startDir:'right', exitX:1, exitY:7,
-      collectibles:[{x:3,y:3},{x:3,y:5},{x:3,y:7}],
+      hint: 'Three horseshoes — over, then DOWN, then again. Each horseshoe ends facing backwards, so after it: Turn Left, Move, Move, Turn Left brings you down to the next one. Repeat 3 { Call horseshoe, Turn Left, Move, Move, Turn Left } and you land on the finish.',
+      grid: [[1,1,1,1,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,0,1,1,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,0,1,1,1],[1,0,0,0,1],[1,1,1,0,1],[1,0,0,0,1],[1,0,1,1,1],[1,0,1,1,1],[1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:1, exitY:13,
+      collectibles:[{x:3,y:3},{x:3,y:7},{x:3,y:11}],
     },
     {
       title: 'Straightaways',
@@ -959,14 +961,14 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'Three Tools',
-      par: 9,
-      maxBlocks: 12,
-      // Nothing new built; library functions are free. Main program = 9 blocks, all-inline = 52.
+      par: 13,
+      maxBlocks: 16,
+      // Nothing new built; library functions are free. Main program = 13 blocks, all-inline = 56.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Everything from your library — hallway, step, horseshoe — and nothing new to write. Read the maze: hallway, step, step, horseshoe, turn around, step, hallway, horseshoe. Click a name in 📚 My Functions if you forget what one does.',
-      grid: [[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,0,0,1,1],[1,1,1,1,1,1,1,0,1,1,1],[1,1,1,1,1,1,0,0,1,1,1],[1,1,1,1,0,1,0,1,1,1,1],[1,1,1,0,0,1,0,1,1,1,1],[1,1,1,0,0,0,0,1,1,1,1],[1,1,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,0,1,0,1,1,1,1,1,1,1],[1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1]],
-      startX:4, startY:1, startDir:'right', exitX:3, exitY:9,
-      collectibles:[{x:6,y:1},{x:8,y:1},{x:7,y:2},{x:6,y:4},{x:4,y:7},{x:3,y:6},{x:3,y:9},{x:3,y:11},{x:1,y:9}],
+      hint: 'Everything from your library — hallway, step, horseshoe — and nothing new to write. Read the maze: hallway, Move, step, horseshoe, then the descent (Turn Left, Move, Move, Turn Left), hallway, Move, step, step, horseshoe. Click a name in 📚 My Functions if you forget what one does.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1],[1,0,0,0,1,1,1,1,0,0,0,1,0,1,1,1],[1,0,1,1,1,1,1,1,0,1,0,1,0,1,1,1],[1,0,0,0,0,1,1,1,0,1,0,0,0,1,1,1],[1,1,1,1,0,0,0,1,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,0,0,0,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:9, startY:1, startDir:'right', exitX:3, exitY:4,
+      collectibles:[{x:11,y:1},{x:13,y:1},{x:12,y:3},{x:10,y:6},{x:8,y:6},{x:8,y:8},{x:6,y:7},{x:4,y:6},{x:1,y:4}],
     },
   ],
 

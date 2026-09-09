@@ -106,7 +106,7 @@ const INTENDED: { title: string; newDefs: string[]; main: Tok[] }[] = [
   {
     title: "Horseshoes",
     newDefs: [],
-    main: [repeat(3, [call("horseshoe"), TL, TL])],
+    main: [repeat(3, [call("horseshoe"), TL, M, M, TL])],
   },
   {
     title: "Straightaways",
@@ -116,7 +116,7 @@ const INTENDED: { title: string; newDefs: string[]; main: Tok[] }[] = [
   {
     title: "Three Tools",
     newDefs: [],
-    main: [call("hallway"), call("step"), call("step"), call("horseshoe"), TL, TL, call("step"), call("hallway"), call("horseshoe")],
+    main: [call("hallway"), M, call("step"), call("horseshoe"), TL, M, M, TL, call("hallway"), M, call("step"), call("step"), call("horseshoe")],
   },
 ];
 
@@ -169,6 +169,33 @@ describe("Functions unit — a hallway built from fixed Moves works everywhere a
       } finally {
         LIBRARY.hallway = saved;
       }
+    });
+  }
+});
+
+describe("Functions unit — every shape is mandatory (no bypass through the maze)", () => {
+  function shortestPath(ch: BlockChallenge): number {
+    const g = ch.grid; const start = `${ch.startX},${ch.startY}`;
+    const dist = new Map<string, number>([[start, 0]]); const q = [[ch.startX, ch.startY]];
+    while (q.length) {
+      const [x, y] = q.shift()!;
+      if (x === ch.exitX && y === ch.exitY) return dist.get(`${x},${y}`)!;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (ny < 0 || ny >= g.length || nx < 0 || nx >= g[0].length || g[ny][nx] !== 0) continue;
+        const k = `${nx},${ny}`;
+        if (!dist.has(k)) { dist.set(k, dist.get(`${x},${y}`)! + 1); q.push([nx, ny]); }
+      }
+    }
+    return -1;
+  }
+  function movesOf(toks: Tok[]): number {
+    return toks.reduce((n, t) => n + (t.t === "M" ? 1 : t.t === "call" ? movesOf(LIBRARY[t.fn]) : t.t === "repeat" ? t.n * movesOf(t.body) : t.t === "while" ? 4 * movesOf(t.body) : 0), 0);
+  }
+  for (const { title, main } of INTENDED) {
+    it(`${title}: shortest path equals the intended walk`, () => {
+      const ch = level(title);
+      expect(shortestPath(ch)).toBe(movesOf(main));
     });
   }
 });
