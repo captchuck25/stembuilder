@@ -18,7 +18,7 @@ const CARD: React.CSSProperties = {
 interface Stats {
   users: { total: number; teachers: number; students: number };
   classes: { total: number; enrollments: number };
-  activity: { completedChallenges: number; bridgeDesigns: number; turtleSubmissions: number };
+  activity: { completedChallenges: number; bridgeDesigns: number; towerDesigns?: number; turtleSubmissions: number };
   toolCounts: Record<string, number>;
   recentUsers: { name: string; email: string; role: string; created_at: string }[];
 }
@@ -175,6 +175,7 @@ export default function AdminPage() {
     { label: "Enrollments", value: stats.classes.enrollments, color: "#0891b2", icon: "📋" },
     { label: "Challenges Completed", value: stats.activity.completedChallenges, color: "#16a34a", icon: "✅" },
     { label: "Bridge Designs", value: stats.activity.bridgeDesigns, color: "#b45309", icon: "🌉" },
+    { label: "Tower Designs", value: stats.activity.towerDesigns ?? 0, color: "#0f766e", icon: "🗼" },
     { label: "Turtle Submissions", value: stats.activity.turtleSubmissions, color: "#0d9488", icon: "🐢" },
   ];
 

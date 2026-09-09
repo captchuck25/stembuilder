@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'User not found' }, { status: 404 }) // no cross-tenant existence leak
   }
 
-  const [enrollments, progress, bridges, turtles, sketches, blueprints] = await Promise.all([
+  const [enrollments, progress, bridges, turtles, sketches, blueprints, towers] = await Promise.all([
     db.from('enrollments').select('class_id, enrolled_at').eq('student_id', id).is('deleted_at', null),
     db.from('user_progress').select('tool, level_idx, challenge_idx, completed, quiz_score, saved_code, updated_at')
       .eq('user_id', id).is('deleted_at', null),
@@ -29,6 +29,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     db.from('turtle_submissions').select('*').eq('user_id', id).is('deleted_at', null),
     db.from('stem_sketch_designs').select('*').eq('user_id', id).is('deleted_at', null),
     db.from('blueprint_lab_designs').select('*').eq('user_id', id).is('deleted_at', null),
+    db.from('tower_designs').select('*').eq('user_id', id).is('deleted_at', null),
   ])
 
   await ctx.audit({
@@ -45,6 +46,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     turtleSubmissions: turtles.data ?? [],
     stemSketchDesigns: sketches.data ?? [],
     blueprintLabDesigns: blueprints.data ?? [],
+    towerDesigns: towers.data ?? [],
   }, null, 2), {
     headers: {
       'Content-Type': 'application/json',

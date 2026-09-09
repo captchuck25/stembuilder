@@ -17,6 +17,7 @@ export async function GET() {
     { count: totalEnrollments },
     { count: totalProgress },
     { count: totalBridges },
+    { count: totalTowers },
     { count: totalTurtle },
     { data: recentUsers },
     { data: toolBreakdown },
@@ -28,6 +29,7 @@ export async function GET() {
     db.from('enrollments').select('*', { count: 'exact', head: true }).is('deleted_at', null),
     db.from('user_progress').select('*', { count: 'exact', head: true }).eq('completed', true).is('deleted_at', null),
     db.from('bridge_designs').select('*', { count: 'exact', head: true }).is('deleted_at', null),
+    db.from('tower_designs').select('*', { count: 'exact', head: true }).is('deleted_at', null),
     db.from('turtle_submissions').select('*', { count: 'exact', head: true }).not('submitted_at', 'is', null).is('deleted_at', null),
     db.from('profiles').select('name, email, role, created_at').is('deleted_at', null).order('created_at', { ascending: false }).limit(10),
     db.from('user_progress').select('tool').eq('completed', true).is('deleted_at', null),
@@ -42,7 +44,7 @@ export async function GET() {
   return NextResponse.json({
     users: { total: totalUsers ?? 0, teachers: totalTeachers ?? 0, students: totalStudents ?? 0 },
     classes: { total: totalClasses ?? 0, enrollments: totalEnrollments ?? 0 },
-    activity: { completedChallenges: totalProgress ?? 0, bridgeDesigns: totalBridges ?? 0, turtleSubmissions: totalTurtle ?? 0 },
+    activity: { completedChallenges: totalProgress ?? 0, bridgeDesigns: totalBridges ?? 0, towerDesigns: totalTowers ?? 0, turtleSubmissions: totalTurtle ?? 0 },
     toolCounts,
     recentUsers: recentUsers ?? [],
   })

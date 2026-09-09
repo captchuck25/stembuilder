@@ -18,6 +18,7 @@ import QuizzesTab from "./QuizzesTab";
 import StemSketchTab from "./StemSketchTab";
 import { TOOL_META, LeaderboardBoards, type LeaderboardData as MeasLeaderboardData, type MeasTool } from "@/app/tools/measurement-lab/shared";
 import BlueprintTab from "./BlueprintTab";
+import TowerPanel from "./TowerPanel";
 import { type AssignmentConfig as MeasAssignmentConfig } from "@/app/tools/measurement-lab/constants";
 
 const CARD: React.CSSProperties = {
@@ -146,7 +147,7 @@ export default function ClassDetailPage() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "turtle" | "stem-sketch" | "blueprint" | "measurement" | "quizzes">("code-lab");
+  const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "tower" | "turtle" | "stem-sketch" | "blueprint" | "measurement" | "quizzes">("code-lab");
   // Quiz Builder is pro/trial/district only: free teachers get NO tab (not a
   // locked teaser). The API routes independently re-check the plan.
   const [quizBuilderAllowed, setQuizBuilderAllowed] = useState(false);
@@ -1888,6 +1889,7 @@ export default function ClassDetailPage() {
               { id: "block-lab"  as const, label: "Block Lab",         icon: "🧩", color: "#7c3aed", desc: "Visual block coding" },
               { id: "arcade-lab" as const, label: "Arcade Lab",        icon: "🕹️", color: "#e11d48", desc: "Game design & coding" },
               { id: "bridge"     as const, label: "Bridge Builder",    icon: "🌉", color: "#d97706", desc: "Structural engineering" },
+              { id: "tower"      as const, label: "Tower Builder",     icon: "🗼", color: "#0f766e", desc: "Crush-test towers" },
               { id: "turtle"     as const, label: "Turtle Challenges", icon: "🐢", color: "#059669", desc: "Creative drawing review" },
               { id: "stem-sketch" as const, label: "STEM Sketch",      icon: "✏️", color: "#0891b2", desc: "3D design & print" },
               { id: "blueprint"   as const, label: "Blueprint Lab",    icon: "📐", color: "#4f46e5", desc: "Floor plan design" },
@@ -2341,6 +2343,11 @@ export default function ClassDetailPage() {
               </div>
             );
           })()}
+
+          {/* ── Tower Builder panel (self-contained; see TowerPanel.tsx) ──────────── */}
+          {selectedTool === "tower" && (
+            <TowerPanel classId={classId} students={students} />
+          )}
 
           {/* ── Bridge Builder panel ───────────────────────────────────────────────── */}
           {selectedTool === "bridge" && (

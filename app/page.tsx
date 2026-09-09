@@ -8,9 +8,9 @@ import styles from "./page.module.css";
 
 const tiles = [
   {
-    label: "Bridge Builder",
-    href: "/tools/bridge",
-    src: "/ui/bridge-button-v2.png",
+    label: "Structures",
+    href: "/tools/structures",
+    src: "/ui/structures-button.png",
   },
   {
     label: "Code Lab",

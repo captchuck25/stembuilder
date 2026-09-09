@@ -1,0 +1,54 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/auth'
+import { adminDb } from '@/lib/db.server'
+
+// Tower Builder saved designs — same shape and semantics as /api/bridge.
+// Requires migration 0029 (tower_designs).
+
+export async function GET() {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const db = adminDb()
+  const { data } = await db
+    .from('tower_designs')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false })
+
+  return NextResponse.json(data ?? [])
+}
+
+export async function POST(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json()
+  const { name, heightFeet, footprintFeet, loadLb, designerName, nodes, members, passed, cost, thumbnail } = body
+
+  if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 })
+
+  const db = adminDb()
+  const row: Record<string, unknown> = {
+    user_id: session.user.id,
+    name,
+    height_feet: heightFeet,
+    footprint_feet: footprintFeet,
+    load_lb: loadLb,
+    designer_name: designerName,
+    nodes,
+    members,
+    passed,
+    cost,
+    updated_at: new Date().toISOString(),
+    deleted_at: null,
+  }
+  if (typeof thumbnail === 'string' && thumbnail.length > 0) row.thumbnail = thumbnail
+  const { error } = await db
+    .from('tower_designs')
+    .upsert(row, { onConflict: 'user_id,name' })
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ ok: true })
+}

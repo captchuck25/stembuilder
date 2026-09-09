@@ -40,6 +40,18 @@ interface BridgeAssignment {
   class_id: string;
 }
 
+interface TowerAssignment {
+  id: string;
+  title: string;
+  height_feet: number;
+  footprint_feet: number;
+  load_lb: number;
+  max_cost: number;
+  submitted: boolean;
+  passed: boolean;
+  class_id: string;
+}
+
 interface MeasurementAssignment {
   id: string;
   class_id: string;
@@ -110,6 +122,7 @@ export default function StudentDashboard() {
   const router = useRouter();
   const [enrolledClasses, setEnrolledClasses] = useState<EnrolledClass[]>([]);
   const [bridgeAssignments, setBridgeAssignments] = useState<BridgeAssignment[]>([]);
+  const [towerAssignments, setTowerAssignments] = useState<TowerAssignment[]>([]);
   const [measAssignments, setMeasAssignments] = useState<MeasurementAssignment[]>([]);
   const [sketchAssignments, setSketchAssignments] = useState<SketchAssignmentRow[]>([]);
   const [sketchTutorials, setSketchTutorials] = useState<SketchTutorialState>({ classes: [], completed: [] });
@@ -138,7 +151,7 @@ export default function StudentDashboard() {
   }, [status, session?.user?.id]);
 
   async function loadClasses() {
-    const [classRes, bridgeRes, measRes, sketchRes, quizRes, progressRes, turtleRes, tutorialRes] = await Promise.all([
+    const [classRes, bridgeRes, measRes, sketchRes, quizRes, progressRes, turtleRes, tutorialRes, towerRes] = await Promise.all([
       fetch("/api/student/classes"),
       fetch("/api/student/bridge-assignments"),
       fetch("/api/student/measurement-assignments"),
@@ -147,9 +160,11 @@ export default function StudentDashboard() {
       fetch("/api/student/my-progress"),
       fetch("/api/turtle"),
       fetch("/api/student/stem-sketch-tutorials"),
+      fetch("/api/student/tower-assignments"),
     ]);
     setEnrolledClasses(classRes.ok ? await classRes.json() : []);
     setBridgeAssignments(bridgeRes.ok ? await bridgeRes.json() : []);
+    setTowerAssignments(towerRes.ok ? await towerRes.json() : []);
     setMeasAssignments(measRes.ok ? await measRes.json() : []);
     setSketchAssignments(sketchRes.ok ? await sketchRes.json() : []);
     setQuizAssignments(quizRes.ok ? await quizRes.json() : []);
@@ -295,12 +310,13 @@ export default function StudentDashboard() {
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
               {enrolledClasses.map(({ class: cls, assignments, turtleAssignedIds }) => {
                 const classBridgeAssignments = bridgeAssignments.filter(b => b.class_id === cls.id);
+                const classTowerAssignments = towerAssignments.filter(t => t.class_id === cls.id);
                 const classMeasAssignments = measAssignments.filter(m => m.class_id === cls.id);
                 const classSketchAssignments = sketchAssignments.filter(s => s.class_id === cls.id);
                 const classQuizAssignments = quizAssignments.filter(q => q.class_id === cls.id);
                 const classSketchTutorials = sketchTutorials.classes.find(t => t.class_id === cls.id)?.tutorialIds ?? [];
                 const turtleIds = turtleAssignedIds ?? [];
-                const totalAssignments = assignments.length + classBridgeAssignments.length + classMeasAssignments.length + classSketchAssignments.length + classQuizAssignments.length + turtleIds.length + classSketchTutorials.length;
+                const totalAssignments = assignments.length + classBridgeAssignments.length + classTowerAssignments.length + classMeasAssignments.length + classSketchAssignments.length + classQuizAssignments.length + turtleIds.length + classSketchTutorials.length;
                 return (
                 <div key={cls.id} style={{ ...CARD, padding: "28px 30px" }}>
                   <div style={{ fontSize: 20, fontWeight: 900, color: "#111", marginBottom: 4 }}>{cls.name}</div>
@@ -466,6 +482,38 @@ export default function StudentDashboard() {
                                       {b.span_feet} ft · {b.load_lb / 2000} ton · max ${b.max_cost.toFixed(0)}
                                     </div>
                                     {b.passed && (
+                                      <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>✓ Completed</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Tower Assignments */}
+                      {classTowerAssignments.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#0f766e",
+                            textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 8 }}>
+                            🗼 Tower Builder
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                            {classTowerAssignments.map(t => (
+                              <Link key={t.id} href={`/tools/tower?assignment=${t.id}`} style={{ textDecoration: "none" }}>
+                                <div style={{ padding: "14px 20px", borderRadius: 14,
+                                  background: t.passed ? "linear-gradient(135deg, #dcfce722, #dcfce744)" : "linear-gradient(135deg, #ccfbf122, #99f6e444)",
+                                  border: `2px solid ${t.passed ? "#16a34a" : "#0f766e"}`,
+                                  display: "flex", alignItems: "center", gap: 10 }}>
+                                  <div style={{ fontSize: 22 }}>🗼</div>
+                                  <div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111" }}>
+                                      {t.title || "Tower Assignment"}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: "#555" }}>
+                                      {t.height_feet} ft tall · {t.footprint_feet} ft footprint · {t.load_lb / 2000} ton · max ${Number(t.max_cost).toFixed(0)}
+                                    </div>
+                                    {t.passed && (
                                       <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>✓ Completed</div>
                                     )}
                                   </div>
