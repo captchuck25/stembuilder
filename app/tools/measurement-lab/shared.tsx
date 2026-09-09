@@ -11,6 +11,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatLeaderboardName } from "./name-format";
 import { normalizeAssignmentConfig } from "./constants";
+import { decodeRulerMode } from "./ruler/fractions";
 import type { AssignmentConfig, MeasTool } from "./constants";
 
 export { formatLeaderboardName, normalizeAssignmentConfig };
@@ -57,12 +58,16 @@ export const TOOL_META: Record<MeasTool, {
   "ruler": {
     label: "Ruler", icon: "📏", color: "#2563eb",
     modeLabel: "Mode",
+    // unit + task packed into one value (see ruler/fractions.ts); the Find
+    // values are the pre-Take originals so older assignments stay valid.
     modes: [
-      { value: "inches", label: "Inches" },
-      { value: "metric", label: "Metric" },
+      { value: "inches",      label: "Inches · Find" },
+      { value: "inches-take", label: "Inches · Take" },
+      { value: "metric",      label: "Metric · Find" },
+      { value: "metric-take", label: "Metric · Take" },
     ],
     precisionLabel: "Precision",
-    precisions: (mode) => mode === "metric"
+    precisions: (mode) => decodeRulerMode(mode).unit === "metric"
       ? [
         { value: "10", label: "cm" },
         { value: "5", label: "5 mm" },
@@ -76,8 +81,12 @@ export const TOOL_META: Record<MeasTool, {
         { value: "16", label: "1/16\"" },
       ],
     tier: (mode, precision) => {
-      if (mode === "metric") return precision === "10" ? 1 : precision === "1" ? 3 : 2;
-      return precision === "8" ? 2 : precision === "16" ? 3 : 1;
+      const { unit, task } = decodeRulerMode(mode);
+      const base = unit === "metric"
+        ? (precision === "10" ? 1 : precision === "1" ? 3 : 2)
+        : (precision === "8" ? 2 : precision === "16" ? 3 : 1);
+      // Take (type the reading) is a step harder than Find (click the tick).
+      return (task === "take" ? Math.min(4, base + 1) : base) as Tier;
     },
   },
   "dial-caliper": {

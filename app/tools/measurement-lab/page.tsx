@@ -14,7 +14,7 @@ const tools = [
     id: "ruler",
     icon: "📏",
     label: "Ruler Game",
-    desc: "Read inches & metric measurements",
+    desc: "Find & take inch and metric measurements",
     color: "#2563eb",
     href: "/tools/measurement-lab/ruler",
     ready: true,

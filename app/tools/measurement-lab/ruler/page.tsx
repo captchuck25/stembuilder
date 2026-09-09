@@ -10,6 +10,11 @@ import {
   ModeSelector, ScoreHud, SprintBar, ResultScreen,
   AssignmentBanner, AssignmentErrorCard,
 } from "../shared";
+import {
+  gcd, inchLabel, cmLabel, encodeRulerMode, decodeRulerMode,
+  parseInchInput, parseCmInput, inchAnswerCorrect, inchAnswerStatus, cmAnswerCorrect,
+  type RulerTask, type TypedAnswer,
+} from "./fractions";
 
 // ─── Ruler geometry ───────────────────────────────────────────────────────────
 
@@ -29,6 +34,8 @@ const TICK_IN: Record<number, number> = { 1: 60, 2: 44, 4: 32, 8: 22, 16: 13 };
 // keyed by mm subdivision: 10=1cm, 5=5mm, 2=2mm, 1=1mm
 const TICK_MM: Record<number, number> = { 10: 60, 5: 28, 2: 28, 1: 28 };
 
+const BLUE = "#2563eb", GREEN = "#16a34a", RED = "#dc2626";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Mode     = "inches" | "metric";
@@ -37,18 +44,9 @@ type MmStep   = 10 | 5 | 2 | 1;
 
 interface Target  { value: number; label: string; }
 interface Pointer { x: number; value: number; }
+interface Marker  { x: number; color: string; }
 
 // ─── Math helpers ─────────────────────────────────────────────────────────────
-
-function gcd(a: number, b: number): number { return b === 0 ? a : gcd(b, a % b); }
-
-function inchLabel(ticks: number, den: number): string {
-  const w = Math.floor(ticks / den), n = ticks % den;
-  if (n === 0) return `${w}"`;
-  const g = gcd(n, den);
-  const sn = n / g, sd = den / g;
-  return w === 0 ? `${sn}/${sd}"` : `${w} ${sn}/${sd}"`;
-}
 
 function valueToX_in(value: number): number { return PAD + value * INCH_PX; }
 function valueToX_mm(mm: number): number    { return PAD + (mm / 10) * CM_PX; }
@@ -84,8 +82,7 @@ function newMetricTarget(step: MmStep): Target {
   const total = (N_CM * 10) / step;
   const t = Math.floor(Math.random() * (total - 1)) + 1;
   const mm = t * step;
-  const cm = mm / 10;
-  return { value: mm, label: cm % 1 === 0 ? `${cm} cm` : `${cm.toFixed(1)} cm` };
+  return { value: mm, label: cmLabel(mm) };
 }
 
 // ─── Ruler SVG ────────────────────────────────────────────────────────────────
@@ -105,19 +102,19 @@ function Pointer({ x, color }: { x: number; color: string }) {
   );
 }
 
-function InchRuler({
-  prec, userPtr, correctPtr, answered,
-  onRulerClick,
-}: {
-  prec: InchPrec;
-  userPtr: Pointer | null;
-  correctPtr: Pointer | null;
-  answered: boolean;
+// Both rulers share the same interaction contract: `markers` are drawn on top,
+// and when `interactive` is false the ruler ignores hover/click (Take mode —
+// the student reads the arrow instead of placing one).
+interface RulerProps {
+  markers: Marker[];
+  interactive: boolean;
   onRulerClick: (svgX: number) => void;
-}) {
+}
+
+function InchRuler({ prec, markers, interactive, onRulerClick }: RulerProps & { prec: InchPrec }) {
   const W = N_IN * INCH_PX + PAD * 2;
   const svgRef = useRef<SVGSVGElement>(null);
-  const [hover, setHover] = useState<{ x: number; label: string } | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
 
   function getSvgX(e: React.MouseEvent) {
     if (!svgRef.current) return null;
@@ -126,17 +123,15 @@ function InchRuler({
   }
 
   function handleMouseMove(e: React.MouseEvent) {
-    if (answered) { setHover(null); return; }
+    if (!interactive) { setHover(null); return; }
     const svgX = getSvgX(e);
     if (svgX === null) return;
     const ptr = snapClick(svgX, "inches", prec, 10);
-    if (!ptr) { setHover(null); return; }
-    const ticks = Math.round(ptr.value * prec);
-    setHover({ x: ptr.x, label: inchLabel(ticks, prec) });
+    setHover(ptr ? ptr.x : null);
   }
 
   function handleClick(e: React.MouseEvent) {
-    if (answered) return;
+    if (!interactive) return;
     const svgX = getSvgX(e);
     if (svgX !== null) onRulerClick(svgX);
   }
@@ -167,7 +162,7 @@ function InchRuler({
       onClick={handleClick}
       onMouseMove={handleMouseMove}
       onMouseLeave={() => setHover(null)}
-      style={{ cursor: answered ? "default" : "crosshair", display: "block", maxWidth: "100%" }}>
+      style={{ cursor: interactive ? "crosshair" : "default", display: "block", maxWidth: "100%" }}>
       {/* Ruler body — cream/wood color, extends past 0 and 6 */}
       <rect x={PAD - OVERHANG} y={RY} width={N_IN * INCH_PX + OVERHANG * 2} height={RH}
         fill="#FFFAED" stroke="#A0791A" strokeWidth={1.5} rx={2} />
@@ -176,35 +171,20 @@ function InchRuler({
         fontSize={17} fill="#3a1a00" fontWeight="700">0</text>
       {tickEls}
       {/* Hover highlight — blue line only */}
-      {hover && !answered && (
-        <line x1={hover.x} y1={RY} x2={hover.x} y2={RY + RH}
-          stroke="#2563eb" strokeWidth={2.5} opacity={0.5}
+      {hover !== null && interactive && (
+        <line x1={hover} y1={RY} x2={hover} y2={RY + RH}
+          stroke={BLUE} strokeWidth={2.5} opacity={0.5}
           style={{ pointerEvents: "none" }} />
       )}
-      {correctPtr && <Pointer x={correctPtr.x} color="#16a34a" />}
-      {userPtr && (
-        <Pointer
-          x={userPtr.x}
-          color={!correctPtr ? "#2563eb" : Math.abs(userPtr.x - (correctPtr?.x ?? -999)) < 0.5 ? "#16a34a" : "#dc2626"}
-        />
-      )}
+      {markers.map((m, i) => <Pointer key={i} x={m.x} color={m.color} />)}
     </svg>
   );
 }
 
-function MetricRuler({
-  step, userPtr, correctPtr, answered,
-  onRulerClick,
-}: {
-  step: MmStep;
-  userPtr: Pointer | null;
-  correctPtr: Pointer | null;
-  answered: boolean;
-  onRulerClick: (svgX: number) => void;
-}) {
+function MetricRuler({ step, markers, interactive, onRulerClick }: RulerProps & { step: MmStep }) {
   const W = N_CM * CM_PX + PAD * 2;
   const svgRef = useRef<SVGSVGElement>(null);
-  const [hover, setHover] = useState<{ x: number; label: string } | null>(null);
+  const [hover, setHover] = useState<number | null>(null);
 
   function getSvgX(e: React.MouseEvent) {
     if (!svgRef.current) return null;
@@ -213,19 +193,15 @@ function MetricRuler({
   }
 
   function handleMouseMove(e: React.MouseEvent) {
-    if (answered) { setHover(null); return; }
+    if (!interactive) { setHover(null); return; }
     const svgX = getSvgX(e);
     if (svgX === null) return;
     const ptr = snapClick(svgX, "metric", 2, step);
-    if (!ptr) { setHover(null); return; }
-    const mm = ptr.value;
-    const cm = mm / 10;
-    const label = cm % 1 === 0 ? `${cm} cm` : `${cm.toFixed(1)} cm`;
-    setHover({ x: ptr.x, label });
+    setHover(ptr ? ptr.x : null);
   }
 
   function handleClick(e: React.MouseEvent) {
-    if (answered) return;
+    if (!interactive) return;
     const svgX = getSvgX(e);
     if (svgX !== null) onRulerClick(svgX);
   }
@@ -255,7 +231,7 @@ function MetricRuler({
       onClick={handleClick}
       onMouseMove={handleMouseMove}
       onMouseLeave={() => setHover(null)}
-      style={{ cursor: answered ? "default" : "crosshair", display: "block", maxWidth: "100%" }}>
+      style={{ cursor: interactive ? "crosshair" : "default", display: "block", maxWidth: "100%" }}>
       {/* Ruler body — white with green border, extends past 0 and 20 */}
       <rect x={PAD - OVERHANG} y={RY} width={N_CM * CM_PX + OVERHANG * 2} height={RH}
         fill="#F4FBF5" stroke="#1a6a2a" strokeWidth={1.5} rx={2} />
@@ -264,18 +240,12 @@ function MetricRuler({
         fontSize={16} fill="#0a3a1a" fontWeight="700">0</text>
       {tickEls}
       {/* Hover highlight — green line only */}
-      {hover && !answered && (
-        <line x1={hover.x} y1={RY} x2={hover.x} y2={RY + RH}
+      {hover !== null && interactive && (
+        <line x1={hover} y1={RY} x2={hover} y2={RY + RH}
           stroke="#059669" strokeWidth={2.5} opacity={0.5}
           style={{ pointerEvents: "none" }} />
       )}
-      {correctPtr && <Pointer x={correctPtr.x} color="#16a34a" />}
-      {userPtr && (
-        <Pointer
-          x={userPtr.x}
-          color={!correctPtr ? "#2563eb" : Math.abs(userPtr.x - (correctPtr?.x ?? -999)) < 0.5 ? "#16a34a" : "#dc2626"}
-        />
-      )}
+      {markers.map((m, i) => <Pointer key={i} x={m.x} color={m.color} />)}
     </svg>
   );
 }
@@ -296,12 +266,25 @@ const MM_STEPS: { val: MmStep; label: string }[] = [
   { val: 1,  label: "1mm" },
 ];
 
+// ─── Take-mode answer fields ──────────────────────────────────────────────────
+
+const FIELD: React.CSSProperties = {
+  fontFamily: "monospace", fontWeight: 900, textAlign: "center",
+  color: "#111", background: "#fff", outline: "none", borderRadius: 10,
+  padding: 0,
+};
+
+function fieldBorder(state: "idle" | "error" | "correct" | "wrong"): string {
+  return `3px solid ${state === "correct" ? GREEN : state === "wrong" || state === "error" ? RED : "#d1d5db"}`;
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 function RulerGamePage() {
   const { data: session } = useSession();
   const userId = session?.user?.id ?? null;
   const [mode,     setMode]     = useState<Mode>("inches");
+  const [task,     setTask]     = useState<RulerTask>("find");
   const [inchPrec, setInchPrec] = useState<InchPrec>(2);
   const [mmStep,   setMmStep]   = useState<MmStep>(10);
 
@@ -312,13 +295,27 @@ function RulerGamePage() {
   const [strikes,    setStrikes]    = useState(0);
   const [gameOver,   setGameOver]   = useState(false);
   const [answered,   setAnswered]   = useState(false);
+  const [correct,    setCorrect]    = useState(false);
+
+  // Take-mode typed answer
+  const [wholeIn,    setWholeIn]    = useState("");
+  const [numIn,      setNumIn]      = useState("");
+  const [denIn,      setDenIn]      = useState("");
+  const [cmIn,       setCmIn]       = useState("");
+  const [inputError, setInputError] = useState(false);
+  const [typed,      setTyped]      = useState<TypedAnswer | null>(null);
+  const [unsimplified, setUnsimplified] = useState(false); // value matched, fraction not reduced
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
 
   const meas = useMeasurementSession({
     tool: "ruler",
-    getTier: () => TOOL_META["ruler"].tier(mode, mode === "inches" ? String(inchPrec) : String(mmStep)),
-    onAdvance: () => nextQuestion(mode, inchPrec, mmStep),
+    getTier: () => TOOL_META["ruler"].tier(
+      encodeRulerMode(mode, task),
+      mode === "inches" ? String(inchPrec) : String(mmStep),
+    ),
+    onAdvance: () => nextQuestion(mode, inchPrec, mmStep, task),
   });
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
@@ -327,14 +324,15 @@ function RulerGamePage() {
   useEffect(() => {
     if (!meas.assignment) return;
     const cfg = meas.assignment.config;
-    if (cfg.mode === "metric") {
+    const { unit, task: tk } = decodeRulerMode(cfg.mode);
+    if (unit === "metric") {
       const step = ([10, 5, 2, 1] as MmStep[]).includes(parseInt(cfg.precision, 10) as MmStep)
         ? parseInt(cfg.precision, 10) as MmStep : 10;
-      startFresh("metric", inchPrec, step);
+      startFresh("metric", inchPrec, step, tk);
     } else {
       const prec = ([2, 4, 8, 16] as InchPrec[]).includes(parseInt(cfg.precision, 10) as InchPrec)
         ? parseInt(cfg.precision, 10) as InchPrec : 2;
-      startFresh("inches", prec, mmStep);
+      startFresh("inches", prec, mmStep, tk);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meas.assignment]);
@@ -345,77 +343,146 @@ function RulerGamePage() {
     m === "inches" ? newInchTarget(p) : newMetricTarget(s),
   []);
 
-  function startFresh(m: Mode, p: InchPrec, s: MmStep) {
-    clearTimer();
-    setMode(m); setInchPrec(p); setMmStep(s);
-    const t = freshTarget(m, p, s);
-    setTarget(t);
-    meas.noteQuestionShown(t.label);
+  function resetQuestionState() {
     setUserPtr(null); setCorrectPtr(null);
-    setScore(0); setStrikes(0);
-    setGameOver(false); setAnswered(false);
+    setAnswered(false); setCorrect(false);
+    setWholeIn(""); setNumIn(""); setDenIn(""); setCmIn("");
+    setInputError(false); setTyped(null); setUnsimplified(false);
   }
 
-  function nextQuestion(m: Mode, p: InchPrec, s: MmStep) {
-    setUserPtr(null); setCorrectPtr(null); setAnswered(false);
+  function focusFirstField(tk: RulerTask) {
+    if (tk === "take") setTimeout(() => firstFieldRef.current?.focus(), 50);
+  }
+
+  function startFresh(m: Mode, p: InchPrec, s: MmStep, tk: RulerTask) {
+    clearTimer();
+    setMode(m); setInchPrec(p); setMmStep(s); setTask(tk);
     const t = freshTarget(m, p, s);
     setTarget(t);
     meas.noteQuestionShown(t.label);
+    resetQuestionState();
+    setScore(0); setStrikes(0);
+    setGameOver(false);
+    focusFirstField(tk);
   }
 
-  function handleRulerClick(svgX: number) {
-    if (answered || gameOver || meas.sessionOver) return;
-    const ptr = snapClick(svgX, mode, inchPrec, mmStep);
-    if (!ptr) return;
-    setUserPtr(ptr);
+  function nextQuestion(m: Mode, p: InchPrec, s: MmStep, tk: RulerTask) {
+    resetQuestionState();
+    const t = freshTarget(m, p, s);
+    setTarget(t);
+    meas.noteQuestionShown(t.label);
+    focusFirstField(tk);
+  }
+
+  // Shared post-answer bookkeeping for both the click (Find) and typed (Take)
+  // paths: session recording, practice strikes/high score, advance timers.
+  function finishAnswer(isCorrect: boolean, answerLabel: string) {
     setAnswered(true);
-
-    const correct = Math.abs(ptr.value - target.value) < 0.0001;
-    const clickedLabel = mode === "inches"
-      ? inchLabel(Math.round(ptr.value * inchPrec), inchPrec)
-      : (ptr.value / 10) % 1 === 0 ? `${ptr.value / 10} cm` : `${(ptr.value / 10).toFixed(1)} cm`;
-    const res = meas.recordAnswer(correct, { target: target.label, answer: clickedLabel });
-
-    if (!correct) {
-      // Show correct answer on ruler (all modes)
-      const cx = mode === "inches"
-        ? valueToX_in(target.value)
-        : valueToX_mm(target.value);
-      setCorrectPtr({ x: cx, value: target.value });
-    }
+    setCorrect(isCorrect);
+    const res = meas.recordAnswer(isCorrect, { target: target.label, answer: answerLabel });
+    const advance = () => nextQuestion(mode, inchPrec, mmStep, task);
 
     if (meas.playMode === "practice") {
-      if (correct) {
+      if (isCorrect) {
         const newScore = score + 1;
         setScore(newScore);
         if (userId) {
-          const li = mode === "inches" ? 0 : 1;
+          // level slot: 0 inches·find, 1 metric·find, 2 inches·take, 3 metric·take
+          const li = (mode === "inches" ? 0 : 1) + (task === "take" ? 2 : 0);
           const ci = mode === "inches"
             ? INCH_PRECS.findIndex(p => p.val === inchPrec)
             : MM_STEPS.findIndex(s => s.val === mmStep);
           upsertToolHighScore(userId, "meas-ruler", li, ci, newScore);
         }
         // Advance after short delay
-        timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1200);
+        timerRef.current = setTimeout(advance, 1200);
       } else {
         const newStrikes = strikes + 1;
         setStrikes(newStrikes);
         if (newStrikes >= 3) {
           timerRef.current = setTimeout(() => setGameOver(true), 1800);
         } else {
-          timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), 1800);
+          timerRef.current = setTimeout(advance, 1800);
         }
       }
     } else if (!res.sessionOver) {
       // sprint keeps feedback brief so the 60s clock isn't eaten by delays
-      const delay = meas.playMode === "sprint" ? (correct ? 700 : 1100) : (correct ? 1200 : 1800);
-      timerRef.current = setTimeout(() => nextQuestion(mode, inchPrec, mmStep), delay);
+      const delay = meas.playMode === "sprint" ? (isCorrect ? 700 : 1100) : (isCorrect ? 1200 : 1800);
+      timerRef.current = setTimeout(advance, delay);
     }
   }
+
+  // Find mode: click the tick that matches the target.
+  function handleRulerClick(svgX: number) {
+    if (task !== "find" || answered || gameOver || meas.sessionOver) return;
+    const ptr = snapClick(svgX, mode, inchPrec, mmStep);
+    if (!ptr) return;
+    setUserPtr(ptr);
+
+    const isCorrect = Math.abs(ptr.value - target.value) < 0.0001;
+    const clickedLabel = mode === "inches"
+      ? inchLabel(Math.round(ptr.value * inchPrec), inchPrec)
+      : cmLabel(ptr.value);
+
+    if (!isCorrect) {
+      // Show correct answer on ruler (all modes)
+      const cx = mode === "inches" ? valueToX_in(target.value) : valueToX_mm(target.value);
+      setCorrectPtr({ x: cx, value: target.value });
+    }
+    finishAnswer(isCorrect, clickedLabel);
+  }
+
+  // Take mode: type the reading at the arrow.
+  function handleTakeSubmit() {
+    if (task !== "take" || answered || gameOver || meas.sessionOver) return;
+    let ans: TypedAnswer | null;
+    let isCorrect: boolean;
+    if (mode === "inches") {
+      ans = parseInchInput(wholeIn, numIn, denIn);
+      if (!ans) { setInputError(true); return; }
+      isCorrect = inchAnswerCorrect(ans, target.value, numIn, denIn);
+      setUnsimplified(inchAnswerStatus(ans, target.value, numIn, denIn) === "unsimplified");
+    } else {
+      ans = parseCmInput(cmIn);
+      if (!ans) { setInputError(true); return; }
+      isCorrect = cmAnswerCorrect(ans, target.value);
+    }
+    setTyped(ans);
+    finishAnswer(isCorrect, ans.label);
+  }
+
+  function onFieldKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") { e.preventDefault(); handleTakeSubmit(); }
+  }
+  function onFieldChange(setter: (v: string) => void) {
+    return (e: React.ChangeEvent<HTMLInputElement>) => { setInputError(false); setter(e.target.value); };
+  }
+
+  // Markers drawn on the ruler.
+  const markers: Marker[] = [];
+  if (task === "find") {
+    if (correctPtr) markers.push({ x: correctPtr.x, color: GREEN });
+    if (userPtr) markers.push({ x: userPtr.x, color: !answered ? BLUE : correct ? GREEN : RED });
+  } else {
+    const tx = mode === "inches" ? valueToX_in(target.value) : valueToX_mm(target.value);
+    markers.push({ x: tx, color: !answered ? BLUE : correct ? GREEN : RED });
+  }
+
+  const fieldState = answered ? (correct ? "correct" : "wrong") : inputError ? "error" : "idle";
+  const fieldsLocked = answered || gameOver || meas.sessionOver;
 
   const NAV_BTN: React.CSSProperties = {
     padding: "7px 14px", borderRadius: 10, border: "2px solid",
     fontWeight: 700, fontSize: 12, cursor: "pointer", transition: "all 120ms",
+  };
+  const navStyle = (active: boolean): React.CSSProperties => ({
+    ...NAV_BTN,
+    borderColor: active ? BLUE : "#e0e0e0",
+    background:  active ? "#eff6ff" : "#f9f9f9",
+    color:       active ? BLUE : "#666",
+  });
+  const GROUP_LABEL: React.CSSProperties = {
+    fontSize: 12, fontWeight: 800, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px",
   };
 
   return (
@@ -436,7 +503,10 @@ function RulerGamePage() {
           <div style={{ ...CARD, padding: "18px 24px", marginBottom: 20 }}>
             <h1 style={{ fontSize: 24, fontWeight: 900, color: "#111", margin: "0 0 4px" }}>📏 Ruler Game</h1>
             <p style={{ fontSize: 13, fontWeight: 600, color: "#555", margin: 0 }}>
-              Click the ruler at the correct measurement. 3 strikes and you're out!
+              {task === "find"
+                ? "Find: click the ruler at the measurement you're given."
+                : "Take: read the arrow and type the measurement."}
+              {meas.playMode === "practice" ? " 3 strikes and you're out!" : ""}
             </p>
           </div>
 
@@ -448,21 +518,31 @@ function RulerGamePage() {
           <div style={{ ...CARD, padding: "14px 20px", marginBottom: 20,
             display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
 
-            <ModeSelector session={meas} color="#2563eb"
-              onSelect={() => startFresh(mode, inchPrec, mmStep)} />
+            <ModeSelector session={meas} color={BLUE}
+              onSelect={() => startFresh(mode, inchPrec, mmStep, task)} />
+
+            <div style={{ width: 1, height: 28, background: "#e5e7eb" }} />
+
+            {/* Task: Find (click the tick) vs Take (type the reading) */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={GROUP_LABEL}>Task</span>
+              {(["find", "take"] as RulerTask[]).map(tk => (
+                <button key={tk} onClick={() => startFresh(mode, inchPrec, mmStep, tk)}
+                  title={tk === "find" ? "You're given a measurement — click it on the ruler" : "An arrow marks the ruler — type the measurement"}
+                  style={navStyle(task === tk)}>
+                  {tk === "find" ? "Find" : "Take"}
+                </button>
+              ))}
+            </div>
 
             <div style={{ width: 1, height: 28, background: "#e5e7eb" }} />
 
             {/* Mode */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px" }}>Mode</span>
+              <span style={GROUP_LABEL}>Mode</span>
               {(["inches", "metric"] as Mode[]).map(m => (
-                <button key={m} onClick={() => startFresh(m, inchPrec, mmStep)}
-                  style={{ ...NAV_BTN,
-                    borderColor: mode === m ? "#2563eb" : "#e0e0e0",
-                    background:  mode === m ? "#eff6ff"  : "#f9f9f9",
-                    color:       mode === m ? "#2563eb"  : "#666",
-                  }}>
+                <button key={m} onClick={() => startFresh(m, inchPrec, mmStep, task)}
+                  style={navStyle(mode === m)}>
                   {m === "inches" ? "Inches" : "Metric"}
                 </button>
               ))}
@@ -472,25 +552,17 @@ function RulerGamePage() {
 
             {/* Precision */}
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "#888", textTransform: "uppercase", letterSpacing: "0.5px" }}>Precision</span>
+              <span style={GROUP_LABEL}>Precision</span>
               {mode === "inches"
                 ? INCH_PRECS.map(p => (
-                  <button key={p.val} onClick={() => startFresh(mode, p.val, mmStep)}
-                    style={{ ...NAV_BTN,
-                      borderColor: inchPrec === p.val ? "#2563eb" : "#e0e0e0",
-                      background:  inchPrec === p.val ? "#eff6ff"  : "#f9f9f9",
-                      color:       inchPrec === p.val ? "#2563eb"  : "#666",
-                    }}>
+                  <button key={p.val} onClick={() => startFresh(mode, p.val, mmStep, task)}
+                    style={navStyle(inchPrec === p.val)}>
                     {p.label}
                   </button>
                 ))
                 : MM_STEPS.map(s => (
-                  <button key={s.val} onClick={() => startFresh(mode, inchPrec, s.val)}
-                    style={{ ...NAV_BTN,
-                      borderColor: mmStep === s.val ? "#2563eb" : "#e0e0e0",
-                      background:  mmStep === s.val ? "#eff6ff"  : "#f9f9f9",
-                      color:       mmStep === s.val ? "#2563eb"  : "#666",
-                    }}>
+                  <button key={s.val} onClick={() => startFresh(mode, inchPrec, s.val, task)}
+                    style={navStyle(mmStep === s.val)}>
                     {s.label}
                   </button>
                 ))
@@ -501,13 +573,13 @@ function RulerGamePage() {
 
           {/* Main game card */}
           {meas.sessionOver ? (
-            <ResultScreen session={meas} color="#2563eb" onPlayAgain={() => meas.restart()} />
+            <ResultScreen session={meas} color={BLUE} onPlayAgain={() => meas.restart()} />
           ) : gameOver ? (
             <div style={{ ...CARD, padding: "64px 40px", textAlign: "center" }}>
               <div style={{ fontSize: 56, marginBottom: 14 }}>💥</div>
               <h2 style={{ fontSize: 28, fontWeight: 900, color: "#111", marginBottom: 8 }}>Game Over!</h2>
               <p style={{ fontSize: 18, color: "#333", marginBottom: 4 }}>
-                Final score: <strong style={{ color: "#2563eb" }}>{score}</strong>
+                Final score: <strong style={{ color: BLUE }}>{score}</strong>
               </p>
               <p style={{ fontSize: 13, color: "#888", fontWeight: 600, marginBottom: 32 }}>
                 {score === 0 ? "Keep practicing — you'll get it!" :
@@ -515,8 +587,8 @@ function RulerGamePage() {
                  score < 10 ? "Nice work! Can you beat your score?" :
                  "Excellent — you're a measurement pro!"}
               </p>
-              <button onClick={() => startFresh(mode, inchPrec, mmStep)}
-                style={{ padding: "14px 40px", background: "#2563eb", color: "#fff",
+              <button onClick={() => startFresh(mode, inchPrec, mmStep, task)}
+                style={{ padding: "14px 40px", background: BLUE, color: "#fff",
                   border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: "pointer" }}>
                 Play Again
               </button>
@@ -526,42 +598,105 @@ function RulerGamePage() {
 
               {meas.playMode === "sprint" && <SprintBar secondsLeft={meas.sprintSecondsLeft} />}
 
-              {/* ── Target display ── */}
+              {/* ── Prompt: the target (Find) or the answer fields (Take) ── */}
               <div style={{ textAlign: "center", marginBottom: 20 }}>
                 <div style={{ fontSize: 12, fontWeight: 800, color: "#888",
                   textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 6 }}>
-                  Find this measurement
+                  {task === "find" ? "Find this measurement" : "Take this measurement"}
                 </div>
-                <div style={{ fontSize: 48, fontWeight: 900, color: "#111",
-                  fontFamily: "monospace", letterSpacing: "1px", lineHeight: 1 }}>
-                  {target.label}
-                </div>
+
+                {task === "find" ? (
+                  <div style={{ fontSize: 48, fontWeight: 900, color: "#111",
+                    fontFamily: "monospace", letterSpacing: "1px", lineHeight: 1 }}>
+                    {target.label}
+                  </div>
+                ) : mode === "inches" ? (
+                  // whole number + stacked fraction, sized like the Find prompt
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                    <input ref={firstFieldRef} value={wholeIn} onChange={onFieldChange(setWholeIn)}
+                      onKeyDown={onFieldKey} disabled={fieldsLocked} aria-label="whole inches"
+                      inputMode="numeric" placeholder="0" maxLength={2}
+                      style={{ ...FIELD, width: 74, height: 76, fontSize: 40, border: fieldBorder(fieldState) }} />
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                      <input value={numIn} onChange={onFieldChange(setNumIn)}
+                        onKeyDown={onFieldKey} disabled={fieldsLocked} aria-label="numerator"
+                        inputMode="numeric" maxLength={2}
+                        style={{ ...FIELD, width: 58, height: 36, fontSize: 22, border: fieldBorder(fieldState) }} />
+                      <div style={{ width: 62, height: 3, background: "#111", borderRadius: 2 }} />
+                      <input value={denIn} onChange={onFieldChange(setDenIn)}
+                        onKeyDown={onFieldKey} disabled={fieldsLocked} aria-label="denominator"
+                        inputMode="numeric" maxLength={2}
+                        style={{ ...FIELD, width: 58, height: 36, fontSize: 22, border: fieldBorder(fieldState) }} />
+                    </div>
+                    <span style={{ fontSize: 40, fontWeight: 900, color: "#111", fontFamily: "monospace" }}>&quot;</span>
+                    {!answered && (
+                      <button onClick={handleTakeSubmit}
+                        style={{ marginLeft: 10, padding: "12px 26px", background: BLUE, color: "#fff",
+                          border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: "pointer" }}>
+                        Check
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+                    <input ref={firstFieldRef} value={cmIn} onChange={onFieldChange(setCmIn)}
+                      onKeyDown={onFieldKey} disabled={fieldsLocked} aria-label="centimetres"
+                      inputMode="decimal" placeholder="0.0" maxLength={5}
+                      style={{ ...FIELD, width: 150, height: 76, fontSize: 40, border: fieldBorder(fieldState) }} />
+                    <span style={{ fontSize: 28, fontWeight: 900, color: "#111", fontFamily: "monospace" }}>cm</span>
+                    {!answered && (
+                      <button onClick={handleTakeSubmit}
+                        style={{ marginLeft: 10, padding: "12px 26px", background: BLUE, color: "#fff",
+                          border: "none", borderRadius: 10, fontSize: 15, fontWeight: 800, cursor: "pointer" }}>
+                        Check
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* ── Ruler ── */}
               <div style={{ overflowX: "auto", paddingBottom: 4, marginBottom: 12,
                 display: "flex", justifyContent: "center" }}>
                 {mode === "inches"
-                  ? <InchRuler prec={inchPrec} userPtr={userPtr} correctPtr={correctPtr}
-                      answered={answered} onRulerClick={handleRulerClick} />
-                  : <MetricRuler step={mmStep} userPtr={userPtr} correctPtr={correctPtr}
-                      answered={answered} onRulerClick={handleRulerClick} />
+                  ? <InchRuler prec={inchPrec} markers={markers}
+                      interactive={task === "find" && !answered} onRulerClick={handleRulerClick} />
+                  : <MetricRuler step={mmStep} markers={markers}
+                      interactive={task === "find" && !answered} onRulerClick={handleRulerClick} />
                 }
               </div>
 
               {/* ── Feedback message ── */}
               <div style={{ textAlign: "center", minHeight: 28, marginBottom: 20 }}>
-                {answered && !correctPtr && (
-                  <span style={{ fontSize: 16, fontWeight: 800, color: "#16a34a" }}>✓ Correct!</span>
+                {answered && correct && (
+                  <span style={{ fontSize: 16, fontWeight: 800, color: GREEN }}>✓ Correct!</span>
                 )}
-                {answered && correctPtr && (
-                  <span style={{ fontSize: 15, fontWeight: 700, color: "#dc2626" }}>
+                {answered && !correct && task === "find" && (
+                  <span style={{ fontSize: 15, fontWeight: 700, color: RED }}>
                     ✗ The answer was <strong style={{ fontFamily: "monospace" }}>{target.label}</strong> — shown in green
                   </span>
                 )}
+                {answered && !correct && task === "take" && unsimplified && typed && (
+                  <span style={{ fontSize: 15, fontWeight: 700, color: RED }}>
+                    ✗ <strong style={{ fontFamily: "monospace" }}>{typed.label}</strong> is the right spot, but the fraction
+                    isn&apos;t simplified — the answer is <strong style={{ fontFamily: "monospace" }}>{target.label}</strong>
+                  </span>
+                )}
+                {answered && !correct && task === "take" && !unsimplified && (
+                  <span style={{ fontSize: 15, fontWeight: 700, color: RED }}>
+                    ✗ The arrow is at <strong style={{ fontFamily: "monospace" }}>{target.label}</strong>
+                    {typed && <> — you typed <strong style={{ fontFamily: "monospace" }}>{typed.label}</strong></>}
+                  </span>
+                )}
                 {!answered && (
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#aaa" }}>
-                    Click the ruler to mark your answer
+                  <span style={{ fontSize: 12, fontWeight: 600, color: inputError ? RED : "#aaa" }}>
+                    {task === "find"
+                      ? "Click the ruler to mark your answer"
+                      : inputError
+                        ? (mode === "inches" ? "Type a whole number, a fraction, or both" : "Type a number like 3.5")
+                        : mode === "inches"
+                          ? "Type the measurement at the blue arrow — whole inches and the fraction, then Enter"
+                          : "Type the measurement at the blue arrow in centimetres, then Enter"}
                   </span>
                 )}
               </div>
@@ -584,7 +719,7 @@ function RulerGamePage() {
                     {[0, 1, 2].map(i => (
                       <div key={i} style={{
                         width: 22, height: 22, borderRadius: "50%",
-                        background: i < strikes ? "#dc2626" : "#e5e7eb",
+                        background: i < strikes ? RED : "#e5e7eb",
                         border: `2px solid ${i < strikes ? "#b91c1c" : "#d1d5db"}`,
                         transition: "background 250ms",
                         display: "flex", alignItems: "center", justifyContent: "center",
