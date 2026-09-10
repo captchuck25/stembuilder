@@ -34,5 +34,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  return NextResponse.json({ ...data, config: normalizeAssignmentConfig(data.config) })
+  // The caller's own attempt history, so the game can enforce retake limits
+  // and show "attempt 2 of 3" before the first question.
+  const { data: mine } = await db
+    .from('measurement_attempts')
+    .select('correct')
+    .eq('assignment_id', id)
+    .eq('student_id', session.user.id)
+    .is('deleted_at', null)
+  const attemptsUsed = mine?.length ?? 0
+  const bestCorrect = attemptsUsed ? Math.max(...mine!.map((m: { correct: number }) => m.correct)) : null
+
+  return NextResponse.json({ ...data, config: normalizeAssignmentConfig(data.config), attemptsUsed, bestCorrect })
 }

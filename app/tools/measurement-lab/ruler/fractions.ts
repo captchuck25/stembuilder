@@ -105,3 +105,88 @@ export function inchAnswerCorrect(ans: TypedAnswer, targetIn: number, num: strin
 export function cmAnswerCorrect(ans: TypedAnswer, targetMm: number): boolean {
   return Math.abs(ans.value - targetMm) < 0.01;
 }
+
+// ─── Target variety ───────────────────────────────────────────────────────────
+//
+// Picking a uniformly random tick at 1/16" precision gives sixteenths half the
+// time and whole inches almost never (Charlie 2026-09-10: "they get into a
+// pattern of sixteenths continuously"). Instead we rotate through the
+// *kinds* of mark with a shuffle bag — every kind comes up once per cycle, in
+// random order — then pick a random tick of that kind. The same value never
+// repeats back-to-back.
+
+export interface VarietyBag {
+  classes: number[];   // the kinds available at this precision
+  bag: number[];       // remaining kinds in the current shuffled cycle
+  prev: number;        // last value dealt (ticks or mm), to avoid repeats
+}
+
+/** Inch kinds = simplified denominators present at a precision: 16 → [1,2,4,8,16]. */
+export function inchClasses(prec: number): number[] {
+  const out: number[] = [];
+  for (let d = 1; d <= prec; d *= 2) out.push(d);
+  return out;
+}
+
+/** Metric kinds by mm value: 10 = whole cm, 5 = half cm, 2 = even mm, 1 = odd mm. */
+export function metricClasses(step: number): number[] {
+  return step === 10 ? [10] : step === 5 ? [10, 5] : step === 2 ? [10, 2] : [10, 5, 2, 1];
+}
+
+export function makeBag(classes: number[]): VarietyBag {
+  return { classes, bag: [], prev: -1 };
+}
+
+function drawClass(b: VarietyBag, rng: () => number): number {
+  if (b.bag.length === 0) {
+    const cycle = [...b.classes];
+    for (let i = cycle.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [cycle[i], cycle[j]] = [cycle[j], cycle[i]];
+    }
+    b.bag = cycle;
+  }
+  return b.bag.pop()!;
+}
+
+function pickFrom(b: VarietyBag, cands: number[], rng: () => number): number {
+  const pool = cands.length > 1 ? cands.filter(c => c !== b.prev) : cands;
+  const v = pool[Math.floor(rng() * pool.length)];
+  b.prev = v;
+  return v;
+}
+
+/** Simplified denominator of ticks/prec (whole inches → 1). */
+export function inchClassOf(ticks: number, prec: number): number {
+  return prec / gcd(ticks, prec);
+}
+
+export function metricClassOf(mm: number): number {
+  return mm % 10 === 0 ? 10 : mm % 5 === 0 ? 5 : mm % 2 === 0 ? 2 : 1;
+}
+
+/** Next inch target in ticks (1 .. totalInches*prec-1) rotating through kinds. */
+export function nextInchTicks(prec: number, totalInches: number, b: VarietyBag, rng: () => number = Math.random): number {
+  const total = totalInches * prec;
+  for (let guard = 0; guard < 8; guard++) {
+    const cls = drawClass(b, rng);
+    const cands: number[] = [];
+    for (let t = 1; t < total; t++) if (inchClassOf(t, prec) === cls) cands.push(t);
+    if (cands.length) return pickFrom(b, cands, rng);
+  }
+  return pickFrom(b, Array.from({ length: total - 1 }, (_, i) => i + 1), rng);
+}
+
+/** Next metric target in mm (step .. totalCm*10-step) rotating through kinds. */
+export function nextMetricMm(step: number, totalCm: number, b: VarietyBag, rng: () => number = Math.random): number {
+  const totalMm = totalCm * 10;
+  for (let guard = 0; guard < 8; guard++) {
+    const cls = drawClass(b, rng);
+    const cands: number[] = [];
+    for (let mm = step; mm < totalMm; mm += step) if (metricClassOf(mm) === cls) cands.push(mm);
+    if (cands.length) return pickFrom(b, cands, rng);
+  }
+  const all: number[] = [];
+  for (let mm = step; mm < totalMm; mm += step) all.push(mm);
+  return pickFrom(b, all, rng);
+}

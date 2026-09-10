@@ -58,7 +58,7 @@ interface MeasurementAssignment {
   class_name: string;
   title: string;
   tool: string;
-  config: { mode: string; precision: string; questionCount: number; timerSeconds: number | null; passThreshold: number };
+  config: { mode: string; precision: string; questionCount: number; timerSeconds: number | null; passThreshold: number; maxAttempts?: number | null; scoring?: "goal" | "score" };
   bestCorrect: number | null;
   attemptCount: number;
   passed: boolean;
@@ -543,15 +543,26 @@ export default function StudentDashboard() {
                                       {m.title || "Measurement Assignment"}
                                     </div>
                                     <div style={{ fontSize: 12, color: "#555" }}>
-                                      {MEAS_TOOL_LABELS[m.tool] ?? m.tool} · {m.config.questionCount} questions · goal {m.config.passThreshold}
+                                      {MEAS_TOOL_LABELS[m.tool] ?? m.tool} · {m.config.questionCount} questions{m.config.scoring === "score" ? " · scored" : ` · goal ${m.config.passThreshold}`}
                                     </div>
                                     {m.passed ? (
                                       <div style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginTop: 2 }}>
-                                        ✓ Completed (best {m.bestCorrect}/{m.config.questionCount})
+                                        {m.config.scoring === "score"
+                                          ? `✓ Scored ${m.bestCorrect}/${m.config.questionCount}${m.attemptCount > 1 ? ` (best of ${m.attemptCount})` : ""}`
+                                          : `✓ Completed (best ${m.bestCorrect}/${m.config.questionCount})`}
                                       </div>
                                     ) : m.attemptCount > 0 ? (
                                       <div style={{ fontSize: 11, color: "#b45309", fontWeight: 700, marginTop: 2 }}>
                                         Best {m.bestCorrect}/{m.config.questionCount} · {m.attemptCount} {m.attemptCount === 1 ? "try" : "tries"}
+                                        {m.config.maxAttempts
+                                          ? (m.config.maxAttempts - m.attemptCount > 0
+                                              ? ` · ${m.config.maxAttempts - m.attemptCount} left`
+                                              : " · no attempts left")
+                                          : " · try again!"}
+                                      </div>
+                                    ) : m.config.maxAttempts ? (
+                                      <div style={{ fontSize: 11, color: "#888", fontWeight: 700, marginTop: 2 }}>
+                                        {m.config.maxAttempts} attempt{m.config.maxAttempts === 1 ? "" : "s"} allowed
                                       </div>
                                     ) : null}
                                   </div>

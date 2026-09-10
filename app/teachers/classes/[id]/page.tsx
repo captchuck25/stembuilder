@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { type Class, type Assignment, type LessonLock } from "@/lib/supabase";
@@ -148,6 +148,22 @@ export default function ClassDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedTool, setSelectedTool] = useState<"code-lab" | "block-lab" | "arcade-lab" | "bridge" | "tower" | "turtle" | "stem-sketch" | "blueprint" | "measurement" | "quizzes">("code-lab");
+
+  // Keep the selected tool tab across refreshes — restore first, then persist
+  // (same sessionStorage pattern as the Python maze page's phase restore).
+  useEffect(() => {
+    try {
+      const t = sessionStorage.getItem("teacher_class_tool");
+      if (t === "code-lab" || t === "block-lab" || t === "arcade-lab" || t === "bridge" ||
+          t === "tower" || t === "turtle" || t === "stem-sketch" || t === "blueprint" ||
+          t === "measurement" || t === "quizzes") {
+        setSelectedTool(t);
+      }
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { sessionStorage.setItem("teacher_class_tool", selectedTool); } catch { /* ignore */ }
+  }, [selectedTool]);
   // Quiz Builder is pro/trial/district only: free teachers get NO tab (not a
   // locked teaser). The API routes independently re-check the plan.
   const [quizBuilderAllowed, setQuizBuilderAllowed] = useState(false);
@@ -191,7 +207,13 @@ export default function ClassDetailPage() {
 
   // Measurement Lab assignments state
   interface MeasurementAssignmentRow { id: string; title: string; tool: MeasTool; config: MeasAssignmentConfig; attemptStudentCount: number; created_at: string; }
-  interface MeasurementResultRow { student_id: string; name: string; best_correct: number; total: number; attempts: number; last_at: string; }
+  interface MeasurementMissed { q: number; target: string; answer: string }
+  interface MeasurementAttemptRow { correct: number; total: number; at: string; missed: MeasurementMissed[] }
+  interface MeasurementResultRow {
+    student_id: string; name: string; best_correct: number; first_correct: number; total: number;
+    attempts: number; last_at: string; history: MeasurementAttemptRow[];
+  }
+  const [openMeasStudent, setOpenMeasStudent] = useState<string | null>(null); // "assignmentId:studentId"
   const [measAssignments, setMeasAssignments] = useState<MeasurementAssignmentRow[]>([]);
   const [loadingMeas, setLoadingMeas] = useState(false);
   const measLoadedRef = useRef(false);
@@ -199,6 +221,8 @@ export default function ClassDetailPage() {
   const [measForm, setMeasForm] = useState({
     title: "", tool: "ruler" as MeasTool, mode: "inches", precision: "2",
     questionCount: 10, timerSeconds: "", passThreshold: 8,
+    maxAttempts: 0,   // 0 = unlimited retakes
+    scoring: "goal" as "goal" | "score",
   });
   const [measFormSaving, setMeasFormSaving] = useState(false);
   const [measFormError, setMeasFormError] = useState("");
@@ -531,6 +555,8 @@ export default function ClassDetailPage() {
           questionCount: qc,
           timerSeconds: Number.isFinite(timer) && timer > 0 ? timer : null,
           passThreshold: pt,
+          maxAttempts: measForm.maxAttempts > 0 ? measForm.maxAttempts : null,
+          scoring: measForm.scoring,
         },
       }),
     });
@@ -2787,6 +2813,18 @@ export default function ClassDetailPage() {
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Scoring
+                        <select
+                          value={measForm.scoring}
+                          onChange={e => setMeasForm(f => ({ ...f, scoring: e.target.value as "goal" | "score" }))}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          <option value="goal">Pass / fail against a goal</option>
+                          <option value="score">Record score only (quiz grade)</option>
+                        </select>
+                      </label>
+                      {measForm.scoring === "goal" ? (
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
                         Goal (correct to pass)
                         <select
                           value={measForm.passThreshold}
@@ -2798,6 +2836,13 @@ export default function ClassDetailPage() {
                           ))}
                         </select>
                       </label>
+                      ) : (
+                      <div style={{ fontSize: 12, color: "#666", fontWeight: 600, alignSelf: "end", paddingBottom: 10 }}>
+                        No pass goal — students see their score, you see every attempt and what they missed.
+                      </div>
+                      )}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
                         Seconds per question (optional)
                         <input
@@ -2811,6 +2856,22 @@ export default function ClassDetailPage() {
                             borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600,
                             color: "#111", outline: "none", boxSizing: "border-box" }}
                         />
+                      </label>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                        Retakes
+                        <select
+                          value={measForm.maxAttempts}
+                          onChange={e => setMeasForm(f => ({ ...f, maxAttempts: Number(e.target.value) }))}
+                          style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
+                            borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
+                          <option value={0}>Unlimited — retake until they pass</option>
+                          <option value={1}>1 attempt only</option>
+                          <option value={2}>2 attempts</option>
+                          <option value={3}>3 attempts</option>
+                          <option value={5}>5 attempts</option>
+                        </select>
                       </label>
                     </div>
                     {measFormError && <div style={{ fontSize: 12, color: "#dc2626" }}>{measFormError}</div>}
@@ -2853,10 +2914,15 @@ export default function ClassDetailPage() {
                             </div>
                             <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                               <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>{meta.label} · {modeLabel}{precLabel ? ` · ${precLabel}` : ""}</span>
-                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>{a.config.questionCount} questions · goal {a.config.passThreshold}</span>
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>
+                                {a.config.questionCount} questions · {a.config.scoring === "score" ? "score only" : `goal ${a.config.passThreshold}`}
+                              </span>
                               {a.config.timerSeconds ? (
                                 <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>⏱ {a.config.timerSeconds}s / question</span>
                               ) : null}
+                              <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>
+                                🔁 {a.config.maxAttempts ? `max ${a.config.maxAttempts} attempt${a.config.maxAttempts === 1 ? "" : "s"}` : "unlimited retakes"}
+                              </span>
                               <span style={{ fontSize: 12, color: "#16a34a", fontWeight: 700 }}>
                                 ✓ {a.attemptStudentCount} student{a.attemptStudentCount !== 1 ? "s" : ""} attempted
                               </span>
@@ -2900,6 +2966,7 @@ export default function ClassDetailPage() {
                                   <thead>
                                     <tr style={{ background: "#ccfbf1" }}>
                                       <th style={{ ...TH }}>Student</th>
+                                      <th style={{ ...TH, textAlign: "center" }}>First Try</th>
                                       <th style={{ ...TH, textAlign: "center" }}>Best</th>
                                       <th style={{ ...TH, textAlign: "center" }}>Attempts</th>
                                       <th style={{ ...TH }}>Last Attempt</th>
@@ -2907,12 +2974,22 @@ export default function ClassDetailPage() {
                                   </thead>
                                   <tbody>
                                     {results.map((row, si) => {
-                                      const passed = row.best_correct >= a.config.passThreshold;
+                                      const scoreOnly = a.config.scoring === "score";
+                                      const passed = !scoreOnly && row.best_correct >= a.config.passThreshold;
+                                      const rowKey = `${a.id}:${row.student_id}`;
+                                      const open = openMeasStudent === rowKey;
+                                      const history = row.history ?? [];
                                       return (
-                                        <tr key={row.student_id} style={{ background: si % 2 === 0 ? "#fff" : "#f0fdfa" }}>
-                                          <td style={{ ...TD, fontWeight: 700 }}>{row.name}</td>
+                                        <Fragment key={row.student_id}>
+                                        <tr onClick={() => setOpenMeasStudent(open ? null : rowKey)}
+                                          title="Click to see every attempt and the missed questions"
+                                          style={{ background: si % 2 === 0 ? "#fff" : "#f0fdfa", cursor: "pointer" }}>
+                                          <td style={{ ...TD, fontWeight: 700 }}>{open ? "▾" : "▸"} {row.name}</td>
+                                          <td style={{ ...TD, textAlign: "center", fontWeight: 700, color: "#444" }}>
+                                            {row.first_correct ?? row.best_correct}/{row.total}
+                                          </td>
                                           <td style={{ ...TD, textAlign: "center", fontWeight: 800,
-                                            color: passed ? "#16a34a" : "#dc2626" }}>
+                                            color: scoreOnly ? "#115e59" : passed ? "#16a34a" : "#dc2626" }}>
                                             {row.best_correct}/{row.total} {passed ? "✓" : ""}
                                           </td>
                                           <td style={{ ...TD, textAlign: "center" }}>{row.attempts}</td>
@@ -2920,6 +2997,36 @@ export default function ClassDetailPage() {
                                             {new Date(row.last_at).toLocaleDateString()}
                                           </td>
                                         </tr>
+                                        {open && (
+                                          <tr style={{ background: "#f8fffe" }}>
+                                            <td colSpan={5} style={{ ...TD, padding: "10px 14px 14px" }}>
+                                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                                {history.map((h, hi) => (
+                                                  <div key={hi} style={{ fontSize: 12, color: "#333" }}>
+                                                    <span style={{ fontWeight: 800, color: "#115e59" }}>
+                                                      Attempt {hi + 1} · {h.correct}/{h.total}
+                                                    </span>
+                                                    <span style={{ color: "#888" }}> · {new Date(h.at).toLocaleString()}</span>
+                                                    {h.missed.length === 0 ? (
+                                                      <span style={{ color: "#16a34a", fontWeight: 700 }}> · nothing missed</span>
+                                                    ) : (
+                                                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                                                        {h.missed.map((m, mi) => (
+                                                          <span key={mi} style={{ fontFamily: "monospace", fontSize: 12,
+                                                            background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6,
+                                                            padding: "2px 8px", color: "#991b1b" }}>
+                                                            Q{m.q}: {m.target} → {m.answer || "(no answer)"}
+                                                          </span>
+                                                        ))}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </td>
+                                          </tr>
+                                        )}
+                                        </Fragment>
                                       );
                                     })}
                                   </tbody>

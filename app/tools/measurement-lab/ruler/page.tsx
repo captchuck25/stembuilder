@@ -10,10 +10,12 @@ import {
   ModeSelector, ScoreHud, SprintBar, ResultScreen,
   AssignmentBanner, AssignmentErrorCard,
 } from "../shared";
+import { isLeaderboardEligible, LEADERBOARD_SETTINGS } from "../constants";
 import {
   gcd, inchLabel, cmLabel, encodeRulerMode, decodeRulerMode,
   parseInchInput, parseCmInput, inchAnswerCorrect, inchAnswerStatus, cmAnswerCorrect,
-  type RulerTask, type TypedAnswer,
+  inchClasses, metricClasses, makeBag, nextInchTicks, nextMetricMm,
+  type RulerTask, type TypedAnswer, type VarietyBag,
 } from "./fractions";
 
 // ─── Ruler geometry ───────────────────────────────────────────────────────────
@@ -72,16 +74,24 @@ function snapClick(
   }
 }
 
-function newInchTarget(prec: InchPrec): Target {
-  const total = N_IN * prec;
-  const t = Math.floor(Math.random() * (total - 1)) + 1;
+// Targets rotate through the kinds of mark (whole, half, quarter, …) via a
+// shuffle bag so a 1/16" session isn't wall-to-wall sixteenths. One bag per
+// (unit, precision); a settings change starts a fresh bag.
+interface TargetSource { key: string; bag: VarietyBag }
+
+function bagFor(src: TargetSource | null, m: Mode, p: InchPrec, s: MmStep): TargetSource {
+  const key = m === "inches" ? `in:${p}` : `mm:${s}`;
+  if (src && src.key === key) return src;
+  return { key, bag: makeBag(m === "inches" ? inchClasses(p) : metricClasses(s)) };
+}
+
+function newInchTarget(prec: InchPrec, bag: VarietyBag): Target {
+  const t = nextInchTicks(prec, N_IN, bag);
   return { value: t / prec, label: inchLabel(t, prec) };
 }
 
-function newMetricTarget(step: MmStep): Target {
-  const total = (N_CM * 10) / step;
-  const t = Math.floor(Math.random() * (total - 1)) + 1;
-  const mm = t * step;
+function newMetricTarget(step: MmStep, bag: VarietyBag): Target {
+  const mm = nextMetricMm(step, N_CM, bag);
   return { value: mm, label: cmLabel(mm) };
 }
 
@@ -288,7 +298,11 @@ function RulerGamePage() {
   const [inchPrec, setInchPrec] = useState<InchPrec>(2);
   const [mmStep,   setMmStep]   = useState<MmStep>(10);
 
-  const [target,     setTarget]     = useState<Target>(() => newInchTarget(2));
+  const sourceRef = useRef<TargetSource | null>(null);
+  const [target,     setTarget]     = useState<Target>(() => {
+    sourceRef.current = bagFor(null, "inches", 2, 10);
+    return newInchTarget(2, sourceRef.current.bag);
+  });
   const [userPtr,    setUserPtr]    = useState<Pointer | null>(null);
   const [correctPtr, setCorrectPtr] = useState<Pointer | null>(null);
   const [score,      setScore]      = useState(0);
@@ -309,12 +323,14 @@ function RulerGamePage() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
+  const settingsMode = encodeRulerMode(mode, task);
+  const settingsPrecision = mode === "inches" ? String(inchPrec) : String(mmStep);
+  const boardEligible = isLeaderboardEligible("ruler", settingsMode, settingsPrecision);
+
   const meas = useMeasurementSession({
     tool: "ruler",
-    getTier: () => TOOL_META["ruler"].tier(
-      encodeRulerMode(mode, task),
-      mode === "inches" ? String(inchPrec) : String(mmStep),
-    ),
+    getTier: () => TOOL_META["ruler"].tier(settingsMode, settingsPrecision),
+    getSettings: () => ({ mode: settingsMode, precision: settingsPrecision }),
     onAdvance: () => nextQuestion(mode, inchPrec, mmStep, task),
   });
 
@@ -339,9 +355,11 @@ function RulerGamePage() {
 
   const clearTimer = () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } };
 
-  const freshTarget = useCallback((m: Mode, p: InchPrec, s: MmStep) =>
-    m === "inches" ? newInchTarget(p) : newMetricTarget(s),
-  []);
+  const freshTarget = useCallback((m: Mode, p: InchPrec, s: MmStep) => {
+    const src = bagFor(sourceRef.current, m, p, s);
+    sourceRef.current = src;
+    return m === "inches" ? newInchTarget(p, src.bag) : newMetricTarget(s, src.bag);
+  }, []);
 
   function resetQuestionState() {
     setUserPtr(null); setCorrectPtr(null);
@@ -597,6 +615,13 @@ function RulerGamePage() {
             <div style={{ ...CARD, padding: "28px 24px 20px" }}>
 
               {meas.playMode === "sprint" && <SprintBar secondsLeft={meas.sprintSecondsLeft} />}
+              {meas.playMode === "sprint" && !boardEligible && (
+                <div style={{ textAlign: "center", fontSize: 12, fontWeight: 700, color: "#b45309",
+                  background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8,
+                  padding: "6px 10px", marginBottom: 14 }}>
+                  Leaderboard sprints are {LEADERBOARD_SETTINGS.ruler!.label} — this run is practice only and won&apos;t count.
+                </div>
+              )}
 
               {/* ── Prompt: the target (Find) or the answer fields (Take) ── */}
               <div style={{ textAlign: "center", marginBottom: 20 }}>

@@ -35,6 +35,18 @@ export async function POST(req: NextRequest) {
       total !== cfg.questionCount || correct < 0 || correct > total)
     return NextResponse.json({ error: 'Invalid score' }, { status: 400 })
 
+  // Retake limit (config.maxAttempts, null = unlimited).
+  if (cfg.maxAttempts) {
+    const { count } = await db
+      .from('measurement_attempts')
+      .select('id', { count: 'exact', head: true })
+      .eq('assignment_id', assignmentId)
+      .eq('student_id', session.user.id)
+      .is('deleted_at', null)
+    if ((count ?? 0) >= cfg.maxAttempts)
+      return NextResponse.json({ error: 'No attempts remaining' }, { status: 403 })
+  }
+
   const duration = Number.isInteger(durationS) && durationS > 0 ? Math.min(durationS, 7200) : null
 
   // Cap the missed-question payload: at most one entry per question, short strings.

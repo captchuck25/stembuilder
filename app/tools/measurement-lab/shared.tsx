@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatLeaderboardName } from "./name-format";
-import { normalizeAssignmentConfig } from "./constants";
+import { normalizeAssignmentConfig, isLeaderboardEligible, LEADERBOARD_SETTINGS } from "./constants";
 import { decodeRulerMode } from "./ruler/fractions";
 import type { AssignmentConfig, MeasTool } from "./constants";
 
@@ -165,6 +165,9 @@ export function useMeasurementSession(opts: {
   tool: MeasTool;
   getTier: () => Tier;
   onAdvance: () => void;
+  // Current settings in assignment-config vocabulary; used to decide whether
+  // a sprint run qualifies for the leaderboard (see LEADERBOARD_SETTINGS).
+  getSettings?: () => { mode: string; precision: string };
 }) {
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -174,7 +177,13 @@ export function useMeasurementSession(opts: {
 
   const [playMode, setPlayMode] = useState<PlayMode>("practice");
   const [assignment, setAssignment] = useState<MeasurementAssignment | null>(null);
-  const [assignmentError, setAssignmentError] = useState<{ kind: "load" } | { kind: "wrong-tool"; tool: string } | null>(null);
+  const [assignmentError, setAssignmentError] = useState<
+    | { kind: "load" }
+    | { kind: "wrong-tool"; tool: string }
+    | { kind: "exhausted"; used: number; max: number; best: number | null }
+    | null
+  >(null);
+  const [attemptsUsed, setAttemptsUsed] = useState(0); // finished attempts on this assignment (server count + this session)
 
   const [points, setPoints] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -182,7 +191,8 @@ export function useMeasurementSession(opts: {
 
   const [sprintSecondsLeft, setSprintSecondsLeft] = useState<number | null>(null);
   const [sprintOver, setSprintOver] = useState(false);
-  const [runResult, setRunResult] = useState<{ best: number; improved: boolean } | null>(null);
+  // counted=false: the run played at settings that don't qualify for the board.
+  const [runResult, setRunResult] = useState<{ best: number; improved: boolean; counted: boolean } | null>(null);
 
   const [questionIdx, setQuestionIdx] = useState(0); // answered so far (0-based next question)
   const [correctCount, setCorrectCount] = useState(0);
@@ -219,13 +229,20 @@ export function useMeasurementSession(opts: {
     const finalPoints = pointsRef.current;
     if (finalPoints > 0) {
       setRunResult(null);
+      const settings = optsRef.current.getSettings?.() ?? { mode: "", precision: "" };
+      if (!isLeaderboardEligible(optsRef.current.tool, settings.mode, settings.precision)) {
+        setRunResult({ best: 0, improved: false, counted: false });
+        return;
+      }
       fetch("/api/measurement-runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tool: optsRef.current.tool, points: finalPoints }),
+        body: JSON.stringify({ tool: optsRef.current.tool, points: finalPoints, ...settings }),
       })
         .then(res => (res.ok ? res.json() : null))
-        .then(data => { if (data) setRunResult({ best: data.best, improved: data.improved }); })
+        .then(data => {
+          if (data) setRunResult({ best: data.best ?? 0, improved: !!data.improved, counted: data.counted !== false });
+        })
         .catch(() => {});
     }
   };
@@ -275,8 +292,16 @@ export function useMeasurementSession(opts: {
         const a = data.assignment ?? data;
         if (cancelled) return;
         if (a.tool !== optsRef.current.tool) { setAssignmentError({ kind: "wrong-tool", tool: a.tool }); return; }
+        const cfg = normalizeAssignmentConfig(a.config);
+        const used = Number.isInteger(data.attemptsUsed) ? data.attemptsUsed : 0;
+        setAttemptsUsed(used);
+        if (cfg.maxAttempts && used >= cfg.maxAttempts) {
+          // Retake limit reached: stay in practice mode and explain.
+          setAssignmentError({ kind: "exhausted", used, max: cfg.maxAttempts, best: data.bestCorrect ?? null });
+          return;
+        }
         setAssignmentError(null);
-        setAssignment({ ...a, config: normalizeAssignmentConfig(a.config) });
+        setAssignment({ ...a, config: cfg });
         setPlayMode("assignment");
         startedAtRef.current = Date.now();
       } catch {
@@ -309,8 +334,14 @@ export function useMeasurementSession(opts: {
     else setSprintSecondsLeft(null);
   }
 
+  // Retakes remaining on the active assignment (null = unlimited).
+  const attemptsLeft = assignment?.config.maxAttempts
+    ? Math.max(0, assignment.config.maxAttempts - attemptsUsed)
+    : null;
+
   // Restart the current mode (sprint "Play Again" / assignment "Try Again").
   function restart() {
+    if (assignment && attemptsLeft === 0) return; // no retakes left
     stopSprintTimer();
     stopQuestionTimer();
     resetCounters();
@@ -333,7 +364,10 @@ export function useMeasurementSession(opts: {
         missed: missedRef.current,
       }),
     })
-      .then(res => setAttemptSave(res.ok ? "saved" : "error"))
+      .then(res => {
+        setAttemptSave(res.ok ? "saved" : "error");
+        if (res.ok) setAttemptsUsed(u => u + 1);
+      })
       .catch(() => setAttemptSave("error"));
   }
 
@@ -396,8 +430,9 @@ export function useMeasurementSession(opts: {
   const sessionOver = sprintOver || assignmentDone;
 
   return {
+    tool: opts.tool,
     playMode, selectMode, restart,
-    assignment, assignmentError,
+    assignment, assignmentError, attemptsUsed, attemptsLeft,
     points, streak, bestStreak,
     multiplier: comboMultiplier(streak),
     sprintSecondsLeft, sprintOver, runResult,
@@ -538,8 +573,12 @@ export function AssignmentBanner({ session }: { session: MeasurementSession }) {
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 15, fontWeight: 900, color: "#111" }}>{a.title}</div>
         <div style={{ fontSize: 12, fontWeight: 600, color: "#666" }}>
-          {a.config.questionCount} questions · goal {a.config.passThreshold}/{a.config.questionCount} correct
+          {a.config.questionCount} questions
+          {a.config.scoring === "score" ? " · scored, no pass goal" : ` · goal ${a.config.passThreshold}/${a.config.questionCount} correct`}
           {a.config.timerSeconds ? ` · ${a.config.timerSeconds}s per question` : ""}
+          {a.config.maxAttempts
+            ? ` · attempt ${Math.min(session.attemptsUsed + 1, a.config.maxAttempts)} of ${a.config.maxAttempts}`
+            : " · unlimited retakes"}
         </div>
       </div>
       <Link href="/student/dashboard" style={{ fontSize: 12, fontWeight: 700, color: "#0d9488" }}>
@@ -555,7 +594,13 @@ export function AssignmentErrorCard({ session }: { session: MeasurementSession }
   if (!err) return null;
   return (
     <div style={{ ...CARD, padding: "16px 22px", marginBottom: 16, borderColor: "#dc2626" }}>
-      {err.kind === "wrong-tool" ? (
+      {err.kind === "exhausted" ? (
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>
+          You&apos;ve used all {err.max} attempt{err.max === 1 ? "" : "s"} on this assignment
+          {err.best != null ? ` — your best score was ${err.best}` : ""}. Your teacher can see your results.{" "}
+          <Link href="/student/dashboard" style={{ color: "#0d9488" }}>Back to dashboard →</Link>
+        </div>
+      ) : err.kind === "wrong-tool" ? (
         <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>
           This assignment is for the {TOOL_META[err.tool as MeasTool]?.label ?? err.tool} game.{" "}
           <Link href={`/tools/measurement-lab/${err.tool}${typeof window !== "undefined" ? window.location.search : ""}`}
@@ -591,9 +636,11 @@ export function ResultScreen({ session, color, onPlayAgain }: {
           Best combo ×{comboMultiplier(s.bestStreak)} ({s.bestStreak} in a row)
         </p>
         <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 32, minHeight: 18,
-          color: s.runResult?.improved ? "#16a34a" : "#888" }}>
+          color: s.runResult?.improved ? "#16a34a" : s.runResult && !s.runResult.counted ? "#b45309" : "#888" }}>
           {s.points === 0 ? "Score a point to get on the board!"
             : !s.runResult ? " "
+            : !s.runResult.counted
+              ? `This run doesn't count for the leaderboard — play ${LEADERBOARD_SETTINGS[s.tool]?.label ?? "the leaderboard settings"} to get on the board.`
             : s.runResult.improved ? "🏆 New personal best — check the leaderboard!"
             : `Personal best: ${s.runResult.best}`}
         </p>
@@ -610,18 +657,28 @@ export function ResultScreen({ session, color, onPlayAgain }: {
   const a = s.assignment;
   if (!a) return null;
   const total = a.config.questionCount;
-  const passed = s.correctCount >= a.config.passThreshold;
+  const scoreOnly = a.config.scoring === "score";
+  const passed = scoreOnly || s.correctCount >= a.config.passThreshold;
+  const left = s.attemptsLeft;                  // null = unlimited
+  const canRetry = left === null || left > 0;
+  const retakeNote = left === null
+    ? "You can retake this as many times as you like."
+    : left > 0 ? `${left} attempt${left === 1 ? "" : "s"} left.`
+    : "No attempts left — your best score is what your teacher sees.";
   return (
     <div style={{ ...CARD, padding: "56px 40px", textAlign: "center" }}>
       <div style={{ fontSize: 56, marginBottom: 14 }}>{passed ? "🎉" : "📚"}</div>
       <h2 style={{ fontSize: 28, fontWeight: 900, color: "#111", marginBottom: 8 }}>
-        {passed ? "Assignment Complete!" : "Keep Practicing!"}
+        {passed ? "Assignment Complete!" : canRetry ? "Not quite — try again!" : "Assignment Finished"}
       </h2>
       <p style={{ fontSize: 34, fontWeight: 900, color: passed ? "#16a34a" : "#dc2626", margin: "0 0 4px" }}>
         {s.correctCount}/{total}
       </p>
       <p style={{ fontSize: 13, color: "#888", fontWeight: 600, marginBottom: 8 }}>
-        Goal: {a.config.passThreshold}/{total} correct
+        {scoreOnly ? "Your score has been recorded for your teacher."
+          : passed ? `Goal: ${a.config.passThreshold}/${total} correct`
+          : `You need ${a.config.passThreshold}/${total} to pass.`}
+        {" "}{retakeNote}
       </p>
       <p style={{ fontSize: 12, fontWeight: 700, marginBottom: 28, minHeight: 16,
         color: s.attemptSave === "error" ? "#dc2626" : "#888" }}>
@@ -631,11 +688,13 @@ export function ResultScreen({ session, color, onPlayAgain }: {
           : " "}
       </p>
       <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-        <button onClick={onPlayAgain}
-          style={{ padding: "14px 36px", background: color, color: "#fff",
-            border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: "pointer" }}>
-          Try Again
-        </button>
+        {canRetry && (
+          <button onClick={onPlayAgain}
+            style={{ padding: "14px 36px", background: color, color: "#fff",
+              border: "none", borderRadius: 12, fontSize: 16, fontWeight: 800, cursor: "pointer" }}>
+            Try Again
+          </button>
+        )}
         <Link href="/student/dashboard"
           style={{ padding: "14px 36px", background: "#f3f4f6", color: "#333",
             border: "2px solid #e5e7eb", borderRadius: 12, fontSize: 16, fontWeight: 800,
@@ -680,6 +739,11 @@ export function LeaderboardBoards({ data, accent = "#0d9488" }: { data: Leaderbo
           </button>
         ))}
       </div>
+      {tab !== "overall" && LEADERBOARD_SETTINGS[tab] && (
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#888", marginBottom: 10 }}>
+          Only {LEADERBOARD_SETTINGS[tab]!.label} sprints count on this board.
+        </div>
+      )}
       {rows.length === 0 ? (
         <div style={{ fontSize: 13, fontWeight: 600, color: "#999", padding: "14px 4px" }}>
           No sprint scores yet — play ⏱ Sprint mode in any instrument to get on the board!
