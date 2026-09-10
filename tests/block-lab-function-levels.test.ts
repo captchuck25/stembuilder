@@ -111,7 +111,7 @@ const INTENDED: { title: string; newDefs: string[]; main: Tok[] }[] = [
   {
     title: "Straightaways",
     newDefs: ["hallway"],
-    main: [call("hallway"), call("hallway"), call("hallway")],
+    main: [call("hallway"), M, TL, call("hallway"), M, M, TL, call("hallway"), M],
   },
   {
     title: "Three Tools",

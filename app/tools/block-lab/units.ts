@@ -895,7 +895,7 @@ Same idea, same words. You already know how it works.`,
   ],
 
   challenges: [
-    // ── Six levels, the user's progression (2026-09-08, rev 3) ─────────────
+    // ── Six levels, the user's progression (2026-09-09, rev 4) ─────────────
     // build step -> reuse step -> build horseshoe (the maze IS the shape) ->
     // horseshoes only -> build a straightaway -> all three. Every shape is
     // IDENTICAL wherever it appears, including straightaways of length 4
@@ -950,14 +950,14 @@ Same idea, same words. You already know how it works.`,
     },
     {
       title: 'Straightaways',
-      par: 8,
-      maxBlocks: 11,
-      // Builds `hallway` here (its definition is counted). Main program = 3 blocks, all-inline = 21.
+      par: 14,
+      maxBlocks: 17,
+      // Builds `hallway` here (its definition is counted). Main program = 9 blocks, all-inline = 27.
       blockIds: ['move_forward', 'turn_left', 'turn_right', 'collect', 'repeat', 'while_path_ahead', 'define_trick', 'do_trick'],
-      hint: 'Your third tool: a straightaway with chips on squares 2 and 4, then Turn Right. Build it as While path ahead { Move, Collect }, then Turn Right — or with Moves and Collects. Name it (try hallway). Every straightaway in this unit is exactly this long, so it works everywhere.',
-      grid: [[1,1,1,1,1,1,1,1,1],[1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,0,1,1],[1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1]],
-      startX:2, startY:1, startDir:'right', exitX:2, exitY:5,
-      collectibles:[{x:4,y:1},{x:6,y:1},{x:6,y:3},{x:6,y:5},{x:4,y:5},{x:2,y:5}],
+      hint: 'Your third tool: a straightaway with chips on squares 2 and 4, then Turn Right. Build it as While path ahead { Move, Collect }, then Turn Right — or with Moves and Collects. Name it (try hallway). Three straightaways down a staircase: hallway, Move, Turn Left, hallway, Move, Move, Turn Left, hallway, Move. The two little steps are different on purpose, so a loop will not do it — your function does the work.',
+      grid: [[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],[1,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1],[1,1,1,1,1,0,0,0,0,0,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1],[1,1,1,1,1,1,1,1,1,0,0,0,0,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1],[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]],
+      startX:1, startY:1, startDir:'right', exitX:13, exitY:5,
+      collectibles:[{x:3,y:1},{x:5,y:1},{x:7,y:2},{x:9,y:2},{x:11,y:4},{x:13,y:4}],
     },
     {
       title: 'Three Tools',
