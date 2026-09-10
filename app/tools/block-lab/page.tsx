@@ -536,7 +536,12 @@ function ChallengeView({
   const [blockCount, setBlockCount] = useState(0);
   // 📚 Library functions available on this challenge cost 0 blocks
   const slug = levelSlug(ch.title);
-  const freeNames = useMemo(() => new Set(Object.keys(progress.library)), [progress.library]);
+  // 📚 The library only shows up on levels that HAVE function blocks in their
+  // palette (the Functions unit). Earlier units never see Define/Call, so the
+  // saved functions must not be injected there (they showed up on every level).
+  const fnLevel = availableBlocks.some(b => b.id === 'do_trick' || b.id === 'define_trick');
+  const activeLibrary = useMemo(() => (fnLevel ? progress.library : {}), [fnLevel, progress.library]);
+  const freeNames = useMemo(() => new Set(Object.keys(activeLibrary)), [activeLibrary]);
   const [previewFn, setPreviewFn] = useState<string | null>(null);
   useEffect(() => { setFunctionLibraryNames([...freeNames]); }, [freeNames]);
   const [speed, setSpeed] = useState(ui === 4 ? 2 : 1);
@@ -717,18 +722,18 @@ function ChallengeView({
                   key={chalKey(ui, ci)}
                   ref={editorRef}
                   availableBlocks={availableBlocks}
-                  initialXml={withLibrary(savedFor(progress.savedXml[chalKey(ui, ci)], slug), progress.library)}
+                  initialXml={withLibrary(savedFor(progress.savedXml[chalKey(ui, ci)], slug), activeLibrary)}
                   disabled={running}
                   itemName={theme.itemName}
                   onScriptChange={s => setBlockCount(countFree(s, freeNames))}
-                  libraryXml={progress.library}
+                  libraryXml={activeLibrary}
                 />
               </div>
 
               {/* 📚 My Functions — every function the student has built. Click a
                   name to SEE it as real blocks; re-add it if it went missing;
                   forget it if they want to rebuild. Saved when a level is beaten. */}
-              {(freeNames.size > 0 || unit.id === 5) && (
+              {fnLevel && (
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(219,39,119,0.08)', flexShrink: 0 }}>
                   <div style={{ padding: '6px 12px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 11, fontWeight: 800, color: '#f9a8d4', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📚 My Functions</span>
