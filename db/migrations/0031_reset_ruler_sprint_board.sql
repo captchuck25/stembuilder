@@ -1,4 +1,4 @@
--- 0030: OPTIONAL — reset the Ruler sprint leaderboard.
+-- 0031 (was 0030; renumbered — 0030 is tower_assignments): ALREADY RUN 2026-09-10 — reset the Ruler sprint leaderboard.
 --
 -- From 2026-09-10 the ruler board only accepts sprints played at
 -- Find · Inches · 1/16" (enforced in /api/measurement-runs via
