@@ -420,6 +420,34 @@ export default function BlocksPage() {
     setPhase({ tag: "challenge", mi, ci });
   }, [progress.savedScripts]);
 
+  // Restore the last screen from sessionStorage on refresh — mirrors the
+  // Python maze page. A challenge restore goes through enterChallenge so the
+  // maze state and saved script are set up exactly like a normal click; other
+  // phases land on the module intro. Restore is declared BEFORE the persist
+  // effect so it reads the stored phase before mount overwrites it. The ref
+  // guard is StrictMode-safe: the restore is synchronous, nothing to cancel.
+  const restoredPhaseRef = useRef(false);
+  useEffect(() => {
+    if (restoredPhaseRef.current) return;
+    restoredPhaseRef.current = true;
+    try {
+      const raw = sessionStorage.getItem("block_lab_phase");
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      if (!p || typeof p.tag !== "string" || typeof p.mi !== "number") return;
+      if (p.tag === "challenge" && MODULES[p.mi]?.challenges[p.ci]) {
+        enterChallenge(p.mi, p.ci);
+      } else if (p.tag !== "overview" && MODULES[p.mi]) {
+        setPhase({ tag: "intro", mi: p.mi });
+      }
+    } catch { /* ignore */ }
+  }, [enterChallenge]);
+
+  // Persist phase on every change so a refresh lands back on the same screen.
+  useEffect(() => {
+    try { sessionStorage.setItem("block_lab_phase", JSON.stringify(phase)); } catch { /* ignore */ }
+  }, [phase]);
+
   // ── Progress ──────────────────────────────────────────────────────────────
 
   function markChallengeComplete(mi: number, ci: number) {
