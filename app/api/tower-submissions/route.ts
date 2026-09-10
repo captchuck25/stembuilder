@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { recordAssignmentCompletion, findOwnDesign } from '@/lib/assignmentRecords.server'
 
 // POST /api/tower-submissions  { assignmentId, cost, passed }
 export async function POST(req: NextRequest) {
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
   // Verify assignment exists and student is enrolled
   const { data: assignment } = await db
     .from('tower_assignments')
-    .select('class_id, max_cost')
+    .select('class_id, max_cost, title')
     .eq('id', assignmentId)
     .single()
   if (!assignment) return NextResponse.json({ error: 'Assignment not found' }, { status: 404 })
@@ -39,5 +40,16 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Student's durable copy of the outcome (best-effort; never blocks the submit).
+  const designId = await findOwnDesign(db, 'tower_designs', session.user.id, assignmentId)
+  await recordAssignmentCompletion(db, {
+    studentId: session.user.id, tool: 'tower', assignmentId,
+    title: assignment.title ?? 'Tower Assignment', classId: assignment.class_id,
+    passed: !!passed,
+    summary: `$${Math.round(Number(cost) || 0).toLocaleString()} · ${passed ? 'passed' : 'not passed'}`,
+    result: { cost, maxCost: assignment.max_cost },
+    designRef: designId ? { tool: 'tower', id: designId } : null,
+  })
   return NextResponse.json(data)
 }

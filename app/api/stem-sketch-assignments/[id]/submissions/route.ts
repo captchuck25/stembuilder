@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { recordAssignmentCompletion } from '@/lib/assignmentRecords.server'
 
 async function inflateBase64Gzip(b64: string): Promise<unknown> {
   const bin = Buffer.from(b64, 'base64')
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const db = adminDb()
   const { data: assignment } = await db
     .from('stem_sketch_assignments')
-    .select('id, class_id')
+    .select('id, class_id, title')
     .eq('id', assignmentId)
     .single()
   if (!assignment) return NextResponse.json({ error: 'Assignment not found' }, { status: 404 })
@@ -64,5 +65,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Student's durable copy of the outcome (best-effort; never blocks the submit).
+  const designId = typeof body.designId === 'string' && body.designId ? body.designId : null
+  await recordAssignmentCompletion(db, {
+    studentId: session.user.id, tool: 'stem-sketch', assignmentId,
+    title: assignment.title ?? 'STEM Sketch Assignment', classId: assignment.class_id,
+    passed,
+    summary: passed ? 'Passed the checker' : 'Submitted',
+    result: metrics && typeof metrics === 'object' ? { metrics } : null,
+    designRef: designId ? { tool: 'stem-sketch', id: designId } : null,
+  })
   return NextResponse.json({ ok: true }, { status: 201 })
 }

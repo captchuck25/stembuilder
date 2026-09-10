@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { recordAssignmentCompletion } from '@/lib/assignmentRecords.server'
 import { normalizeQuizConfig, windowState, type QuizQuestion } from '@/lib/quiz'
 
 // POST /api/quiz-attempts — submit one finished attempt.
@@ -68,6 +69,15 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const pct = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0
+
+  // Student's durable copy of the outcome (best-effort; never blocks the submit).
+  await recordAssignmentCompletion(db, {
+    studentId: session.user.id, tool: 'quiz', assignmentId,
+    title: a.title ?? 'Quiz', classId: a.class_id,
+    passed: pct >= cfg.passThreshold,
+    summary: `${score}/${questions.length} (${pct}%)`,
+    result: { score, total: questions.length, pct },
+  })
   // Reveal immediately only when this assignment says so.
   const revealNow = cfg.revealMode === 'after_submit'
   return NextResponse.json({

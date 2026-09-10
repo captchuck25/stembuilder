@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { recordAssignmentCompletion } from '@/lib/assignmentRecords.server'
 import {
   computeAutoTiers, resolveAssignmentBrief, resolveGradingRubric, rubricForDeliverables,
 } from '@/app/tools/blueprint-lab/engine/gradingRubric'
@@ -59,6 +60,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .maybeSingle()
 
   const now = new Date().toISOString()
+  // Student's durable copy (best-effort). Blueprint work is teacher-graded
+  // later, so passed stays null; the record marks the submission itself.
+  const designId = typeof body?.designId === 'string' && body.designId ? body.designId : null
+  const record = () => recordAssignmentCompletion(db, {
+    studentId: session.user.id, tool: 'blueprint', assignmentId: id,
+    title: a.title ?? 'Blueprint Assignment', classId: a.class_id,
+    passed: null,
+    summary: existing ? 'Resubmitted' : 'Submitted',
+    designRef: designId ? { tool: 'blueprint', id: designId } : null,
+  })
   if (existing) {
     const { error } = await db
       .from('blueprint_submissions')
@@ -72,6 +83,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       })
       .eq('id', existing.id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await record()
     return NextResponse.json({ ok: true, id: existing.id, status: 'submitted' })
   }
 
@@ -89,6 +101,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .select('id')
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  await record()
   return NextResponse.json({ ok: true, id: data?.id, status: 'submitted' })
 }
 

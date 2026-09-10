@@ -135,6 +135,113 @@ const BLOCK_MODULES = [
   { id: 5, title: "Functions",    color: "#DB2777", challenges: 6,  quizTotal: 5 },
 ];
 
+// ─── Assignments (durable history) ────────────────────────────────────────────
+//
+// Reads /api/student/assignment-records: the student's own copy of every
+// assignment they finished, kept even after the class is deleted. One-way —
+// nothing here can satisfy an assignment; it only shows what already did.
+
+interface AssignmentRecord {
+  id: number;
+  tool: "bridge" | "tower" | "measurement" | "quiz" | "stem-sketch" | "blueprint";
+  assignment_id: string;
+  assignment_title: string;
+  class_id: string | null;
+  class_name: string;
+  attempt_no: number;
+  passed: boolean | null;
+  summary: string;
+  result: Record<string, unknown> | null;
+  design_ref: { tool: string; id: string } | null;
+  submitted_at: string;
+}
+
+const RECORD_TOOL_META: Record<AssignmentRecord["tool"], { icon: string; label: string; open: (id: string) => string }> = {
+  "bridge":      { icon: "🌉", label: "Bridge Builder",   open: id => `/tools/bridge?id=${id}` },
+  "tower":       { icon: "🗼", label: "Tower Builder",    open: id => `/tools/tower?id=${id}` },
+  "measurement": { icon: "📏", label: "Measurement Lab",  open: id => `/tools/measurement-lab/${id}` },
+  "quiz":        { icon: "📝", label: "Quiz",             open: () => "/student/dashboard" },
+  "stem-sketch": { icon: "✏️", label: "STEM Sketch",      open: id => `/tools/stem-sketch?id=${id}` },
+  "blueprint":   { icon: "📐", label: "Blueprint Lab",    open: id => `/tools/blueprint-lab?id=${id}` },
+};
+
+async function fetchAssignmentRecords(): Promise<AssignmentRecord[]> {
+  try {
+    const res = await fetch("/api/student/assignment-records");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch { return []; }
+}
+
+function AssignmentsSection({ records }: { records: AssignmentRecord[] }) {
+  // Group by class, newest activity first; the record keeps the class name so
+  // deleted classes still show up under their old name.
+  const groups = new Map<string, { name: string; rows: AssignmentRecord[] }>();
+  for (const r of records) {
+    const key = r.class_id ?? r.class_name ?? "";
+    const g = groups.get(key) ?? { name: r.class_name || "Class", rows: [] };
+    g.rows.push(r);
+    groups.set(key, g);
+  }
+  const passedCount = records.filter(r => r.passed === true).length;
+
+  return (
+    <div style={{ ...CARD, padding: "20px 24px", marginBottom: 16 }}>
+      <SectionHeader icon="📋" title="Assignments" href="/student/dashboard" linkLabel="Open Dashboard" />
+      {records.length === 0 ? (
+        <p style={{ fontSize: 13, color: "#888", margin: 0 }}>
+          Assignments you finish show up here and stay here — even after the class ends.
+        </p>
+      ) : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#666", marginBottom: 14 }}>
+            {records.length} finished · {passedCount} passed
+          </div>
+          {[...groups.values()].map((g, gi) => (
+            <div key={gi} style={{ marginBottom: gi === groups.size - 1 ? 0 : 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", textTransform: "uppercase",
+                letterSpacing: "0.6px", marginBottom: 8 }}>
+                {g.name}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {g.rows.map(r => {
+                  const meta = RECORD_TOOL_META[r.tool];
+                  const color = r.passed === true ? "#16a34a" : r.passed === false ? "#b45309" : "#555";
+                  const href = r.design_ref?.id ? meta.open(r.design_ref.id) : null;
+                  const body = (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px",
+                      borderRadius: 12, border: "2px solid #eee", background: "#fafafa" }}>
+                      <div style={{ fontSize: 22, flexShrink: 0 }}>{meta.icon}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#111", overflow: "hidden",
+                          textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {r.assignment_title}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>
+                          {meta.label} · {new Date(r.submitted_at).toLocaleDateString()}
+                          {r.attempt_no > 1 ? ` · try ${r.attempt_no}` : ""}
+                          {href ? " · open design →" : ""}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color, whiteSpace: "nowrap" }}>
+                        {r.passed === true ? "✓ " : ""}{r.summary}
+                      </div>
+                    </div>
+                  );
+                  return href
+                    ? <Link key={r.id} href={href} style={{ textDecoration: "none" }}>{body}</Link>
+                    : <div key={r.id}>{body}</div>;
+                })}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function BlockLabSection({ rows }: { rows: ProgressRow[] }) {
   const activeModules = BLOCK_MODULES.filter(m => m.challenges > 0);
   return (
@@ -1229,6 +1336,7 @@ export default function AchievementsPage() {
   const [towerDesigns,   setTowerDesigns]   = useState<TowerDesign[]>([]);
   const [sketchDesigns,  setSketchDesigns]  = useState<StemSketchDesign[]>([]);
   const [bpDesigns,      setBpDesigns]      = useState<BlueprintLabDesign[]>([]);
+  const [records,        setRecords]        = useState<AssignmentRecord[]>([]);
   const [dataLoading,    setDataLoading]    = useState(true);
   const [turtleCompleted,    setTurtleCompleted]    = useState<Set<string>>(new Set());
   const [turtleSubmissions,  setTurtleSubmissions]  = useState<TurtleSubmission[]>([]);
@@ -1256,7 +1364,9 @@ export default function AchievementsPage() {
       fetchStemSketchDesigns(),
       fetchBlueprintLabDesigns(),
       fetchTowerDesigns(),
-    ]).then(([cl, bl, ms, bd, ts, sk, bp, td]) => {
+      fetchAssignmentRecords(),
+    ]).then(([cl, bl, ms, bd, ts, sk, bp, td, ar]) => {
+      setRecords(ar);
       setCodeLabRows(cl);
       setBlockLabRows(bl);
       setMeasScores(ms);
@@ -1314,6 +1424,7 @@ export default function AchievementsPage() {
           {/* Content */}
           {status !== "loading" && session?.user && !dataLoading && (
             <>
+              <AssignmentsSection records={records} />
               <CodeLabSection rows={codeLabRows} />
               <BlockLabSection rows={blockLabRows} />
               <ArcadeLabSection />

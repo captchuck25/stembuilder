@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { recordAssignmentCompletion } from '@/lib/assignmentRecords.server'
 import { normalizeAssignmentConfig } from '@/app/tools/measurement-lab/constants'
 
 // POST /api/measurement-attempts
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
   const db = adminDb()
   const { data: assignment } = await db
     .from('measurement_assignments')
-    .select('id, class_id, config')
+    .select('id, class_id, config, title, tool')
     .eq('id', assignmentId)
     .single()
   if (!assignment) return NextResponse.json({ error: 'Assignment not found' }, { status: 404 })
@@ -68,5 +69,14 @@ export async function POST(req: NextRequest) {
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Student's durable copy of the outcome (best-effort; never blocks the submit).
+  await recordAssignmentCompletion(db, {
+    studentId: session.user.id, tool: 'measurement', assignmentId,
+    title: assignment.title ?? 'Measurement Assignment', classId: assignment.class_id,
+    passed: cfg.scoring === 'score' ? null : correct >= cfg.passThreshold,
+    summary: `${correct}/${total}`,
+    result: { correct, total, instrument: assignment.tool, mode: cfg.mode, precision: cfg.precision, scoring: cfg.scoring },
+  })
   return NextResponse.json({ ok: true }, { status: 201 })
 }
