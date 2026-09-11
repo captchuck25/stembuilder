@@ -73,6 +73,39 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ ...data, attemptStudentCount: 0 })
 }
 
+// PATCH /api/teacher/measurement-assignments  { id, title?, config? }
+// Edits an assignment in place (title + settings). The instrument (tool) is
+// fixed: existing attempts were recorded against it. Existing attempts keep
+// their own stored total, so changing the question count only affects new
+// attempts.
+export async function PATCH(req: NextRequest) {
+  const session = await auth()
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { id, title, config } = await req.json()
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
+
+  const db = adminDb()
+  const { data: a } = await db.from('measurement_assignments').select('teacher_id, config').eq('id', id).single()
+  if (!a || a.teacher_id !== session.user.id)
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const patch: Record<string, unknown> = {}
+  if (typeof title === 'string') patch.title = title.trim() || 'Measurement Assignment'
+  if (config && typeof config === 'object') patch.config = normalizeAssignmentConfig({ ...a.config, ...config })
+  if (!Object.keys(patch).length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+
+  const { data, error } = await db
+    .from('measurement_assignments')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single()
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json(data)
+}
+
 // DELETE /api/teacher/measurement-assignments?id=X
 export async function DELETE(req: NextRequest) {
   const session = await auth()

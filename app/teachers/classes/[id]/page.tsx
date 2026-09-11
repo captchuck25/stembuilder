@@ -225,6 +225,9 @@ export default function ClassDetailPage() {
     scoring: "goal" as "goal" | "score",
   });
   const [measFormSaving, setMeasFormSaving] = useState(false);
+  const [editingMeasId, setEditingMeasId] = useState<string | null>(null);      // non-null = the form edits this assignment
+  const [measAlsoClasses, setMeasAlsoClasses] = useState<Set<string>>(new Set()); // extra classes to create the same assignment in
+  const [measCreatedNote, setMeasCreatedNote] = useState("");
   const [measFormError, setMeasFormError] = useState("");
   const [deletingMeasId, setDeletingMeasId] = useState<string | null>(null);
   const [expandedMeasId, setExpandedMeasId] = useState<string | null>(null);
@@ -536,34 +539,94 @@ export default function ClassDetailPage() {
     if (!measBoardData[scope]) loadMeasBoard(scope);
   }
 
-  async function handleCreateMeasAssignment() {
+  function measFormConfig() {
     const qc = Math.min(20, Math.max(5, measForm.questionCount));
     const pt = Math.min(qc, Math.max(1, measForm.passThreshold));
     const timer = parseInt(measForm.timerSeconds, 10);
+    return {
+      mode: measForm.mode,
+      precision: measForm.precision,
+      questionCount: qc,
+      timerSeconds: Number.isFinite(timer) && timer > 0 ? timer : null,
+      passThreshold: pt,
+      maxAttempts: measForm.maxAttempts > 0 ? measForm.maxAttempts : null,
+      scoring: measForm.scoring,
+    };
+  }
+
+  // Open the form prefilled with an existing assignment (instrument locked).
+  function openMeasEdit(a: MeasurementAssignmentRow) {
+    setMeasForm({
+      title: a.title ?? "",
+      tool: a.tool,
+      mode: a.config.mode,
+      precision: a.config.precision,
+      questionCount: a.config.questionCount,
+      timerSeconds: a.config.timerSeconds ? String(a.config.timerSeconds) : "",
+      passThreshold: a.config.passThreshold,
+      maxAttempts: a.config.maxAttempts ?? 0,
+      scoring: a.config.scoring ?? "goal",
+    });
+    setEditingMeasId(a.id);
+    setMeasAlsoClasses(new Set());
+    setMeasFormError("");
+    setMeasCreatedNote("");
+    setShowMeasForm(true);
+  }
+
+  function closeMeasForm() {
+    setShowMeasForm(false);
+    setEditingMeasId(null);
+    setMeasAlsoClasses(new Set());
+    setMeasFormError("");
+  }
+
+  async function handleCreateMeasAssignment() {
     setMeasFormSaving(true);
     setMeasFormError("");
-    const res = await fetch("/api/teacher/measurement-assignments", {
+    setMeasCreatedNote("");
+    const config = measFormConfig();
+
+    if (editingMeasId) {
+      const res = await fetch("/api/teacher/measurement-assignments", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editingMeasId, title: measForm.title, config }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMeasAssignments(prev => prev.map(a => a.id === editingMeasId ? { ...a, ...data } : a));
+        closeMeasForm();
+        setMeasForm(f => ({ ...f, title: "" }));
+      } else {
+        const e = await res.json().catch(() => ({}));
+        setMeasFormError(e.error ?? "Failed to save changes");
+      }
+      setMeasFormSaving(false);
+      return;
+    }
+
+    const post = (cid: string) => fetch("/api/teacher/measurement-assignments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        classId,
-        title: measForm.title,
-        tool: measForm.tool,
-        config: {
-          mode: measForm.mode,
-          precision: measForm.precision,
-          questionCount: qc,
-          timerSeconds: Number.isFinite(timer) && timer > 0 ? timer : null,
-          passThreshold: pt,
-          maxAttempts: measForm.maxAttempts > 0 ? measForm.maxAttempts : null,
-          scoring: measForm.scoring,
-        },
-      }),
+      body: JSON.stringify({ classId: cid, title: measForm.title, tool: measForm.tool, config }),
     });
+    const res = await post(classId);
     if (res.ok) {
       const data = await res.json();
       setMeasAssignments(prev => [data, ...prev]);
-      setShowMeasForm(false);
+      // Same assignment in the other selected classes (each class gets its own
+      // row, so results stay per class).
+      const others = [...measAlsoClasses];
+      if (others.length) {
+        const results = await Promise.all(others.map(cid => post(cid).then(r => r.ok).catch(() => false)));
+        const okCount = results.filter(Boolean).length;
+        const names = otherClasses.filter(c => measAlsoClasses.has(c.id)).map(c => c.name);
+        setMeasCreatedNote(okCount === others.length
+          ? `Also assigned to ${names.join(", ")}.`
+          : `Assigned here, but only ${okCount} of ${others.length} other classes succeeded — check them.`);
+      }
+      closeMeasForm();
       setMeasForm(f => ({ ...f, title: "" }));
     } else {
       const e = await res.json().catch(() => ({}));
@@ -2727,7 +2790,7 @@ export default function ClassDetailPage() {
                   </p>
                 </div>
                 <button
-                  onClick={() => { setShowMeasForm(v => !v); setMeasFormError(""); }}
+                  onClick={() => { if (showMeasForm) closeMeasForm(); else { setEditingMeasId(null); setMeasAlsoClasses(new Set()); setMeasFormError(""); setMeasCreatedNote(""); setShowMeasForm(true); } }}
                   style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #0d9488",
                     background: showMeasForm ? "#ccfbf1" : "#fff", color: "#115e59",
                     fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
@@ -2738,7 +2801,15 @@ export default function ClassDetailPage() {
               {showMeasForm && (
                 <div style={{ background: "#f0fdfa", border: "2px solid #99f6e4", borderRadius: 14,
                   padding: "20px 22px", marginBottom: 24 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: "#115e59", marginBottom: 14 }}>Create Measurement Assignment</div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#115e59", marginBottom: 14 }}>
+                    {editingMeasId ? "Edit Measurement Assignment" : "Create Measurement Assignment"}
+                  </div>
+                  {editingMeasId && (measAssignments.find(a => a.id === editingMeasId)?.attemptStudentCount ?? 0) > 0 && (
+                    <div style={{ fontSize: 12, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a",
+                      borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontWeight: 600 }}>
+                      Students have already attempted this assignment. Changes apply to new attempts; earlier attempts keep the score they earned.
+                    </div>
+                  )}
                   <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 480 }}>
                     <label style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
                       Title (optional)
@@ -2757,6 +2828,8 @@ export default function ClassDetailPage() {
                         Instrument
                         <select
                           value={measForm.tool}
+                          disabled={!!editingMeasId}
+                          title={editingMeasId ? "The instrument can't change once an assignment exists — create a new one instead" : undefined}
                           onChange={e => setMeasFormTool(e.target.value as MeasTool)}
                           style={{ display: "block", width: "100%", marginTop: 4, padding: "9px 10px",
                             borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
@@ -2874,6 +2947,39 @@ export default function ClassDetailPage() {
                         </select>
                       </label>
                     </div>
+                    {!editingMeasId && otherClasses.length > 0 && (
+                      <div style={{ border: "2px solid #99f6e4", borderRadius: 10, padding: "10px 14px", background: "#fff" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "#555" }}>
+                            Also assign to other classes
+                            <span style={{ fontWeight: 600, color: "#888" }}> · {measAlsoClasses.size} of {otherClasses.length} selected</span>
+                          </span>
+                          <button type="button"
+                            onClick={() => setMeasAlsoClasses(
+                              measAlsoClasses.size === otherClasses.length ? new Set() : new Set(otherClasses.map(c => c.id)))}
+                            style={{ padding: "4px 12px", borderRadius: 999, border: "2px solid #0d9488",
+                              background: "#f0fdfa", color: "#115e59", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+                            {measAlsoClasses.size === otherClasses.length ? "None" : "All classes"}
+                          </button>
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                          {[...otherClasses].sort((a, b) => a.name.localeCompare(b.name)).map(c => (
+                            <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px",
+                              borderRadius: 8, border: "2px solid #e5e7eb", cursor: "pointer", fontSize: 13, fontWeight: 600,
+                              background: measAlsoClasses.has(c.id) ? "#ccfbf1" : "#f9fafb", color: "#111" }}>
+                              <input type="checkbox" checked={measAlsoClasses.has(c.id)}
+                                onChange={() => setMeasAlsoClasses(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                                  return next;
+                                })}
+                                style={{ width: 14, height: 14, accentColor: "#0d9488", cursor: "pointer" }} />
+                              {c.name}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {measFormError && <div style={{ fontSize: 12, color: "#dc2626" }}>{measFormError}</div>}
                     <button
                       onClick={handleCreateMeasAssignment}
@@ -2882,12 +2988,20 @@ export default function ClassDetailPage() {
                         background: measFormSaving ? "#5eead4" : "#0d9488",
                         color: "#fff", fontWeight: 800, fontSize: 14,
                         cursor: measFormSaving ? "not-allowed" : "pointer", alignSelf: "flex-start" }}>
-                      {measFormSaving ? "Creating…" : "Create Assignment"}
+                      {measFormSaving ? (editingMeasId ? "Saving…" : "Creating…")
+                        : editingMeasId ? "Save Changes"
+                        : measAlsoClasses.size > 0 ? `Create in ${measAlsoClasses.size + 1} classes` : "Create Assignment"}
                     </button>
                   </div>
                 </div>
               )}
 
+              {measCreatedNote && (
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#115e59", background: "#f0fdfa",
+                  border: "2px solid #99f6e4", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+                  ✓ {measCreatedNote}
+                </div>
+              )}
               {loadingMeas ? (
                 <div style={{ padding: "32px 0", textAlign: "center", color: "#888", fontWeight: 600 }}>Loading…</div>
               ) : measAssignments.length === 0 ? (
@@ -2935,6 +3049,13 @@ export default function ClassDetailPage() {
                                 textDecoration: "none" }}>
                               ▶ Try It
                             </Link>
+                            <button
+                              onClick={() => { openMeasEdit(a); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                              style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #99f6e4",
+                                background: editingMeasId === a.id ? "#ccfbf1" : "#fff", color: "#115e59",
+                                fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                              ✎ Edit
+                            </button>
                             <button
                               onClick={() => toggleMeasResults(a.id)}
                               style={{ padding: "7px 16px", borderRadius: 8, border: "2px solid #0d9488",
