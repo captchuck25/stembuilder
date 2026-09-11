@@ -3079,10 +3079,25 @@ export default function ClassDetailPage() {
                           <div style={{ borderTop: "2px solid #99f6e4", padding: "20px 18px" }}>
                             {isLoadingResults ? (
                               <div style={{ color: "#888", fontSize: 13 }}>Loading…</div>
-                            ) : results.length === 0 ? (
+                            ) : results.length === 0 && students.length === 0 ? (
                               <div style={{ color: "#aaa", fontSize: 13, fontStyle: "italic" }}>No attempts yet.</div>
                             ) : (
                               <div style={{ overflowX: "auto", borderRadius: 10, border: "2px solid #99f6e4" }}>
+                                {(() => {
+                                  // Roster students with no attempt yet — listed after the
+                                  // attempted rows so the teacher can see who is missing it.
+                                  const attempted = new Set(results.map(r => r.student_id));
+                                  const missing = students.filter(st => !attempted.has(st.id));
+                                  return (
+                                    <div style={{ fontSize: 12, fontWeight: 700, color: "#555", padding: "10px 12px",
+                                      background: "#f0fdfa", borderBottom: "2px solid #99f6e4" }}>
+                                      {results.length} of {results.length + missing.length} students attempted
+                                      {missing.length > 0 && (
+                                        <span style={{ color: "#b45309" }}> · {missing.length} not started</span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 380 }}>
                                   <thead>
                                     <tr style={{ background: "#ccfbf1" }}>
@@ -3150,6 +3165,19 @@ export default function ClassDetailPage() {
                                         </Fragment>
                                       );
                                     })}
+                                    {students
+                                      .filter(st => !results.some(r => r.student_id === st.id))
+                                      .sort((x, y) => x.name.localeCompare(y.name))
+                                      .map((st, mi) => (
+                                        <tr key={`missing-${st.id}`}
+                                          style={{ background: (results.length + mi) % 2 === 0 ? "#fff" : "#f0fdfa", opacity: 0.75 }}>
+                                          <td style={{ ...TD, fontWeight: 700, color: "#555" }}>{st.name || st.username || "Student"}</td>
+                                          <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>—</td>
+                                          <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>—</td>
+                                          <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>0</td>
+                                          <td style={{ ...TD, fontSize: 12, fontWeight: 700, color: "#b45309" }}>Not started</td>
+                                        </tr>
+                                      ))}
                                   </tbody>
                                 </table>
                               </div>
