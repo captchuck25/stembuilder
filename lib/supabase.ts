@@ -1,9 +1,8 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+// Type definitions for our database tables. Client components import this
+// module for its TYPES ONLY. It must never create a Supabase client or read
+// env vars, so no Supabase URL or key can be inlined into a browser bundle.
+// Server code goes through adminDb() in lib/db.server.ts or the tenant client
+// in lib/tenant-db.server.ts.
 
 // ─── Types matching our database tables ──────────────────────────────────────
 

@@ -8,14 +8,14 @@ import { tenantDb } from '@/lib/tenant-db.server'
 // 0011), not app code. Runs against the live Supabase project; creates
 // clearly-named throwaway rows and removes them afterwards.
 //
-// Requires env (loaded from .env.local): NEXT_PUBLIC_SUPABASE_URL,
-// NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
+// Requires env (loaded from .env.local): SUPABASE_URL,
+// SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
 // SUPABASE_JWT_SECRET. Skips (with a warning) when any is missing.
 // Fails with a clear error if migration 0011 has not been applied yet.
 
 const envReady = !!(
-  process.env.NEXT_PUBLIC_SUPABASE_URL &&
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
+  process.env.SUPABASE_URL &&
+  process.env.SUPABASE_ANON_KEY &&
   process.env.SUPABASE_SERVICE_ROLE_KEY &&
   process.env.SUPABASE_JWT_SECRET
 )
@@ -33,7 +33,7 @@ describe.skipIf(!envReady)('RLS tenant isolation (live Supabase)', () => {
   let classB: string
 
   beforeAll(async () => {
-    svc = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
+    svc = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
 
     const probe = await svc.from('districts').select('id').limit(1)
     if (probe.error) throw new Error(`districts table unavailable — run db/migrations/0011 first (${probe.error.message})`)
@@ -142,14 +142,14 @@ describe.skipIf(!envReady)('RLS tenant isolation (live Supabase)', () => {
       .setSubject(`${TAG}-teacher-claims`).setIssuedAt().setExpirationTime('2m')
       .sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET!))
     const teacherClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!,
       { global: { headers: { Authorization: `Bearer ${jwt}` } }, auth: { persistSession: false } })
     const { data } = await teacherClient.from('districts').select('id')
     expect(data ?? []).toHaveLength(0)
   })
 
   it('the bare anon key sees nothing', async () => {
-    const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!)
+    const anon = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!)
     const { data } = await anon.from('districts').select('id')
     expect(data ?? []).toHaveLength(0)
   })
