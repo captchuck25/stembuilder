@@ -136,6 +136,9 @@ export default function PrivacyPolicy() {
               are served through our own servers, not fetched from Google by the student&apos;s
               browser.</li>
             <li><strong>Resend</strong> — transactional email (e.g. password resets)</li>
+            <li><strong>Stripe</strong> — payment processing for paid teacher plans. Teachers enter
+              payment details on Stripe&apos;s own secure checkout pages; we never see card numbers,
+              and Stripe never receives student data.</li>
           </ul>
         </section>
 

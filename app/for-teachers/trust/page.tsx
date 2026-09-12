@@ -62,6 +62,7 @@ const SUBPROCESSORS = [
   { name: "Supabase", purpose: "Database (US) holding accounts, classes, and student work" },
   { name: "Google", purpose: "Optional “Sign in with Google” and Google Classroom roster sync — only when a teacher or school chooses to use them" },
   { name: "Resend", purpose: "Transactional email (account and verification messages)" },
+  { name: "Stripe", purpose: "Payment processing for paid teacher plans, on Stripe's own checkout pages — no student data" },
 ];
 
 export default function TrustPage() {
