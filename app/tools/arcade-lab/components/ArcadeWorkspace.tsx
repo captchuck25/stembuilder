@@ -29,6 +29,8 @@ export default function ArcadeWorkspace({ owner, genre = 'platformer', xml, onXm
       toolbox: buildArcadeToolbox(owner, genre) as Blockly.utils.toolbox.ToolboxInfo,
       renderer: 'zelos',
       theme: getDarkTheme(),
+      // Self-hosted media (see public/blockly-media) — never load from Google's appspot default.
+      media: '/blockly-media/',
       scrollbars: true,
       trashcan: true,
       sounds: false,

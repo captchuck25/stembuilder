@@ -83,6 +83,10 @@ export default function BlockFigure({ dsl, itemName }: { dsl: string; itemName?:
       theme: getDarkTheme(),
       scrollbars: false,
       zoom: { startScale: 0.75 },
+      // Self-hosted copy of node_modules/blockly/media. Without this Blockly
+      // fetches sprites/sounds from blockly-demo.appspot.com (Google), which
+      // would send every student's IP to a third party.
+      media: "/blockly-media/",
     });
     try {
       Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(stackXml(parseStack(dsl.split("\n")))), ws);

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createHash } from 'crypto'
 import { adminDb } from '@/lib/db.server'
 import { createResetToken } from '@/lib/reset.server'
 import { sendEmail } from '@/lib/email'
@@ -10,7 +11,9 @@ const TOKEN_TTL_MS = 60 * 60 * 1000 // 1 hour
 // response never becomes an oracle):
 //  1. Per-IP, in-memory: cheap first gate against a single machine hammering
 //     the endpoint. Best-effort on serverless (per warm instance), which is
-//     fine — it only needs to blunt bursts, not be airtight.
+//     fine — it only needs to blunt bursts, not be airtight. The IP itself is
+//     never kept: it is reduced to a truncated one-way hash before it touches
+//     the map, and the map lives only in process memory (never logged/stored).
 //  2. Per-account, in the database: at most MAX_TOKENS_PER_HOUR reset tokens
 //     per user per hour, counted from password_reset_tokens itself. Durable
 //     across instances; caps the emails any one inbox can be flooded with.
@@ -21,15 +24,22 @@ const MAX_TOKENS_PER_HOUR = 3
 
 const ipHits = new Map<string, number[]>()
 
-function ipRateLimited(ip: string): boolean {
+// Truncated SHA-256 of the client address: enough bits to bucket a burst,
+// not recoverable to an address, and the only form the IP ever takes here.
+function ipBucket(req: NextRequest): string {
+  const raw = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
+  return createHash('sha256').update(raw).digest('hex').slice(0, 16)
+}
+
+function ipRateLimited(bucket: string): boolean {
   const now = Date.now()
-  const hits = (ipHits.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS)
+  const hits = (ipHits.get(bucket) ?? []).filter((t) => now - t < IP_WINDOW_MS)
   if (hits.length >= IP_MAX_REQUESTS) {
-    ipHits.set(ip, hits)
+    ipHits.set(bucket, hits)
     return true
   }
   hits.push(now)
-  ipHits.set(ip, hits)
+  ipHits.set(bucket, hits)
   if (ipHits.size > 10_000) ipHits.clear() // unbounded-growth backstop
   return false
 }
@@ -60,8 +70,7 @@ function resetEmailHtml(url: string): string {
 // password can reset; Google-only and username-only accounts have no password
 // to reset (students who can't reach email are reset by their teacher instead).
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'
-  if (ipRateLimited(ip)) return NextResponse.json({ ok: true })
+  if (ipRateLimited(ipBucket(req))) return NextResponse.json({ ok: true })
 
   let email: unknown
   try {

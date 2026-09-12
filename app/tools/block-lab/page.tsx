@@ -288,6 +288,8 @@ function BlockStack({ lines, xml, itemName }: { lines?: string[]; xml?: string; 
       theme: getDarkTheme(),
       scrollbars: false,
       zoom: { startScale: 0.75 },
+      // Self-hosted media (see public/blockly-media) — never load from Google's appspot default.
+      media: '/blockly-media/',
     });
     try {
       const src = xml ? `<xml xmlns="https://developers.google.com/blockly/xml">${xml}</xml>` : stackXml(parseStack(linesKey.split('\n')));

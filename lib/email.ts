@@ -36,7 +36,7 @@ export async function sendEmail({ to, subject, html, text }: EmailArgs): Promise
     case 'postmark':
       return sendViaPostmark({ from, to, subject, html, text })
     default:
-      console.error(`[email] unknown EMAIL_PROVIDER "${provider}" — email to "${to}" not sent`)
+      console.error(`[email] unknown EMAIL_PROVIDER "${provider}" — email to ${maskEmail(to)} not sent`)
       return false
   }
 }
@@ -97,6 +97,14 @@ async function sendViaPostmark({ from, to, subject, html, text }: DriverArgs): P
 }
 
 function devFallback(missingVar: string, to: string, subject: string): false {
-  console.log(`[email:dev-fallback] no ${missingVar} set — would email "${to}": ${subject}`)
+  console.log(`[email:dev-fallback] no ${missingVar} set — would email ${maskEmail(to)}: ${subject}`)
   return false
+}
+
+// Logs must never carry a full recipient address (they land in hosting-provider
+// log storage). Keep the first character and the domain: "c***@example.org".
+function maskEmail(addr: string): string {
+  const at = addr.indexOf('@')
+  if (at <= 0) return '***'
+  return `${addr[0]}***${addr.slice(at)}`
 }
