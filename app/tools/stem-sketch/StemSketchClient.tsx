@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import { proxiedAvatarUrl } from "@/lib/avatar";
 
 type DemoDesign = {
   id: string;
@@ -79,7 +80,8 @@ export default function StemSketchClient() {
             signedIn: true,
             name: session.user.name ?? null,
             email: session.user.email ?? null,
-            image: session.user.image ?? null,
+            // Proxied through our origin so the iframe's <img> never hits Google.
+            image: proxiedAvatarUrl(session.user.image, 30),
           }
         : { signedIn: false },
     });

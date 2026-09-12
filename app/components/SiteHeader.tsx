@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import { useState } from "react";
 import { isAnyAdmin, roleAtLeast } from "@/lib/roles";
+import { proxiedAvatarUrl } from "@/lib/avatar";
 
 const NAV_BTN: React.CSSProperties = {
   border: "1px solid #fff",
@@ -55,7 +56,8 @@ export default function SiteHeader({ children, onLogoClick, hideUserButton }: {
                   style={{ ...NAV_BTN, display: "flex", alignItems: "center", gap: 8 }}
                 >
                   {session.user.image ? (
-                    <img src={session.user.image} alt="" style={{ width: 32, height: 32, borderRadius: "50%", display: "block" }} />
+                    // eslint-disable-next-line @next/next/no-img-element -- already proxied through /_next/image via proxiedAvatarUrl
+                    <img src={proxiedAvatarUrl(session.user.image, 32)!} alt="" style={{ width: 32, height: 32, borderRadius: "50%", display: "block" }} />
                   ) : (
                     <span style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.25)",
                       display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800 }}>

@@ -18,7 +18,7 @@ export default function PrivacyPolicy() {
         </Link>
 
         <h1 style={{ fontSize: 32, fontWeight: 900, color: "#111", margin: "24px 0 4px" }}>Privacy Policy</h1>
-        <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 36 }}>Last updated: August 3, 2026</p>
+        <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 36 }}>Last updated: September 11, 2026</p>
 
         <section style={SECTION}>
           <h2 style={H2}>What is STEM Builder?</h2>
@@ -33,6 +33,7 @@ export default function PrivacyPolicy() {
           <h2 style={H2}>Our commitments</h2>
           <ul style={UL}>
             <li>No ads, ever, and we never sell or rent your data.</li>
+            <li>No analytics, advertising, or tracking technology on any page.</li>
             <li>We collect the minimum needed to run the service.</li>
             <li>Student data is deleted on request.</li>
             <li>Data is encrypted and stored in the United States.</li>
@@ -47,21 +48,33 @@ export default function PrivacyPolicy() {
             <li><strong>Student account</strong> — a name (or the name your teacher/school provides,
               which may be a first name and last initial). Students who join with a class code can use
               a username-only account — no email or contact information required. If a student signs in
-              with Google, we receive their name, email, and Google account ID.</li>
+              with Google, we receive their name, email, Google account ID, and profile picture. If a
+              school syncs its roster from Google Classroom, we receive each student&apos;s name, school
+              email address, and Google Classroom ID from the school.</li>
             <li><strong>Submitted and saved work</strong> — designs, code, drawings, projects, and
               progress created in the tools.</li>
             <li><strong>Class enrollment</strong> — which classes you&apos;re in and the assignments
               your teacher has set.</li>
-            <li><strong>Minimal technical data</strong> — sign-in events, session information, general
-              device/browser type, and security logs, used to operate and protect the platform.</li>
+            <li><strong>Technical data</strong> — a sign-in cookie that keeps you logged in (it holds
+              your account ID and role and expires after 30 days), and the standard web-server request
+              logs our hosting provider keeps for a short period for security, which include IP
+              addresses and browser type. We run no analytics, advertising, or tracking on any page,
+              and we do not build profiles from technical data.</li>
             <li><strong>Age (independent accounts only)</strong> — if someone creates an account with
               no class or school, we ask their date of birth once to confirm they are 13 or older. We
-              do not store the date of birth — only a record that the check passed. We do not collect
-              age for students who join through a class or school.</li>
+              do not store the date of birth — only a record that the check passed. If the check
+              fails, a 24-hour cookie remembers that so it cannot be retried with a different date. We
+              do not collect age for students who join through a class or school.</li>
           </ul>
           <p style={{ ...P, marginTop: 12 }}>
             We do not collect Social Security numbers, precise location, biometric or health data,
             demographic information, or home addresses/phone numbers.
+          </p>
+          <p style={{ ...P, marginTop: 12 }}>
+            Student pages load no third-party scripts, fonts, or trackers: apart from a student&apos;s
+            own choice to use &quot;Sign in with Google,&quot; every request a student&apos;s browser
+            makes goes to our own domain. We do not send student work or student information to any
+            artificial-intelligence service.
           </p>
         </section>
 
@@ -114,10 +127,14 @@ export default function PrivacyPolicy() {
             only on our behalf:
           </p>
           <ul style={UL}>
-            <li><strong>Vercel</strong> — application hosting (US)</li>
-            <li><strong>Supabase</strong> — database and file storage (US)</li>
+            <li><strong>Vercel</strong> — application hosting (US). As the web server it receives
+              every request, including IP addresses, and retains standard request logs for a short
+              period.</li>
+            <li><strong>Supabase</strong> — database (US) holding accounts, classes, and saved work</li>
             <li><strong>Google</strong> — &quot;Sign in with Google&quot; and Google Classroom
-              rostering (when used)</li>
+              rostering, only when a teacher or school chooses to use them. Google profile pictures
+              are served through our own servers, not fetched from Google by the student&apos;s
+              browser.</li>
             <li><strong>Resend</strong> — transactional email (e.g. password resets)</li>
           </ul>
         </section>
@@ -135,9 +152,13 @@ export default function PrivacyPolicy() {
         </section>
 
         <section style={SECTION}>
-          <h2 style={H2}>Data deletion</h2>
+          <h2 style={H2}>Data retention &amp; deletion</h2>
           <p style={P}>
-            You may request deletion of your account and all associated data at any time by emailing{" "}
+            Account data is kept for as long as the account is active. Teachers and schools can remove
+            a student from a class, or delete a student account, at any time from their dashboard.
+          </p>
+          <p style={P}>
+            You may also request deletion of your account and all associated data at any time by emailing{" "}
             <a href="mailto:privacy@stembuilder.io" style={A}>privacy@stembuilder.io</a>; teachers and
             schools may request removal of their students&apos; data. When you delete data or a school
             agreement ends, the data is removed from active use immediately and permanently erased

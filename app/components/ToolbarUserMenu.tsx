@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import { useEffect, useRef, useState } from "react";
+import { proxiedAvatarUrl } from "@/lib/avatar";
 
 // Compact profile control for the slim in-app toolbars (Blueprint Lab / STEM
 // Sketch). Mirrors the avatar + dropdown from SiteHeader, but styled for a
@@ -51,7 +52,8 @@ export default function ToolbarUserMenu({ size = 30, accent = "#7c3aed" }: {
         }}
       >
         {session.user.image ? (
-          <img src={session.user.image} alt="" style={{ width: size, height: size, borderRadius: "50%", display: "block" }} />
+          // eslint-disable-next-line @next/next/no-img-element -- already proxied through /_next/image via proxiedAvatarUrl
+          <img src={proxiedAvatarUrl(session.user.image, size)!} alt="" style={{ width: size, height: size, borderRadius: "50%", display: "block" }} />
         ) : (
           <span style={{
             width: size, height: size, borderRadius: "50%", background: accent,

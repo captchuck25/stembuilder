@@ -5,17 +5,22 @@ import styles from "../marketing.module.css";
 export const metadata: Metadata = {
   title: "Trust & Privacy",
   description:
-    "How STEM Builder protects students: FERPA & COPPA alignment, no ads, no data sales, username-only student accounts, US data storage, and district-ready data privacy agreements.",
+    "How STEM Builder protects students: no trackers or third-party scripts on student pages, FERPA & COPPA alignment, no ads, no data sales, username-only class-code accounts, US data storage, and district-ready data privacy agreements.",
   alternates: { canonical: "/for-teachers/trust" },
   openGraph: {
     title: "Trust & Privacy | STEM Builder for Teachers",
     description:
-      "FERPA & COPPA alignment, no ads, no data sales, username-only student accounts, US data storage, and district-ready data privacy agreements.",
+      "No trackers on student pages, FERPA & COPPA alignment, no ads, no data sales, username-only class-code accounts, US data storage, and district-ready data privacy agreements.",
     url: "/for-teachers/trust",
   },
 };
 
 const COMMITMENTS = [
+  {
+    title: "No trackers. No third parties on student pages.",
+    body:
+      "Student pages load no analytics, advertising pixels, session recording, error-reporting tools, third-party fonts, or outside scripts. Every request a student's browser makes goes to STEM Builder's own domain, and no AI service ever sees student work. The one exception is a student who chooses “Sign in with Google,” which takes them to Google for that single step.",
+  },
   {
     title: "FERPA & COPPA-aligned",
     body:
@@ -27,19 +32,19 @@ const COMMITMENTS = [
       "There is no advertising anywhere on STEM Builder, and we never sell student data or use it for marketing. Student information exists for one purpose: running your class.",
   },
   {
-    title: "Students join with no email",
+    title: "Class codes need no email",
     body:
-      "Students can join a class with just a username and a password. No student email address is ever required, and students are never asked for more personal information than the class needs.",
+      "Students who join with a class code use a username and a password — no email address, no contact information. Students are never asked for more personal information than the class needs. When a school syncs a roster from Google Classroom, the school provides student names and school email addresses under its own agreement with us.",
   },
   {
     title: "Data minimization by default",
     body:
-      "We collect the minimum needed to run a classroom: a username, class membership, and the work students create. If we don't need it to make the tools work, we don't collect it.",
+      "We collect the minimum needed to run a classroom: a display name, a username, class membership, and the work students create. If we don't need it to make the tools work, we don't collect it.",
   },
   {
     title: "Deleted means deleted",
     body:
-      "When work or accounts are deleted, they're removed on a scheduled purge — deleted data doesn't linger indefinitely in our systems.",
+      "When a teacher or school deletes a student, a class, or an account, it disappears from the app immediately and is permanently purged within 30 days by an automated, logged process. Deleted data never lingers.",
   },
   {
     title: "School data stays isolated",
@@ -53,9 +58,9 @@ const COMMITMENTS = [
 ];
 
 const SUBPROCESSORS = [
-  { name: "Vercel", purpose: "Application hosting and content delivery" },
-  { name: "Supabase", purpose: "Database and authentication infrastructure" },
-  { name: "Google", purpose: "Optional sign-in and Google Classroom roster sync" },
+  { name: "Vercel", purpose: "Application hosting; as the web server it receives every request (including IP addresses) and keeps standard request logs for a short period" },
+  { name: "Supabase", purpose: "Database (US) holding accounts, classes, and student work" },
+  { name: "Google", purpose: "Optional “Sign in with Google” and Google Classroom roster sync — only when a teacher or school chooses to use them" },
   { name: "Resend", purpose: "Transactional email (account and verification messages)" },
 ];
 
