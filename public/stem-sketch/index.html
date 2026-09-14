@@ -1521,6 +1521,7 @@
     <div class="grid-controls" id="grid-controls">
       <label>Grid <select id="grid-spacing"></select></label>
       <label><input type="checkbox" id="grid-snap"/> Snap</label>
+      <label title="Show the origin cross lines through the middle of the sheet"><input type="checkbox" id="grid-axes"/> Axes</label>
       <label>Size <select id="grid-size"></select></label>
       <span class="units-toggle" id="units-toggle" style="margin-left:6px">
         <button data-units="mm">mm</button>
@@ -4158,11 +4159,23 @@ class SketchEngine {
       const [bx2, by2] = this.worldToScreen(wpHalf, -wpHalf);
       svg += `<rect class="workplane-border" x="${bx1}" y="${by1}" width="${bx2 - bx1}" height="${by2 - by1}"/>`;
     }
-    // Axes
-    const [oX, oY] = this.worldToScreen(0, 0);
-    svg += `<line class="axis" x1="0" y1="${oY}" x2="${w}" y2="${oY}"/>`;
-    svg += `<line class="axis" x1="${oX}" y1="0" x2="${oX}" y2="${h}"/>`;
-    svg += `<circle class="origin" cx="${oX}" cy="${oY}" r="3"/>`;
+    // Axes + origin dot. On a FACE sketch the plane origin is an arbitrary
+    // face-center, so the cross lines read as a phantom extra grid line
+    // right through the part (ssissues #1) — hidden by default there;
+    // free/plane sketches keep them. The Axes checkbox in the grid bar
+    // overrides either way (doc.grid.showAxes, undefined = per-sketch
+    // default).
+    const showAxes = (doc.grid.showAxes !== undefined)
+      ? !!doc.grid.showAxes
+      : !doc.sketch?.sourceBodyId;
+    const axCb = document.getElementById('grid-axes');
+    if (axCb && axCb.checked !== showAxes) axCb.checked = showAxes;
+    if (showAxes) {
+      const [oX, oY] = this.worldToScreen(0, 0);
+      svg += `<line class="axis" x1="0" y1="${oY}" x2="${w}" y2="${oY}"/>`;
+      svg += `<line class="axis" x1="${oX}" y1="0" x2="${oX}" y2="${h}"/>`;
+      svg += `<circle class="origin" cx="${oX}" cy="${oY}" r="3"/>`;
+    }
 
     // Body silhouettes — only show the projected 3D body outlines when the
     // sketch was started ON a body face (Sketch-on-Face workflow). A free
@@ -8647,7 +8660,12 @@ class Viewer3D {
         bevelEnabled: false,
         curveSegments: 32,
       });
-      if (direction < 0) geo.translate(0, 0, -Math.abs(length));
+      // Mirror the BUILD rule exactly (buildBodyMesh: negatives always grow
+      // INTO the body along −n, positives outward along +n) — the preview
+      // must never disagree with what Done will produce. It used to follow
+      // the drag direction, so a Cut typed in the tooltip previewed OUTWARD
+      // and then cut inward on commit (ssissues #2).
+      if (isCut) geo.translate(0, 0, -Math.abs(length));
       geo.applyMatrix4(makePlaneMatrix(job.sketch.plane));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 9;
@@ -19466,6 +19484,19 @@ function renderGridPanel() {
     doc.grid.snap = e.target.checked;
     setStatus(`Snap to grid: ${e.target.checked ? 'on' : 'off'}`);
   });
+  // Axes toggle — checked state is kept in sync by render() (the default
+  // is per-sketch: hidden on face sketches, shown elsewhere).
+  const axes = $('grid-axes');
+  if (axes) {
+    const newAxes = axes.cloneNode(true);
+    axes.parentNode.replaceChild(newAxes, axes);
+    newAxes.addEventListener('change', (e) => {
+      doc.grid.showAxes = e.target.checked;
+      setStatus(`Origin axes: ${e.target.checked ? 'shown' : 'hidden'}`);
+      sketchEng?.render();
+      setDirty(true);
+    });
+  }
   const newSize = sizeSel.cloneNode(true);
   sizeSel.parentNode.replaceChild(newSize, sizeSel);
   newSize.addEventListener('change', (e) => {
