@@ -755,7 +755,12 @@ export function LeaderboardBoards({ data, accent = "#0d9488" }: { data: Leaderbo
               <tr key={`${r.name}-${i}`} style={{ borderBottom: "1px solid #f0f0f0" }}>
                 <td style={{ padding: "8px 10px", width: 44, fontSize: 15, fontWeight: 900,
                   color: i === 0 ? "#d97706" : i === 1 ? "#6b7280" : i === 2 ? "#b45309" : "#bbb" }}>
-                  {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}
+                  {(() => {
+                    // Competition ranking: equal points share a rank (1, 2, 2, 4 …).
+                    let rank = i;
+                    while (rank > 0 && rows[rank - 1].points === r.points) rank--;
+                    return rank === 0 ? "🥇" : rank === 1 ? "🥈" : rank === 2 ? "🥉" : `${rank + 1}.`;
+                  })()}
                 </td>
                 <td style={{ padding: "8px 10px", fontSize: 14, fontWeight: 700, color: "#111" }}>{r.name}</td>
                 <td style={{ padding: "8px 10px", textAlign: "right", fontSize: 15, fontWeight: 900, color: accent }}>

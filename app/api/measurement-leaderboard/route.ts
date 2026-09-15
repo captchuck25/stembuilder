@@ -95,26 +95,34 @@ export async function GET(req: NextRequest) {
   )
   const liveRuns = (runs ?? []).filter((r: { student_id: string }) => nameMap.has(r.student_id))
 
+  // Top 10, but never cut a tie: everyone with the same points as 10th place
+  // stays on the board (Charlie, 2026-09-15).
+  function topWithTies<T extends { points: number }>(sorted: T[], n = 10): T[] {
+    if (sorted.length <= n) return sorted
+    const cutoff = sorted[n - 1].points
+    let end = n
+    while (end < sorted.length && sorted[end].points === cutoff) end++
+    return sorted.slice(0, end)
+  }
+
   const boards: Record<string, { name: string; points: number }[]> = {}
   for (const tool of MEAS_TOOL_IDS) {
-    boards[tool] = liveRuns
+    boards[tool] = topWithTies(liveRuns
       .filter((r: { tool: string }) => r.tool === tool)
       .sort((a: { best_points: number }, b: { best_points: number }) => b.best_points - a.best_points)
-      .slice(0, 10)
       .map((r: { student_id: string; best_points: number }) => ({
         name: nameMap.get(r.student_id)!,
         points: r.best_points,
-      }))
+      })))
   }
 
   const totals = new Map<string, number>()
   for (const r of liveRuns) {
     totals.set(r.student_id, (totals.get(r.student_id) ?? 0) + r.best_points)
   }
-  const overall = [...totals.entries()]
+  const overall = topWithTies([...totals.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([studentId, points]) => ({ name: nameMap.get(studentId)!, points }))
+    .map(([studentId, points]) => ({ name: nameMap.get(studentId)!, points })))
 
   return NextResponse.json({ leaderboardEnabled: anchorEnabled, boards, overall })
 }
