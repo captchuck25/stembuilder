@@ -3109,7 +3109,30 @@ export default function ClassDetailPage() {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {results.map((row, si) => {
+                                    {[
+                                      ...results.map(r => ({ kind: "done" as const, r, sortName: r.name })),
+                                      ...students
+                                        .filter(st => !results.some(r => r.student_id === st.id))
+                                        .map(st => ({ kind: "missing" as const, st, sortName: st.name || st.username || "" })),
+                                    ]
+                                      // One alphabetical roster (by last name) so grades can be copied
+                                      // straight into a gradebook; not-started students sit in place.
+                                      .sort((x, y) => compareByLastName({ name: x.sortName }, { name: y.sortName }))
+                                      .map((item, si) => {
+                                      if (item.kind === "missing") {
+                                        const st = item.st;
+                                        return (
+                                          <tr key={`missing-${st.id}`}
+                                            style={{ background: si % 2 === 0 ? "#fff" : "#f0fdfa", opacity: 0.75 }}>
+                                            <td style={{ ...TD, fontWeight: 700, color: "#555" }}>{st.name || st.username || "Student"}</td>
+                                            <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>—</td>
+                                            <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>—</td>
+                                            <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>0</td>
+                                            <td style={{ ...TD, fontSize: 12, fontWeight: 700, color: "#b45309" }}>Not started</td>
+                                          </tr>
+                                        );
+                                      }
+                                      const row = item.r;
                                       const scoreOnly = a.config.scoring === "score";
                                       const passed = !scoreOnly && row.best_correct >= a.config.passThreshold;
                                       const rowKey = `${a.id}:${row.student_id}`;
@@ -3165,19 +3188,6 @@ export default function ClassDetailPage() {
                                         </Fragment>
                                       );
                                     })}
-                                    {students
-                                      .filter(st => !results.some(r => r.student_id === st.id))
-                                      .sort((x, y) => x.name.localeCompare(y.name))
-                                      .map((st, mi) => (
-                                        <tr key={`missing-${st.id}`}
-                                          style={{ background: (results.length + mi) % 2 === 0 ? "#fff" : "#f0fdfa", opacity: 0.75 }}>
-                                          <td style={{ ...TD, fontWeight: 700, color: "#555" }}>{st.name || st.username || "Student"}</td>
-                                          <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>—</td>
-                                          <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>—</td>
-                                          <td style={{ ...TD, textAlign: "center", color: "#bbb" }}>0</td>
-                                          <td style={{ ...TD, fontSize: 12, fontWeight: 700, color: "#b45309" }}>Not started</td>
-                                        </tr>
-                                      ))}
                                   </tbody>
                                 </table>
                               </div>

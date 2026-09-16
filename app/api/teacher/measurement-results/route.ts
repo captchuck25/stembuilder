@@ -3,6 +3,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 
+function lastFirst(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  if (parts.length < 2) return (parts[0] ?? '').toLowerCase()
+  return `${parts[parts.length - 1]} ${parts.slice(0, -1).join(' ')}`.toLowerCase()
+}
+
 // GET /api/teacher/measurement-results?assignmentId=X
 // Per-student results for one assignment: best score, attempt count, last
 // attempt. Teacher-only (full names are fine here — bridge precedent).
@@ -72,7 +78,8 @@ export async function GET(req: NextRequest) {
       const p = profileMap.get(id)
       return { ...row, name: p?.name || p?.username || 'Student' }
     })
-    .sort((x, y) => y.best_correct - x.best_correct || x.name.localeCompare(y.name))
+    // Gradebook order: last name, then first.
+    .sort((x, y) => lastFirst(x.name).localeCompare(lastFirst(y.name)))
 
   return NextResponse.json(result)
 }
