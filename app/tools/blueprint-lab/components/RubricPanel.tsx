@@ -246,7 +246,7 @@ export default function RubricPanel({
   if (mode === 'teacher') {
     return (
       <aside style={{
-        width: 300, flexShrink: 0, background: T.panel,
+        width: 'clamp(240px, 22vw, 300px)', flexShrink: 0, background: T.panel,
         borderLeft: `1px solid ${T.line}`, display: 'flex', flexDirection: 'column',
       }}>
         {body}

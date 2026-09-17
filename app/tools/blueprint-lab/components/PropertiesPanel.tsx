@@ -15,8 +15,11 @@ import { useState } from 'react';
 import { wallAngleDeg, wallLength } from '../engine/geometry';
 import { T } from '../engine/theme';
 
+// Panel gives way before the canvas does: 280px on a laptop, slimming to a
+// 220px floor on narrow screens (Chromebooks, mirrored 4:3 projectors).
+// It stays visible so selecting a door/window/wall always reveals its options.
 const PANEL: React.CSSProperties = {
-  width: 280, flexShrink: 0, background: T.panel,
+  width: 'clamp(220px, 20vw, 280px)', flexShrink: 0, background: T.panel,
   borderLeft: `1px solid ${T.line}`,
   display: 'flex', flexDirection: 'column',
   color: T.ink, fontFamily: 'ui-sans-serif, system-ui',

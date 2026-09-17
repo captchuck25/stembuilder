@@ -1878,19 +1878,25 @@ export default function BlueprintLabClient() {
       {/* Top app bar — consolidates the former 120px SiteHeader into this
           single row: SB logo on the left, Home + profile on the right, so the
           drafting workspace gets the reclaimed vertical space. */}
+      {/* The bar is two clusters (file/floor on the left, views/account on
+          the right). On a laptop they share one 52px row exactly as before;
+          on narrow screens (Chromebooks, mirrored 4:3 projectors) the right
+          cluster wraps to a second row instead of being pushed off screen.
+          Nothing collapses or hides, so every control stays reachable. */}
       <div style={{
-        height: 52, background: T.panel,
-        borderBottom: `1px solid ${T.line}`,
-        display: 'flex', alignItems: 'center',
-        padding: '0 18px', gap: 14, flexShrink: 0,
+        minHeight: 52, boxSizing: 'border-box', background: T.panel,
+        borderBottom: `1px solid `,
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', alignContent: 'center',
+        padding: '6px 18px', columnGap: 14, rowGap: 6, flexShrink: 0,
       }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
         {/* STEM Builder brand logo → home */}
         <Link href="/" title="STEM Builder home" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
           <img src="/ui/sb-logo.png" alt="STEM Builder" style={{ height: 32, width: 'auto', display: 'block' }} />
         </Link>
 
         {/* Brand — plain logo + text, matching STEM Sketch's brand block */}
-        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.15 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.15, whiteSpace: 'nowrap', flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '0.2px', color: T.ink }}>Blueprint Lab</span>
           <span style={{ fontSize: 10, color: T.inkMuted }}>draft · plan · build</span>
         </div>
@@ -2049,7 +2055,8 @@ export default function BlueprintLabClient() {
           onUpdateElevation={handleUpdateFloorElevation}
         />
 
-        <span style={{ flex: 1 }} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginLeft: 'auto' }}>
 
         <button
           onClick={() => setRequirementsOpen(o => assignment ? true : !o)}
@@ -2079,6 +2086,7 @@ export default function BlueprintLabClient() {
         >← Home</Link>
 
         <ToolbarUserMenu />
+      </div>
       </div>
 
       {/* Workspace */}

@@ -35,10 +35,15 @@
   }
 
   /* ===== Layout ===== */
+  /* Left panel gives way before the canvas does: full 300px on a laptop,
+     slimming to a 220px floor on narrow screens (Chromebooks, mirrored
+     4:3 projectors) so the workspace keeps most of the width. The panel is
+     never hidden, so selecting an entity always shows its properties. */
+  :root { --left-w: clamp(220px, 20vw, 300px); }
   .app {
     display: grid;
     grid-template-rows: auto 1fr 36px;
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: var(--left-w) 1fr;
     grid-template-areas:
       "topbar topbar"
       "left   canvas"
@@ -580,6 +585,13 @@
     background: white;
   }
   .field input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  /* Narrow screens: tighter label column + padding so inputs stay usable
+     inside the slimmed left panel. */
+  @media (max-width: 1280px) {
+    .props { padding: 4px 10px 12px; }
+    .field { grid-template-columns: 74px 1fr; gap: 6px; }
+    .field label { font-size: 12px; }
+  }
   /* Segmented toggle used in the properties panel to flip an entity between
      Regular and Construction. Visible button-pair instead of a tiny checkbox
      so users can find and operate it at a glance. */
