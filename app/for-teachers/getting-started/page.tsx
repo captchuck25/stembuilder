@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { MediaSlot, ComingSoon } from "../components/ui";
+import { ComingSoon } from "../components/ui";
+import GalleryImage from "../components/GalleryImage";
+import PromoVideo from "../components/PromoVideo";
 import DemoDashboardLink from "../components/DemoDashboard";
 import styles from "../marketing.module.css";
 
@@ -23,30 +25,35 @@ const WALKTHROUGH = [
     body:
       "Sign up with your school email and a password, or use your Google account. Teacher accounts are free — no credit card, no trial clock.",
     media: "Screenshot — the teacher sign-up page",
+    src: "/marketing/getting-started/step1-signup.webp",
   },
   {
     title: "Create a class",
     body:
       "Name your class (\"Period 3 STEM\") and it's live. You'll get a class code right away — that code is all your students need.",
     media: "Screenshot — creating a class and getting the class code",
+    src: "/marketing/getting-started/step2-class-code.webp",
   },
   {
     title: "Students join with the code — or sync Google Classroom",
     body:
       "Students go to the join page, enter the class code, and pick a username — no student email required. Using Google Classroom? Connect it and import your roster in a couple of clicks instead.",
     media: "Screenshot — a student joining with the class code",
+    src: "/marketing/getting-started/step3-student-join.webp",
   },
   {
     title: "Assign a tool",
     body:
       "Open your class, pick a tool, and set a challenge — a bridge to beat, a home to design, levels to complete. Or let students explore freely; every tool works without an assignment, too.",
     media: "Screenshot — assigning a challenge to the class",
+    src: "/marketing/getting-started/step4-assign.webp",
   },
   {
     title: "Watch them build",
     body:
       "Your dashboard shows every student's work and progress in one place — who's started, who's stuck, who's already on version three.",
     media: "Screenshot — the teacher dashboard with class progress",
+    src: "/marketing/getting-started/step5-dashboard.webp",
     demoLink: true,
   },
 ];
@@ -62,7 +69,10 @@ export default function GettingStartedPage() {
             the whole process, start to finish.
           </p>
           <div className={styles.cardSoft} style={{ maxWidth: 780 }}>
-            <MediaSlot label="Overview video — STEM Builder for teachers in 90 seconds" kind="video" />
+            <PromoVideo
+              src="/marketing/getting-started/overview.mp4"
+              label="Overview video — from sign-up to a live assignment in about a minute"
+            />
           </div>
         </div>
       </section>
@@ -80,7 +90,7 @@ export default function GettingStartedPage() {
                     <DemoDashboardLink />
                   </p>
                 )}
-                <MediaSlot label={step.media} />
+                <GalleryImage src={step.src} alt={step.media} />
               </li>
             ))}
           </ol>
