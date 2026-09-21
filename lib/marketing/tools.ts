@@ -133,22 +133,25 @@ export const TOOLS: MarketingTool[] = [
   },
   {
     slug: "bridge-builder",
-    name: "Bridge Builder",
+    name: "Structures",
+    subtitle: "Bridge & Tower Builder",
     flagship: false,
     tagline:
-      "Design a bridge, then stress-test it under load and watch it hold — or crumble. Engineering, physics, and problem-solving in one.",
-    toolHref: "/tools/bridge",
-    image: "/ui/bridge-button-v2.png",
+      "Design a bridge and stress-test it under load, or build a tower and crush-test it — then watch it hold, or crumble. Engineering, physics, and problem-solving in one.",
+    toolHref: "/tools/structures",
+    image: "/ui/structures-button.png",
     gradeBand: "Grades 4–10",
     subjects: ["Physics", "Engineering"],
     description: [
       "Students design a truss bridge, then put it under load and watch the physics play out — members stretch and compress, color-shift under stress, and fail if the design can't take it. It turns engineering iteration into a game: design, test, learn, redesign.",
       "Built-in challenges, class leaderboards, and a teacher gradebook make it easy to run as a competition — designs are ranked on efficiency, rewarding the bridge that holds its load at the lowest cost.",
+      "Tower Builder is the other half of the set: students build a lattice tower on a limited footprint, then a press plate lowers onto it and the crush load climbs in pounds until the tower holds — or lets go. Same steel, same joints, same costs as the bridge, so what a class learns on one carries straight over to the other.",
     ],
     classroomUse: [
       "Run the Bridge Challenge: everyone gets the same span and load, and the class leaderboard tracks whose design does it most efficiently — and at the lowest cost.",
       "Teach forces by watching them: tension and compression are color-coded live under load.",
       "Pair with a physical build — design and test digitally first, giving students confidence in their design before investing the time to construct it from classroom materials.",
+      "Run the Tower Challenge: same footprint, same target height, same load for everyone — the leaderboard ranks the tower that survives the crush test at the lowest cost.",
     ],
     gallery: [
       {
@@ -163,11 +166,15 @@ export const TOOLS: MarketingTool[] = [
         label: "Teacher view — bridge assignments with results, designs, and costs",
         src: "/marketing/bridge-builder/gallery-3.png",
       },
+      {
+        label: "Tower Builder — an X-braced tower holding its full crush load",
+        src: "/marketing/tower-builder/gallery-1.png",
+      },
     ],
-    demoVideo: "Demo video — designing and stress-testing a bridge (90 sec)",
+    demoVideo: "Bridge Builder demo — designing and stress-testing a bridge (90 sec)",
     demoVideoSrc: "/marketing/bridge-builder/demo.mp4",
     seoDescription:
-      "Bridge Builder lets students design a bridge and stress-test it under load in the browser — live physics, class leaderboards, and engineering iteration in one tool.",
+      "Structures pairs Bridge Builder and Tower Builder: students design a bridge and stress-test it under load, or build a tower and crush-test it — live physics, class leaderboards, and engineering iteration in the browser.",
   },
   {
     slug: "code-lab",
@@ -208,7 +215,7 @@ export const TOOLS: MarketingTool[] = [
     seoDescription:
       "Code Lab teaches students to code in the browser — maze puzzles and game design with blocks, then a graduation path to real Python logic and turtle graphics, with teacher progress tracking.",
     lessonPlanPitch:
-      "Teacher Pro and District plans include answer keys and ready-to-use video tutorials to share with your class.",
+      "Teacher Pro and District plans include answer keys, ready-to-use video tutorials to share with your class, and the Quiz Builder — auto-graded quizzes drawn from a ready-made question bank for every Block Lab unit and Python level.",
   },
   {
     slug: "electronics-lab",
@@ -245,6 +252,8 @@ export const TOOLS: MarketingTool[] = [
     ],
     demoVideo: "Demo video — wiring a parallel circuit (20 sec)",
     demoVideoSrc: "/marketing/electronics-lab/demo.mp4",
+    lessonPlanPitch:
+      "Teacher Pro and District plans include the Quiz Builder — auto-graded quizzes drawn from a ready-made question bank for all seven Electronics Lab units.",
     seoDescription:
       "Electronics Lab is a live circuit simulator for classrooms — students build circuits with batteries, bulbs, and switches, and progress from first circuits to breadboards and Ohm's Law.",
   },

@@ -63,6 +63,7 @@ export const PLANS: PricingPlan[] = [
       "Everything in Free",
       `Up to ${PRO_STUDENT_CAP} students (then just $${OVERAGE_PRICE_PER_BLOCK} per additional ${OVERAGE_BLOCK_SIZE})`,
       "Access to our growing library of ready-to-teach projects & units",
+      "Quiz Builder — auto-graded quizzes from a ready-made question bank (Electronics Lab, Block Lab, and Python Code Lab today; more units coming)",
     ],
     ctas: [{ label: "Go Pro", href: "/teachers/upgrade", primary: true }],
   },
@@ -75,6 +76,7 @@ export const PLANS: PricingPlan[] = [
     features: [
       "Unlimited teachers & students at your school(s)",
       "Our growing curriculum & project library included",
+      "Quiz Builder for every teacher",
       "Admin dashboard & usage reporting",
       "Rostering — Google Classroom",
       "A free trial to start",
