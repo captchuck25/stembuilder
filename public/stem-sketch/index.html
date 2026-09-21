@@ -2536,7 +2536,10 @@ class SketchEngine {
       const tol = Math.max(endpointTolMm, (hc.r || 0) * 0.95);
       const d = Math.hypot(wx - hc.x, wy - hc.y);
       if (d < tol) {
-        candidates.push({ x: hc.x, y: hc.y, kind: 'center', strength: 1.6 - 0.5 * (d / tol) });
+        // Floor stays ABOVE the grid's peak (1.45) across the full pull
+        // radius — anywhere inside the hole must lock to its center even
+        // when a grid intersection sits inside an off-grid hole.
+        candidates.push({ x: hc.x, y: hc.y, kind: 'center', strength: 1.75 - 0.25 * (d / tol) });
       }
     }
 
@@ -2658,7 +2661,10 @@ class SketchEngine {
         const my = (s.a.y + s.b.y) / 2;
         const dm = Math.hypot(wx - mx, wy - my);
         if (dm < endpointTolMm) {
-          candidates.push({ x: mx, y: my, kind: 'midpoint', strength: 1.3 - 0.9 * (dm / endpointTolMm) });
+          // 0.7 decay: stays above the grid's 0.9 floor for the closer half
+          // of the pull radius, so a clearly-closer midpoint wins mid-cell,
+          // while the grid's 1.45 peak still rules near its own points.
+          candidates.push({ x: mx, y: my, kind: 'midpoint', strength: 1.3 - 0.7 * (dm / endpointTolMm) });
         }
       }
     }
@@ -2704,7 +2710,16 @@ class SketchEngine {
       const ga = doc.sketch?.gridAnchor || { x: 0, y: 0 };
       const gx = ga.x + Math.round((wx - ga.x) / step) * step;
       const gy = ga.y + Math.round((wy - ga.y) / step) * step;
-      candidates.push({ x: gx, y: gy, kind: 'grid', strength: 1.0 });
+      // DISTANCE-AWARE grid strength (ssissues 2026-09-16): when the cursor
+      // is right on a grid point, the grid should win over a midpoint that
+      // is farther away — "closest wins" between grid and same-grade
+      // features. Decays from 1.45 near the point, FLOORED at 0.9 so the
+      // grid still beats along-the-edge candidates (capped at 0.85)
+      // everywhere — the cursor can never drift off-grid by hovering an
+      // outline, same guarantee as the old constant 1.0.
+      const dg = Math.hypot(wx - gx, wy - gy);
+      const gs = Math.max(0.9, 1.45 - 0.9 * (dg / endpointTolMm));
+      candidates.push({ x: gx, y: gy, kind: 'grid', strength: gs });
     }
 
     // Snap to the face boundary (only present when sketching on a body face).
@@ -2735,8 +2750,12 @@ class SketchEngine {
         { x: b.x,           y: b.y + b.h/2 },
       ];
       for (const m of midpoints) {
+        // Midpoint-grade pull, NOT the 40px corner pull: face-edge midpoints
+        // used to hold strength ≥1.0 across the whole 40px radius, so they
+        // beat the grid from 20px away and made grid points near an edge
+        // unreachable (ssissues 2026-09-16: "midpoint snap is too strong").
         const d = Math.hypot(wx - m.x, wy - m.y);
-        if (d < faceTolMm) candidates.push({ x: m.x, y: m.y, kind: 'face-mid', strength: 1.8 - 0.8 * (d / faceTolMm) });
+        if (d < endpointTolMm) candidates.push({ x: m.x, y: m.y, kind: 'face-mid', strength: 1.3 - 0.7 * (d / endpointTolMm) });
       }
       // Project onto the four edges. When grid-snap is ON these
       // along-the-edge candidates are suppressed (handled by the
@@ -2774,8 +2793,9 @@ class SketchEngine {
         { x: b.cx, y: b.cy + b.r }, { x: b.cx, y: b.cy - b.r },
       ];
       for (const c of cards) {
+        // Same midpoint-grade pull as the rect face-edge midpoints.
         const d = Math.hypot(wx - c.x, wy - c.y);
-        if (d < faceTolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-mid', strength: 1.8 - 0.8 * (d / faceTolMm) });
+        if (d < endpointTolMm) candidates.push({ x: c.x, y: c.y, kind: 'face-mid', strength: 1.3 - 0.7 * (d / endpointTolMm) });
       }
       // Snap to any point on the perimeter — suppressed when grid-snap
       // is on so the cursor can't drift off-grid along the circle.
