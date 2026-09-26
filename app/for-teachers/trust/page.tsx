@@ -5,12 +5,12 @@ import styles from "../marketing.module.css";
 export const metadata: Metadata = {
   title: "Trust & Privacy",
   description:
-    "How STEM Builder protects students: no trackers or third-party scripts on student pages, FERPA & COPPA alignment, no ads, no data sales, username-only class-code accounts, US data storage, and district-ready data privacy agreements.",
+    "How STEM Builder protects students: no trackers or third-party scripts on student pages, FERPA & COPPA alignment, no ads, no data sales, username-only class-code accounts, and US data storage.",
   alternates: { canonical: "/for-teachers/trust" },
   openGraph: {
     title: "Trust & Privacy | STEM Builder for Teachers",
     description:
-      "No trackers on student pages, FERPA & COPPA alignment, no ads, no data sales, username-only class-code accounts, US data storage, and district-ready data privacy agreements.",
+      "No trackers on student pages, FERPA & COPPA alignment, no ads, no data sales, username-only class-code accounts, and US data storage.",
     url: "/for-teachers/trust",
   },
 };
@@ -95,30 +95,16 @@ export default function TrustPage() {
 
       <section className={`${styles.grayBg} ${styles.section}`}>
         <div className={styles.container}>
-          <div className={styles.grid2}>
-            <div className={styles.cardSoft}>
-              <h2 className={styles.h3} style={{ fontSize: 22 }}>For districts: NDPA-ready</h2>
-              <p className={styles.body}>
-                We&apos;re prepared to sign a data privacy agreement with your
-                district, including the National Data Privacy Agreement (NDPA).
-                Request our DPA at{" "}
-                <a href="mailto:privacy@stembuilder.io" className={styles.textLink}>
-                  privacy@stembuilder.io
-                </a>
-                .
-              </p>
-            </div>
-            <div className={styles.cardSoft}>
-              <h2 className={styles.h3} style={{ fontSize: 22 }}>Questions?</h2>
-              <p className={styles.body}>
-                Privacy questions from teachers, parents, or district staff are
-                always welcome:{" "}
-                <a href="mailto:privacy@stembuilder.io" className={styles.textLink}>
-                  privacy@stembuilder.io
-                </a>
-                .
-              </p>
-            </div>
+          <div className={styles.cardSoft} style={{ maxWidth: 720 }}>
+            <h2 className={styles.h3} style={{ fontSize: 22 }}>Questions?</h2>
+            <p className={styles.body}>
+              Privacy questions from teachers, parents, or district staff are
+              always welcome:{" "}
+              <a href="mailto:privacy@stembuilder.io" className={styles.textLink}>
+                privacy@stembuilder.io
+              </a>
+              .
+            </p>
           </div>
         </div>
       </section>
