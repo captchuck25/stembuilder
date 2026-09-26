@@ -2720,6 +2720,54 @@ class SketchEngine {
       const dg = Math.hypot(wx - gx, wy - gy);
       const gs = Math.max(0.9, 1.45 - 0.9 * (dg / endpointTolMm));
       candidates.push({ x: gx, y: gy, kind: 'grid', strength: gs });
+
+      // PERIMETER × GRID crossings (ssissues 2026-09-26): an off-grid part
+      // (a 3.6 in box) has edges that never land on a grid point, and the
+      // along-the-edge snap is suppressed while grid snap is on — so a
+      // line couldn't start ON the border at all. Add candidates where the
+      // face outline crosses grid lines: on the part AND on the grid.
+      // They render as intersections, because that's what they are.
+      const addEdgeGridCrossings = (a, p2) => {
+        const dx = p2.x - a.x, dy = p2.y - a.y;
+        const L2 = dx * dx + dy * dy;
+        if (L2 < 1e-9) return;
+        // cheap reject: cursor must be near this segment at all
+        const tc = clamp(((wx - a.x) * dx + (wy - a.y) * dy) / L2, 0, 1);
+        if (Math.hypot(wx - (a.x + tc * dx), wy - (a.y + tc * dy)) > endpointTolMm * 1.5) return;
+        const pushT = (t) => {
+          if (t < -1e-6 || t > 1 + 1e-6) return;
+          const px = a.x + t * dx, py = a.y + t * dy;
+          const d = Math.hypot(wx - px, wy - py);
+          if (d < endpointTolMm) {
+            candidates.push({ x: px, y: py, kind: 'intersection', strength: 1.5 - 1.0 * (d / endpointTolMm) });
+          }
+        };
+        if (Math.abs(dx) > 1e-9) {
+          const k = Math.round((wx - ga.x) / step);
+          for (const kk of [k - 1, k, k + 1]) pushT((ga.x + kk * step - a.x) / dx);
+        }
+        if (Math.abs(dy) > 1e-9) {
+          const m = Math.round((wy - ga.y) / step);
+          for (const mm of [m - 1, m, m + 1]) pushT((ga.y + mm * step - a.y) / dy);
+        }
+      };
+      let hadPerimeter = false;
+      for (const ent of doc.sketch.entities) {
+        if (!ent.facePerimeter || ent.id === ignoreId) continue;
+        hadPerimeter = true;
+        for (const s of (entityToSegments(ent) || [])) addEdgeGridCrossings(s.a, s.b);
+      }
+      // Boundary-rect edges cover sketches that have no traced perimeter.
+      const bnd = doc.sketch?.boundary;
+      if (!hadPerimeter && bnd && bnd.type === 'rect') {
+        const cs = [
+          [{ x: bnd.x, y: bnd.y }, { x: bnd.x + bnd.w, y: bnd.y }],
+          [{ x: bnd.x + bnd.w, y: bnd.y }, { x: bnd.x + bnd.w, y: bnd.y + bnd.h }],
+          [{ x: bnd.x + bnd.w, y: bnd.y + bnd.h }, { x: bnd.x, y: bnd.y + bnd.h }],
+          [{ x: bnd.x, y: bnd.y + bnd.h }, { x: bnd.x, y: bnd.y }],
+        ];
+        for (const [a, p2] of cs) addEdgeGridCrossings(a, p2);
+      }
     }
 
     // Snap to the face boundary (only present when sketching on a body face).
