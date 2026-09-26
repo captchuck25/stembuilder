@@ -6872,7 +6872,7 @@ function projectBodiesOntoPlane(plane, onlyBodyId) {
           bevelEnabled: false,
           curveSegments: 32,
         });
-        if (child.op === 'subtract') tmpGeo.translate(0, 0, -(child.height || 1));
+        if (child.op === 'subtract' || child.dir === -1) tmpGeo.translate(0, 0, -(child.height || 1));
         const planeMChild = makePlaneMatrix(child.plane);
         tmpGeo.applyMatrix4(planeMChild);
         // Apply parent group's offset
@@ -8750,11 +8750,12 @@ class Viewer3D {
         curveSegments: 32,
       });
       // Mirror the BUILD rule exactly (buildBodyMesh: negatives always grow
-      // INTO the body along −n, positives outward along +n) — the preview
-      // must never disagree with what Done will produce. It used to follow
-      // the drag direction, so a Cut typed in the tooltip previewed OUTWARD
+      // INTO the body along −n; positives follow the drag sign — outward by
+      // default, along −n when dragged inward) — the preview must never
+      // disagree with what Done will produce. It used to follow only the
+      // drag direction, so a Cut typed in the tooltip previewed OUTWARD
       // and then cut inward on commit (ssissues #2).
-      if (isCut) geo.translate(0, 0, -Math.abs(length));
+      if (isCut || direction < 0) geo.translate(0, 0, -Math.abs(length));
       geo.applyMatrix4(makePlaneMatrix(job.sketch.plane));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 9;
@@ -9803,8 +9804,9 @@ function buildBodyMesh(body) {
       });
     }
     // For Negative extrudes, flip extrusion direction so it goes INTO the body
-    // (along plane −n) instead of outward — that's the natural "cut a hole" direction.
-    if (body.op === 'subtract') geo.translate(0, 0, -body.height);
+    // (along plane −n) instead of outward — that's the natural "cut a hole"
+    // direction. An Add dragged INWARD (body.dir === -1) grows along −n too.
+    if (body.op === 'subtract' || body.dir === -1) geo.translate(0, 0, -body.height);
     const plane = body.plane || GROUND_PLANE;
     const planeMat = makePlaneMatrix(plane);
     geo.applyMatrix4(planeMat);
@@ -13411,6 +13413,11 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
       height: lengthMm,
       x: 0, y: 0, z: 0,
       op,
+      // An ADD extrude honors the drag direction: pulled outward it grows
+      // along +n as always; pushed INWARD it grows along −n, through the
+      // body (the dowel pushed in toward the far side — ssissues
+      // 2026-09-26). Cuts ignore the sign: a cut always goes INTO the body.
+      ...(op !== 'subtract' && direction < 0 ? { dir: -1 } : {}),
       // Live re-extrude metadata — used by rebuildExtrudesForSketch to find
       // the same region after the user edits the source sketch and switches
       // back to 3D. Centroid match within ~5mm finds the updated region.
@@ -21464,12 +21471,38 @@ function openFilletDialog() {
           ent = r2p;
         }
         if (ent.type !== 'polyline') continue;
+        // FILLETING THE FACE PERIMETER: the traced outline is REFERENCE
+        // geometry — it must keep matching the body's real (still square)
+        // face. Rounding it in place erased the square corner from every
+        // piece of sketch geometry, so the corner wedge between the arc
+        // and the true corner belonged to no region and nothing there was
+        // clickable (ssissues 2026-09-26: "I filleted them, now I can't
+        // grab them"). Fillet a DRAWN copy instead: the copy carries the
+        // rounded profile, the untouched perimeter still closes the corner
+        // wedges, and both become grabbable regions — extrude the profile,
+        // or cut the wedges off to round the part.
+        const isPerimCopy = !!ent.facePerimeter;
+        if (isPerimCopy) {
+          const copy = {
+            id: doc.sketch.nextId++, type: 'polyline', closed: !!ent.closed,
+            points: ent.points.map(p => ({ x: p.x, y: p.y })),
+          };
+          doc.sketch.entities.push(copy);
+          ent = copy;
+        }
         indices.sort((a, b) => b - a); // descending — splices later first
+        let entOk = 0;
         for (const i of indices) {
           const ok = (style === 'chamfer')
             ? chamferPolylineCorner(ent, i, r)
             : filletPolylineCorner(ent, i, r);
-          if (ok) processed++;
+          if (ok) { processed++; entOk++; }
+        }
+        // Every fillet on this perimeter copy failed (radius too big) —
+        // drop the copy, or an exact duplicate outline lingers over the
+        // perimeter for no reason.
+        if (isPerimCopy && !entOk) {
+          doc.sketch.entities = doc.sketch.entities.filter(e => e.id !== ent.id);
         }
       }
       // Junctions AFTER vertex work: they merge chains, and vertex fillets
