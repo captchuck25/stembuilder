@@ -12119,6 +12119,68 @@ function _coalesceSoftSiblings(children, opts) {
   return out;
 }
 
+// Resize a GROUP by scaling its baked geometry about its own center
+// (ssissues 2026-09-26: duplicate the inner-shell group, enlarge the copy
+// in place into a concentric outer shell). Cumulative factors persist on
+// body.bakeScale so the re-derive paths (load-time recovery, sketch-edit
+// propagation) re-apply them after rebuilding from children; the children
+// stay parametric and unscaled, so Ungroup restores originals as-is.
+function scaleGroupBody(body, fx, fy, fz) {
+  if (!body || (body.type !== 'group' && body.type !== 'combined')) return false;
+  if (!(body.geometry instanceof THREE.BufferGeometry)) return false;
+  if (!(fx > 0 && fy > 0 && fz > 0)) return false;
+  pushUndo();
+  // Duplicated groups can share one geometry object — never scale in place.
+  const geo = body.geometry.clone();
+  geo.computeBoundingBox();
+  const c = geo.boundingBox.getCenter(new THREE.Vector3());
+  geo.translate(-c.x, -c.y, -c.z);
+  geo.scale(fx, fy, fz);
+  geo.translate(c.x, c.y, c.z);
+  geo.computeVertexNormals();
+  body.geometry = geo;
+  const bs = body.bakeScale || { x: 1, y: 1, z: 1 };
+  body.bakeScale = { x: bs.x * fx, y: bs.y * fy, z: bs.z * fz };
+  if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo(); }
+  renderProps(); renderTree();
+  setDirty(true);
+  return true;
+}
+
+// "Return to sketch size" (Charlie, pre-deploy review of group resize):
+// drop the stored scale and re-derive from the children — the sketches
+// are the source of truth underneath, so this is exact, not approximate.
+// Sketches drawn WHILE the group was resized will visually mismatch after
+// returning (a sketch is a snapshot of the object at the size it was
+// drawn); nothing breaks — cuts rebuild through the same layering.
+function restoreGroupSketchSize(body) {
+  if (!body?.bakeScale) return;
+  pushUndo();
+  delete body.bakeScale;
+  body.geometry = null;
+  try { _ensureGroupGeometry(body); } catch (err) { console.error('Return to sketch size rebuild failed:', err); }
+  if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo(); }
+  renderProps(); renderTree();
+  setDirty(true);
+  setStatus('↩ Back to the size it was drawn at — the face sketches match the object again.');
+}
+
+// Re-apply a group's stored resize after its geometry was re-derived from
+// its children. Scaling is about the derived geometry's own center — the
+// same anchor scaleGroupBody used, so the result lands identically.
+function _applyBakeScale(body) {
+  const bs = body?.bakeScale;
+  if (!bs || !(body.geometry instanceof THREE.BufferGeometry)) return;
+  if (Math.abs(bs.x - 1) < 1e-9 && Math.abs(bs.y - 1) < 1e-9 && Math.abs(bs.z - 1) < 1e-9) return;
+  const geo = body.geometry;
+  geo.computeBoundingBox();
+  const c = geo.boundingBox.getCenter(new THREE.Vector3());
+  geo.translate(-c.x, -c.y, -c.z);
+  geo.scale(bs.x, bs.y, bs.z);
+  geo.translate(c.x, c.y, c.z);
+  geo.computeVertexNormals();
+}
+
 function rebuildGroupGeometry(group) {
   if (!group || group.type !== 'group' || !Array.isArray(group.children)) return;
   if (typeof CSG === 'undefined') return;
@@ -12190,6 +12252,7 @@ function rebuildGroupGeometry(group) {
       // Same crumb-drop + fin-collapse polish as the live bake and load
       // paths, so an edit-propagated rebuild produces the same clean shape.
       group.geometry = _dropCrumbComponents(baked);
+      _applyBakeScale(group); // re-apply a stored group resize
       // Phase 2 — do NOT re-bake thread shells here. Threads live as
       // _mergedShells metadata and render via overlay + export only, so the
       // rebuilt geometry stays shell-free and CSG never re-ingests them.
@@ -14670,6 +14733,7 @@ function _ensureGroupGeometry(body) {
     // Same crumb-drop as the live group path so a reload rebuilds the
     // exact same shape (severed hair-thin islands stay gone).
     body.geometry = _dropCrumbComponents(geo);
+    _applyBakeScale(body); // re-apply a stored group resize
     // Track which engine baked this: csg.js output gets re-baked cleanly
     // when Manifold arrives (engine-ready hook); a Manifold bake clears
     // any stale fallback tag.
@@ -20441,11 +20505,13 @@ function renderProps() {
       // Compute the merged bbox so the user can see the group's overall
       // W × H × D — matches what every other primitive shows.
       let bboxStr = '—';
+      let gsz = null;
       if (body.mesh) {
         viewer && viewer.scene && viewer.scene.updateMatrixWorld(true);
         const bb = new THREE.Box3().setFromObject(body.mesh);
         if (!bb.isEmpty()) {
           const sz = bb.getSize(new THREE.Vector3());
+          gsz = { x: sz.x, y: sz.y, z: sz.z };
           bboxStr = `${fmtUL(sz.x)} × ${fmtUL(sz.y)} × ${fmtUL(sz.z)}`;
         }
       }
@@ -20462,11 +20528,26 @@ function renderProps() {
         }
       })(body);
       const groupSoftVal = softTargets.length ? Math.max(...softTargets.map(c => c.softR || 0)) : 0;
+      // EDITABLE group size (ssissues 2026-09-26: "I should be able to take
+      // this group and alter the size of it") — typed W/H/D resize the whole
+      // group about its own center, so a duplicate enlarged in place stays
+      // perfectly concentric with the original (the hollow-shell workflow).
+      const sizeRows = gsz ? `
+        <div class="field"><label>Width (${u})</label><input type="number" data-gdim="x" value="${fmtU(gsz.x)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Height (${u})</label><input type="number" data-gdim="y" value="${fmtU(gsz.y)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Depth (${u})</label><input type="number" data-gdim="z" value="${fmtU(gsz.z)}" step="0.5" min="0.01"/></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="group-uniform-scale" style="width:auto;margin:0" checked/>
+          <label for="group-uniform-scale" style="margin:0;cursor:pointer">Resize all three together (keep proportions)</label>
+        </div>
+        ${body.bakeScale ? `<div class="hint" style="margin-top:2px">Resized ×${(+body.bakeScale.x).toFixed(2)}${(Math.abs(body.bakeScale.x - body.bakeScale.y) > 0.001 || Math.abs(body.bakeScale.x - body.bakeScale.z) > 0.001) ? ` / ×${(+body.bakeScale.y).toFixed(2)} / ×${(+body.bakeScale.z).toFixed(2)}` : ''} from the size it was drawn at. Sketches made at another size will look off until it matches again.</div>
+        <button class="action" id="group-restore-size" style="display:block;width:100%;margin-top:4px" title="Drop the resize and rebuild exactly from the sketches">↩ Return to sketch size</button>` : ''}`
+        : `<div class="field"><label>Size (W×H×D)</label><div>${bboxStr}</div></div>`;
       dimFields = `<h4>Group</h4>
-        <div class="field"><label>Size (W×H×D)</label><div>${bboxStr}</div></div>
+        ${sizeRows}
         <div class="field"><label>Bodies</label><div>${body.children?.length || 0}</div></div>
         <div class="field"><label>Contents</label><div style="font-size:11px;color:var(--ink-soft)">${childList}</div></div>
-        <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear.</div>`;
+        <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear at their original size.</div>`;
     }
 
     const opField = `
@@ -20491,6 +20572,7 @@ function renderProps() {
 
     props.querySelectorAll('input').forEach(inp => {
       inp.addEventListener('input', () => {
+        if (inp.dataset.gdim) return; // group resize commits on 'change', below
         const v = parseFloat(inp.value);
         if (!isFinite(v)) return;
         if (inp.dataset.rk) {
@@ -20505,6 +20587,33 @@ function renderProps() {
         if (typeof checkCollisionWarnings === 'function') checkCollisionWarnings([body.id]);
       });
     });
+    // Group resize — 'change' (not per-keystroke) so half-typed numbers
+    // don't scale the part. Factor = typed size / current size per axis;
+    // the uniform checkbox applies the same factor to all three.
+    props.querySelectorAll('input[data-gdim]').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const v = parseFloat(inp.value);
+        if (!isFinite(v) || v <= 0 || !body.mesh) { renderProps(); return; }
+        viewer && viewer.scene && viewer.scene.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(body.mesh);
+        if (bb.isEmpty()) return;
+        const sz = bb.getSize(new THREE.Vector3());
+        const axis = inp.dataset.gdim;
+        const cur = sz[axis];
+        if (!(cur > 0.001)) return;
+        const f = fromUnit(v) / cur;
+        if (!isFinite(f) || f <= 0 || Math.abs(f - 1) < 1e-6) return;
+        const uni = !!document.getElementById('group-uniform-scale')?.checked;
+        const fx = uni || axis === 'x' ? f : 1;
+        const fy = uni || axis === 'y' ? f : 1;
+        const fz = uni || axis === 'z' ? f : 1;
+        if (scaleGroupBody(body, fx, fy, fz)) {
+          setStatus(`Resized group to ${fmtUL(sz.x * fx)} × ${fmtUL(sz.y * fy)} × ${fmtUL(sz.z * fz)}${uni ? ' (proportions kept)' : ''}`);
+        }
+      });
+    });
+    const restoreBtn = $('group-restore-size');
+    if (restoreBtn) restoreBtn.onclick = () => restoreGroupSketchSize(body);
     // Group soften — 'change' (not per-keystroke): the re-bake is a CSG
     // union of all children, too heavy to run on every digit typed.
     const groupSoftInp = $('group-soft-input');
