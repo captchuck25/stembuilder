@@ -2757,6 +2757,11 @@ class SketchEngine {
         hadPerimeter = true;
         for (const s of (entityToSegments(ent) || [])) addEdgeGridCrossings(s.a, s.b);
       }
+      // Projected body-outline lines too (ssissues 2026-09-26 #2: "we also
+      // want to click on our hidden lines") — the interior walls a face
+      // sketch shows (e.g. the shell walls below the top face) are exactly
+      // what a student wants to grab at a grid crossing.
+      for (const s of (this._projSegs || [])) addEdgeGridCrossings(s.p1, s.p2);
       // Boundary-rect edges cover sketches that have no traced perimeter.
       const bnd = doc.sketch?.boundary;
       if (!hadPerimeter && bnd && bnd.type === 'rect') {
@@ -4346,10 +4351,14 @@ class SketchEngine {
       // Draw order: red neighbours first, the sketched part's black lines
       // LAST — where a red and black edge coincide, black sits on top.
       segs.sort((a, b) => (a._own ? 1 : 0) - (b._own ? 1 : 0));
-      // Cache the visible outline segments for the snap engine — students
-      // trace these lines (and their crossings = interference boundaries)
-      // to build tight-tolerance profiles.
-      this._projSegs = segs.filter(s => !s._hidden);
+      // Cache the outline segments for the snap engine — students trace
+      // these lines (and their crossings = interference boundaries) to
+      // build tight-tolerance profiles. HIDDEN lines included (ssissues
+      // 2026-09-26: "we also want to click on our hidden lines") — the
+      // dashed below-surface walls are reference geometry a student
+      // designs against, and they're visible on screen, so snapping to
+      // them matches what the eye sees.
+      this._projSegs = segs;
       // Edges with both endpoints near z=0 lie ON the sketch plane → highlight
       const onPlaneTol = 0.5; // mm
       for (const seg of segs) {
