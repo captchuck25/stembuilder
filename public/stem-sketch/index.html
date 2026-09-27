@@ -6503,6 +6503,52 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
   }
   const viewN = new THREE.Vector3(...plane.n).normalize();
   const COS25 = Math.cos(25 * Math.PI / 180);
+  // TANGENT EDGES + VIEW-PARALLEL RIMS (ssissues 2026-09-27, diagnosed on
+  // the real Rack Attachment STL): a rounded-off corner tessellates into
+  // ~15–20° strips — every seam is under the 25° crease threshold, and a
+  // round whose normals swing from "parallel to the view" to "facing
+  // away" never crosses the strict silhouette sign test. Whole rounded
+  // corners emitted NOTHING, which is why hidden lines looked selective
+  // (dashes stopping where a fillet begins, entire sides blank).
+  // Drafting draws exactly the TANGENT EDGES for such a round — the seams
+  // where the round meets a flat face. Detect them: a smooth seam whose
+  // one side sits inside a planar patch while the other side curves.
+  // Also keep the rim of a face lying parallel to the view — that's the
+  // silhouette boundary the strict sign test skips because d === 0.
+  // Flood-fill COPLANAR PATCHES (union-find) and sum their areas. A fillet
+  // strip is a slim patch; the face it tangentially meets is a big one —
+  // the area contrast marks the tangent seam. (A neighbor-normal test
+  // fails here: fan triangulation lets one big-face triangle touch both
+  // corner rounds, which made the flat side look "curved" too.)
+  const COSFLAT = Math.cos(1.5 * Math.PI / 180);
+  const parent = new Int32Array(triCount);
+  for (let t = 0; t < triCount; t++) parent[t] = t;
+  const findP = (t) => { while (parent[t] !== t) { parent[t] = parent[parent[t]]; t = parent[t]; } return t; };
+  {
+    const nA = new THREE.Vector3(), nB = new THREE.Vector3();
+    for (const e of edges.values()) {
+      if (e.t2 === -1) continue;
+      nA.set(nrm[e.t1 * 3], nrm[e.t1 * 3 + 1], nrm[e.t1 * 3 + 2]);
+      nB.set(nrm[e.t2 * 3], nrm[e.t2 * 3 + 1], nrm[e.t2 * 3 + 2]);
+      if (nA.dot(nB) >= COSFLAT) {
+        const ra = findP(e.t1), rb = findP(e.t2);
+        if (ra !== rb) parent[ra] = rb;
+      }
+    }
+  }
+  const patchArea = new Float64Array(triCount);
+  {
+    const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
+    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), cr = new THREE.Vector3();
+    for (let t = 0; t < triCount; t++) {
+      const a = ia[t * 3] * 3, b = ia[t * 3 + 1] * 3, c3 = ia[t * 3 + 2] * 3;
+      pA.set(v[a], v[a + 1], v[a + 2]);
+      pB.set(v[b], v[b + 1], v[b + 2]);
+      pC.set(v[c3], v[c3 + 1], v[c3 + 2]);
+      e1.subVectors(pB, pA); e2.subVectors(pC, pA); cr.crossVectors(e1, e2);
+      patchArea[findP(t)] += cr.length() / 2;
+    }
+  }
   const picked = [];
   const n1 = new THREE.Vector3(), n2v = new THREE.Vector3();
   for (const e of edges.values()) {
@@ -6511,10 +6557,17 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
     else {
       n1.set(nrm[e.t1 * 3], nrm[e.t1 * 3 + 1], nrm[e.t1 * 3 + 2]);
       n2v.set(nrm[e.t2 * 3], nrm[e.t2 * 3 + 1], nrm[e.t2 * 3 + 2]);
-      if (n1.dot(n2v) < COS25) keep = true; // crease
+      const c = n1.dot(n2v);
+      if (c < COS25) keep = true; // crease
       else {
         const d1 = n1.dot(viewN), d2 = n2v.dot(viewN);
         if ((d1 > 1e-6 && d2 < -1e-6) || (d1 < -1e-6 && d2 > 1e-6)) keep = true; // silhouette
+        else if ((Math.abs(d1) <= 1e-3) !== (Math.abs(d2) <= 1e-3)) keep = true; // parallel-face rim
+        else if (c < COSFLAT) {
+          // tangent edge: slim curved strip meeting a much larger flat patch
+          const aA = patchArea[findP(e.t1)], aB = patchArea[findP(e.t2)];
+          if (Math.min(aA, aB) > 0 && Math.max(aA, aB) >= 4 * Math.min(aA, aB)) keep = true;
+        }
       }
     }
     if (keep) picked.push(e);
