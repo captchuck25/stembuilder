@@ -769,6 +769,13 @@
     -moz-appearance: textfield;
     pointer-events: auto; /* still typeable */
   }
+  /* The pill body passes drags through to the canvas, but every BUTTON
+     must hit-test — with only the input opted back in, ALL the buttons
+     (Add/Cut/Through/Done/To face/×) were click-dead and clicks fell
+     through to the canvas, selecting the body behind the pill. Found via
+     real-pointer testing 2026-09-27; synthetic dispatchEvent() tests
+     bypass hit-testing and never caught it. */
+  .extrude-tooltip button { pointer-events: auto; }
   .extrude-tooltip input::-webkit-outer-spin-button,
   .extrude-tooltip input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .extrude-tooltip .unit { opacity: 0.7; }
