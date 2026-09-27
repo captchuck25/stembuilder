@@ -1517,6 +1517,7 @@
         <button type="button" data-op="subtract">－ Cut</button>
       </span>
       <button type="button" id="extrude-flip-btn" class="extrude-flip" title="Grow toward the other side of the face (same as dragging the arrow the other way)" style="display:none">⇄ Other side</button>
+      <button type="button" id="extrude-toface-btn" class="extrude-flip" title="Then click any face on the part — the extrude length and direction are set so it ends exactly on that face" style="display:none">▸ To face</button>
       <button type="button" id="extrude-through-btn" class="extrude-through" title="Cut all the way through the body" style="display:none">⇣ Through</button>
       <button type="button" id="extrude-done-btn" class="extrude-done" title="Commit extrude (Enter)">Done</button>
       <button type="button" id="extrude-cancel-btn" class="extrude-cancel" title="Cancel (Esc)">×</button>
@@ -6536,28 +6537,58 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
     const hits = rc.intersectObject(body.mesh, false);
     return hits.length > 0 && hits[0].distance < FAR - MARGIN;
   };
+  // Per-edge sample budget: enough samples to SPLIT a long edge where it
+  // crosses in/out of cover, bounded so the total raycast count stays in
+  // the same ballpark as the old two-sample pass on dense meshes.
+  const spanBudget = doVis ? Math.max(2, Math.min(9, Math.floor(6000 / picked.length))) : 0;
   for (const e of picked) {
     const ax = e.i * 3, bx = e.j * 3;
     wp.set(v[ax], v[ax + 1], v[ax + 2]).applyMatrix4(planeMInv);
     const p1 = { x: wp.x, y: wp.y, z: wp.z };
     wp.set(v[bx], v[bx + 1], v[bx + 2]).applyMatrix4(planeMInv);
     const p2 = { x: wp.x, y: wp.y, z: wp.z };
-    if (Math.hypot(p1.x - p2.x, p1.y - p2.y) < MIN_LEN) continue;
-    const seg = { p1, p2, dz1: p1.z, dz2: p2.z };
-    // _vis marks "this segment carries real visibility info" — the renderer
-    // then draws it solid unless _hidden, instead of the legacy convention
-    // of dashing everything that isn't on the sketch plane.
-    seg._vis = true;
-    if (doVis) {
-      const qx = (t) => v[ax] + (v[bx] - v[ax]) * t;
-      const qy = (t) => v[ax + 1] + (v[bx + 1] - v[ax + 1]) * t;
-      const qz = (t) => v[ax + 2] + (v[bx + 2] - v[ax + 2]) * t;
-      if (blocked(qx(0.25), qy(0.25), qz(0.25)) && blocked(qx(0.75), qy(0.75), qz(0.75))) {
-        seg._hidden = true;
-      }
+    const len2D = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    if (len2D < MIN_LEN) continue;
+    if (!doVis) {
+      // _vis marks "this segment carries real visibility info" — the
+      // renderer then draws it solid unless _hidden, instead of the legacy
+      // convention of dashing everything that isn't on the sketch plane.
+      segments.push({ p1, p2, dz1: p1.z, dz2: p2.z, _vis: true });
+      emitted++;
+      continue;
     }
-    segments.push(seg);
-    emitted++;
+    // MULTI-SAMPLE HIDDEN-LINE SPLIT. The old pass sampled each edge at two
+    // points and classified the WHOLE edge — an edge half behind the part
+    // and half in the open came out all-solid or all-dashed, so hidden
+    // lines looked "selective": dashes stopped mid-run or a covered stretch
+    // rendered solid over its dashed twin (ssissues 2026-09-27). Sample
+    // several span midpoints instead and emit one sub-segment per run of
+    // equal visibility, each classified on its own.
+    const spans = Math.max(2, Math.min(spanBudget, Math.ceil(len2D / 4)));
+    const qx = (t) => v[ax] + (v[bx] - v[ax]) * t;
+    const qy = (t) => v[ax + 1] + (v[bx + 1] - v[ax + 1]) * t;
+    const qz = (t) => v[ax + 2] + (v[bx + 2] - v[ax + 2]) * t;
+    const states = [];
+    for (let k = 0; k < spans; k++) {
+      const t = (k + 0.5) / spans;
+      states.push(blocked(qx(t), qy(t), qz(t)));
+    }
+    const lerp = (t) => ({
+      x: p1.x + (p2.x - p1.x) * t,
+      y: p1.y + (p2.y - p1.y) * t,
+      z: p1.z + (p2.z - p1.z) * t,
+    });
+    let runStart = 0;
+    for (let k = 1; k <= spans; k++) {
+      if (k < spans && states[k] === states[runStart]) continue;
+      const sp1 = lerp(runStart / spans);
+      const sp2 = lerp(k / spans);
+      const seg = { p1: sp1, p2: sp2, dz1: sp1.z, dz2: sp2.z, _vis: true };
+      if (states[runStart]) seg._hidden = true;
+      segments.push(seg);
+      emitted++;
+      runStart = k;
+    }
   }
   if (emitted) {
     _analyticEdgeCache.set(body.mesh, {
@@ -8034,6 +8065,37 @@ class Viewer3D {
             e.stopPropagation();
             return;
           }
+        }
+        // 1.35 "To face" pick — armed from the extrude tooltip: the next
+        // click on any body sets the extrude length AND direction so the
+        // extrude ends level with the clicked point (measured along the
+        // sketch normal). The student picks WHERE the extrude should land
+        // instead of doing tape-measure math (ssissues 2026-09-27).
+        if (extrudeState.pickFace && extrudeState.sketch) {
+          const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
+          extrudeState.pickFace = false;
+          const tf = document.getElementById('extrude-toface-btn');
+          if (tf) tf.classList.remove('flipped');
+          if (hits.length) {
+            const o = new THREE.Vector3(...extrudeState.sketch.plane.origin);
+            const n = new THREE.Vector3(...extrudeState.sketch.plane.n).normalize();
+            const d = hits[0].point.clone().sub(o).dot(n);
+            if (Math.abs(d) < 0.05) {
+              showHint('That spot is level with the sketch face itself — pick a face in front of it or behind it.');
+            } else {
+              extrudeState.direction = d > 0 ? 1 : -1;
+              extrudeState.length = Math.abs(d);
+              const inp = document.getElementById('extrude-input');
+              if (inp) inp.value = toUnit(Math.abs(d)).toFixed(2);
+              this.updateExtrudePreview(Math.abs(d), extrudeState.direction);
+              updateExtrudeTooltipText(Math.abs(d), this.extrudeArrows.position);
+              setStatus(`Extrude set to ${fmtUL(Math.abs(d))} — ends on the picked face. Click Done to commit.`);
+            }
+          } else {
+            setStatus('Nothing there to land on — To face cancelled.');
+          }
+          e.stopPropagation();
+          return;
         }
         // 1.4 Extrude push/pull arrow — drag direction determines positive
         // (push out, add) vs. negative (push in, cut into body). Single arrow.
@@ -12619,6 +12681,12 @@ let sketchEng, viewer;
 // ==================================================================
 const undoStack = [];
 const redoStack = [];
+// Lockstep mode tags: which view ('2d'/'3d') each stack entry was pushed
+// from. Undo in the 3D view refuses to roll back 2D sketch work (ssissues
+// 2026-09-27: Ctrl+Z in 3D silently unwound the sketch just drawn — the
+// change was invisible from 3D and looked like data loss).
+const undoModes = [];
+const redoModes = [];
 const MAX_UNDO = 60;
 
 // Encode a TypedArray's raw bytes as base64. ~10–100× faster than
@@ -13148,8 +13216,10 @@ function restoreLocalDraft() {
 function pushUndo() {
   try {
     undoStack.push(snapshotDoc());
-    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    undoModes.push(doc.mode);
+    if (undoStack.length > MAX_UNDO) { undoStack.shift(); undoModes.shift(); }
     redoStack.length = 0;
+    redoModes.length = 0;
     updateUndoRedoButtons();
     setDirty(true);
   } catch (err) {
@@ -13159,8 +13229,15 @@ function pushUndo() {
 }
 function undo() {
   if (!undoStack.length) { setStatus('Nothing to undo'); return; }
+  // Sketch work stays undoable only where it's visible: inside the sketch.
+  if (doc.mode === '3d' && undoModes[undoModes.length - 1] === '2d') {
+    showHint('The next undo step is sketch work — open that sketch to undo it there. The 3D view only undoes 3D changes.');
+    setStatus('Undo paused — the next step back is 2D sketch work.');
+    return;
+  }
   try {
     redoStack.push(snapshotDoc());
+    redoModes.push(undoModes.length ? undoModes.pop() : doc.mode);
     applySnapshot(undoStack.pop());
     setStatus(`Undo (${undoStack.length} step${undoStack.length === 1 ? '' : 's'} left)`);
     updateUndoRedoButtons();
@@ -13171,8 +13248,14 @@ function undo() {
 }
 function redo() {
   if (!redoStack.length) { setStatus('Nothing to redo'); return; }
+  if (doc.mode === '3d' && redoModes[redoModes.length - 1] === '2d') {
+    showHint('The next redo step is sketch work — open that sketch to redo it there.');
+    setStatus('Redo paused — the next step forward is 2D sketch work.');
+    return;
+  }
   try {
     undoStack.push(snapshotDoc());
+    undoModes.push(redoModes.length ? redoModes.pop() : doc.mode);
     applySnapshot(redoStack.pop());
     setStatus(`Redo (${redoStack.length} step${redoStack.length === 1 ? '' : 's'} left)`);
     updateUndoRedoButtons();
@@ -13287,6 +13370,16 @@ function setExtrudeTooltipOp(op) {
     flBtn.style.display = (extrudeTooltipOp === 'add' && !!stF?.sketch?.boundary) ? '' : 'none';
     flBtn.classList.toggle('flipped', (stF?.direction || 1) < 0);
   }
+  // "To face": needs a target body to land on — same gate as Through, but
+  // for either op (add ends ON the face; cut goes down to its depth).
+  const tfBtn = document.getElementById('extrude-toface-btn');
+  if (tfBtn) {
+    const stT = viewer?.extrudeState;
+    const hasT = !!(stT?.sketch?.sourceBodyId &&
+      doc.bodies.find(b => b.id === stT.sketch.sourceBodyId));
+    tfBtn.style.display = hasT ? '' : 'none';
+    tfBtn.classList.toggle('flipped', !!stT?.pickFace);
+  }
   // Refresh live preview if a drag/click is active
   const st = viewer?.extrudeState;
   if (st && st.region && viewer) {
@@ -13341,6 +13434,9 @@ function hideExtrudeTooltip() {
   t.classList.remove('show');
   const inp = document.getElementById('extrude-input');
   if (inp) inp.value = '';
+  if (viewer?.extrudeState) viewer.extrudeState.pickFace = false;
+  const tf = document.getElementById('extrude-toface-btn');
+  if (tf) tf.classList.remove('flipped');
 }
 function updateExtrudeTooltipText(lengthMm, worldPos) {
   const t = document.getElementById('extrude-tooltip');
@@ -13601,6 +13697,23 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
         const v = parseFloat(inp.value);
         const len = (isFinite(v) && v > 0) ? fromUnit(v) : (st.length || 0);
         if (len > 0 && viewer) viewer.updateExtrudePreview(len, st.direction);
+      });
+    }
+    // "To face" — arm a one-shot face pick; the next 3D click sets length
+    // + direction so the extrude ends on the clicked face (handled in the
+    // canvas pointerdown, section 1.35).
+    const tofaceBtn = document.getElementById('extrude-toface-btn');
+    if (tofaceBtn) {
+      tofaceBtn.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const st = viewer?.extrudeState;
+        if (!st || !st.region) return;
+        st.pickFace = !st.pickFace;
+        tofaceBtn.classList.toggle('flipped', st.pickFace);
+        setStatus(st.pickFace
+          ? 'Click a face on the part — the extrude will end exactly on it. (Click To face again to cancel.)'
+          : 'To face cancelled.');
       });
     }
     // Through — set length to "all the way through the target body" and commit
@@ -22394,8 +22507,10 @@ async function applyBevelsBatch(selections, style, size) {
     if (okCount > 0) {
       // Only push undo when at least one bevel actually committed.
       undoStack.push(undoSnapshot);
-      if (undoStack.length > MAX_UNDO) undoStack.shift();
+      undoModes.push('3d'); // bevel runs from the 3D view
+      if (undoStack.length > MAX_UNDO) { undoStack.shift(); undoModes.shift(); }
       redoStack.length = 0;
+      redoModes.length = 0;
       updateUndoRedoButtons();
       setDirty(true);
       const lastId = [...idMap.values()].pop();
@@ -23066,7 +23181,7 @@ function enterAssignmentMode(a) {
   doc.bodies = []; doc.nextBodyId = 1;
   doc.selection = null; doc.multiSelectedSketch = []; doc.multiSelectedBodies = [];
   doc.selectedRegions = []; doc.joints = []; doc.nextJointId = 1;
-  undoStack.length = 0; redoStack.length = 0;
+  undoStack.length = 0; redoStack.length = 0; undoModes.length = 0; redoModes.length = 0;
   updateUndoRedoButtons();
   setDirty(false);
   // The window IS the assignment: name pinned, no new/open/save-elsewhere.
@@ -24206,7 +24321,7 @@ function enterTutorial(id) {
   doc.bodies = []; doc.nextBodyId = 1;
   doc.selection = null; doc.multiSelectedSketch = []; doc.multiSelectedBodies = [];
   doc.selectedRegions = []; doc.joints = []; doc.nextJointId = 1;
-  undoStack.length = 0; redoStack.length = 0;
+  undoStack.length = 0; redoStack.length = 0; undoModes.length = 0; redoModes.length = 0;
   updateUndoRedoButtons();
   if (t.seed) { try { t.seed(doc); } catch (err) { console.warn('tutorial seed failed:', err); } }
 
