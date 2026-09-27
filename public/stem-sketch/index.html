@@ -4387,9 +4387,37 @@ class SketchEngine {
       // designs against, and they're visible on screen, so snapping to
       // them matches what the eye sees.
       this._projSegs = segs;
-      // Edges with both endpoints near z=0 lie ON the sketch plane → highlight
+      // DRAFTING PRECEDENCE (ssissues 2026-09-27): a hidden edge lying
+      // exactly under a visible one — the far wall's rim behind the near
+      // wall's in a side view, a through-hole's back rim under its front
+      // rim — drew a gray dashed twin beside every solid line and read as
+      // "extra lines". The visible line wins: coincident hidden segs are
+      // SKIPPED in the draw pass (they stay in _projSegs, so snapping is
+      // unchanged — the solid twin snaps at the same spot). Cover lines =
+      // visible / in-plane projected segs plus the traced facePerimeter
+      // entity segments.
       const onPlaneTol = 0.5; // mm
+      const coverSegs = [];
+      for (const s of segs) {
+        const ip = Math.abs(s.dz1) < onPlaneTol && Math.abs(s.dz2) < onPlaneTol;
+        if (!s._hidden && (ip || s._vis)) coverSegs.push([s.p1.x, s.p1.y, s.p2.x, s.p2.y]);
+      }
+      for (const e of (doc.sketch.entities || [])) {
+        if (!e.facePerimeter) continue;
+        for (const s2 of entityToSegments(e)) coverSegs.push([s2.a.x, s2.a.y, s2.b.x, s2.b.y]);
+      }
+      const COIN = 0.35; // mm
+      const underCover = (p) => {
+        for (const c of coverSegs) {
+          if (pointSegDist(p.x, p.y, c[0], c[1], c[2], c[3]) < COIN) return true;
+        }
+        return false;
+      };
       for (const seg of segs) {
+        if (seg._hidden) {
+          const midX = (seg.p1.x + seg.p2.x) / 2, midY = (seg.p1.y + seg.p2.y) / 2;
+          if (underCover(seg.p1) && underCover(seg.p2) && underCover({ x: midX, y: midY })) continue;
+        }
         const [sx1, sy1] = this.worldToScreen(seg.p1.x, seg.p1.y);
         const [sx2, sy2] = this.worldToScreen(seg.p2.x, seg.p2.y);
         const inPlane = Math.abs(seg.dz1) < onPlaneTol && Math.abs(seg.dz2) < onPlaneTol;
