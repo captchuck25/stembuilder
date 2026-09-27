@@ -1516,7 +1516,6 @@
         <button type="button" data-op="add" class="active">＋ Add</button>
         <button type="button" data-op="subtract">－ Cut</button>
       </span>
-      <button type="button" id="extrude-flip-btn" class="extrude-flip" title="Grow toward the other side of the face (same as dragging the arrow the other way)" style="display:none">⇄ Other side</button>
       <button type="button" id="extrude-toface-btn" class="extrude-flip" title="Then click any face on the part — the extrude length and direction are set so it ends exactly on that face" style="display:none">▸ To face</button>
       <button type="button" id="extrude-through-btn" class="extrude-through" title="Cut all the way through the body" style="display:none">⇣ Through</button>
       <button type="button" id="extrude-done-btn" class="extrude-done" title="Commit extrude (Enter)">Done</button>
@@ -8073,26 +8072,35 @@ class Viewer3D {
         // instead of doing tape-measure math (ssissues 2026-09-27).
         if (extrudeState.pickFace && extrudeState.sketch) {
           const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false);
-          extrudeState.pickFace = false;
-          const tf = document.getElementById('extrude-toface-btn');
-          if (tf) tf.classList.remove('flipped');
+          const disarm = () => {
+            extrudeState.pickFace = false;
+            this.canvas.style.cursor = '';
+            const tf = document.getElementById('extrude-toface-btn');
+            if (tf) tf.classList.remove('flipped');
+          };
           if (hits.length) {
             const o = new THREE.Vector3(...extrudeState.sketch.plane.origin);
             const n = new THREE.Vector3(...extrudeState.sketch.plane.n).normalize();
             const d = hits[0].point.clone().sub(o).dot(n);
             if (Math.abs(d) < 0.05) {
-              showHint('That spot is level with the sketch face itself — pick a face in front of it or behind it.');
+              // Clicked the sketch's own face — STAY ARMED so the next
+              // click still picks (disarming here made the whole feature
+              // feel dead: hint missed, next click just selected the body).
+              showHint('That face is the one the sketch is ON — click a face in front of it or behind it (like the back of the part).');
             } else {
+              disarm();
               extrudeState.direction = d > 0 ? 1 : -1;
               extrudeState.length = Math.abs(d);
               const inp = document.getElementById('extrude-input');
               if (inp) inp.value = toUnit(Math.abs(d)).toFixed(2);
               this.updateExtrudePreview(Math.abs(d), extrudeState.direction);
               updateExtrudeTooltipText(Math.abs(d), this.extrudeArrows.position);
+              showHint(`Extrude ends on that face — ${fmtUL(Math.abs(d))} ${d > 0 ? 'outward' : 'into / through the part'}. Click Done to commit.`);
               setStatus(`Extrude set to ${fmtUL(Math.abs(d))} — ends on the picked face. Click Done to commit.`);
             }
           } else {
-            setStatus('Nothing there to land on — To face cancelled.');
+            // Clicked empty space — stay armed, remind what we're waiting for.
+            showHint('Still picking: click a face ON the part (or click To face again to cancel).');
           }
           e.stopPropagation();
           return;
@@ -13358,18 +13366,9 @@ function setExtrudeTooltipOp(op) {
       doc.bodies.find(b => b.id === st.sketch.sourceBodyId));
     thBtn.style.display = (extrudeTooltipOp === 'subtract' && hasTarget) ? '' : 'none';
   }
-  // "Other side" flip: only for an ADD on a face-attached sketch (a cut
-  // always goes INTO the body, so flipping is meaningless there). It's the
-  // clickable twin of dragging the arrow past zero — discoverable even
-  // when the user types a length instead of dragging (ssissues
-  // 2026-09-27: the hook needed to grow flush with the wall, and nothing
-  // on the tooltip said the other direction existed).
-  const flBtn = document.getElementById('extrude-flip-btn');
-  if (flBtn) {
-    const stF = viewer?.extrudeState;
-    flBtn.style.display = (extrudeTooltipOp === 'add' && !!stF?.sketch?.boundary) ? '' : 'none';
-    flBtn.classList.toggle('flipped', (stF?.direction || 1) < 0);
-  }
+  // ("Other side" was tried here and removed on Charlie's call 2026-09-27:
+  // dragging the arrow through the face already flips the direction, and
+  // To face is the control people actually reach for.)
   // "To face": needs a target body to land on — same gate as Through, but
   // for either op (add ends ON the face; cut goes down to its depth).
   const tfBtn = document.getElementById('extrude-toface-btn');
@@ -13435,6 +13434,7 @@ function hideExtrudeTooltip() {
   const inp = document.getElementById('extrude-input');
   if (inp) inp.value = '';
   if (viewer?.extrudeState) viewer.extrudeState.pickFace = false;
+  if (viewer?.canvas) viewer.canvas.style.cursor = '';
   const tf = document.getElementById('extrude-toface-btn');
   if (tf) tf.classList.remove('flipped');
 }
@@ -13445,10 +13445,6 @@ function updateExtrudeTooltipText(lengthMm, worldPos) {
   if (inp && document.activeElement !== inp) {
     inp.value = (lengthMm > 0) ? toUnit(lengthMm).toFixed(2) : '';
   }
-  // Keep the "Other side" button's lit state honest while the arrow drag
-  // flips the sign under it.
-  const flBtn = document.getElementById('extrude-flip-btn');
-  if (flBtn) flBtn.classList.toggle('flipped', (viewer?.extrudeState?.direction || 1) < 0);
   // Position over the worldPos
   if (worldPos && viewer) {
     const cArea = document.getElementById('canvas-area').getBoundingClientRect();
@@ -13682,23 +13678,6 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
         commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], lenMm, st.direction || 1);
       });
     }
-    // "Other side" — flip the extrude direction without re-dragging the
-    // arrow. Updates the live preview; Done/Enter then commit with the
-    // flipped direction (they all read st.direction).
-    const flipBtn = document.getElementById('extrude-flip-btn');
-    if (flipBtn) {
-      flipBtn.addEventListener('mousedown', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const st = viewer?.extrudeState;
-        if (!st || !st.region) return;
-        st.direction = (st.direction || 1) < 0 ? 1 : -1;
-        flipBtn.classList.toggle('flipped', st.direction < 0);
-        const v = parseFloat(inp.value);
-        const len = (isFinite(v) && v > 0) ? fromUnit(v) : (st.length || 0);
-        if (len > 0 && viewer) viewer.updateExtrudePreview(len, st.direction);
-      });
-    }
     // "To face" — arm a one-shot face pick; the next 3D click sets length
     // + direction so the extrude ends on the clicked face (handled in the
     // canvas pointerdown, section 1.35).
@@ -13708,9 +13687,16 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
         ev.preventDefault();
         ev.stopPropagation();
         const st = viewer?.extrudeState;
-        if (!st || !st.region) return;
+        if (!st || !st.region) {
+          showHint('Pick a region first (click the blue patch, then the arrow), then To face.');
+          return;
+        }
         st.pickFace = !st.pickFace;
         tofaceBtn.classList.toggle('flipped', st.pickFace);
+        if (viewer?.canvas) viewer.canvas.style.cursor = st.pickFace ? 'crosshair' : '';
+        showHint(st.pickFace
+          ? 'Now click a face on the part — the extrude will end exactly on it.'
+          : 'To face cancelled.');
         setStatus(st.pickFace
           ? 'Click a face on the part — the extrude will end exactly on it. (Click To face again to cancel.)'
           : 'To face cancelled.');
