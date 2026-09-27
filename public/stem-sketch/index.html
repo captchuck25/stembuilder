@@ -817,6 +817,13 @@
   }
   .extrude-tooltip .extrude-done:hover { background: rgba(79, 195, 110, 1); }
   .extrude-tooltip .extrude-cancel:hover { background: rgba(255, 255, 255, 0.32); }
+  .extrude-tooltip .extrude-flip {
+    border: none; border-radius: 6px; padding: 4px 8px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+    background: rgba(255, 255, 255, 0.14); color: #dfe7ff;
+  }
+  .extrude-tooltip .extrude-flip:hover { background: rgba(255, 255, 255, 0.3); }
+  .extrude-tooltip .extrude-flip.flipped { background: rgba(79, 124, 255, 0.9); color: #fff; }
   .extrude-tooltip .extrude-through {
     background: rgba(229, 62, 62, 0.6);
     color: white;
@@ -1509,6 +1516,7 @@
         <button type="button" data-op="add" class="active">＋ Add</button>
         <button type="button" data-op="subtract">－ Cut</button>
       </span>
+      <button type="button" id="extrude-flip-btn" class="extrude-flip" title="Grow toward the other side of the face (same as dragging the arrow the other way)" style="display:none">⇄ Other side</button>
       <button type="button" id="extrude-through-btn" class="extrude-through" title="Cut all the way through the body" style="display:none">⇣ Through</button>
       <button type="button" id="extrude-done-btn" class="extrude-done" title="Commit extrude (Enter)">Done</button>
       <button type="button" id="extrude-cancel-btn" class="extrude-cancel" title="Cancel (Esc)">×</button>
@@ -3178,7 +3186,9 @@ class SketchEngine {
       // hitTest / multi-select logic below.
       if (!e.shiftKey && doc.selection?.kind === 'sketch') {
         const selEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
-        if (selEnt && selEnt.type === 'polyline') {
+        // Traced face outlines expose no vertex/Bezier handles: node drags
+        // would deform reference geometry that must keep matching the part.
+        if (selEnt && selEnt.type === 'polyline' && !selEnt.facePerimeter) {
           const cpTolPx = 8;
           const svgRect = this.rect();
           const screenX = e.clientX - svgRect.left;
@@ -3711,6 +3721,17 @@ class SketchEngine {
     // Upgrade move-pending to move once drag threshold is crossed
     if (this.dragMode === 'move-pending') {
       if (Math.hypot(e.clientX - this.dragStart.sx, e.clientY - this.dragStart.sy) < 5) return;
+      // A selection holding ONLY traced face outlines can't move — say so
+      // instead of a silent dead drag (and don't push a no-op undo entry).
+      const movable = (this.dragStart.starts || []).some(s => {
+        const ent = s && doc.sketch.entities.find(x => x.id === s.id);
+        return ent && !ent.facePerimeter;
+      });
+      if (!movable) {
+        this.dragMode = null;
+        showHint('The face outline is traced from the part — it can\'t be moved. Draw shapes on it, or use Offset / Fillet.');
+        return;
+      }
       pushUndo();
       this.dragMode = 'move';
     }
@@ -5339,6 +5360,11 @@ function pointInPolygon(px, py, pts) {
 }
 
 function moveEntity(ent, start, dx, dy) {
+  // The traced face outline is REFERENCE geometry — it mirrors where the
+  // part's face really is, so a drag / arrow-key nudge / dimension drive
+  // must never displace it (ssissues 2026-09-27: the outline wandered off
+  // the face, and every region built against it lied about the part).
+  if (ent.facePerimeter) return;
   if (ent.type === 'rect') { ent.x = start.x + dx; ent.y = start.y + dy; }
   if (ent.type === 'circle' || ent.type === 'threadMark' || ent.type === 'pivotMark') {
     ent.cx = start.cx + dx; ent.cy = start.cy + dy;
@@ -6069,7 +6095,7 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
     // anything with > 10 points as a smooth curve: open → first + last only,
     // closed → suppress entirely (the bbox handles do the work). User-drawn
     // polylines with ≤10 vertices keep their per-vertex handles.
-    if (singleSelected || preview) {
+    if ((singleSelected || preview) && !ent.facePerimeter) {
       const n = ent.points.length;
       const dense = n > 10;
       if (!dense) {
@@ -13249,6 +13275,18 @@ function setExtrudeTooltipOp(op) {
       doc.bodies.find(b => b.id === st.sketch.sourceBodyId));
     thBtn.style.display = (extrudeTooltipOp === 'subtract' && hasTarget) ? '' : 'none';
   }
+  // "Other side" flip: only for an ADD on a face-attached sketch (a cut
+  // always goes INTO the body, so flipping is meaningless there). It's the
+  // clickable twin of dragging the arrow past zero — discoverable even
+  // when the user types a length instead of dragging (ssissues
+  // 2026-09-27: the hook needed to grow flush with the wall, and nothing
+  // on the tooltip said the other direction existed).
+  const flBtn = document.getElementById('extrude-flip-btn');
+  if (flBtn) {
+    const stF = viewer?.extrudeState;
+    flBtn.style.display = (extrudeTooltipOp === 'add' && !!stF?.sketch?.boundary) ? '' : 'none';
+    flBtn.classList.toggle('flipped', (stF?.direction || 1) < 0);
+  }
   // Refresh live preview if a drag/click is active
   const st = viewer?.extrudeState;
   if (st && st.region && viewer) {
@@ -13311,6 +13349,10 @@ function updateExtrudeTooltipText(lengthMm, worldPos) {
   if (inp && document.activeElement !== inp) {
     inp.value = (lengthMm > 0) ? toUnit(lengthMm).toFixed(2) : '';
   }
+  // Keep the "Other side" button's lit state honest while the arrow drag
+  // flips the sign under it.
+  const flBtn = document.getElementById('extrude-flip-btn');
+  if (flBtn) flBtn.classList.toggle('flipped', (viewer?.extrudeState?.direction || 1) < 0);
   // Position over the worldPos
   if (worldPos && viewer) {
     const cArea = document.getElementById('canvas-area').getBoundingClientRect();
@@ -13542,6 +13584,23 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
         const st = viewer?.extrudeState;
         if (!st || !st.region) return;
         commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], lenMm, st.direction || 1);
+      });
+    }
+    // "Other side" — flip the extrude direction without re-dragging the
+    // arrow. Updates the live preview; Done/Enter then commit with the
+    // flipped direction (they all read st.direction).
+    const flipBtn = document.getElementById('extrude-flip-btn');
+    if (flipBtn) {
+      flipBtn.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const st = viewer?.extrudeState;
+        if (!st || !st.region) return;
+        st.direction = (st.direction || 1) < 0 ? 1 : -1;
+        flipBtn.classList.toggle('flipped', st.direction < 0);
+        const v = parseFloat(inp.value);
+        const len = (isFinite(v) && v > 0) ? fromUnit(v) : (st.length || 0);
+        if (len > 0 && viewer) viewer.updateExtrudePreview(len, st.direction);
       });
     }
     // Through — set length to "all the way through the target body" and commit
