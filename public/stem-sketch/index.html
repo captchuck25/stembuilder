@@ -6531,52 +6531,16 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
   }
   const viewN = new THREE.Vector3(...plane.n).normalize();
   const COS25 = Math.cos(25 * Math.PI / 180);
-  // TANGENT EDGES + VIEW-PARALLEL RIMS (ssissues 2026-09-27, diagnosed on
-  // the real Rack Attachment STL): a rounded-off corner tessellates into
-  // ~15–20° strips — every seam is under the 25° crease threshold, and a
-  // round whose normals swing from "parallel to the view" to "facing
-  // away" never crosses the strict silhouette sign test. Whole rounded
-  // corners emitted NOTHING, which is why hidden lines looked selective
-  // (dashes stopping where a fillet begins, entire sides blank).
-  // Drafting draws exactly the TANGENT EDGES for such a round — the seams
-  // where the round meets a flat face. Detect them: a smooth seam whose
-  // one side sits inside a planar patch while the other side curves.
-  // Also keep the rim of a face lying parallel to the view — that's the
-  // silhouette boundary the strict sign test skips because d === 0.
-  // Flood-fill COPLANAR PATCHES (union-find) and sum their areas. A fillet
-  // strip is a slim patch; the face it tangentially meets is a big one —
-  // the area contrast marks the tangent seam. (A neighbor-normal test
-  // fails here: fan triangulation lets one big-face triangle touch both
-  // corner rounds, which made the flat side look "curved" too.)
-  const COSFLAT = Math.cos(1.5 * Math.PI / 180);
-  const parent = new Int32Array(triCount);
-  for (let t = 0; t < triCount; t++) parent[t] = t;
-  const findP = (t) => { while (parent[t] !== t) { parent[t] = parent[parent[t]]; t = parent[t]; } return t; };
-  {
-    const nA = new THREE.Vector3(), nB = new THREE.Vector3();
-    for (const e of edges.values()) {
-      if (e.t2 === -1) continue;
-      nA.set(nrm[e.t1 * 3], nrm[e.t1 * 3 + 1], nrm[e.t1 * 3 + 2]);
-      nB.set(nrm[e.t2 * 3], nrm[e.t2 * 3 + 1], nrm[e.t2 * 3 + 2]);
-      if (nA.dot(nB) >= COSFLAT) {
-        const ra = findP(e.t1), rb = findP(e.t2);
-        if (ra !== rb) parent[ra] = rb;
-      }
-    }
-  }
-  const patchArea = new Float64Array(triCount);
-  {
-    const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
-    const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), cr = new THREE.Vector3();
-    for (let t = 0; t < triCount; t++) {
-      const a = ia[t * 3] * 3, b = ia[t * 3 + 1] * 3, c3 = ia[t * 3 + 2] * 3;
-      pA.set(v[a], v[a + 1], v[a + 2]);
-      pB.set(v[b], v[b + 1], v[b + 2]);
-      pC.set(v[c3], v[c3 + 1], v[c3 + 2]);
-      e1.subVectors(pB, pA); e2.subVectors(pC, pA); cr.crossVectors(e1, e2);
-      patchArea[findP(t)] += cr.length() / 2;
-    }
-  }
+  // VIEW-PARALLEL RIMS (ssissues 2026-09-27, diagnosed on the real Rack
+  // Attachment STL): a rounded-off corner tessellates into ~15–20° strips
+  // — every seam is under the 25° crease threshold, and a round whose
+  // normals swing from "parallel to the view" to "facing away" never
+  // crosses the strict silhouette sign test, so whole rounded corners
+  // emitted nothing. Keep the rim of a face lying parallel to the view —
+  // the silhouette boundary the sign test skips because d === 0.
+  // Tangent edges (where a fillet meets a flat face) are deliberately NOT
+  // drawn: they doubled every rounded edge with a second dashed line
+  // ~one radius inside it, and drafting convention omits them.
   const picked = [];
   const n1 = new THREE.Vector3(), n2v = new THREE.Vector3();
   for (const e of edges.values()) {
@@ -6591,11 +6555,6 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
         const d1 = n1.dot(viewN), d2 = n2v.dot(viewN);
         if ((d1 > 1e-6 && d2 < -1e-6) || (d1 < -1e-6 && d2 > 1e-6)) keep = true; // silhouette
         else if ((Math.abs(d1) <= 1e-3) !== (Math.abs(d2) <= 1e-3)) keep = true; // parallel-face rim
-        else if (c < COSFLAT) {
-          // tangent edge: slim curved strip meeting a much larger flat patch
-          const aA = patchArea[findP(e.t1)], aB = patchArea[findP(e.t2)];
-          if (Math.min(aA, aB) > 0 && Math.max(aA, aB) >= 4 * Math.min(aA, aB)) keep = true;
-        }
       }
     }
     if (keep) picked.push(e);
@@ -17302,6 +17261,7 @@ function _traceFacePerimeter(sk) {
   const N = new THREE.Vector3(...sk.plane.n);
   const DZ = 0.3;
   const edgeUse = new Map();
+  const faceTris = []; // in-plane triangles (sketch uv) — the size guard's opening test
   const qk = (p) => (Math.round(p.x * 200) / 200) + ',' + (Math.round(p.y * 200) / 200);
   body.mesh.traverse(o => {
     if (!o.isMesh || !o.geometry || o.userData.__marker) return;
@@ -17324,6 +17284,7 @@ function _traceFacePerimeter(sk) {
       tn.crossVectors(ab, ac);
       const L = tn.length();
       if (L < 1e-9 || tn.dot(N) / L < 0.999) continue; // must FACE the sketch
+      faceTris.push(uv);
       for (let k = 0; k < 3; k++) {
         const a = uv[k], b = uv[(k + 1) % 3];
         const ka = qk(a), kb = qk(b);
@@ -17353,11 +17314,40 @@ function _traceFacePerimeter(sk) {
     }
     loops = _chainSegsToLoops(segs, TOL);
   }
-  // Relative-size guard: keep only loops that matter next to the main
-  // outline (the outer face + real holes). A tiny in-plane facet left by
-  // an old cut used to trace as a stray little shape in a fresh sketch.
+  // Relative-size guard: a tiny in-plane facet left by an old cut traced
+  // as a stray selectable shape in a fresh sketch (bdfbfec) — small loops
+  // are dropped. EXCEPT real openings: a small loop whose interior holds
+  // NO face triangle is a hole rim, not a leftover island. A 3/8" pin hole
+  // is ~1% of a plate face; dropping it left the hole unclickable with only
+  // its hidden back rim drawn, half-dashed (ssissues 2026-09-27). Audited
+  // on the real Rack Attachment STL: every loop this exception changes is
+  // a 9.53mm hole; covered islands are dropped exactly as before.
   const maxArea = Math.max(0, ...loops.map(l => l.area));
-  return loops.filter(l => l.area >= maxArea * 0.02).map(l => l.pts);
+  const triArea = (p, a, b) => (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+  const inTri = (p, t) => {
+    const d1 = triArea(p, t[0], t[1]), d2 = triArea(p, t[1], t[2]), d3 = triArea(p, t[2], t[0]);
+    return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+  };
+  const isOpening = (pts) => {
+    // No triangle data (the rendered-edge fallback) = no evidence it's an
+    // opening; keep the original drop behavior.
+    if (!faceTris.length) return false;
+    // probe just inside one edge — the centroid can fall outside a
+    // non-convex loop
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const L = Math.hypot(b.x - a.x, b.y - a.y);
+      if (L < 0.2) continue;
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
+      for (const s of [0.05, -0.05]) {
+        const p = { x: mx + nx * s, y: my + ny * s };
+        if (pointInPolygon(p.x, p.y, pts)) return !faceTris.some(t => inTri(p, t));
+      }
+    }
+    return false;
+  };
+  return loops.filter(l => l.area >= maxArea * 0.02 || isOpening(l.pts)).map(l => l.pts);
 }
 
 function createSketchOnPlane(plane, opts = {}) {
