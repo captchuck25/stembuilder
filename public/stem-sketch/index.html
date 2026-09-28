@@ -4309,7 +4309,21 @@ class SketchEngine {
       if (attached?.mesh) {
         segs = projectBodiesOntoPlane(doc.sketch.plane, attached.id);
         if (skHasPerimeter) {
-          segs = segs.filter(s => Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5);
+          // Drop a near-plane edge only where the traced outline actually
+          // COVERS it. Dropping every |dz| < 0.5 edge also threw away the
+          // first sliver of a rounded edge curling away from the face —
+          // it sits within 0.5mm of the plane but OUTSIDE the flat face the
+          // outline traces — leaving only the hidden back rim there as a
+          // dashed stub in the corner (ssissues 2026-09-27).
+          const pSegs = [];
+          for (const e of doc.sketch.entities) {
+            if (!e.facePerimeter) continue;
+            for (const s2 of entityToSegments(e)) pSegs.push([s2.a.x, s2.a.y, s2.b.x, s2.b.y]);
+          }
+          segs = segs.filter(s => {
+            if (Math.abs(s.dz1) > 0.5 || Math.abs(s.dz2) > 0.5) return true;
+            return !segCoincides(s.p1, s.p2, pSegs, 0.35);
+          });
         }
         for (const s of segs) s._own = true; // the sketched part draws BLACK
         let ownBB = null;
@@ -4407,17 +4421,8 @@ class SketchEngine {
         for (const s2 of entityToSegments(e)) coverSegs.push([s2.a.x, s2.a.y, s2.b.x, s2.b.y]);
       }
       const COIN = 0.35; // mm
-      const underCover = (p) => {
-        for (const c of coverSegs) {
-          if (pointSegDist(p.x, p.y, c[0], c[1], c[2], c[3]) < COIN) return true;
-        }
-        return false;
-      };
       for (const seg of segs) {
-        if (seg._hidden) {
-          const midX = (seg.p1.x + seg.p2.x) / 2, midY = (seg.p1.y + seg.p2.y) / 2;
-          if (underCover(seg.p1) && underCover(seg.p2) && underCover({ x: midX, y: midY })) continue;
-        }
+        if (seg._hidden && segCoincides(seg.p1, seg.p2, coverSegs, COIN)) continue;
         const [sx1, sy1] = this.worldToScreen(seg.p1.x, seg.p1.y);
         const [sx2, sy2] = this.worldToScreen(seg.p2.x, seg.p2.y);
         const inPlane = Math.abs(seg.dz1) < onPlaneTol && Math.abs(seg.dz2) < onPlaneTol;
@@ -5260,6 +5265,41 @@ function pointSegDist(px, py, ax, ay, bx, by) {
   if (L2 === 0) return Math.hypot(px - ax, py - ay);
   const t = clamp(((px - ax) * dx + (py - ay) * dy) / L2, 0, 1);
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+// "Does this line already draw here?" for line-over-line suppression.
+// Like pointSegDist < tol, but the point must lie ALONGSIDE the segment —
+// its projection may overshoot an end by only `slop` mm. Plain endpoint
+// distance counted a piece poking just past an outline's corner as
+// covered, so the last sliver of an arc vanished at the junction.
+function pointAlongSeg(px, py, ax, ay, bx, by, tol, slop = 0.05) {
+  const dx = bx - ax, dy = by - ay;
+  const L = Math.hypot(dx, dy);
+  if (L < 1e-9) return Math.hypot(px - ax, py - ay) < slop;
+  const along = ((px - ax) * dx + (py - ay) * dy) / L;
+  if (along < -slop || along > L + slop) return false;
+  return Math.abs((px - ax) * dy - (py - ay) * dx) / L < tol;
+}
+
+// Segment p1→p2 COINCIDES with one of `covers` ([ax,ay,bx,by] rows): its
+// ends and midpoint each lie alongside a cover line running the same way
+// (within 25° — curve chords from two tessellations differ a little).
+// Without the direction check, a short chord crossing an outline edge at
+// a junction counted as "on" that edge and vanished.
+function segCoincides(p1, p2, covers, tol) {
+  const sx = p2.x - p1.x, sy = p2.y - p1.y;
+  const sL = Math.hypot(sx, sy);
+  const COS25 = 0.906;
+  const hit = (x, y) => {
+    for (const c of covers) {
+      const cx = c[2] - c[0], cy = c[3] - c[1];
+      const cL = Math.hypot(cx, cy);
+      if (sL > 1e-9 && cL > 1e-9 && Math.abs(sx * cx + sy * cy) / (sL * cL) < COS25) continue;
+      if (pointAlongSeg(x, y, c[0], c[1], c[2], c[3], tol)) return true;
+    }
+    return false;
+  };
+  return hit(p1.x, p1.y) && hit(p2.x, p2.y) && hit((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
 }
 
 // Stroke-only hit: the drawn OUTLINE of the shape (or a point mark),
