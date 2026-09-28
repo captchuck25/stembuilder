@@ -1876,7 +1876,7 @@ class SketchEngine {
     for (const other of doc.sketch.entities) {
       if (other.id === clickedOrig.id) continue;
       const oSegs = entityToSegments(other);
-      if (oSegs.length) cutterSegLists.push(oSegs);
+      if (oSegs.length) { oSegs.ent = other; cutterSegLists.push(oSegs); }
     }
     const fb2 = doc.sketch?.boundary;
     const trimHasPerimeter = doc.sketch.entities.some((e) => e.facePerimeter);
@@ -1892,8 +1892,15 @@ class SketchEngine {
         a: { x: s.p1.x, y: s.p1.y }, b: { x: s.p2.x, y: s.p2.y },
       })));
     }
-    let intersections = []; // each: { s, x, y }
+    let intersections = []; // each: { s, x, y, touch? }
+    // Exact geometry for the crossing math: a circle target / cutter is a
+    // TRUE circle, not its 64-gon; everything else here is straight.
+    const tCirc = clickedOrig.type === 'circle'
+      ? { cx: clickedOrig.cx, cy: clickedOrig.cy, r: clickedOrig.r } : null;
     for (const oSegs of cutterSegLists) {
+      const cCirc = oSegs.ent?.type === 'circle'
+        ? { cx: oSegs.ent.cx, cy: oSegs.ent.cy, r: oSegs.ent.r }
+        : _circleOfArcPolyline(oSegs.ent);
       for (let i = 0; i < segCount; i++) {
         const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
         for (const os of oSegs) {
@@ -1902,17 +1909,47 @@ class SketchEngine {
           const s = cumLens[i] + hit.t * segLens[i];
           // Skip an intersection that sits exactly at the click point
           if (Math.abs(s - clickedS) < 1e-3) continue;
-          intersections.push({ s, x: hit.x, y: hit.y });
+          // Snap the crossing onto the TRUE curves so both trimmed ends
+          // meet exactly (the chord-based point sat up to ~0.1mm off).
+          let exact = null;
+          if (tCirc && cCirc) exact = _circleCircleNearest(tCirc, cCirc, hit);
+          else if (tCirc) exact = _lineCircleNearest(os.a, os.b, tCirc, hit);
+          else if (cCirc) exact = _lineCircleNearest(a, b, cCirc, hit);
+          intersections.push({ s, x: exact ? exact.x : hit.x, y: exact ? exact.y : hit.y });
         }
       }
     }
-    // Dedupe crossings that land on a shared vertex of two adjacent segments
-    // (they register once per segment at the same arc-length s).
-    intersections.sort((a, b) => a.s - b.s);
-    intersections = intersections.filter((it, i) =>
-      i === 0 || Math.abs(it.s - intersections[i - 1].s) > 1e-6);
+    // T-JUNCTIONS: another shape's END resting on this path (left there by
+    // an earlier trim) is a cut point even when it stops a hair short —
+    // the crossing test above can't see a line that only touches.
+    const touchTol = Math.max(0.25, 2 / this.view.pxPerMm);
+    for (const other of doc.sketch.entities) {
+      if (other.id === clickedOrig.id) continue;
+      for (const q of _trimOpenEnds(other)) {
+        // An end sitting exactly ON a corner (a diagonal drawn to a rect
+        // corner) keeps the established rule: a shared vertex is not a
+        // cut. Only ends resting along a side count.
+        if (simplePoly.points.some(v => Math.hypot(v.x - q.x, v.y - q.y) < 1e-4)) continue;
+        let best = null;
+        for (let i = 0; i < segCount; i++) {
+          const a = simplePoly.points[i], b = simplePoly.points[(i + 1) % n];
+          const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+          if (L2 === 0) continue;
+          const t = Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / L2));
+          const d = Math.hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy));
+          if (d < touchTol && (!best || d < best.d)) best = { d, s: cumLens[i] + t * segLens[i] };
+        }
+        if (!best || Math.abs(best.s - clickedS) < 1e-3) continue;
+        // Open ends of an open target are its own terminals, not cuts.
+        if (!simplePoly.closed && (best.s < 1e-3 || best.s > totalLen - 1e-3)) continue;
+        intersections.push({ s: best.s, x: q.x, y: q.y, touch: true });
+      }
+    }
+    // Merge crossings at the same spot (shared vertices of adjacent
+    // segments, or a touch + crossing pair).
+    intersections = _mergeTrimCuts(intersections);
     if (simplePoly.closed && intersections.length > 1
-        && Math.abs((intersections[0].s + totalLen) - intersections[intersections.length - 1].s) < 1e-6) {
+        && Math.abs((intersections[0].s + totalLen) - intersections[intersections.length - 1].s) < 0.05) {
       intersections.pop();
     }
 
@@ -2027,10 +2064,16 @@ class SketchEngine {
       const a0 = angOf(rightInt);
       let sweep = angOf(leftInt) - a0;
       while (sweep <= 1e-6) sweep += Math.PI * 2;
-      results = [circularArcPolyline(ccx, ccy, r, a0, sweep, {
+      const arc = circularArcPolyline(ccx, ccy, r, a0, sweep, {
         construction: clickedOrig.construction || false,
         groupId: clickedOrig.groupId,
-      }, null)];
+      }, null);
+      // Ends land EXACTLY on the crossing points (bit-identical to where
+      // the cutter meets them), not a cos/sin round-trip away.
+      const P0 = arc.points[0], PN = arc.points[arc.points.length - 1];
+      P0.x = rightInt.x; P0.y = rightInt.y;
+      PN.x = leftInt.x; PN.y = leftInt.y;
+      results = [arc];
     } else if (simplePoly.closed) {
       // Closed → open. Kept arc goes from rightInt forward to leftInt.
       // If leftInt.s < rightInt.s, the kept arc wraps through totalLen → 0.
@@ -2165,7 +2208,7 @@ class SketchEngine {
     for (const other of doc.sketch.entities) {
       if (other.id === ent.id) continue;
       const oSegs = entityToSegments(other);
-      if (oSegs.length) cutterLists.push(oSegs);
+      if (oSegs.length) { oSegs.ent = other; cutterLists.push(oSegs); }
     }
     const fbC = doc.sketch?.boundary;
     const curvedHasPerimeter = doc.sketch.entities.some((e) => e.facePerimeter);
@@ -2182,21 +2225,53 @@ class SketchEngine {
       })));
     }
     let cuts = [];
+    // A trimmed circle's arc cuts (and is cut) as the TRUE circle.
+    const tCirc = _circleOfArcPolyline(ent);
     for (const oSegs of cutterLists) {
+      const cCirc = oSegs.ent?.type === 'circle'
+        ? { cx: oSegs.ent.cx, cy: oSegs.ent.cy, r: oSegs.ent.r }
+        : _circleOfArcPolyline(oSegs.ent);
       for (const s of subs) {
         for (const os of oSegs) {
           const hit = segmentIntersection({ x: s.ax, y: s.ay }, { x: s.bx, y: s.by }, os.a, os.b);
           if (!hit) continue;
           const sAt = s.cum + hit.t * s.len;
           if (Math.abs(sAt - clickedS) < 1e-3) continue;
-          cuts.push({ s: sAt, x: hit.x, y: hit.y, k: s.k, t: s.t0 + hit.t * (s.t1 - s.t0) });
+          let exact = null;
+          if (tCirc && cCirc) exact = _circleCircleNearest(tCirc, cCirc, hit);
+          else if (tCirc) exact = _lineCircleNearest(os.a, os.b, tCirc, hit);
+          else if (cCirc && !(_cubicOf(ent, s.k).curved)) {
+            exact = _lineCircleNearest({ x: s.ax, y: s.ay }, { x: s.bx, y: s.by }, cCirc, hit);
+          }
+          cuts.push({ s: sAt, x: exact ? exact.x : hit.x, y: exact ? exact.y : hit.y,
+                      k: s.k, t: s.t0 + hit.t * (s.t1 - s.t0) });
         }
       }
     }
-    cuts.sort((a, b) => a.s - b.s);
-    cuts = cuts.filter((c, i) => i === 0 || Math.abs(c.s - cuts[i - 1].s) > 1e-6);
+    // T-JUNCTIONS — another shape's END resting on this curve is a cut,
+    // even a hair short of it (see _trimOpenEnds). This is the case that
+    // ran a trim straight past a trimmed circle's end.
+    const touchTol = Math.max(0.25, 2 / this.view.pxPerMm);
+    for (const other of doc.sketch.entities) {
+      if (other.id === ent.id) continue;
+      for (const q of _trimOpenEnds(other)) {
+        if (ent.points.some(v => Math.hypot(v.x - q.x, v.y - q.y) < 1e-4)) continue; // shared vertex ≠ cut
+        let best = null;
+        for (const s of subs) {
+          const dx = s.bx - s.ax, dy = s.by - s.ay, L2 = dx * dx + dy * dy;
+          if (L2 === 0) continue;
+          const f = Math.max(0, Math.min(1, ((q.x - s.ax) * dx + (q.y - s.ay) * dy) / L2));
+          const d = Math.hypot(q.x - (s.ax + f * dx), q.y - (s.ay + f * dy));
+          if (d < touchTol && (!best || d < best.d)) best = { d, s: s.cum + f * s.len, k: s.k, t: s.t0 + f * (s.t1 - s.t0) };
+        }
+        if (!best || Math.abs(best.s - clickedS) < 1e-3) continue;
+        if (!ent.closed && (best.s < 1e-3 || best.s > total - 1e-3)) continue;
+        cuts.push({ s: best.s, x: q.x, y: q.y, k: best.k, t: best.t, touch: true });
+      }
+    }
+    cuts = _mergeTrimCuts(cuts);
     if (ent.closed && cuts.length > 1 &&
-        Math.abs((cuts[0].s + total) - cuts[cuts.length - 1].s) < 1e-6) cuts.pop();
+        Math.abs((cuts[0].s + total) - cuts[cuts.length - 1].s) < 0.05) cuts.pop();
 
     const baseProps = { type: 'polyline', construction: ent.construction || false, groupId: ent.groupId };
     const mk = (pts, closed) => ({ ...baseProps, points: pts, closed });
@@ -2254,16 +2329,23 @@ class SketchEngine {
     }
     const removedPts = spanPts(leftC.s, rightC.s);
     const results = [];
+    // Kept pieces END exactly on their cut points (a T-junction cut is the
+    // other shape's endpoint), so the shapes genuinely connect there.
+    const pinStart = (pts, c) => { if (pts.length && c && c.x !== undefined) { pts[0].x = c.x; pts[0].y = c.y; } };
+    const pinEnd = (pts, c) => { if (pts.length && c && c.x !== undefined) { pts[pts.length - 1].x = c.x; pts[pts.length - 1].y = c.y; } };
     if (ent.closed) {
       const pts = this._polySliceCurved(ent, rightC, leftC);
+      pinStart(pts, rightC); pinEnd(pts, leftC);
       if (pts.length >= 2) results.push(mk(pts, false));
     } else {
       if (leftC.s > EPS) {
         const ptsL = this._polySliceCurved(ent, { k: 0, t: 0 }, leftC);
+        pinEnd(ptsL, leftC);
         if (ptsL.length >= 2) results.push(mk(ptsL, false));
       }
       if (rightC.s < total - EPS) {
         const ptsR = this._polySliceCurved(ent, rightC, { k: limit - 1, t: 1 });
+        pinStart(ptsR, rightC);
         if (ptsR.length >= 2) results.push(mk(ptsR, false));
       }
     }
@@ -10145,6 +10227,108 @@ function raySegIntersect(origin, dir, segA, segB) {
 // Strict interior intersection of two segments. Returns {x, y, t, u} where
 // t in [0,1] for seg1 and u in [0,1] for seg2, or null if they don't cross.
 // Returns null when the crossing is at both endpoints (already a shared vertex).
+// ── Trim exactness helpers ────────────────────────────────────────────────
+// Trim finds crossings on TESSELLATED geometry (a circle is a 64-gon of
+// chords), but keeps SMOOTH results — so a trimmed end landed up to a
+// chord-sagitta (~0.1mm) off the true curve it was cut against. The next
+// trim then saw no crossing there (an end stopping a hair short is not an
+// intersection) and ran straight past it (ssissues 2026-09-28).
+
+// Terminal points of an open chain — where another shape can END on the
+// path being trimmed (a T-junction left by an earlier trim).
+function _trimOpenEnds(e) {
+  if (e.type !== 'polyline' || e.closed || !Array.isArray(e.points) || e.points.length < 2) return [];
+  return [e.points[0], e.points[e.points.length - 1]];
+}
+
+// Intersection of the infinite line a→b with circle C nearest `near`
+// (within maxD), or null.
+function _lineCircleNearest(a, b, C, near, maxD = 0.5) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const A = dx * dx + dy * dy;
+  if (A < 1e-12) return null;
+  const fx = a.x - C.cx, fy = a.y - C.cy;
+  const B = 2 * (fx * dx + fy * dy), Cc = fx * fx + fy * fy - C.r * C.r;
+  let disc = B * B - 4 * A * Cc;
+  if (disc < 0) {
+    if (disc < -1e-6 * A) return null;
+    disc = 0; // grazing — tangent point
+  }
+  const sq = Math.sqrt(disc);
+  let best = null, bd = maxD;
+  for (const t of [(-B - sq) / (2 * A), (-B + sq) / (2 * A)]) {
+    const p = { x: a.x + t * dx, y: a.y + t * dy };
+    const d = Math.hypot(p.x - near.x, p.y - near.y);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+
+// Intersection of circles C1, C2 nearest `near` (within maxD), or null.
+function _circleCircleNearest(C1, C2, near, maxD = 0.5) {
+  const dx = C2.cx - C1.cx, dy = C2.cy - C1.cy;
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-9 || d > C1.r + C2.r + 1e-6 || d < Math.abs(C1.r - C2.r) - 1e-6) return null;
+  const a = (C1.r * C1.r - C2.r * C2.r + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, C1.r * C1.r - a * a));
+  const mx = C1.cx + a * dx / d, my = C1.cy + a * dy / d;
+  let best = null, bd = maxD;
+  for (const s of [1, -1]) {
+    const p = { x: mx + s * h * dy / d, y: my - s * h * dx / d };
+    const dd = Math.hypot(p.x - near.x, p.y - near.y);
+    if (dd < bd) { bd = dd; best = p; }
+  }
+  return best;
+}
+
+// The true circle behind a smooth arc polyline (what trimming a circle
+// leaves: Bezier spans whose anchors sit on one circle with handles
+// tangent to it), or null. Lets a trimmed circle keep cutting EXACTLY
+// like the circle it came from.
+function _circleOfArcPolyline(e) {
+  if (!e || e.type !== 'polyline' || !Array.isArray(e.points) || e.points.length < 2) return null;
+  const P = e.points;
+  const first = P[0], last = P[P.length - 1];
+  if (!first.cpOut || !last.cpIn) return null;
+  // Center = where the normals at the two ends meet.
+  const n0 = { x: -first.cpOut.dy, y: first.cpOut.dx };
+  const n1 = { x: -last.cpIn.dy, y: last.cpIn.dx };
+  const den = n0.x * n1.y - n0.y * n1.x;
+  if (Math.abs(den) < 1e-9) return null; // ends parallel (a 180° arc) — use 3 anchors
+  const t = ((last.x - first.x) * n1.y - (last.y - first.y) * n1.x) / den;
+  const cx = first.x + n0.x * t, cy = first.y + n0.y * t;
+  const r = Math.hypot(first.x - cx, first.y - cy);
+  if (!(r > 1e-6)) return null;
+  const tol = Math.max(1e-3 * r, 0.15);
+  for (const p of P) {
+    if (Math.abs(Math.hypot(p.x - cx, p.y - cy) - r) > tol) return null;
+    for (const cp of [p.cpIn, p.cpOut]) {
+      if (!cp) continue;
+      const L = Math.hypot(cp.dx, cp.dy);
+      if (L > 1e-9 && Math.abs(cp.dx * (p.x - cx) + cp.dy * (p.y - cy)) > 0.02 * L * r) return null;
+    }
+  }
+  return { cx, cy, r };
+}
+
+// Sort + merge trim cuts that land within `tol` (mm, along the path) of
+// each other — a T-junction end and the crossing test can both report the
+// same spot. The touch entry wins: its point IS the other shape's end, so
+// the trimmed piece ends exactly on it.
+function _mergeTrimCuts(cuts, tol = 0.05) {
+  cuts.sort((a, b) => a.s - b.s);
+  const out = [];
+  for (const c of cuts) {
+    const prev = out[out.length - 1];
+    if (prev && Math.abs(c.s - prev.s) <= tol) {
+      if (c.touch && !prev.touch) out[out.length - 1] = c;
+      continue;
+    }
+    out.push(c);
+  }
+  return out;
+}
+
 function segmentIntersection(p1, p2, p3, p4) {
   const dx12 = p2.x - p1.x, dy12 = p2.y - p1.y;
   const dx34 = p4.x - p3.x, dy34 = p4.y - p3.y;
