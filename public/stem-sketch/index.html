@@ -2194,7 +2194,11 @@ class SketchEngine {
       if (d < bestD) { bestD = d; clickedS = s.cum + t * s.len; }
     }
     const cutAt = (s0) => {
-      const sw = ((s0 % total) + total) % total;
+      // Only a CLOSED path wraps. On an open piece s = total is its END —
+      // wrapping it to 0 drew the red preview back to the START, painting a
+      // "ghost" over empty space whenever a crossing sat exactly on the
+      // piece's end (common now that trimmed ends land exactly on crossings).
+      const sw = ent.closed ? ((s0 % total) + total) % total : Math.max(0, Math.min(total, s0));
       let sub = subs[subs.length - 1];
       for (const s of subs) { if (sw <= s.cum + s.len + EPS) { sub = s; break; } }
       const f = sub.len ? Math.max(0, Math.min(1, (sw - sub.cum) / sub.len)) : 0;
@@ -6682,33 +6686,85 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
     if (keep) picked.push(e);
   }
   if (!picked.length) return 0;
-  // Visibility classification (skipped above a perf guard — then everything
-  // renders solid, which is still correct-ish and never blank). Each edge is
-  // sampled at two points, each lifted slightly toward the viewer so rays
-  // don't self-intersect or graze along coplanar surfaces; an edge is HIDDEN
-  // only when both samples are blocked by material clearly in front.
-  const doVis = picked.length <= 1500;
-  const rc = new THREE.Raycaster();
-  const FAR = 10000;
+  // Visibility classification. A sample point on an edge is HIDDEN when some
+  // triangle lies clearly in front of it along the view (the point is lifted
+  // LIFT toward the viewer so an edge never hides behind its own faces, and
+  // the blocker must sit MARGIN beyond that).
+  //
+  // Ray-casting every sample against the whole mesh was too slow for big
+  // parts, so it was skipped above 1500 edges — and then EVERY line drew
+  // solid (ssissues 2026-09-28: a bracket with a few round holes crossed the
+  // line and lost all its hidden lines). All rays here run straight along
+  // the view, so the test is 2D: bucket the triangles into a grid over the
+  // sketch plane once, and each sample only tests the triangles in its cell.
+  const doVis = picked.length <= 20000;
   const LIFT = 0.2;    // mm toward the viewer
   const MARGIN = 0.5;  // mm of real material required to count as blocking
-  const dirNeg = viewN.clone().negate();
-  const origin = new THREE.Vector3(), sample = new THREE.Vector3();
   const wp = new THREE.Vector3();
   const MIN_LEN = 0.25;
   let emitted = 0;
-  const blocked = (x, y, z) => {
-    sample.set(x, y, z).addScaledVector(viewN, LIFT);
-    origin.copy(sample).addScaledVector(viewN, FAR);
-    rc.set(origin, dirNeg);
-    rc.far = FAR + 1;
-    const hits = rc.intersectObject(body.mesh, false);
-    return hits.length > 0 && hits[0].distance < FAR - MARGIN;
-  };
+  let blocked = () => false;
+  if (doVis) {
+    // Welded vertices in plane space: x, y on the sketch plane, z toward the viewer.
+    const nV = v.length / 3;
+    const pv = new Float64Array(v.length);
+    let gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (let k = 0; k < nV; k++) {
+      wp.set(v[k * 3], v[k * 3 + 1], v[k * 3 + 2]).applyMatrix4(planeMInv);
+      pv[k * 3] = wp.x; pv[k * 3 + 1] = wp.y; pv[k * 3 + 2] = wp.z;
+      if (wp.x < gx0) gx0 = wp.x; if (wp.x > gx1) gx1 = wp.x;
+      if (wp.y < gy0) gy0 = wp.y; if (wp.y > gy1) gy1 = wp.y;
+    }
+    // Same side rule the ray-caster used: a one-sided material only blocks
+    // with triangles facing the viewer; CSG results render double-sided.
+    const twoSided = body.mesh.material && body.mesh.material.side === THREE.DoubleSide;
+    const G = Math.max(4, Math.min(128, Math.ceil(Math.sqrt(triCount / 2))));
+    const cw = Math.max((gx1 - gx0) / G, 1e-6), ch = Math.max((gy1 - gy0) / G, 1e-6);
+    const cellOf = (x, y) => {
+      const i = Math.min(G - 1, Math.max(0, Math.floor((x - gx0) / cw)));
+      const j = Math.min(G - 1, Math.max(0, Math.floor((y - gy0) / ch)));
+      return j * G + i;
+    };
+    const cells = new Array(G * G);
+    for (let t = 0; t < triCount; t++) {
+      if (!twoSided) {
+        const facing = nrm[t * 3] * viewN.x + nrm[t * 3 + 1] * viewN.y + nrm[t * 3 + 2] * viewN.z;
+        if (facing <= 0) continue;
+      }
+      const a = ia[t * 3] * 3, b = ia[t * 3 + 1] * 3, c = ia[t * 3 + 2] * 3;
+      const x0 = Math.min(pv[a], pv[b], pv[c]), x1 = Math.max(pv[a], pv[b], pv[c]);
+      const y0 = Math.min(pv[a + 1], pv[b + 1], pv[c + 1]), y1 = Math.max(pv[a + 1], pv[b + 1], pv[c + 1]);
+      const i0 = Math.min(G - 1, Math.max(0, Math.floor((x0 - gx0) / cw)));
+      const i1 = Math.min(G - 1, Math.max(0, Math.floor((x1 - gx0) / cw)));
+      const j0 = Math.min(G - 1, Math.max(0, Math.floor((y0 - gy0) / ch)));
+      const j1 = Math.min(G - 1, Math.max(0, Math.floor((y1 - gy0) / ch)));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const k = j * G + i;
+        (cells[k] || (cells[k] = [])).push(t);
+      }
+    }
+    blocked = (x, y, z) => {
+      const list = cells[cellOf(x, y)];
+      if (!list) return false;
+      const thr = z + LIFT + MARGIN;
+      for (const t of list) {
+        const a = ia[t * 3] * 3, b = ia[t * 3 + 1] * 3, c = ia[t * 3 + 2] * 3;
+        const ax2 = pv[a], ay2 = pv[a + 1], bx2 = pv[b], by2 = pv[b + 1], cx2 = pv[c], cy2 = pv[c + 1];
+        const d = (by2 - cy2) * (ax2 - cx2) + (cx2 - bx2) * (ay2 - cy2);
+        if (Math.abs(d) < 1e-12) continue; // edge-on to the view — can't block
+        const l1 = ((by2 - cy2) * (x - cx2) + (cx2 - bx2) * (y - cy2)) / d;
+        const l2 = ((cy2 - ay2) * (x - cx2) + (ax2 - cx2) * (y - cy2)) / d;
+        const l3 = 1 - l1 - l2;
+        if (l1 < -1e-9 || l2 < -1e-9 || l3 < -1e-9) continue;
+        if (l1 * pv[a + 2] + l2 * pv[b + 2] + l3 * pv[c + 2] > thr) return true;
+      }
+      return false;
+    };
+  }
   // Per-edge sample budget: enough samples to SPLIT a long edge where it
-  // crosses in/out of cover, bounded so the total raycast count stays in
-  // the same ballpark as the old two-sample pass on dense meshes.
-  const spanBudget = doVis ? Math.max(2, Math.min(9, Math.floor(6000 / picked.length))) : 0;
+  // crosses in/out of cover, bounded so the total test count stays small on
+  // dense meshes.
+  const spanBudget = doVis ? Math.max(2, Math.min(9, Math.floor(40000 / picked.length))) : 0;
   for (const e of picked) {
     const ax = e.i * 3, bx = e.j * 3;
     wp.set(v[ax], v[ax + 1], v[ax + 2]).applyMatrix4(planeMInv);
@@ -6733,19 +6789,16 @@ function projectBodyEdgesAnalytic(body, plane, planeMInv, segments) {
     // several span midpoints instead and emit one sub-segment per run of
     // equal visibility, each classified on its own.
     const spans = Math.max(2, Math.min(spanBudget, Math.ceil(len2D / 4)));
-    const qx = (t) => v[ax] + (v[bx] - v[ax]) * t;
-    const qy = (t) => v[ax + 1] + (v[bx + 1] - v[ax + 1]) * t;
-    const qz = (t) => v[ax + 2] + (v[bx + 2] - v[ax + 2]) * t;
-    const states = [];
-    for (let k = 0; k < spans; k++) {
-      const t = (k + 0.5) / spans;
-      states.push(blocked(qx(t), qy(t), qz(t)));
-    }
     const lerp = (t) => ({
       x: p1.x + (p2.x - p1.x) * t,
       y: p1.y + (p2.y - p1.y) * t,
       z: p1.z + (p2.z - p1.z) * t,
     });
+    const states = [];
+    for (let k = 0; k < spans; k++) {
+      const q = lerp((k + 0.5) / spans); // plane space, same as the grid
+      states.push(blocked(q.x, q.y, q.z));
+    }
     let runStart = 0;
     for (let k = 1; k <= spans; k++) {
       if (k < spans && states[k] === states[runStart]) continue;
