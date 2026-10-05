@@ -1335,6 +1335,8 @@
         <button class="action" id="cloud-load-btn" title="Load a saved design" style="font-size:14px;padding:0 8px">📂</button>
         <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
         <button class="action" id="tutorials-btn" title="Tutorials — short guided lessons" style="font-size:14px;padding:0 8px">🎓</button>
+        <button class="action" id="import-btn" title="Import an STL model (to alter and reprint) or an SVG drawing (into a sketch)">Import ▾</button>
+        <input type="file" id="import-file" accept=".stl,.svg,model/stl,image/svg+xml" style="display:none"/>
         <button class="action primary" id="export-btn">Export ▾</button>
         <a class="action" id="home-link" href="/" target="_top" style="text-decoration:none;display:inline-flex;align-items:center">← Home</a>
         <div class="user-menu" id="user-menu">
@@ -7360,7 +7362,7 @@ function projectBodiesOntoPlane(plane, onlyBodyId) {
     // For CSG groups, route to the canvas-based edge extraction (works in
     // image space — robust against fan triangulations and unwelded
     // vertices that defeat EdgesGeometry on CSG output).
-    const isCSG = body.type === 'group' || body.type === 'combined';
+    const isCSG = body.type === 'group' || body.type === 'combined' || body.type === 'mesh';
     if (isCSG) {
       const before = segments.length;
       // Primary: analytic edges with hidden-line classification (GPU-free).
@@ -8914,7 +8916,7 @@ class Viewer3D {
         // weld / length-filter combination. The shaded mesh + silhouette
         // already convey the form on a grouped body; skipping the overlay
         // gives the cleanest read.
-        const isCSGBody = body.type === 'group' || body.type === 'combined';
+        const isCSGBody = body.type === 'group' || body.type === 'combined' || body.type === 'mesh';
         if (!isCSGBody && mesh.geometry && mesh.geometry.attributes?.position) {
           try {
             const edgeGeo = new THREE.EdgesGeometry(mesh.geometry, 25);
@@ -9463,7 +9465,7 @@ class Viewer3D {
     const span = Math.max(sz.x, sz.y, sz.z);
     const hr = Math.min(3, Math.max(0.4, span * 0.05));
     const off = hr * 1.2;
-    const isCSGResult = body.type === 'group' || body.type === 'combined';
+    const isCSGResult = body.type === 'group' || body.type === 'combined' || body.type === 'mesh';
 
     const group = new THREE.Group();
     const matEdge = new THREE.LineBasicMaterial({ color: 0x4f7cff, transparent: true, opacity: 0.45 });
@@ -9774,7 +9776,7 @@ function buildBodyMesh(body) {
   // holes through the body (visible from one side, gone from the other).
   // The faceted CSG output hides the horizon artifact that bothered us on
   // smooth primitive curves, so DoubleSide is the lesser evil for groups.
-  const isCSGResult = body.type === 'group' || body.type === 'combined' || body.type === 'baked';
+  const isCSGResult = body.type === 'group' || body.type === 'combined' || body.type === 'baked' || body.type === 'mesh';
   const matSolid = new THREE.MeshStandardMaterial({
     color: isNeg ? 0xff7070 : 0x9eb6ff,
     roughness: 0.55, metalness: 0.05, flatShading: false,
@@ -9815,7 +9817,7 @@ function buildBodyMesh(body) {
     );
   };
   let geo = null, mesh = null;
-  if (body.type === 'combined' || body.type === 'group' || body.type === 'baked') {
+  if (body.type === 'combined' || body.type === 'group' || body.type === 'baked' || body.type === 'mesh') {
     // Guard against a transient null geometry — a batch op that's stripped
     // a group's geometry before re-deriving it can call rebuildBodies in
     // the middle, and three.js throws 'cannot read isBufferGeometry of
@@ -12557,7 +12559,7 @@ function _coalesceSoftSiblings(children, opts) {
 // propagation) re-apply them after rebuilding from children; the children
 // stay parametric and unscaled, so Ungroup restores originals as-is.
 function scaleGroupBody(body, fx, fy, fz) {
-  if (!body || (body.type !== 'group' && body.type !== 'combined')) return false;
+  if (!body || (body.type !== 'group' && body.type !== 'combined' && body.type !== 'mesh')) return false;
   if (!(body.geometry instanceof THREE.BufferGeometry)) return false;
   if (!(fx > 0 && fy > 0 && fz > 0)) return false;
   pushUndo();
@@ -13108,10 +13110,11 @@ function _snapshotBody(b, asChild = false) {
       // previous body as a child and each level's geometry is several
       // MB of triangles. Now only the TOP-level geometry rides in the
       // save; nested groups carry just their children + ops.
-      // EXCEPTION: 'baked' bodies (marked interference overlaps) have no
-      // parametric recipe — their geometry IS the definition, so it must
-      // ride the snapshot even as a child or the cut vanishes on reload.
-      if (asChild && b.type !== 'baked') continue;
+      // EXCEPTION: 'baked' bodies (marked interference overlaps) and
+      // imported 'mesh' bodies have no parametric recipe — their geometry
+      // IS the definition, so it must ride the snapshot even as a child or
+      // the cut / the imported part vanishes on reload.
+      if (asChild && b.type !== 'baked' && b.type !== 'mesh') continue;
       out.geometry = _serializeGeometry(b.geometry);
       out._geomSerialized = true;
       continue;
@@ -15143,7 +15146,7 @@ function _buildShellMeshFromSpec(spec) {
 // Returns { ok, reason }. Used as a sanity gate after a CSG rebuild.
 function _isBodyRenderable(body) {
   if (body.hidden) return { ok: true, reason: 'hidden' };
-  if (body.type === 'group' || body.type === 'combined') {
+  if (body.type === 'group' || body.type === 'combined' || body.type === 'mesh') {
     if (!(body.geometry instanceof THREE.BufferGeometry)) {
       return { ok: false, reason: 'no BufferGeometry on the group' };
     }
@@ -15386,7 +15389,10 @@ function getCSGMesh(body) {
   // BSP tree on the NEXT subtract — that's what kept blowing the body apart
   // when a second thread mark was placed on an already-cut bracket.
   // Hand CSG a cleaned-up clone so each round starts from manifold-ish input.
-  if (body.type === 'group' || body.type === 'combined') {
+  // Imported STL meshes are triangle soup (every triangle owns its own
+  // vertices) — the same weld + degenerate strip turns them into the
+  // shared-vertex solid the boolean engine needs.
+  if (body.type === 'group' || body.type === 'combined' || body.type === 'mesh') {
     return _cleanedCSGInputMesh(body);
   }
   return body.mesh;
@@ -21077,6 +21083,30 @@ function renderProps() {
         <div class="field"><label>Bodies</label><div>${body.children?.length || 0}</div></div>
         <div class="field"><label>Contents</label><div style="font-size:11px;color:var(--ink-soft)">${childList}</div></div>
         <div class="hint"><b>Ungroup</b> (Ctrl+Shift+G) to restore the originals — negatives reappear at their original size.</div>`;
+    } else if (body.type === 'mesh') {
+      // Imported STL: no sketch underneath, so the mesh IS the part. Size is
+      // editable the same way a group's is (scaled about its own center).
+      let gsz = null;
+      if (body.mesh) {
+        viewer && viewer.scene && viewer.scene.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(body.mesh);
+        if (!bb.isEmpty()) { const sz = bb.getSize(new THREE.Vector3()); gsz = { x: sz.x, y: sz.y, z: sz.z }; }
+      }
+      const tris = body.geometry?.index ? body.geometry.index.count / 3
+        : (body.geometry?.attributes?.position?.count || 0) / 3;
+      const sizeRows = gsz ? `
+        <div class="field"><label>Width (${u})</label><input type="number" data-gdim="x" value="${fmtU(gsz.x)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Height (${u})</label><input type="number" data-gdim="y" value="${fmtU(gsz.y)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Depth (${u})</label><input type="number" data-gdim="z" value="${fmtU(gsz.z)}" step="0.5" min="0.01"/></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="group-uniform-scale" style="width:auto;margin:0" checked/>
+          <label for="group-uniform-scale" style="margin:0;cursor:pointer">Resize all three together (keep proportions)</label>
+        </div>` : '';
+      dimFields = `<h4>Imported model</h4>
+        ${body.name ? `<div class="field"><label>File</label><div style="font-size:12px;word-break:break-all">${body.name}</div></div>` : ''}
+        ${sizeRows}
+        <div class="field"><label>Triangles</label><div>${Math.round(tris).toLocaleString()}</div></div>
+        <div class="hint">Sketch on any face to add to it or cut into it, then <b>Group</b> the pieces and export the STL to print. STL files carry no units — if this looks 25× too big or small, it was saved in inches: resize it by the width you expect.</div>`;
     }
 
     const opField = `
@@ -21278,6 +21308,7 @@ function bodyDisplayLabel(b) {
   if (b.name && b.name.trim()) return b.name;
   if (b.type === 'extrude')  return `Extrude (${fmtUL(b.height)})`;
   if (b.type === 'group')    return `Group (${b.children?.length || 0})`;
+  if (b.type === 'mesh')     return b.name ? `${b.name} (imported)` : 'Imported model';
   if (b.type === 'cube')     return 'Cube';
   if (b.type === 'sphere')   return 'Sphere';
   if (b.type === 'cylinder') return 'Cylinder';
@@ -21310,6 +21341,407 @@ function openExportDialog() {
       $('exp-svg').onclick = () => openExportPicker('svg');
     },
   });
+}
+
+// ───────────────────────── Import (STL / SVG) ─────────────────────────────
+// STL: a student finds a model (Thingiverse etc.), brings it in as a solid
+// 'mesh' body, sketches on a face to add initials / cut a slot, Groups the
+// pieces and re-exports to print. SVG: 2D shapes land in the current sketch
+// — a laser file from another tool, or a StemSketch export from a classmate.
+function openImportDialog() {
+  openModal({
+    title: 'Import a file',
+    body: `<p style="margin:0 0 14px;color:var(--ink-soft)">Pick what you're bringing in.</p>
+           <div style="display:flex;gap:12px;flex-wrap:wrap">
+             <button class="action primary" id="imp-stl" style="flex:1;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;line-height:1.3">
+               <span style="font-size:15px;font-weight:700">STL &mdash; 3D model</span>
+               <span style="opacity:0.85;font-size:12px;font-weight:400">Becomes a solid part you can sketch on, cut, add to, and re-export</span>
+             </button>
+             <button class="action" id="imp-svg" style="flex:1;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;line-height:1.3">
+               <span style="font-size:15px;font-weight:700">SVG &mdash; 2D drawing</span>
+               <span style="opacity:0.85;font-size:12px;font-weight:400">Shapes go into ${doc.mode === '2d' && doc.sketch ? 'the current sketch' : 'a sketch'} as editable lines, arcs and circles</span>
+             </button>
+           </div>
+           <div class="hint" style="margin-top:14px">STL files are read in millimeters. Text in an SVG is skipped — convert it to outlines first.</div>`,
+    hideOk: true,
+    custom: () => {
+      const pick = (accept) => { const inp = $('import-file'); inp.accept = accept; inp.click(); $('modal-bg').classList.remove('show'); };
+      $('imp-stl').onclick = () => pick('.stl,model/stl,application/sla,application/octet-stream');
+      $('imp-svg').onclick = () => pick('.svg,image/svg+xml');
+    },
+  });
+}
+
+function importFile(file) {
+  const name = file.name || 'import';
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (ext === 'svg') {
+    file.text().then(txt => importSVGText(txt, name))
+      .catch(err => { console.error('SVG import failed:', err); showHint('Could not read that SVG: ' + err.message); });
+  } else if (ext === 'stl') {
+    file.arrayBuffer().then(buf => importSTLBuffer(buf, name))
+      .catch(err => { console.error('STL import failed:', err); showHint('Could not read that STL: ' + err.message); });
+  } else {
+    showHint('Import takes .stl (3D model) or .svg (2D drawing) files.');
+  }
+}
+
+// ── STL ──
+// Binary when the byte count matches the 84 + 50·n layout; otherwise ASCII.
+// (ASCII files also start with "solid", and some binary exporters write
+// "solid" in the header, so the size test is the reliable one.)
+function parseSTL(buf) {
+  const bytes = new Uint8Array(buf);
+  const positions = [];
+  if (bytes.length >= 84) {
+    const dv = new DataView(buf);
+    const n = dv.getUint32(80, true);
+    if (84 + n * 50 === bytes.length) {
+      for (let t = 0; t < n; t++) {
+        const o = 84 + t * 50;
+        for (let k = 0; k < 3; k++) {
+          positions.push(dv.getFloat32(o + 12 + k * 12, true), dv.getFloat32(o + 16 + k * 12, true), dv.getFloat32(o + 20 + k * 12, true));
+        }
+      }
+      return positions;
+    }
+  }
+  const txt = new TextDecoder('utf-8').decode(bytes);
+  const re = /vertex\s+([-+\d.eE]+)\s+([-+\d.eE]+)\s+([-+\d.eE]+)/g;
+  let m;
+  while ((m = re.exec(txt))) positions.push(+m[1], +m[2], +m[3]);
+  if (positions.length % 9 !== 0) positions.length -= positions.length % 9;
+  return positions;
+}
+
+function importSTLBuffer(buf, name) {
+  const positions = parseSTL(buf);
+  const tris = positions.length / 9;
+  if (!tris) { showHint('That STL has no triangles in it.'); return; }
+  for (const x of positions) if (!isFinite(x)) { showHint('That STL has broken coordinates in it.'); return; }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  // Stand it on the ground, centered on the origin — where a new primitive
+  // lands — so it never arrives off-screen or sunk through the floor.
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  geo.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  geo.computeVertexNormals(); // unindexed → flat per-face normals: crisp facets
+  const size = bb.getSize(new THREE.Vector3());
+  pushUndo();
+  const body = {
+    id: doc.nextBodyId++, type: 'mesh', geometry: geo,
+    name: String(name).replace(/\.stl$/i, '').slice(0, 60),
+    x: 0, y: 0, z: 0,
+  };
+  doc.bodies.push(body);
+  setMode('3d');
+  doc.selection = { kind: 'body', id: body.id };
+  doc.multiSelectedBodies = [body.id];
+  if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo(); try { viewer.setStandardView('iso'); } catch (_) {} }
+  renderTree(); renderProps(); setDirty(true);
+  const big = Math.max(size.x, size.y, size.z);
+  const sizeNote = big > 600 ? ' — that is very large: if it was saved in inches, resize it by the width you expect' : '';
+  setStatus(`Imported ${body.name}: ${tris.toLocaleString()} triangles, ${fmtUL(size.x)} × ${fmtUL(size.y)} × ${fmtUL(size.z)}${sizeNote}`);
+}
+
+// ── SVG ──
+// Everything is flattened to the sketch's own entity types: <rect>,
+// <circle>, <ellipse>, <line>, <polyline>, <polygon> and <path> (M L H V C
+// S Q T A Z, absolute + relative). Transforms are applied through the
+// element tree; units resolve to millimeters via width/height + viewBox; the
+// SVG y-down axis flips to the sketch's y-up.
+function _svgUnitToMm(str) {
+  const m = /^\s*([-+\d.eE]+)\s*([a-z%]*)\s*$/i.exec(String(str || ''));
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  const u = (m[2] || '').toLowerCase();
+  const per = { '': 25.4 / 96, px: 25.4 / 96, mm: 1, cm: 10, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6, q: 0.25 };
+  if (!(u in per)) return null; // % / em etc. — unknown
+  return { v: v * per[u], px: v, unit: u };
+}
+
+function _svgParseTransform(str) {
+  // returns [a,b,c,d,e,f] (x' = a x + c y + e ; y' = b x + d y + f)
+  let M = [1, 0, 0, 1, 0, 0];
+  const mul = (A, B) => [
+    A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1],
+    A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3],
+    A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5],
+  ];
+  const re = /(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\)/g;
+  let m;
+  while ((m = re.exec(str || ''))) {
+    const a = m[2].split(/[\s,]+/).filter(Boolean).map(Number);
+    let T = null;
+    switch (m[1]) {
+      case 'matrix': if (a.length === 6) T = a; break;
+      case 'translate': T = [1, 0, 0, 1, a[0] || 0, a[1] || 0]; break;
+      case 'scale': T = [a[0] || 1, 0, 0, a.length > 1 ? a[1] : (a[0] || 1), 0, 0]; break;
+      case 'rotate': {
+        const r = (a[0] || 0) * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
+        T = [cs, sn, -sn, cs, 0, 0];
+        if (a.length >= 3) T = mul(mul([1, 0, 0, 1, a[1], a[2]], T), [1, 0, 0, 1, -a[1], -a[2]]);
+        break;
+      }
+      case 'skewX': T = [1, 0, Math.tan((a[0] || 0) * Math.PI / 180), 1, 0, 0]; break;
+      case 'skewY': T = [1, Math.tan((a[0] || 0) * Math.PI / 180), 0, 1, 0, 0]; break;
+    }
+    if (T) M = mul(M, T);
+  }
+  return M;
+}
+const _svgMul = (A, B) => [
+  A[0] * B[0] + A[2] * B[1], A[1] * B[0] + A[3] * B[1],
+  A[0] * B[2] + A[2] * B[3], A[1] * B[2] + A[3] * B[3],
+  A[0] * B[4] + A[2] * B[5] + A[4], A[1] * B[4] + A[3] * B[5] + A[5],
+];
+const _svgApply = (M, x, y) => ({ x: M[0] * x + M[2] * y + M[4], y: M[1] * x + M[3] * y + M[5] });
+const _svgApplyVec = (M, dx, dy) => ({ dx: M[0] * dx + M[2] * dy, dy: M[1] * dx + M[3] * dy });
+
+// Elliptical arc (SVG endpoint form) → cubic Bezier spans, each ≤ 90°.
+function _svgArcToCubics(x1, y1, rx, ry, phiDeg, large, sweep, x2, y2) {
+  if (rx === 0 || ry === 0 || (x1 === x2 && y1 === y2)) return [{ c1: { x: x1, y: y1 }, c2: { x: x2, y: y2 }, p: { x: x2, y: y2 } }];
+  rx = Math.abs(rx); ry = Math.abs(ry);
+  const phi = phiDeg * Math.PI / 180, cp = Math.cos(phi), sp = Math.sin(phi);
+  const dx = (x1 - x2) / 2, dy = (y1 - y2) / 2;
+  const x1p = cp * dx + sp * dy, y1p = -sp * dx + cp * dy;
+  const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+  if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+  let num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p;
+  const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+  let k = den > 0 ? Math.sqrt(Math.max(0, num / den)) : 0;
+  if (large === sweep) k = -k;
+  const cxp = k * rx * y1p / ry, cyp = -k * ry * x1p / rx;
+  const cx = cp * cxp - sp * cyp + (x1 + x2) / 2, cy = sp * cxp + cp * cyp + (y1 + y2) / 2;
+  const ang = (ux, uy, vx, vy) => {
+    const d = ux * vx + uy * vy, l = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+    let a = Math.acos(Math.max(-1, Math.min(1, d / l)));
+    if (ux * vy - uy * vx < 0) a = -a;
+    return a;
+  };
+  const t1 = ang(1, 0, (x1p - cxp) / rx, (y1p - cyp) / ry);
+  let dt = ang((x1p - cxp) / rx, (y1p - cyp) / ry, (-x1p - cxp) / rx, (-y1p - cyp) / ry);
+  if (!sweep && dt > 0) dt -= 2 * Math.PI;
+  if (sweep && dt < 0) dt += 2 * Math.PI;
+  const n = Math.max(1, Math.ceil(Math.abs(dt) / (Math.PI / 2)));
+  const step = dt / n;
+  const out = [];
+  const pt = (t) => {
+    const ct = Math.cos(t), st = Math.sin(t);
+    return { x: cp * rx * ct - sp * ry * st + cx, y: sp * rx * ct + cp * ry * st + cy };
+  };
+  const dpt = (t) => {
+    const ct = Math.cos(t), st = Math.sin(t);
+    return { x: -cp * rx * st - sp * ry * ct, y: -sp * rx * st + cp * ry * ct };
+  };
+  const kk = (4 / 3) * Math.tan(step / 4);
+  for (let i = 0; i < n; i++) {
+    const a0 = t1 + i * step, a1 = a0 + step;
+    const P0 = pt(a0), P1 = pt(a1), D0 = dpt(a0), D1 = dpt(a1);
+    out.push({
+      c1: { x: P0.x + kk * D0.x, y: P0.y + kk * D0.y },
+      c2: { x: P1.x - kk * D1.x, y: P1.y - kk * D1.y },
+      p: i === n - 1 ? { x: x2, y: y2 } : P1,
+    });
+  }
+  return out;
+}
+
+// Path data → list of subpaths; each {pts:[{x,y,cpOut?,cpIn?}], closed}.
+// Handles are stored RELATIVE to their anchor (dx,dy) — the sketch's own
+// polyline convention — so later transforms treat them as vectors.
+function _svgPathToSubpaths(d) {
+  const toks = String(d || '').match(/[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?/g) || [];
+  const subs = [];
+  let cur = null, cmd = '', x = 0, y = 0, sx = 0, sy = 0, lastC = null, lastQ = null;
+  let i = 0;
+  const num = () => parseFloat(toks[i++]);
+  const start = (px, py) => { cur = { pts: [{ x: px, y: py }], closed: false }; subs.push(cur); sx = px; sy = py; };
+  const lineTo = (px, py) => { if (!cur) start(x, y); cur.pts.push({ x: px, y: py }); };
+  const cubicTo = (c1x, c1y, c2x, c2y, px, py) => {
+    if (!cur) start(x, y);
+    const a = cur.pts[cur.pts.length - 1];
+    a.cpOut = { dx: c1x - a.x, dy: c1y - a.y };
+    cur.pts.push({ x: px, y: py, cpIn: { dx: c2x - px, dy: c2y - py } });
+  };
+  while (i < toks.length) {
+    const t = toks[i];
+    if (/^[A-Za-z]$/.test(t)) { cmd = t; i++; if (cmd === 'Z' || cmd === 'z') { if (cur) { cur.closed = true; x = sx; y = sy; cur = null; } continue; } }
+    else if (!cmd) { i++; continue; }
+    const rel = cmd === cmd.toLowerCase();
+    switch (cmd.toUpperCase()) {
+      case 'M': { const nx = num(), ny = num(); x = rel ? x + nx : nx; y = rel ? y + ny : ny; start(x, y); cmd = rel ? 'l' : 'L'; lastC = lastQ = null; break; }
+      case 'L': { const nx = num(), ny = num(); x = rel ? x + nx : nx; y = rel ? y + ny : ny; lineTo(x, y); lastC = lastQ = null; break; }
+      case 'H': { const nx = num(); x = rel ? x + nx : nx; lineTo(x, y); lastC = lastQ = null; break; }
+      case 'V': { const ny = num(); y = rel ? y + ny : ny; lineTo(x, y); lastC = lastQ = null; break; }
+      case 'C': {
+        let c1x = num(), c1y = num(), c2x = num(), c2y = num(), px = num(), py = num();
+        if (rel) { c1x += x; c1y += y; c2x += x; c2y += y; px += x; py += y; }
+        cubicTo(c1x, c1y, c2x, c2y, px, py); lastC = { x: c2x, y: c2y }; lastQ = null; x = px; y = py; break;
+      }
+      case 'S': {
+        let c2x = num(), c2y = num(), px = num(), py = num();
+        if (rel) { c2x += x; c2y += y; px += x; py += y; }
+        const c1x = lastC ? 2 * x - lastC.x : x, c1y = lastC ? 2 * y - lastC.y : y;
+        cubicTo(c1x, c1y, c2x, c2y, px, py); lastC = { x: c2x, y: c2y }; lastQ = null; x = px; y = py; break;
+      }
+      case 'Q': {
+        let qx = num(), qy = num(), px = num(), py = num();
+        if (rel) { qx += x; qy += y; px += x; py += y; }
+        cubicTo(x + 2 / 3 * (qx - x), y + 2 / 3 * (qy - y), px + 2 / 3 * (qx - px), py + 2 / 3 * (qy - py), px, py);
+        lastQ = { x: qx, y: qy }; lastC = null; x = px; y = py; break;
+      }
+      case 'T': {
+        let px = num(), py = num();
+        if (rel) { px += x; py += y; }
+        const qx = lastQ ? 2 * x - lastQ.x : x, qy = lastQ ? 2 * y - lastQ.y : y;
+        cubicTo(x + 2 / 3 * (qx - x), y + 2 / 3 * (qy - y), px + 2 / 3 * (qx - px), py + 2 / 3 * (qy - py), px, py);
+        lastQ = { x: qx, y: qy }; lastC = null; x = px; y = py; break;
+      }
+      case 'A': {
+        const rx = num(), ry = num(), rot = num(), large = num() !== 0, sweep = num() !== 0;
+        let px = num(), py = num();
+        if (rel) { px += x; py += y; }
+        for (const seg of _svgArcToCubics(x, y, rx, ry, rot, large, sweep, px, py)) {
+          cubicTo(seg.c1.x, seg.c1.y, seg.c2.x, seg.c2.y, seg.p.x, seg.p.y);
+          x = seg.p.x; y = seg.p.y;
+        }
+        lastC = lastQ = null; break;
+      }
+      default: i++;
+    }
+    if (!isFinite(x) || !isFinite(y)) throw new Error('bad path data');
+  }
+  return subs;
+}
+
+function importSVGText(txt, name) {
+  const docx = new DOMParser().parseFromString(txt, 'image/svg+xml');
+  const root = docx.querySelector('svg');
+  if (!root || docx.querySelector('parsererror')) { showHint('That file is not a readable SVG.'); return; }
+  // Unit scale: viewBox units → mm via the declared width (or height).
+  const vb = (root.getAttribute('viewBox') || '').split(/[\s,]+/).filter(Boolean).map(Number);
+  const wAttr = _svgUnitToMm(root.getAttribute('width')), hAttr = _svgUnitToMm(root.getAttribute('height'));
+  let scale = 25.4 / 96; // px fallback
+  let unitNote = 'px';
+  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+    if (wAttr && wAttr.v > 0) { scale = wAttr.v / vb[2]; unitNote = wAttr.unit || 'px'; }
+    else if (hAttr && hAttr.v > 0) { scale = hAttr.v / vb[3]; unitNote = hAttr.unit || 'px'; }
+  } else if (wAttr && wAttr.unit) { scale = 25.4 / 96 * (wAttr.v / wAttr.px); unitNote = wAttr.unit; }
+  // Walk the tree with accumulated transforms. Skipped: defs, clipPath,
+  // mask, marker, symbol, text (fonts) and hidden elements.
+  const ents = [];
+  const skipTags = new Set(['defs', 'clipPath', 'mask', 'marker', 'symbol', 'pattern', 'text', 'image', 'style', 'title', 'desc', 'metadata']);
+  let skippedText = 0;
+  const walk = (el, M) => {
+    for (const ch of el.children) {
+      const tag = ch.localName;
+      if (tag === 'text') { skippedText++; continue; }
+      if (skipTags.has(tag)) continue;
+      const st = ch.getAttribute('style') || '';
+      if (ch.getAttribute('display') === 'none' || /display\s*:\s*none/.test(st) || ch.getAttribute('visibility') === 'hidden') continue;
+      const Mc = _svgMul(M, _svgParseTransform(ch.getAttribute('transform')));
+      const n = (a, def = 0) => { const v = parseFloat(ch.getAttribute(a)); return isFinite(v) ? v : def; };
+      const uniformNoRot = Math.abs(Mc[1]) < 1e-9 && Math.abs(Mc[2]) < 1e-9 && Math.abs(Math.abs(Mc[0]) - Math.abs(Mc[3])) < 1e-9;
+      const polyFromPts = (pts, closed) => {
+        const out = pts.map(p => {
+          const q = _svgApply(Mc, p.x, p.y);
+          const o = { x: q.x, y: q.y };
+          if (p.cpOut) o.cpOut = _svgApplyVec(Mc, p.cpOut.dx, p.cpOut.dy);
+          if (p.cpIn) o.cpIn = _svgApplyVec(Mc, p.cpIn.dx, p.cpIn.dy);
+          return o;
+        });
+        // drop a closing point that repeats the start
+        if (closed && out.length > 2) {
+          const a = out[0], b = out[out.length - 1];
+          if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6 && !b.cpIn) out.pop();
+        }
+        if (out.length >= 2) ents.push({ type: 'polyline', points: out, closed });
+      };
+      switch (tag) {
+        case 'g': case 'svg': case 'a': case 'switch': walk(ch, Mc); break;
+        case 'rect': {
+          const x = n('x'), y = n('y'), w = n('width'), h = n('height');
+          let rx = n('rx', NaN), ry = n('ry', NaN);
+          if (!isFinite(rx) && isFinite(ry)) rx = ry; if (!isFinite(ry) && isFinite(rx)) ry = rx;
+          if (!(w > 0 && h > 0)) break;
+          if (isFinite(rx) && rx > 0) {
+            rx = Math.min(rx, w / 2); ry = Math.min(ry, h / 2);
+            polyFromPts(_svgPathToSubpaths(`M${x + rx},${y} H${x + w - rx} A${rx},${ry} 0 0 1 ${x + w},${y + ry} V${y + h - ry} A${rx},${ry} 0 0 1 ${x + w - rx},${y + h} H${x + rx} A${rx},${ry} 0 0 1 ${x},${y + h - ry} V${y + ry} A${rx},${ry} 0 0 1 ${x + rx},${y} Z`)[0].pts, true);
+          } else if (Math.abs(Mc[1]) < 1e-9 && Math.abs(Mc[2]) < 1e-9) {
+            // Axis-aligned (any scale / flip) → a real rect entity, so its
+            // width and height stay editable in the panel.
+            const a = _svgApply(Mc, x, y), b = _svgApply(Mc, x + w, y + h);
+            ents.push({ type: 'rect', x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y), _rectRaw: true });
+          } else {
+            polyFromPts([{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }], true);
+          }
+          break;
+        }
+        case 'circle': case 'ellipse': {
+          const cx = n('cx'), cy = n('cy');
+          const rx = tag === 'circle' ? n('r') : n('rx'), ry = tag === 'circle' ? n('r') : n('ry');
+          if (!(rx > 0 && ry > 0)) break;
+          if (tag === 'circle' && uniformNoRot) {
+            const c = _svgApply(Mc, cx, cy);
+            ents.push({ type: 'circle', cx: c.x, cy: c.y, r: rx * Math.abs(Mc[0]) });
+          } else {
+            polyFromPts(ellipsePolylinePoints(cx, cy, rx, ry), true);
+          }
+          break;
+        }
+        case 'line': polyFromPts([{ x: n('x1'), y: n('y1') }, { x: n('x2'), y: n('y2') }], false); break;
+        case 'polyline': case 'polygon': {
+          const a = (ch.getAttribute('points') || '').split(/[\s,]+/).filter(Boolean).map(Number);
+          const pts = [];
+          for (let k = 0; k + 1 < a.length; k += 2) pts.push({ x: a[k], y: a[k + 1] });
+          polyFromPts(pts, tag === 'polygon');
+          break;
+        }
+        case 'path': {
+          for (const sp of _svgPathToSubpaths(ch.getAttribute('d'))) polyFromPts(sp.pts, sp.closed);
+          break;
+        }
+        default: if (ch.children && ch.children.length) walk(ch, Mc);
+      }
+    }
+  };
+  walk(root, [1, 0, 0, 1, 0, 0]);
+  if (!ents.length) { showHint('No shapes found in that SVG' + (skippedText ? ' (text is skipped — convert it to outlines first)' : '') + '.'); return; }
+  if (ents.length > 4000) { showHint(`That SVG has ${ents.length} shapes — too many to work with here. Simplify it first (under 4000).`); return; }
+  // To millimeters, y-up, centered on the origin.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const each = (fn) => { for (const e of ents) { if (e.type === 'circle') fn(e, 'c'); else if (e.type === 'rect') fn(e, 'r'); else for (const p of e.points) fn(p, 'p'); } };
+  each((p, k) => {
+    if (k === 'c') { p.cx *= scale; p.cy *= -scale; p.r *= scale; minX = Math.min(minX, p.cx - p.r); maxX = Math.max(maxX, p.cx + p.r); minY = Math.min(minY, p.cy - p.r); maxY = Math.max(maxY, p.cy + p.r); }
+    else if (k === 'r') {
+      // y flips: the SVG top edge (y) becomes the sketch's top (y + h)
+      const top = -(p.y * scale), hh = p.h * scale;
+      p.x *= scale; p.w *= scale; p.y = top - hh; p.h = hh;
+      delete p._rectRaw;
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x + p.w); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y + p.h);
+    } else {
+      p.x *= scale; p.y *= -scale;
+      if (p.cpOut) { p.cpOut.dx *= scale; p.cpOut.dy *= -scale; }
+      if (p.cpIn) { p.cpIn.dx *= scale; p.cpIn.dy *= -scale; }
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+    }
+  });
+  const ox = (minX + maxX) / 2, oy = (minY + maxY) / 2;
+  each((p, k) => { if (k === 'c') { p.cx -= ox; p.cy -= oy; } else { p.x -= ox; p.y -= oy; } });
+  // Into a sketch: the current one in 2D, else a fresh ground-plane sketch.
+  pushUndo();
+  if (doc.mode !== '2d' || !doc.sketch) setMode('2d');
+  const sk = doc.sketch;
+  const ids = [];
+  for (const e of ents) { e.id = sk.nextId++; sk.entities.push(e); ids.push(e.id); }
+  doc.multiSelectedSketch = ids;
+  doc.selection = { kind: 'sketch', id: ids[ids.length - 1] };
+  if (sketchEng) { sketchEng.render(); if (typeof fitSketchViewToBodies === 'function') try { fitSketchViewToBodies(); } catch (_) {} }
+  renderTree(); renderProps(); setDirty(true);
+  const w = maxX - minX, h = maxY - minY;
+  setStatus(`Imported ${ents.length} shape${ents.length === 1 ? '' : 's'} from ${name} (${fmtUL(w)} × ${fmtUL(h)}, read as ${unitNote})${skippedText ? ` — ${skippedText} text item${skippedText === 1 ? '' : 's'} skipped` : ''}`);
 }
 
 // Component picker — lists every exportable item with checkboxes so the user
@@ -21405,9 +21837,32 @@ function _sketchEntitiesToSVG(entities) {
     } else if (e.type === 'circle') {
       body += `<circle cx="${e.cx - minX + m}" cy="${maxY - e.cy + m}" r="${e.r}" fill="none" stroke="black" stroke-width="0.2"/>\n`;
     } else if (e.type === 'polyline') {
-      const pts = e.points.map(p => `${p.x - minX + m},${maxY - p.y + m}`).join(' ');
-      const tag = e.closed ? 'polygon' : 'polyline';
-      body += `<${tag} points="${pts}" fill="none" stroke="black" stroke-width="0.2"/>\n`;
+      const P = e.points;
+      const curved = P.some(p => p.cpOut || p.cpIn);
+      if (!curved) {
+        const pts = P.map(p => `${p.x - minX + m},${maxY - p.y + m}`).join(' ');
+        const tag = e.closed ? 'polygon' : 'polyline';
+        body += `<${tag} points="${pts}" fill="none" stroke="black" stroke-width="0.2"/>\n`;
+      } else {
+        // Curved shapes (trimmed circles, fillets, ellipses) go out as a
+        // <path> with real cubic Beziers — the old polyline export cut
+        // every arc down to a chord between its anchors (2026-10-05).
+        const X = (x) => +(x - minX + m).toFixed(4), Y = (y) => +(maxY - y + m).toFixed(4);
+        const segs = e.closed ? P.length : P.length - 1;
+        let d = `M${X(P[0].x)},${Y(P[0].y)}`;
+        for (let i = 0; i < segs; i++) {
+          const a = P[i], b = P[(i + 1) % P.length];
+          if (a.cpOut || b.cpIn) {
+            const c1 = a.cpOut ? { x: a.x + a.cpOut.dx, y: a.y + a.cpOut.dy } : a;
+            const c2 = b.cpIn ? { x: b.x + b.cpIn.dx, y: b.y + b.cpIn.dy } : b;
+            d += ` C${X(c1.x)},${Y(c1.y)} ${X(c2.x)},${Y(c2.y)} ${X(b.x)},${Y(b.y)}`;
+          } else {
+            d += ` L${X(b.x)},${Y(b.y)}`;
+          }
+        }
+        if (e.closed) d += ' Z';
+        body += `<path d="${d}" fill="none" stroke="black" stroke-width="0.2"/>\n`;
+      }
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -25558,6 +26013,12 @@ function init() {
   // Export — single button, popup dialog with format choice. Filename
   // input lives in the topbar so STEM Builder can use it as the saved name.
   $('export-btn').onclick = openExportDialog;
+  $('import-btn').onclick = openImportDialog;
+  $('import-file').addEventListener('change', (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    ev.target.value = ''; // same file again next time still fires 'change'
+    if (f) importFile(f);
+  });
   $('new-sketch-btn').onclick = openNewSketchDialog;
   initUserMenu();
 
