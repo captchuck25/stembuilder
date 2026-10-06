@@ -111,6 +111,32 @@ async function saveDesign(p: SavePayload): Promise<{ ok: true; id: string | null
   return { ok: true, id };
 }
 
+// Teacher edit of a shared design → saved into the STUDENT's account as a
+// separate version (see /api/teacher/stem-sketch-shares/[id]/design).
+async function saveTeacherVersion(shareId: string, p: SavePayload): Promise<{ ok: true; versionName: string } | { ok: false; message: string }> {
+  const body = p.docJsonGz
+    ? { docJsonGz: p.docJsonGz, units: p.units, thumbnail: p.thumbnail }
+    : { docJson: p.docJson, units: p.units, thumbnail: p.thumbnail };
+  const payloadJson = JSON.stringify(body);
+  const payloadKB = Math.round(payloadJson.length / 1024);
+  let res: Response;
+  try {
+    res = await fetch(`/api/teacher/stem-sketch-shares/${encodeURIComponent(shareId)}/design`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payloadJson,
+    });
+  } catch (netErr) {
+    return { ok: false, message: `network error (${(netErr as Error).message}) at ${payloadKB} KB payload` };
+  }
+  let txt = "";
+  try { txt = await res.text(); } catch { /* unreadable body */ }
+  if (!res.ok) return { ok: false, message: friendlyHttpError(res, txt, payloadKB) };
+  let versionName = "your version";
+  try { versionName = (JSON.parse(txt) as { versionName?: string }).versionName || versionName; } catch { /* keep default */ }
+  return { ok: true, versionName };
+}
+
 export default function StemSketchClient() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
@@ -126,6 +152,9 @@ export default function StemSketchClient() {
   // Student pressed Share in the tool: the design is saved, then this holds
   // the saved id while the class picker is open.
   const [sharePrompt, setSharePrompt] = useState<{ designId: string; name: string } | null>(null);
+  // Teacher saved while viewing a shared design: the version name their edit
+  // landed under in the student's My Work (shown in the banner).
+  const [teacherSaveNote, setTeacherSaveNote] = useState<string | null>(null);
   // Student (or teacher trying it) launched from an assignment card.
   const assignmentId = searchParams.get("assignment");
   // Teacher previewing a challenge BEFORE assigning it (from the picker).
@@ -296,13 +325,13 @@ export default function StemSketchClient() {
 
   // Warn before leaving the page when there are unsaved changes — but never in demo mode
   useEffect(() => {
-    if (isDemoMode) return;
+    if (isDemoMode && !shareId) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (dirtyRef.current) { e.preventDefault(); e.returnValue = ""; }
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [isDemoMode]);
+  }, [isDemoMode, shareId]);
 
   useEffect(() => {
     const handler = async (e: MessageEvent) => {
@@ -310,8 +339,9 @@ export default function StemSketchClient() {
       if (!type?.startsWith("STEMSKETCH_")) return;
 
       if (type === "STEMSKETCH_DIRTY") {
-        // Ignore dirty signals in demo mode — nothing can persist anyway
-        if (isDemoMode) return;
+        // Ignore dirty signals in demo mode — nothing can persist there
+        // (except the shared-design viewer, where the teacher may save).
+        if (isDemoMode && !shareId) return;
         dirtyRef.current = (e.data as { dirty: boolean }).dirty;
 
       } else if (type === "STEMSKETCH_REQUEST_USER") {
@@ -407,6 +437,19 @@ export default function StemSketchClient() {
       } else if (type === "STEMSKETCH_SAVE" || type === "STEMSKETCH_SHARE") {
         const sharing = type === "STEMSKETCH_SHARE";
         if (isDemoMode) {
+          if (shareId && !sharing && session?.user?.id) {
+            // Teacher editing a shared design: the save goes back to the
+            // student as "<name> (<teacher>'s version)" beside their original.
+            const result = await saveTeacherVersion(shareId, e.data as SavePayload);
+            if (!result.ok) {
+              postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: result.message });
+              return;
+            }
+            dirtyRef.current = false;
+            setTeacherSaveNote(result.versionName);
+            postToSketch({ type: "STEMSKETCH_SAVE_OK" });
+            return;
+          }
           postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: "Demo view — saves are disabled while viewing a student's work." });
           return;
         }
@@ -475,7 +518,7 @@ export default function StemSketchClient() {
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [session, postToSketch, postUser, postAssignment, postTutorialState, isDemoMode, demoDesign, assignmentId, assignment]);
+  }, [session, postToSketch, postUser, postAssignment, postTutorialState, isDemoMode, shareId, demoDesign, assignmentId, assignment]);
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui,sans-serif" }}>
@@ -521,7 +564,12 @@ export default function StemSketchClient() {
           gap: 16, flexWrap: "wrap", flexShrink: 0,
         }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>
-            👁 Viewing {viewingStudent?.name || "student"}&apos;s design — changes won&apos;t be saved
+            👁 Viewing {viewingStudent?.name || "student"}&apos;s design
+            {shareId
+              ? (teacherSaveNote
+                ? ` — ✓ saved to their My Work as “${teacherSaveNote}”`
+                : ` — Save ☁ gives ${viewingStudent?.name || "them"} your edited version next to their original`)
+              : " — changes won't be saved"}
             {demoError && (
               <span style={{ marginLeft: 12, padding: "2px 10px", borderRadius: 999,
                 background: "#fde68a", color: "#7c2d12", fontSize: 12, fontWeight: 800 }}>
@@ -542,6 +590,7 @@ export default function StemSketchClient() {
       )}
 
       {shareId && <ShareFeedbackPanel shareId={shareId} />}
+
 
       {sharePrompt && (
         <SharePrompt
