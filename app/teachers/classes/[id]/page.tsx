@@ -246,8 +246,11 @@ export default function ClassDetailPage() {
   const [loadingStemSketch, setLoadingStemSketch] = useState(false);
   const stemSketchLoadedRef = useRef(false);
   // Designs students shared with this class for feedback (migration 0034).
-  interface StemSketchShareRow { id: string; designId: string; designName: string; designDeleted: boolean; units: string; thumbnail: string | null; designUpdatedAt: string; studentId: string; studentName: string; note: string | null; sharedAt: string; updatedAt: string; feedbackCount: number; lastFeedbackAt: string | null; }
-  const [stemSketchShares, setStemSketchShares] = useState<StemSketchShareRow[]>([]);
+  interface StemSketchShareRow { id: string; designId: string; designName: string; designDeleted: boolean; units: string; thumbnail: string | null; designUpdatedAt: string; studentId: string; studentName: string; note: string | null; sharedAt: string; updatedAt: string; feedbackCount: number; lastFeedbackAt: string | null; repliedByMe: boolean; lastReplyBy: string | null; archivedAt: string | null; }
+  const [stemSketchShares, setStemSketchShares] = useState<StemSketchShareRow[]>([]);      // inbox
+  const [stemSketchArchived, setStemSketchArchived] = useState<StemSketchShareRow[]>([]);  // handled
+  const [showSketchArchive, setShowSketchArchive] = useState(false);
+  const [archivingShareId, setArchivingShareId] = useState<string | null>(null);
   // Roster view of the designs gallery: which students' rows are expanded.
   const [openSketchStudents, setOpenSketchStudents] = useState<Set<string>>(new Set());
 
@@ -431,10 +434,42 @@ export default function ClassDetailPage() {
       .then(setStemSketchDesigns)
       .finally(() => setLoadingStemSketch(false));
     fetch(`/api/teacher/stem-sketch-shares?classId=${classId}`)
-      .then(r => r.ok ? r.json() : [])
-      .then(setStemSketchShares)
+      .then(r => r.ok ? r.json() : { active: [], archived: [] })
+      .then(d => { setStemSketchShares(d.active ?? []); setStemSketchArchived(d.archived ?? []); })
       .catch(() => {});
   }, [selectedTool, cls]);
+
+  // Archive (or restore) a shared design in this class's inbox. Optimistic:
+  // the card moves immediately and is put back if the request fails.
+  async function setShareArchived(share: StemSketchShareRow, archived: boolean) {
+    setArchivingShareId(share.id);
+    const moved = { ...share, archivedAt: archived ? new Date().toISOString() : null };
+    if (archived) {
+      setStemSketchShares(prev => prev.filter(s => s.id !== share.id));
+      setStemSketchArchived(prev => [moved, ...prev]);
+    } else {
+      setStemSketchArchived(prev => prev.filter(s => s.id !== share.id));
+      setStemSketchShares(prev => [moved, ...prev].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    }
+    try {
+      const res = await fetch(`/api/teacher/stem-sketch-shares/${share.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `HTTP ${res.status}`);
+    } catch (err) {
+      // Put it back where it was.
+      if (archived) {
+        setStemSketchArchived(prev => prev.filter(s => s.id !== share.id));
+        setStemSketchShares(prev => [share, ...prev].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+      } else {
+        setStemSketchShares(prev => prev.filter(s => s.id !== share.id));
+        setStemSketchArchived(prev => [share, ...prev]);
+      }
+      window.alert(`Could not ${archived ? "archive" : "restore"}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setArchivingShareId(null);
+    }
+  }
 
   async function loadCoTeachers() {
     const res = await fetch(`/api/teacher/classes/${classId}/teachers`);
@@ -3559,18 +3594,67 @@ export default function ClassDetailPage() {
             </div>
           )}
 
-          {selectedTool === "stem-sketch" && stemSketchShares.length > 0 && (
+          {selectedTool === "stem-sketch" && (stemSketchShares.length > 0 || stemSketchArchived.length > 0) && (() => {
+            const needsReply = stemSketchShares.filter(s => s.feedbackCount === 0).length;
+            const replied = stemSketchShares.filter(s => s.feedbackCount > 0);
+            const list = showSketchArchive ? stemSketchArchived : stemSketchShares;
+            const statusChip = (s: StemSketchShareRow) => {
+              if (s.feedbackCount === 0) return { text: "Needs reply", bg: "#fff7ed", fg: "#c2410c", border: "#fdba74" };
+              if (s.repliedByMe) return { text: "✓ You replied", bg: "#f0fdf4", fg: "#15803d", border: "#86efac" };
+              return { text: `✓ ${s.lastReplyBy ?? "A co-teacher"} replied`, bg: "#f0fdf4", fg: "#15803d", border: "#86efac" };
+            };
+            return (
             <div style={{ ...CARD, padding: "26px 28px", marginBottom: 24 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#d97706", marginBottom: 6 }}>💬 Shared with you</h2>
-              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                Designs students shared with this class for feedback. Open one to see their note and reply — they read your
-                feedback in My Work.
-              </p>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <h2 style={{ fontSize: 18, fontWeight: 900, color: "#d97706", marginBottom: 6 }}>
+                    💬 Shared with you
+                    {!showSketchArchive && needsReply > 0 && (
+                      <span style={{ marginLeft: 10, fontSize: 12, fontWeight: 800, color: "#c2410c", background: "#fff7ed",
+                        border: "2px solid #fdba74", borderRadius: 999, padding: "2px 10px", verticalAlign: "middle" }}>
+                        {needsReply} need{needsReply === 1 ? "s" : ""} a reply
+                      </span>
+                    )}
+                  </h2>
+                  <p style={{ fontSize: 13, color: "#666", marginBottom: 16, maxWidth: 720 }}>
+                    Your inbox for student work. When a student presses <strong>Share</strong> in STEM Sketch, their design lands
+                    here with their note. Open it to leave feedback or save an edited version back to them, then
+                    <strong> Archive</strong> it to clear it off this list — students keep their design and your notes either way.
+                  </p>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flexShrink: 0 }}>
+                  {!showSketchArchive && replied.length >= 2 && (
+                    <button onClick={() => replied.forEach(s => setShareArchived(s, true))}
+                      style={{ padding: "6px 14px", borderRadius: 999, border: "2px solid #fde68a", background: "#fff",
+                        color: "#92400e", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+                      Archive all replied ({replied.length})
+                    </button>
+                  )}
+                  <button onClick={() => setShowSketchArchive(v => !v)}
+                    style={{ padding: "6px 14px", borderRadius: 999, border: "2px solid #e5e7eb",
+                      background: showSketchArchive ? "#f3f4f6" : "#fff", color: "#374151", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+                    {showSketchArchive ? "← Back to inbox" : `Archived (${stemSketchArchived.length})`}
+                  </button>
+                </div>
+              </div>
+
+              {list.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "28px 0 12px", color: "#888", fontSize: 14 }}>
+                  {showSketchArchive
+                    ? "Nothing archived yet."
+                    : <>🎉 Inbox empty — every shared design has been handled.
+                        {stemSketchArchived.length > 0 && <span style={{ color: "#aaa" }}> ({stemSketchArchived.length} archived)</span>}</>}
+                </div>
+              ) : (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-                {stemSketchShares.map(s => (
-                  <div key={s.id} style={{ borderRadius: 12, border: "2px solid #fde68a",
-                    background: "#fffbeb", overflow: "hidden", width: 220, flexShrink: 0, display: "flex", flexDirection: "column" }}>
-                    <div style={{ width: "100%", height: 120, background: "#fef3c7", overflow: "hidden",
+                {list.map(s => {
+                  const chip = statusChip(s);
+                  const busy = archivingShareId === s.id;
+                  return (
+                  <div key={s.id} style={{ borderRadius: 12, border: `2px solid ${showSketchArchive ? "#e5e7eb" : s.feedbackCount === 0 ? "#fdba74" : "#fde68a"}`,
+                    background: showSketchArchive ? "#f9fafb" : "#fffbeb", overflow: "hidden", width: 220, flexShrink: 0,
+                    display: "flex", flexDirection: "column", opacity: busy ? 0.5 : 1 }}>
+                    <div style={{ width: "100%", height: 120, background: "#fef3c7", overflow: "hidden", position: "relative",
                       display: "flex", alignItems: "center", justifyContent: "center" }}>
                       {s.thumbnail ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -3579,9 +3663,13 @@ export default function ClassDetailPage() {
                       ) : (
                         <span style={{ fontSize: 32, opacity: 0.3 }}>✏️</span>
                       )}
+                      <span style={{ position: "absolute", top: 8, left: 8, fontSize: 11, fontWeight: 800, color: chip.fg,
+                        background: chip.bg, border: `2px solid ${chip.border}`, borderRadius: 999, padding: "2px 9px" }}>
+                        {chip.text}
+                      </span>
                     </div>
                     <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
+                      <div title={s.designName} style={{ fontWeight: 700, fontSize: 13, color: "#111",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.designName}</div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#b45309", marginTop: 2 }}>{s.studentName}</div>
                       {s.note && (
@@ -3592,36 +3680,48 @@ export default function ClassDetailPage() {
                       )}
                       <div style={{ fontSize: 11, color: "#888", marginTop: 6, marginBottom: 8 }}>
                         Shared {new Date(s.sharedAt).toLocaleDateString()}
-                        {s.feedbackCount > 0 ? ` · ${s.feedbackCount} note${s.feedbackCount === 1 ? "" : "s"}` : " · no feedback yet"}
+                        {s.feedbackCount > 0 ? ` · ${s.feedbackCount} note${s.feedbackCount === 1 ? "" : "s"}` : ""}
+                        {s.archivedAt ? ` · archived ${new Date(s.archivedAt).toLocaleDateString()}` : ""}
                       </div>
-                      {s.designDeleted ? (
-                        <div style={{ fontSize: 12, color: "#9ca3af", fontWeight: 700, textAlign: "center", marginTop: "auto" }}>
-                          Design was deleted
-                        </div>
-                      ) : (
-                        <Link
-                          href={`/tools/stem-sketch?asStudent=${s.studentId}&id=${s.designId}&shareId=${s.id}`}
-                          target="_blank"
-                          title={`Open ${s.studentName}'s design (read-only) and leave feedback`}
-                          style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800, marginTop: "auto",
-                            color: "#92400e", textDecoration: "none",
-                            padding: "5px 10px", borderRadius: 999,
-                            border: "2px solid #d97706", background: "#fff" }}>
-                          {s.feedbackCount > 0 ? "👁 Open · reply" : "👁 Open · give feedback"}
-                        </Link>
-                      )}
+                      <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+                        {s.designDeleted ? (
+                          <div style={{ flex: 1, fontSize: 12, color: "#9ca3af", fontWeight: 700, textAlign: "center", padding: "5px 0" }}>
+                            Design was deleted
+                          </div>
+                        ) : (
+                          <Link
+                            href={`/tools/stem-sketch?asStudent=${s.studentId}&id=${s.designId}&shareId=${s.id}`}
+                            target="_blank"
+                            title={`Open ${s.studentName}'s design and leave feedback`}
+                            style={{ flex: 1, display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
+                              color: "#92400e", textDecoration: "none", padding: "5px 10px", borderRadius: 999,
+                              border: "2px solid #d97706", background: "#fff", whiteSpace: "nowrap" }}>
+                            {s.feedbackCount > 0 ? "👁 Open · reply" : "👁 Open · give feedback"}
+                          </Link>
+                        )}
+                        <button onClick={() => setShareArchived(s, !showSketchArchive)} disabled={busy}
+                          title={showSketchArchive ? "Move back to the inbox" : "Done with this one — move it to Archived"}
+                          style={{ padding: "5px 10px", borderRadius: 999, border: "2px solid #e5e7eb", background: "#fff",
+                            color: "#6b7280", fontWeight: 800, fontSize: 12, cursor: busy ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}>
+                          {showSketchArchive ? "↩ Restore" : "Archive"}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
+              )}
             </div>
-          )}
+            );
+          })()}
 
           {selectedTool === "stem-sketch" && (
             <div style={{ ...CARD, padding: "26px 28px" }}>
               <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0891b2", marginBottom: 6 }}>STEM Sketch Designs</h2>
-              <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
-                One row per student, A–Z by last name, with their most recent design. Click a name to see all of their work.
+              <p style={{ fontSize: 13, color: "#666", marginBottom: 16, maxWidth: 720 }}>
+                Everything students in this class have saved in STEM Sketch — shared or not. One row per student (A–Z by last
+                name) with their latest design; click a row to open all of their work.
               </p>
               {loadingStemSketch ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
