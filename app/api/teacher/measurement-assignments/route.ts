@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { isMeasTool, normalizeAssignmentConfig } from '@/app/tools/measurement-lab/constants'
+import { teacherCanAccessAssignment, teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/teacher/measurement-assignments?classId=X
 export async function GET(req: NextRequest) {
@@ -14,8 +15,7 @@ export async function GET(req: NextRequest) {
   if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: assignments } = await db
@@ -53,8 +53,7 @@ export async function POST(req: NextRequest) {
   const cfg = normalizeAssignmentConfig(config)
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data, error } = await db
@@ -88,7 +87,7 @@ export async function PATCH(req: NextRequest) {
 
   const db = adminDb()
   const { data: a } = await db.from('measurement_assignments').select('teacher_id, config').eq('id', id).single()
-  if (!a || a.teacher_id !== session.user.id)
+  if (!a || !(await teacherCanAccessAssignment(db, session.user.id, 'measurement_assignments', id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const patch: Record<string, unknown> = {}
@@ -117,7 +116,7 @@ export async function DELETE(req: NextRequest) {
 
   const db = adminDb()
   const { data: a } = await db.from('measurement_assignments').select('teacher_id').eq('id', id).single()
-  if (!a || a.teacher_id !== session.user.id)
+  if (!a || !(await teacherCanAccessAssignment(db, session.user.id, 'measurement_assignments', id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { error } = await db.from('measurement_assignments').delete().eq('id', id)

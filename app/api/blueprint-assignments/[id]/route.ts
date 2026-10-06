@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/blueprint-assignments/<id>
 // Fetches one Blueprint Lab assignment for the tool (teacher preview now;
@@ -21,7 +22,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!a) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (a.teacher_id !== session.user.id) {
+  if (!(await teacherCanAccessClass(db, session.user.id, a.class_id))) {
     const { data: enrollment } = await db
       .from('enrollments')
       .select('student_id')

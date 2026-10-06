@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 // Teacher side of the Blueprint submission loop.
 //
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     .select('id, teacher_id')
     .eq('id', assignmentId)
     .maybeSingle()
-  if (!a || a.teacher_id !== who.userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!a || !(await teacherCanAccessAssignment(db, who.userId, 'blueprint_assignments', assignmentId))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: subs } = await db
     .from('blueprint_submissions')
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
     .select('teacher_id')
     .eq('id', sub.assignment_id)
     .single()
-  if (!a || a.teacher_id !== who.userId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!a || !(await teacherCanAccessAssignment(db, who.userId, 'blueprint_assignments', sub.assignment_id))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (action === 'return') {

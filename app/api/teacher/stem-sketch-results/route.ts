@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { stemSketchAssignmentsAllowed } from '@/lib/stem-sketch.server'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 // GET /api/teacher/stem-sketch-results?assignmentId=X
 // Per-student results for one assignment: passed (any passing submission),
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
     .select('teacher_id')
     .eq('id', assignmentId)
     .single()
-  if (!a || a.teacher_id !== session.user.id)
+  if (!a || !(await teacherCanAccessAssignment(db, session.user.id, 'stem_sketch_assignments', assignmentId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: subs } = await db

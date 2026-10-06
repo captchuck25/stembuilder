@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { stemSketchAssignmentsAllowed } from '@/lib/stem-sketch.server'
 import { isTrackableTutorialId } from '@/lib/stem-sketch/tutorials'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // Teacher surface for STEM Sketch tutorial assignments: one assigned SET per
 // class (stem_sketch_tutorial_assignments, 0025) plus a per-student
@@ -20,8 +21,7 @@ async function guard(classId: string | null) {
   if (!classId) return { err: NextResponse.json({ error: 'Missing classId' }, { status: 400 }) }
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return { err: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
   return { db, userId: session.user.id }
 }

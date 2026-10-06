@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { generateTempPassword } from '@/lib/reset.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 const USERNAME_RE = /^[a-z0-9._-]{3,20}$/
 
@@ -37,15 +38,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     )
   }
 
-  // The teacher must own this class; the RPC re-checks the class is live.
-  const { data: cls } = await db
-    .from('classes')
-    .select('id')
-    .eq('id', classId)
-    .eq('teacher_id', session.user.id)
-    .is('deleted_at', null)
-    .maybeSingle()
-  if (!cls) return NextResponse.json({ error: 'Class not found' }, { status: 404 })
+  // The teacher must own or co-teach this class; the RPC re-checks the class is live.
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
+    return NextResponse.json({ error: 'Class not found' }, { status: 404 })
 
   const { name, username } = await req.json()
   if (!name?.trim() || !username) {

@@ -21,7 +21,8 @@ const CARD: React.CSSProperties = {
 export default function TeacherDashboard() {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const [classes, setClasses] = useState<Class[]>([]);
+  // role/ownerName come from /api/teacher/classes (co-taught classes are listed too).
+  const [classes, setClasses] = useState<(Class & { role?: "owner" | "co-teacher"; ownerName?: string | null })[]>([]);
   const [studentCounts, setStudentCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -513,11 +514,20 @@ export default function TeacherDashboard() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 24 }}>
               {classes.map(cls => (
                 <div key={cls.id} style={{ ...CARD, padding: "24px 26px" }}>
-                  <div style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 4 }}>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#111", marginBottom: 4, display: "flex",
+                    alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                     {cls.name}
+                    {cls.role === "co-teacher" && (
+                      <span title={`You co-teach this class with ${cls.ownerName || "its owner"}`}
+                        style={{ fontSize: 11, fontWeight: 800, color: "#6d28d9", background: "#f5f3ff",
+                          border: "2px solid #ddd6fe", borderRadius: 999, padding: "2px 9px" }}>
+                        Co-teaching
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>
                     {studentCounts[cls.id] ?? 0} student{studentCounts[cls.id] !== 1 ? "s" : ""} enrolled
+                    {cls.role === "co-teacher" && cls.ownerName ? ` · ${cls.ownerName}'s class` : ""}
                   </div>
 
                   {/* Join code */}

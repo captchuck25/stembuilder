@@ -4,6 +4,7 @@ import { auth } from '@/auth';
 import { adminDb } from '@/lib/db.server';
 import { LEVELS } from '@/app/tools/code-lab/python/levels';
 import { UNITS } from '@/app/tools/block-lab/units';
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 export async function GET(
   req: NextRequest,
@@ -19,9 +20,7 @@ export async function GET(
 
   const db = adminDb();
 
-  const { data: classData } = await db
-    .from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single();
-  if (!classData || classData.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: enrollData } = await db

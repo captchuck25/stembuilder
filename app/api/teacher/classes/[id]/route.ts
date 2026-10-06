@@ -4,11 +4,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { softDeleteClass, softDeleteEnrollment } from '@/lib/retention'
 import { LEVELS } from '@/app/tools/code-lab/python/levels'
-
-async function verifyTeacherOwnsClass(db: ReturnType<typeof import('@/lib/db.server').adminDb>, classId: string, teacherId: string) {
-  const { data } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  return data?.teacher_id === teacherId
-}
+import { classRoleFor, teacherCanAccessClass, teacherOwnsClass } from '@/lib/class-access.server'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth()
@@ -17,6 +13,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const { id: classId } = await params
   const db = adminDb()
+
+  const role = await classRoleFor(db, session.user.id, classId)
+  if (!role) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const [{ data: classData }, { data: assignData }, { data: enrollData }, { data: lockData }] = await Promise.all([
     db.from('classes').select('*').eq('id', classId).is('deleted_at', null).single(),
@@ -56,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     )
   }
 
-  return NextResponse.json({ class: classData, assignments: assignData ?? [], locks: lockData ?? [], students, studentIds })
+  return NextResponse.json({ class: classData, role, assignments: assignData ?? [], locks: lockData ?? [], students, studentIds })
 }
 
 // PATCH /api/teacher/classes/[id]  { name } → rename class
@@ -67,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { id: classId } = await params
   const db = adminDb()
-  if (!(await verifyTeacherOwnsClass(db, classId, session.user.id)))
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { name, leaderboardEnabled } = await req.json()
@@ -98,10 +97,14 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   const { id: classId } = await params
   const db = adminDb()
-  if (!(await verifyTeacherOwnsClass(db, classId, session.user.id)))
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
   const studentId = new URL(req.url).searchParams.get('studentId')
+
+  // Any teacher on the class may drop a student; only the owner deletes the class.
+  const allowed = studentId
+    ? await teacherCanAccessClass(db, session.user.id, classId)
+    : await teacherOwnsClass(db, session.user.id, classId)
+  if (!allowed)
+    return NextResponse.json({ error: studentId ? 'Forbidden' : 'Only the class owner can delete a class.' }, { status: 403 })
 
   try {
     if (studentId) {

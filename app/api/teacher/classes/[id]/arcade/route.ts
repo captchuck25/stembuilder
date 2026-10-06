@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { adminDb } from '@/lib/db.server';
 import { ARCADE_MISSIONS, ARCADE_QUIZ } from '@/app/tools/arcade-lab/unit';
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/teacher/classes/:id/arcade
 // Per-student Arcade Lab progress (missions / quiz / certification / free build)
@@ -18,9 +19,7 @@ export async function GET(
   const { id: classId } = await params;
   const db = adminDb();
 
-  const { data: classData } = await db
-    .from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single();
-  if (!classData || classData.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data: enrollData } = await db

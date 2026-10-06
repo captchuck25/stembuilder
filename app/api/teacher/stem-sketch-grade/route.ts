@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { stemSketchAssignmentsAllowed } from '@/lib/stem-sketch.server'
 import { getChallenge } from '@/lib/stem-sketch/challenges'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 // POST /api/teacher/stem-sketch-grade
 // Body: { submissionId, scores: { [rubricRowId]: number } }
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
     .select('teacher_id, challenge_id')
     .eq('id', sub.assignment_id)
     .single()
-  if (!assignment || assignment.teacher_id !== session.user.id)
+  if (!assignment || !(await teacherCanAccessAssignment(db, session.user.id, 'stem_sketch_assignments', sub.assignment_id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const challenge = getChallenge(assignment.challenge_id)

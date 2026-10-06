@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { recordAssignmentCompletion } from '@/lib/assignmentRecords.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 import {
   computeAutoTiers, resolveAssignmentBrief, resolveGradingRubric, rubricForDeliverables,
 } from '@/app/tools/blueprint-lab/engine/gradingRubric'
@@ -32,9 +33,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .maybeSingle()
   if (!a) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  // Must be enrolled in the class (the owning teacher may also submit — that
+  // Must be enrolled in the class (the class's teachers may also submit — that
   // covers teacher-preview test submissions).
-  if (a.teacher_id !== session.user.id) {
+  if (!(await teacherCanAccessClass(db, session.user.id, a.class_id))) {
     const { data: enrollment } = await db
       .from('enrollments')
       .select('student_id')

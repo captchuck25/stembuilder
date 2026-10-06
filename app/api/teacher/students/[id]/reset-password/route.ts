@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { generateTempPassword } from '@/lib/reset.server'
+import { teacherClassIds } from '@/lib/class-access.server'
 
 // POST /api/teacher/students/[id]/reset-password
 // A teacher resets one of their own students' passwords to a fresh temporary
@@ -18,9 +19,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const { id: studentId } = await params
   const db = adminDb()
 
-  // The student must be enrolled in a class this teacher owns.
-  const { data: teacherClasses } = await db.from('classes').select('id').eq('teacher_id', session.user.id).is('deleted_at', null)
-  const classIds = (teacherClasses ?? []).map((c: { id: string }) => c.id)
+  // The student must be enrolled in a class this teacher owns or co-teaches.
+  const classIds = await teacherClassIds(db, session.user.id)
   if (!classIds.length) return NextResponse.json({ error: 'That student is not in one of your classes.' }, { status: 403 })
 
   const { data: enrollment } = await db

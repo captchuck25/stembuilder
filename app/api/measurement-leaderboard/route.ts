@@ -3,6 +3,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { MEAS_TOOL_IDS } from '@/app/tools/measurement-lab/constants'
 import { formatLeaderboardName } from '@/app/tools/measurement-lab/name-format'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/measurement-leaderboard?classId=X&scope=class|combined
 // Top-10 sprint leaderboards, per instrument plus an "overall" (sum of each
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
     .single()
   if (!cls) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const isOwningTeacher = cls.teacher_id === session.user.id
+  const isOwningTeacher = await teacherCanAccessClass(db, session.user.id, classId)
   if (!isOwningTeacher) {
     const { data: enrollment } = await db
       .from('enrollments')

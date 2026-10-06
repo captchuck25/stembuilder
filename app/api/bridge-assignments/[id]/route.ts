@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/bridge-assignments/[id]
 // Returns the assignment config so the bridge page can lock span/load/maxCost
@@ -23,14 +24,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   //   (a) a student enrolled in the class, or
   //   (b) the teacher who owns the class (needed for the teacher demo-view flow
   //       where a teacher loads a student's bridge for projection).
-  const [{ data: enrollment }, { data: classRow }] = await Promise.all([
+  const [{ data: enrollment }, isOwningTeacher] = await Promise.all([
     db.from('enrollments').select('id')
       .eq('class_id', data.class_id).eq('student_id', session.user.id).is('deleted_at', null).maybeSingle(),
-    db.from('classes').select('teacher_id').eq('id', data.class_id).is('deleted_at', null).maybeSingle(),
+    teacherCanAccessClass(db, session.user.id, data.class_id),
   ])
 
   const isEnrolledStudent = !!enrollment
-  const isOwningTeacher = classRow?.teacher_id === session.user.id
   if (!isEnrolledStudent && !isOwningTeacher) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

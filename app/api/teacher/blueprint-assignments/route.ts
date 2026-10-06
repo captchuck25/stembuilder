@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessAssignment, teacherCanAccessClass } from '@/lib/class-access.server'
 
 // Teacher CRUD for Blueprint Lab assignments (briefs + edited rubric + shell
 // settings). Requires migration 0023 (blueprint_assignments).
@@ -19,17 +20,6 @@ async function requireTeacher() {
   return { userId: session.user.id }
 }
 
-async function ownsClass(db: ReturnType<typeof adminDb>, teacherId: string, classId: string) {
-  const { data } = await db
-    .from('classes')
-    .select('id')
-    .eq('id', classId)
-    .eq('teacher_id', teacherId)
-    .is('deleted_at', null)
-    .single()
-  return !!data
-}
-
 export async function GET(req: NextRequest) {
   const who = await requireTeacher()
   if ('error' in who) return who.error
@@ -38,7 +28,7 @@ export async function GET(req: NextRequest) {
   if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
 
   const db = adminDb()
-  if (!(await ownsClass(db, who.userId, classId)))
+  if (!(await teacherCanAccessClass(db, who.userId, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data } = await db
@@ -59,7 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing classId or briefId' }, { status: 400 })
 
   const db = adminDb()
-  if (!(await ownsClass(db, who.userId, String(body.classId))))
+  if (!(await teacherCanAccessClass(db, who.userId, String(body.classId))))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const shellMode = ['scratch', 'choice', 'fixed'].includes(body.shellMode) ? body.shellMode : 'scratch'
@@ -76,11 +66,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.id) {
+    if (!(await teacherCanAccessAssignment(db, who.userId, 'blueprint_assignments', String(body.id))))
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    // An edit keeps the original author; only the config columns change.
+    const { teacher_id: _author, ...patch } = row
+    void _author
     const { data, error } = await db
       .from('blueprint_assignments')
-      .update(row)
+      .update(patch)
       .eq('id', String(body.id))
-      .eq('teacher_id', who.userId)
       .select('id')
       .single()
     if (error || !data) return NextResponse.json({ error: error?.message ?? 'Not found' }, { status: 404 })
@@ -103,11 +97,14 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 
-  const { error } = await adminDb()
+  const db = adminDb()
+  if (!(await teacherCanAccessAssignment(db, who.userId, 'blueprint_assignments', id)))
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  const { error } = await db
     .from('blueprint_assignments')
     .delete()
     .eq('id', id)
-    .eq('teacher_id', who.userId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

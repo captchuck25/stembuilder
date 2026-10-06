@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherClassIds } from '@/lib/class-access.server'
 
 export interface PythonLeaderboardRow {
   rank: number
@@ -52,12 +53,7 @@ export async function GET() {
   const db = adminDb()
 
   // Restrict to students enrolled in this teacher's classes.
-  const { data: classes } = await db
-    .from('classes')
-    .select('id')
-    .eq('teacher_id', session.user.id)
-    .is('deleted_at', null)
-  const classIds = (classes ?? []).map((c: { id: string }) => c.id)
+  const classIds = await teacherClassIds(db, session.user.id)
   if (classIds.length === 0) return NextResponse.json({ byChallenge: [] })
 
   const { data: enrollments } = await db

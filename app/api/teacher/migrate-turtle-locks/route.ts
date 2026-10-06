@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { CHALLENGES as TURTLE_CHALLENGES } from '@/app/tools/code-lab/turtle/challenges'
+import { teacherClassIds } from '@/lib/class-access.server'
 
 // One-time migration: fix classes that were auto-seeded with the wrong turtle lock
 // indexing (level_idx in 0..(challengeCount-1) — only counted challenges, missed
@@ -24,13 +25,7 @@ export async function POST() {
   const fullCount = TURTLE_CHALLENGES.length
 
   // Find every class this teacher owns
-  const { data: classes } = await db
-    .from('classes')
-    .select('id')
-    .eq('teacher_id', session.user.id)
-    .is('deleted_at', null)
-
-  const classIds = (classes ?? []).map((c: { id: string }) => c.id)
+  const classIds = await teacherClassIds(db, session.user.id)
   if (classIds.length === 0) return NextResponse.json({ migrated: 0, skipped: 0 })
 
   // Pull all the data we need in three bulk queries

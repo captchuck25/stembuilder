@@ -1139,6 +1139,19 @@ function StemSketchTutorials() {
   );
 }
 
+// A design the student shared with a class, plus the teacher feedback on it
+// (GET /api/stem-sketch/shares).
+type StemSketchShare = {
+  id: string;
+  designId: string;
+  classId: string;
+  className: string;
+  note: string | null;
+  createdAt: string;
+  feedback: { id: number; body: string; authorName: string; createdAt: string; isNew: boolean }[];
+  unread: number;
+};
+
 function StemSketchSection({ designs, onDeleted }: {
   designs: StemSketchDesign[];
   onDeleted: (id: string) => void;
@@ -1146,6 +1159,40 @@ function StemSketchSection({ designs, onDeleted }: {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [shares, setShares] = useState<StemSketchShare[]>([]);
+  const [openShareId, setOpenShareId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/stem-sketch/shares")
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: StemSketchShare[]) => { if (!cancelled && Array.isArray(rows)) setShares(rows); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const sharesByDesign = new Map<string, StemSketchShare[]>();
+  for (const s of shares) {
+    const list = sharesByDesign.get(String(s.designId)) ?? [];
+    list.push(s);
+    sharesByDesign.set(String(s.designId), list);
+  }
+
+  function toggleThread(s: StemSketchShare) {
+    const opening = openShareId !== s.id;
+    setOpenShareId(opening ? s.id : null);
+    if (opening && s.unread > 0) {
+      // Mark read now; the badge clears locally and on the next load.
+      fetch(`/api/stem-sketch/shares/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seen: true }) }).catch(() => {});
+      setShares(prev => prev.map(x => x.id === s.id ? { ...x, unread: 0, feedback: x.feedback.map(f => ({ ...f, isNew: false })) } : x));
+    }
+  }
+
+  async function unshare(s: StemSketchShare) {
+    if (!window.confirm(`Stop sharing with ${s.className}? Your teacher's notes stay with you until you delete the design.`)) return;
+    const res = await fetch(`/api/stem-sketch/shares/${s.id}`, { method: "DELETE" });
+    if (res.ok) setShares(prev => prev.filter(x => x.id !== s.id));
+  }
 
   function requestDelete(id: string) {
     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
@@ -1168,8 +1215,18 @@ function StemSketchSection({ designs, onDeleted }: {
       {/* Tutorials live above the designs, in their own block — guided
           practice and personal projects stay visually separate. */}
       <StemSketchTutorials />
-      <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 10,
+      <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 4,
         borderTop: "2px solid #f0f0f0", paddingTop: 14 }}>✏️ My Designs</div>
+      {shares.length > 0 ? (
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 10 }}>
+          Designs you shared show the class and any teacher feedback — click the 💬 badge to read it.
+          {shares.some(s => s.unread > 0) && <strong style={{ color: "#b45309" }}> You have new feedback.</strong>}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
+          Tip: press <strong>Share</strong> in STEM Sketch to send a design to your class for teacher feedback.
+        </div>
+      )}
       {designs.length === 0 ? (
         <p style={{ fontSize: 14, color: "#888", margin: 0 }}>
           No saved designs yet. Open STEM Sketch and save your first design!
@@ -1177,8 +1234,9 @@ function StemSketchSection({ designs, onDeleted }: {
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
           {designs.map(d => (
-            <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e5e7eb", background: "#f9fafb",
-              overflow: "hidden", width: 200, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+            <div key={d.id} style={{ borderRadius: 12, border: `2px solid ${sharesByDesign.get(String(d.id))?.some(s => s.unread > 0) ? "#fcd34d" : "#e5e7eb"}`,
+              background: "#f9fafb", overflow: "hidden", width: openShareId && sharesByDesign.get(String(d.id))?.some(s => s.id === openShareId) ? 420 : 200,
+              flexShrink: 0, display: "flex", flexDirection: "column" }}>
               {/* Thumbnail — click or double-click to open the design in the editor */}
               <Link
                 href={`/tools/stem-sketch?id=${d.id}`}
@@ -1231,6 +1289,44 @@ function StemSketchSection({ designs, onDeleted }: {
                   </button>
                 )}
               </div>
+              {/* Share status + feedback thread */}
+              {(sharesByDesign.get(String(d.id)) ?? []).map(s => (
+                <div key={s.id} style={{ borderTop: "2px solid #f0f0f0", padding: "8px 12px 10px", background: "#fffbeb" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#92400e" }}>Shared · {s.className}</span>
+                    <button onClick={() => toggleThread(s)}
+                      title={s.feedback.length ? "Read your teacher's feedback" : "No feedback yet"}
+                      style={{ marginLeft: "auto", padding: "2px 9px", borderRadius: 999, fontSize: 11, fontWeight: 800, cursor: "pointer",
+                        border: `2px solid ${s.unread > 0 ? "#d97706" : "#e5e7eb"}`,
+                        background: s.unread > 0 ? "#d97706" : "#fff", color: s.unread > 0 ? "#fff" : "#6b7280" }}>
+                      💬 {s.feedback.length}{s.unread > 0 ? ` · ${s.unread} new` : ""}
+                    </button>
+                    <button onClick={() => unshare(s)} title="Stop sharing with this class"
+                      style={{ padding: "2px 7px", borderRadius: 999, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        border: "2px solid #e5e7eb", background: "#fff", color: "#9ca3af" }}>
+                      Unshare
+                    </button>
+                  </div>
+                  {openShareId === s.id && (
+                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {s.note && (
+                        <div style={{ fontSize: 12, color: "#555", fontStyle: "italic" }}>You wrote: “{s.note}”</div>
+                      )}
+                      {s.feedback.length === 0 ? (
+                        <div style={{ fontSize: 12, color: "#888" }}>No feedback yet — your teacher will see it in the class page.</div>
+                      ) : s.feedback.map(f => (
+                        <div key={f.id} style={{ background: "#fff", border: `2px solid ${f.isNew ? "#fcd34d" : "#e5e7eb"}`,
+                          borderRadius: 8, padding: "6px 10px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 800, color: "#0e7490" }}>
+                            {f.authorName} · {new Date(f.createdAt).toLocaleDateString()}
+                          </div>
+                          <div style={{ fontSize: 13, color: "#1f2937", whiteSpace: "pre-wrap" }}>{f.body}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           ))}
         </div>

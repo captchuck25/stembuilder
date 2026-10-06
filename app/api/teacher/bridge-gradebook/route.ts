@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/teacher/bridge-gradebook?classId=X
 // Returns all bridge submissions for all assignments in the class
@@ -15,15 +16,9 @@ export async function GET(req: NextRequest) {
 
   const db = adminDb()
 
-  // Verify teacher owns this class
-  const { data: cls } = await db
-    .from('classes')
-    .select('id')
-    .eq('id', classId)
-    .eq('teacher_id', session.user.id)
-    .is('deleted_at', null)
-    .single()
-  if (!cls) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // Owner or co-teacher of this class
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   // Get all bridge assignments for this class
   const { data: assignments } = await db

@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/teacher/tower-gradebook?classId=X
 // Returns all tower submissions (plus in-progress drafts) for all assignments in the class
@@ -15,14 +16,8 @@ export async function GET(req: NextRequest) {
 
   const db = adminDb()
 
-  const { data: cls } = await db
-    .from('classes')
-    .select('id')
-    .eq('id', classId)
-    .eq('teacher_id', session.user.id)
-    .is('deleted_at', null)
-    .single()
-  if (!cls) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: assignments } = await db
     .from('tower_assignments')

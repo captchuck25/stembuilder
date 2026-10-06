@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { normalizeQuizConfig, type QuizQuestion } from '@/lib/quiz'
 import { quizBuilderAllowed } from '@/lib/quiz.server'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 // GET /api/teacher/quiz-results?assignmentId=X
 // Per-student results (best %, attempts, last taken) + per-question miss
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
     .select('teacher_id, config, quizzes(questions)')
     .eq('id', assignmentId)
     .single()
-  if (!a || a.teacher_id !== session.user.id)
+  if (!a || !(await teacherCanAccessAssignment(db, session.user.id, 'quiz_assignments', assignmentId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const cfg = normalizeQuizConfig(a.config)

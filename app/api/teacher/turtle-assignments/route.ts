@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/teacher/turtle-assignments?classId=X
 // Returns: string[] of assigned challenge_ids
@@ -14,8 +15,7 @@ export async function GET(req: NextRequest) {
   if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data } = await db
@@ -36,8 +36,7 @@ export async function POST(req: NextRequest) {
   if (!classId || !challengeId) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { error } = await db
@@ -59,8 +58,7 @@ export async function DELETE(req: NextRequest) {
   if (!classId || !challengeId) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { error } = await db

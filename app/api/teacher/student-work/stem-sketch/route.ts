@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { teacherSharesClassWithStudent } from '@/lib/teacher-access'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 // GET /api/teacher/student-work/stem-sketch?designId=X
 // GET /api/teacher/student-work/stem-sketch?submissionId=X
@@ -75,7 +76,7 @@ async function getSubmission(teacherId: string, submissionId: string) {
     .select('teacher_id, title')
     .eq('id', sub.assignment_id)
     .single()
-  if (!assignment || assignment.teacher_id !== teacherId)
+  if (!assignment || !(await teacherCanAccessAssignment(db, teacherId, 'stem_sketch_assignments', sub.assignment_id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: profile } = await db

@@ -39,6 +39,78 @@ type AssignmentInfo = {
   };
 };
 
+// Payload the iframe posts for STEMSKETCH_SAVE and STEMSKETCH_SHARE.
+type SavePayload = {
+  name: string;
+  docJson?: object;
+  docJsonGz?: string;
+  units: string;
+  thumbnail: string | null;
+};
+
+type ShareFeedback = { id: number; body: string; authorName: string; mine?: boolean; createdAt: string };
+type ShareInfo = {
+  id: string;
+  className: string;
+  student: { id: string; name: string; email: string };
+  note: string | null;
+  sharedAt: string;
+  feedback: ShareFeedback[];
+};
+
+function friendlyHttpError(res: Response, txt: string, payloadKB: number): string {
+  let msg = `HTTP ${res.status}`;
+  try {
+    const parsed = JSON.parse(txt);
+    if (parsed?.error) msg = `${parsed.error} (HTTP ${res.status})`;
+    else msg = `${txt.slice(0, 160)} (HTTP ${res.status})`;
+  } catch {
+    msg = `${txt.slice(0, 160) || res.statusText} (HTTP ${res.status}, payload ${payloadKB} KB)`;
+  }
+  // Common-case hint when we're clearly over Vercel's default body limit.
+  if (res.status === 413 || (res.status === 0 && payloadKB > 4000)) {
+    msg = `Design too large for the server (${payloadKB} KB — Vercel limit ~4500 KB). Try fewer bevels / simpler geometry, or undo a recent CSG step.`;
+  }
+  return msg;
+}
+
+// POST the design to /api/stem-sketch/designs. Shared by Save and Share.
+async function saveDesign(p: SavePayload): Promise<{ ok: true; id: string | null } | { ok: false; message: string }> {
+  // The iframe ships either docJson (legacy / fallback) or docJsonGz
+  // (gzip + base64 — the modern path that keeps complex saves under
+  // the Vercel/Supabase body-size limits). Pass whichever it sent
+  // straight through; the API route accepts either.
+  const body = p.docJsonGz
+    ? { name: p.name, docJsonGz: p.docJsonGz, units: p.units, thumbnail: p.thumbnail }
+    : { name: p.name, docJson: p.docJson, units: p.units, thumbnail: p.thumbnail };
+  // Capture payload size up front so a 413 / 504 from Vercel
+  // doesn't look like a mysterious "unknown error" downstream.
+  const payloadJson = JSON.stringify(body);
+  const payloadKB = Math.round(payloadJson.length / 1024);
+  let res: Response;
+  try {
+    res = await fetch("/api/stem-sketch/designs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payloadJson,
+    });
+  } catch (netErr) {
+    // Network error before we got a status back (CORS, connection
+    // reset, request aborted because Vercel rejected it pre-handler
+    // for size). Surface it instead of silently dropping.
+    return { ok: false, message: `network error (${(netErr as Error).message}) at ${payloadKB} KB payload` };
+  }
+  // Read response as TEXT first — many failure modes (Vercel 413
+  // body-size, 504 timeout, gateway HTML pages, Supabase HTML
+  // error pages) return non-JSON.
+  let txt = "";
+  try { txt = await res.text(); } catch { /* response body wasn't readable */ }
+  if (!res.ok) return { ok: false, message: friendlyHttpError(res, txt, payloadKB) };
+  let id: string | null = null;
+  try { id = (JSON.parse(txt) as { id?: string | null }).id ?? null; } catch { /* older API shape */ }
+  return { ok: true, id };
+}
+
 export default function StemSketchClient() {
   const { data: session } = useSession();
   const searchParams = useSearchParams();
@@ -48,6 +120,12 @@ export default function StemSketchClient() {
   // assignment submission (?submissionId=) — same read-only demo mode.
   const demoSubmissionId = searchParams.get("submissionId");
   const isDemoMode = !!viewAsStudent && !!(demoDesignId || demoSubmissionId);
+  // Opened from a class's "Shared with you" list: the teacher also gets the
+  // student's note and a feedback thread beside the read-only view.
+  const shareId = isDemoMode ? searchParams.get("shareId") : null;
+  // Student pressed Share in the tool: the design is saved, then this holds
+  // the saved id while the class picker is open.
+  const [sharePrompt, setSharePrompt] = useState<{ designId: string; name: string } | null>(null);
   // Student (or teacher trying it) launched from an assignment card.
   const assignmentId = searchParams.get("assignment");
   // Teacher previewing a challenge BEFORE assigning it (from the picker).
@@ -326,77 +404,33 @@ export default function StemSketchClient() {
       } else if (type === "STEMSKETCH_SIGNOUT") {
         signOut({ callbackUrl: "/" });
 
-      } else if (type === "STEMSKETCH_SAVE") {
+      } else if (type === "STEMSKETCH_SAVE" || type === "STEMSKETCH_SHARE") {
+        const sharing = type === "STEMSKETCH_SHARE";
         if (isDemoMode) {
           postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: "Demo view — saves are disabled while viewing a student's work." });
           return;
         }
-        // The iframe ships either docJson (legacy / fallback) or docJsonGz
-        // (gzip + base64 — the modern path that keeps complex saves under
-        // the Vercel/Supabase body-size limits). Pass whichever it sent
-        // straight through; the API route accepts either.
-        const { name, docJson, docJsonGz, units, thumbnail } = e.data as {
-          name: string;
-          docJson?: object;
-          docJsonGz?: string;
-          units: string;
-          thumbnail: string | null;
-        };
         if (!session?.user?.id) {
+          // SAVE_ERR resets the cloud button's "saving" state; SHARE_ERR sets the final status line.
           postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: "Sign in to save" });
+          if (sharing) postToSketch({ type: "STEMSKETCH_SHARE_ERR", message: "Sign in to share" });
           return;
         }
-        const body = docJsonGz
-          ? { name, docJsonGz, units, thumbnail }
-          : { name, docJson, units, thumbnail };
-        // Capture payload size up front so a 413 / 504 from Vercel
-        // doesn't look like a mysterious "unknown error" downstream.
-        const payloadJson = JSON.stringify(body);
-        const payloadKB = Math.round(payloadJson.length / 1024);
-        let res: Response;
-        try {
-          res = await fetch("/api/stem-sketch/designs", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payloadJson,
-          });
-        } catch (netErr) {
-          // Network error before we got a status back (CORS, connection
-          // reset, request aborted because Vercel rejected it pre-handler
-          // for size). Surface it instead of silently dropping.
-          postToSketch({
-            type: "STEMSKETCH_SAVE_ERR",
-            message: `network error (${(netErr as Error).message}) at ${payloadKB} KB payload`,
-          });
+        const payload = e.data as SavePayload;
+        const result = await saveDesign(payload);
+        if (!result.ok) {
+          postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: result.message });
+          if (sharing) postToSketch({ type: "STEMSKETCH_SHARE_ERR", message: `could not save first — ${result.message}` });
           return;
         }
-        if (res.ok) {
-          dirtyRef.current = false;
-          postToSketch({ type: "STEMSKETCH_SAVE_OK" });
-        } else {
-          // Read response as TEXT first — many failure modes (Vercel 413
-          // body-size, 504 timeout, gateway HTML pages, Supabase HTML
-          // error pages) return non-JSON. Try to JSON-parse and fall
-          // back to a truncated text snippet so the iframe shows what
-          // actually came back.
-          let msg = `HTTP ${res.status}`;
-          try {
-            const txt = await res.text();
-            try {
-              const parsed = JSON.parse(txt);
-              if (parsed?.error) msg = `${parsed.error} (HTTP ${res.status})`;
-              else msg = `${txt.slice(0, 160)} (HTTP ${res.status})`;
-            } catch {
-              msg = `${txt.slice(0, 160) || res.statusText} (HTTP ${res.status}, payload ${payloadKB} KB)`;
-            }
-          } catch {
-            /* response body wasn't readable */
+        dirtyRef.current = false;
+        postToSketch({ type: "STEMSKETCH_SAVE_OK" });
+        if (sharing) {
+          if (!result.id) {
+            postToSketch({ type: "STEMSKETCH_SHARE_ERR", message: "saved, but the server did not return a design id" });
+            return;
           }
-          // Common-case hint when we're clearly over Vercel's default body limit.
-          if (res.status === 413 || (res.status === 0 && payloadKB > 4000)) {
-            msg = `Design too large for the server (${payloadKB} KB — Vercel limit ~4500 KB). Try fewer bevels / simpler geometry, or undo a recent CSG step.`;
-          }
-          postToSketch({ type: "STEMSKETCH_SAVE_ERR", message: msg });
+          setSharePrompt({ designId: result.id, name: payload.name });
         }
 
       } else if (type === "STEMSKETCH_REQUEST_LIST") {
@@ -507,6 +541,20 @@ export default function StemSketchClient() {
         </div>
       )}
 
+      {shareId && <ShareFeedbackPanel shareId={shareId} />}
+
+      {sharePrompt && (
+        <SharePrompt
+          designId={sharePrompt.designId}
+          designName={sharePrompt.name}
+          onDone={(ok, msg) => {
+            setSharePrompt(null);
+            if (ok === null) return; // cancelled — nothing to report
+            postToSketch(ok ? { type: "STEMSKETCH_SHARE_OK", className: msg } : { type: "STEMSKETCH_SHARE_ERR", message: msg });
+          }}
+        />
+      )}
+
       <iframe
         ref={iframeRef}
         src="/stem-sketch/index.html"
@@ -577,6 +625,215 @@ export default function StemSketchClient() {
         }}
         style={{ flex: 1, border: "none", display: "block" }}
       />
+    </div>
+  );
+}
+
+// ── Share with a class (student) ──
+// Picks one of the student's classes and an optional note; the share row
+// points at the just-saved design, so the teacher always sees the live copy.
+function SharePrompt({ designId, designName, onDone }: {
+  designId: string;
+  designName: string;
+  onDone: (ok: boolean | null, msg: string) => void;
+}) {
+  const [classes, setClasses] = useState<{ id: string; name: string }[] | null>(null);
+  const [classId, setClassId] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/student/classes")
+      .then(r => (r.ok ? r.json() : []))
+      .then((rows: { class: { id: string; name: string } }[]) => {
+        if (cancelled) return;
+        const list = rows.map(r => ({ id: String(r.class.id), name: r.class.name }));
+        setClasses(list);
+        if (list.length === 1) setClassId(list[0].id);
+      })
+      .catch(() => { if (!cancelled) setClasses([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function submit() {
+    if (!classId) { setError("Pick a class first."); return; }
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch("/api/stem-sketch/shares", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ designId, classId, note: note.trim() || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data?.error || `Share failed (HTTP ${res.status})`); setBusy(false); return; }
+      onDone(true, data?.className || classes?.find(c => c.id === classId)?.name || "your class");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  }
+
+  const field = { width: "100%", padding: "9px 12px", borderRadius: 8, border: "2px solid #e5e7eb",
+    fontSize: 14, color: "#111", outline: "none", fontFamily: "inherit", boxSizing: "border-box" as const };
+
+  return (
+    <div onClick={() => onDone(null, "")} style={{ position: "fixed", inset: 0, zIndex: 1000,
+      background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 420,
+        padding: "22px 24px", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", color: "#111" }}>
+        <div style={{ fontSize: 17, fontWeight: 900, marginBottom: 4 }}>Share “{designName}”</div>
+        <div style={{ fontSize: 13, color: "#555", marginBottom: 16 }}>
+          Your teacher can open it and leave feedback. You’ll see their notes in My Work.
+        </div>
+
+        {classes === null ? (
+          <div style={{ fontSize: 13, color: "#888" }}>Loading your classes…</div>
+        ) : classes.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#92400e", background: "#fef3c7", border: "2px solid #fcd34d",
+            borderRadius: 10, padding: "10px 12px" }}>
+            You’re not in a class yet. Join one with your teacher’s class code (My Work → Join a class), then share.
+          </div>
+        ) : (
+          <>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: "#374151", marginBottom: 6 }}>Class</label>
+            <select value={classId} onChange={e => setClassId(e.target.value)} style={{ ...field, marginBottom: 14 }}>
+              {classes.length > 1 && <option value="">Choose a class…</option>}
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: "#374151", marginBottom: 6 }}>
+              Note to your teacher <span style={{ fontWeight: 600, color: "#888" }}>(optional)</span>
+            </label>
+            <textarea value={note} onChange={e => setNote(e.target.value)} maxLength={1000} rows={3}
+              placeholder="What would you like them to look at?"
+              style={{ ...field, resize: "vertical", marginBottom: 14 }} />
+          </>
+        )}
+
+        {error && <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 700, marginBottom: 10 }}>{error}</div>}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={() => onDone(null, "")} style={{ padding: "9px 16px", borderRadius: 8, border: "2px solid #e5e7eb",
+            background: "#fff", color: "#374151", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            Cancel
+          </button>
+          {classes && classes.length > 0 && (
+            <button onClick={submit} disabled={busy || !classId} style={{ padding: "9px 18px", borderRadius: 8, border: "none",
+              background: busy || !classId ? "#cbd5e1" : "#0891b2", color: "#fff", fontWeight: 800, fontSize: 13,
+              cursor: busy || !classId ? "not-allowed" : "pointer" }}>
+              {busy ? "Sharing…" : "Share"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Feedback thread (teacher viewer) ──
+// Shown under the demo banner when the design was opened from a class's
+// "Shared with you" list. Owner and co-teachers can both write here.
+function ShareFeedbackPanel({ shareId }: { shareId: string }) {
+  const [share, setShare] = useState<ShareInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/teacher/stem-sketch-shares/${encodeURIComponent(shareId)}`)
+      .then(async r => {
+        if (!r.ok) { if (!cancelled) setError(`Could not load the share (HTTP ${r.status})`); return null; }
+        return r.json() as Promise<ShareInfo>;
+      })
+      .then(s => { if (s && !cancelled) setShare(s); })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+    return () => { cancelled = true; };
+  }, [shareId]);
+
+  async function post() {
+    const body = draft.trim();
+    if (!body || !share) return;
+    setPosting(true); setError(null);
+    try {
+      const res = await fetch(`/api/teacher/stem-sketch-shares/${encodeURIComponent(shareId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data?.error || `Could not post (HTTP ${res.status})`); return; }
+      setShare({ ...share, feedback: [...share.feedback, data.feedback as ShareFeedback] });
+      setDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  return (
+    <div style={{ background: "#fffbeb", borderBottom: "2px solid #fcd34d", color: "#78350f", flexShrink: 0,
+      padding: open ? "10px 20px 14px" : "6px 20px", fontSize: 13 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ fontWeight: 800 }}>
+          💬 Feedback{share ? ` for ${share.student.name || "student"} · ${share.className}` : ""}
+          {share && share.feedback.length > 0 && (
+            <span style={{ marginLeft: 8, fontWeight: 700, color: "#92400e" }}>
+              {share.feedback.length} note{share.feedback.length === 1 ? "" : "s"}
+            </span>
+          )}
+          {error && <span style={{ marginLeft: 12, color: "#b91c1c", fontWeight: 700 }}>{error}</span>}
+        </div>
+        <button onClick={() => setOpen(o => !o)} style={{ padding: "4px 12px", borderRadius: 999, border: "2px solid #d97706",
+          background: "#fff", color: "#92400e", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+          {open ? "Hide" : "Show"}
+        </button>
+      </div>
+
+      {open && share && (
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginTop: 10 }}>
+          <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+            {share.note ? (
+              <div style={{ background: "#fff", border: "2px solid #fde68a", borderRadius: 10, padding: "8px 12px", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "#b45309" }}>
+                  {share.student.name || "Student"} wrote
+                </div>
+                <div style={{ whiteSpace: "pre-wrap", color: "#1f2937", marginTop: 2 }}>{share.note}</div>
+              </div>
+            ) : (
+              <div style={{ color: "#a16207", marginBottom: 10 }}>No note from the student — shared {new Date(share.sharedAt).toLocaleDateString()}.</div>
+            )}
+            {share.feedback.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+                {share.feedback.map(f => (
+                  <div key={f.id} style={{ background: f.mine ? "#ecfeff" : "#fff", border: "2px solid #e5e7eb", borderRadius: 10, padding: "6px 12px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "#0e7490" }}>
+                      {f.mine ? "You" : f.authorName} · {new Date(f.createdAt).toLocaleString()}
+                    </div>
+                    <div style={{ whiteSpace: "pre-wrap", color: "#1f2937" }}>{f.body}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+            <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={3} maxLength={4000}
+              placeholder="Leave feedback for the student…"
+              style={{ width: "100%", boxSizing: "border-box", padding: "8px 12px", borderRadius: 10, border: "2px solid #fcd34d",
+                fontSize: 13, color: "#111", fontFamily: "inherit", resize: "vertical", outline: "none" }} />
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+              <button onClick={post} disabled={posting || !draft.trim()} style={{ padding: "7px 16px", borderRadius: 8, border: "none",
+                background: posting || !draft.trim() ? "#e5e7eb" : "#d97706", color: posting || !draft.trim() ? "#9ca3af" : "#fff",
+                fontWeight: 800, fontSize: 13, cursor: posting || !draft.trim() ? "not-allowed" : "pointer" }}>
+                {posting ? "Sending…" : "Send feedback"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 // GET /api/teacher/tower-submissions?assignmentId=X
 // Returns all passing submissions ranked by cost (lowest = 1st)
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     .eq('id', assignmentId)
     .single()
 
-  if (!assignment || assignment.teacher_id !== session.user.id)
+  if (!assignment || !(await teacherCanAccessAssignment(db, session.user.id, 'tower_assignments', assignmentId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: submissions } = await db

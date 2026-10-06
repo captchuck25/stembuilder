@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
+import { teacherCanAccessAssignment } from '@/lib/class-access.server'
 
 function lastFirst(name: string): string {
   const parts = name.trim().split(/\s+/)
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
     .select('teacher_id')
     .eq('id', assignmentId)
     .single()
-  if (!a || a.teacher_id !== session.user.id)
+  if (!a || !(await teacherCanAccessAssignment(db, session.user.id, 'measurement_assignments', assignmentId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: attempts } = await db

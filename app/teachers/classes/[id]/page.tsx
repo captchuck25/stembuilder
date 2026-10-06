@@ -245,6 +245,18 @@ export default function ClassDetailPage() {
   const [stemSketchDesigns, setStemSketchDesigns] = useState<StemSketchRow[]>([]);
   const [loadingStemSketch, setLoadingStemSketch] = useState(false);
   const stemSketchLoadedRef = useRef(false);
+  // Designs students shared with this class for feedback (migration 0034).
+  interface StemSketchShareRow { id: string; designId: string; designName: string; designDeleted: boolean; units: string; thumbnail: string | null; designUpdatedAt: string; studentId: string; studentName: string; note: string | null; sharedAt: string; updatedAt: string; feedbackCount: number; lastFeedbackAt: string | null; }
+  const [stemSketchShares, setStemSketchShares] = useState<StemSketchShareRow[]>([]);
+
+  // Co-teachers (migration 0033). classRole gates owner-only controls.
+  const [classRole, setClassRole] = useState<"owner" | "co-teacher">("owner");
+  interface TeacherRow { id: string; name: string | null; email: string | null; }
+  const [classOwner, setClassOwner] = useState<TeacherRow | null>(null);
+  const [coTeachers, setCoTeachers] = useState<TeacherRow[]>([]);
+  const [coTeacherEmail, setCoTeacherEmail] = useState("");
+  const [coTeacherBusy, setCoTeacherBusy] = useState(false);
+  const [coTeacherError, setCoTeacherError] = useState("");
 
 
   // Arcade Lab
@@ -416,7 +428,49 @@ export default function ClassDetailPage() {
       .then(r => r.ok ? r.json() : [])
       .then(setStemSketchDesigns)
       .finally(() => setLoadingStemSketch(false));
+    fetch(`/api/teacher/stem-sketch-shares?classId=${classId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setStemSketchShares)
+      .catch(() => {});
   }, [selectedTool, cls]);
+
+  async function loadCoTeachers() {
+    const res = await fetch(`/api/teacher/classes/${classId}/teachers`);
+    if (!res.ok) return;
+    const data = await res.json();
+    setClassOwner(data.owner ?? null);
+    setCoTeachers(data.coTeachers ?? []);
+  }
+
+  async function handleAddCoTeacher(e: React.FormEvent) {
+    e.preventDefault();
+    const email = coTeacherEmail.trim();
+    if (!email) return;
+    setCoTeacherBusy(true); setCoTeacherError("");
+    try {
+      const res = await fetch(`/api/teacher/classes/${classId}/teachers`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setCoTeacherError(data?.error || `Could not add (HTTP ${res.status})`); return; }
+      setCoTeachers(prev => [...prev, data.teacher]);
+      setCoTeacherEmail("");
+    } finally {
+      setCoTeacherBusy(false);
+    }
+  }
+
+  async function handleRemoveCoTeacher(teacherId: string) {
+    setCoTeacherBusy(true); setCoTeacherError("");
+    try {
+      const res = await fetch(`/api/teacher/classes/${classId}/teachers?teacherId=${encodeURIComponent(teacherId)}`, { method: "DELETE" });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setCoTeacherError(d?.error || `Could not remove (HTTP ${res.status})`); return; }
+      if (teacherId === session?.user?.id) { router.push("/teachers/dashboard"); return; }
+      setCoTeachers(prev => prev.filter(t => t.id !== teacherId));
+    } finally {
+      setCoTeacherBusy(false);
+    }
+  }
 
 
   // Measurement Lab: lazy-load assignments + class leaderboard on first tab open
@@ -437,6 +491,8 @@ export default function ClassDetailPage() {
     if (!res.ok) { router.push("/teachers/dashboard"); return; }
     const data = await res.json();
     setCls(data.class);
+    setClassRole(data.role === "co-teacher" ? "co-teacher" : "owner");
+    loadCoTeachers();
     setAssignments(data.assignments ?? []);
     setLocks(data.locks ?? []);
     setStudents(data.students ?? []);
@@ -1743,6 +1799,19 @@ export default function ClassDetailPage() {
                   <span style={{ fontSize: 13, color: "#555", fontWeight: 600 }}>
                     {students.length} student{students.length !== 1 ? "s" : ""} enrolled
                   </span>
+                  {classRole === "co-teacher" ? (
+                    <span title={`You co-teach this class with ${classOwner?.name || classOwner?.email || "its owner"}`}
+                      style={{ fontSize: 12, fontWeight: 800, color: "#6d28d9", background: "#f5f3ff",
+                        border: "2px solid #ddd6fe", borderRadius: 999, padding: "3px 10px" }}>
+                      Co-teaching · {classOwner?.name || classOwner?.email || "owner"}
+                    </span>
+                  ) : coTeachers.length > 0 && (
+                    <span title={coTeachers.map(t => t.name || t.email).join(", ")}
+                      style={{ fontSize: 12, fontWeight: 800, color: "#6d28d9", background: "#f5f3ff",
+                        border: "2px solid #ddd6fe", borderRadius: 999, padding: "3px 10px" }}>
+                      {coTeachers.length} co-teacher{coTeachers.length === 1 ? "" : "s"}
+                    </span>
+                  )}
                 </div>
               </div>
               <button
@@ -1784,6 +1853,57 @@ export default function ClassDetailPage() {
                     </button>
                   </div>
                   {renameError && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{renameError}</div>}
+                </div>
+
+                {/* Co-teachers */}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 4 }}>Teachers</div>
+                  <div style={{ fontSize: 12, color: "#666", marginBottom: 10, maxWidth: 560 }}>
+                    Co-teachers see this class exactly as you do — students, assignments, submissions, grades, and shared
+                    designs. Only the owner can delete the class or change who teaches it.
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 560, marginBottom: 10 }}>
+                    {classOwner && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10,
+                        border: "2px solid #e5e7eb", background: "#f9fafb", fontSize: 13 }}>
+                        <span style={{ fontWeight: 800, color: "#111" }}>{classOwner.name || classOwner.email}</span>
+                        <span style={{ fontSize: 11, color: "#6b7280" }}>{classOwner.name ? classOwner.email : ""}</span>
+                        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, color: "#2563eb",
+                          background: "#eff6ff", border: "2px solid #bfdbfe", borderRadius: 999, padding: "2px 8px" }}>Owner</span>
+                      </div>
+                    )}
+                    {coTeachers.map(t => (
+                      <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 10,
+                        border: "2px solid #ddd6fe", background: "#f5f3ff", fontSize: 13 }}>
+                        <span style={{ fontWeight: 800, color: "#111" }}>{t.name || t.email}</span>
+                        <span style={{ fontSize: 11, color: "#6b7280" }}>{t.name ? t.email : ""}</span>
+                        <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, color: "#6d28d9" }}>Co-teacher</span>
+                        {(classRole === "owner" || t.id === session?.user?.id) && (
+                          <button onClick={() => handleRemoveCoTeacher(t.id)} disabled={coTeacherBusy}
+                            title={t.id === session?.user?.id ? "Leave this class" : "Remove co-teacher"}
+                            style={{ padding: "3px 10px", borderRadius: 6, border: "2px solid #e5e7eb", background: "#fff",
+                              color: "#888", fontWeight: 700, fontSize: 11, cursor: coTeacherBusy ? "not-allowed" : "pointer" }}>
+                            {t.id === session?.user?.id ? "Leave" : "✕"}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {classRole === "owner" && (
+                    <form onSubmit={handleAddCoTeacher} style={{ display: "flex", gap: 8, flexWrap: "wrap", maxWidth: 560 }}>
+                      <input value={coTeacherEmail} onChange={e => { setCoTeacherEmail(e.target.value); setCoTeacherError(""); }}
+                        type="email" placeholder="Co-teacher's StemBuilder email"
+                        style={{ flex: 1, minWidth: 220, padding: "8px 12px", borderRadius: 8,
+                          border: coTeacherError ? "2px solid #dc2626" : "2px solid #ddd6fe", fontSize: 13, color: "#111", outline: "none" }} />
+                      <button type="submit" disabled={coTeacherBusy || !coTeacherEmail.trim()}
+                        style={{ padding: "8px 18px", borderRadius: 8, border: "none",
+                          background: coTeacherEmail.trim() ? "#7c3aed" : "#cbd5e1", color: "#fff", fontWeight: 800, fontSize: 13,
+                          cursor: coTeacherBusy ? "not-allowed" : "pointer" }}>
+                        {coTeacherBusy ? "Adding…" : "+ Add co-teacher"}
+                      </button>
+                    </form>
+                  )}
+                  {coTeacherError && <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 600, marginTop: 8 }}>{coTeacherError}</div>}
                 </div>
 
                 {/* Student roster */}
@@ -1934,7 +2054,12 @@ export default function ClassDetailPage() {
                   )}
                 </div>
 
-                {/* Danger zone */}
+                {/* Danger zone — owner only; a co-teacher leaves via the Teachers list above */}
+                {classRole === "co-teacher" ? (
+                  <div style={{ borderTop: "2px solid #f0f0f0", paddingTop: 16, fontSize: 12, color: "#6b7280" }}>
+                    Only {classOwner?.name || classOwner?.email || "the class owner"} can delete this class.
+                  </div>
+                ) : (
                 <div style={{ borderTop: "2px solid #fee2e2", paddingTop: 20 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: "#dc2626", marginBottom: 10 }}>Danger Zone</div>
                   {!confirmDeleteClass ? (
@@ -1966,6 +2091,7 @@ export default function ClassDetailPage() {
                     </div>
                   )}
                 </div>
+                )}
 
               </div>
             )}
@@ -3428,6 +3554,64 @@ export default function ClassDetailPage() {
           {selectedTool === "stem-sketch" && sketchAssignmentsAllowed && (
             <div style={{ ...CARD, padding: "28px 28px", marginBottom: 24 }}>
               <StemSketchTab classId={classId} />
+            </div>
+          )}
+
+          {selectedTool === "stem-sketch" && stemSketchShares.length > 0 && (
+            <div style={{ ...CARD, padding: "26px 28px", marginBottom: 24 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 900, color: "#d97706", marginBottom: 6 }}>💬 Shared with you</h2>
+              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
+                Designs students shared with this class for feedback. Open one to see their note and reply — they read your
+                feedback in My Work.
+              </p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+                {stemSketchShares.map(s => (
+                  <div key={s.id} style={{ borderRadius: 12, border: "2px solid #fde68a",
+                    background: "#fffbeb", overflow: "hidden", width: 220, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+                    <div style={{ width: "100%", height: 120, background: "#fef3c7", overflow: "hidden",
+                      display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {s.thumbnail ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={s.thumbnail} alt={s.designName}
+                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                      ) : (
+                        <span style={{ fontSize: 32, opacity: 0.3 }}>✏️</span>
+                      )}
+                    </div>
+                    <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.designName}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#b45309", marginTop: 2 }}>{s.studentName}</div>
+                      {s.note && (
+                        <div title={s.note} style={{ fontSize: 12, color: "#444", marginTop: 6, fontStyle: "italic",
+                          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                          “{s.note}”
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: "#888", marginTop: 6, marginBottom: 8 }}>
+                        Shared {new Date(s.sharedAt).toLocaleDateString()}
+                        {s.feedbackCount > 0 ? ` · ${s.feedbackCount} note${s.feedbackCount === 1 ? "" : "s"}` : " · no feedback yet"}
+                      </div>
+                      {s.designDeleted ? (
+                        <div style={{ fontSize: 12, color: "#9ca3af", fontWeight: 700, textAlign: "center", marginTop: "auto" }}>
+                          Design was deleted
+                        </div>
+                      ) : (
+                        <Link
+                          href={`/tools/stem-sketch?asStudent=${s.studentId}&id=${s.designId}&shareId=${s.id}`}
+                          target="_blank"
+                          title={`Open ${s.studentName}'s design (read-only) and leave feedback`}
+                          style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800, marginTop: "auto",
+                            color: "#92400e", textDecoration: "none",
+                            padding: "5px 10px", borderRadius: 999,
+                            border: "2px solid #d97706", background: "#fff" }}>
+                          {s.feedbackCount > 0 ? "👁 Open · reply" : "👁 Open · give feedback"}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

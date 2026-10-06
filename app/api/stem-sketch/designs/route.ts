@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
   if (!docJson) return NextResponse.json({ error: 'Missing docJson or docJsonGz' }, { status: 400 })
 
-  const { error } = await adminDb()
+  const { data, error } = await adminDb()
     .from('stem_sketch_designs')
     .upsert(
       {
@@ -57,7 +57,10 @@ export async function POST(req: NextRequest) {
       },
       { onConflict: 'user_id,name' }
     )
+    .select('id')
+    .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true })
+  // The id lets the host share the design with a class right after saving.
+  return NextResponse.json({ ok: true, id: data?.id != null ? String(data.id) : null })
 }

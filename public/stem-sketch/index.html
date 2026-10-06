@@ -1349,6 +1349,7 @@
         <button class="action" id="new-design-btn" title="Start a new blank design (clears the auto-restore draft)" style="font-size:14px;padding:0 8px">＋ New</button>
         <button class="action" id="cloud-load-btn" title="Load a saved design" style="font-size:14px;padding:0 8px">📂</button>
         <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
+        <button class="action" id="share-btn" title="Share this design with your class so your teacher can leave feedback" style="font-size:12px">Share</button>
         <button class="action" id="tutorials-btn" title="Tutorials — short guided lessons" style="font-size:14px;padding:0 8px">🎓</button>
         <button class="action" id="import-btn" title="Import an STL model (to alter and reprint) or an SVG drawing (into a sketch)">Import ▾</button>
         <input type="file" id="import-file" accept=".stl,.svg,model/stl,image/svg+xml" style="display:none"/>
@@ -23654,6 +23655,9 @@ function openModal({ title, body, onConfirm, custom, hideOk, confirmText }) {
 
 // ---------- 7. Platform integration (postMessage save/load) ----------
 // Outbound: { type:'STEMSKETCH_SAVE', name, docJson, units }
+// Outbound: { type:'STEMSKETCH_SHARE', name, docJson|docJsonGz, units, thumbnail }
+//           — same payload as SAVE; the wrapper saves, then opens its
+//           "share with a class" picker and answers SHARE_OK / SHARE_ERR.
 // Outbound: { type:'STEMSKETCH_REQUEST_LIST' }
 // Outbound: { type:'STEMSKETCH_REQUEST_LOAD', id }
 // Inbound:  { type:'STEMSKETCH_LOAD', name, docJson, units }
@@ -23742,7 +23746,10 @@ async function gzipJsonToBase64(value) {
   }
 }
 
-async function cloudSave() {
+// opts.share: save, then ask the wrapper to share the saved design with one
+// of the student's classes (teacher feedback lands in My Work).
+async function cloudSave(opts) {
+  const share = !!(opts && opts.share);
   // Tutorial scratch must never land in the student's designs (the Save
   // button is hidden in tutorial mode; this guards any other path in).
   if (window.__tutorial) { setStatus('Tutorials aren’t saved — your own design comes back when you exit.'); return; }
@@ -23843,9 +23850,10 @@ async function cloudSave() {
     setStatus(`⚠ Design too large to cloud-save (${gzKB} KB gzipped — limit ~4500 KB). Try undoing recent CSG ops, or use Export instead.`);
     return;
   }
+  const type = share ? 'STEMSKETCH_SHARE' : 'STEMSKETCH_SAVE';
   const payload = docJsonGz
-    ? { type: 'STEMSKETCH_SAVE', name, docJsonGz, units: doc.units, thumbnail }
-    : { type: 'STEMSKETCH_SAVE', name, docJson,   units: doc.units, thumbnail };
+    ? { type, name, docJsonGz, units: doc.units, thumbnail }
+    : { type, name, docJson,   units: doc.units, thumbnail };
   notifyParent(payload);
 }
 
@@ -24002,7 +24010,7 @@ function enterAssignmentMode(a) {
   // The window IS the assignment: name pinned, no new/open/save-elsewhere.
   const nameInp = document.getElementById('project-filename');
   if (nameInp) { nameInp.value = a.title || a.challenge.title || 'Assignment'; nameInp.disabled = true; }
-  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn'].forEach(id => {
+  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn', 'share-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -24746,6 +24754,10 @@ window.addEventListener('message', (e) => {
   } else if (data.type === 'STEMSKETCH_SAVE_ERR') {
     setStatus('⚠ Save failed: ' + (data.message || 'unknown error'));
     cloudSaveFlash(false, data.message);
+  } else if (data.type === 'STEMSKETCH_SHARE_OK') {
+    setStatus('✓ Shared with ' + (data.className || 'your class') + ' — feedback shows up in My Work.');
+  } else if (data.type === 'STEMSKETCH_SHARE_ERR') {
+    setStatus('⚠ Share failed: ' + (data.message || 'unknown error'));
   } else if (data.type === 'STEMSKETCH_USER') {
     applyUser(data.user);
   } else if (data.type === 'STEMSKETCH_ASSIGNMENT') {
@@ -25144,7 +25156,7 @@ function enterTutorial(id) {
   if (nameInp) { nameInp.value = `Tutorial: ${t.title}`; nameInp.disabled = true; }
   // No New/Open/Save while practicing — tutorial scratch must never overwrite
   // or sit beside the student's real designs. All restored on exit.
-  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn'].forEach(bid => {
+  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn', 'share-btn'].forEach(bid => {
     const el = document.getElementById(bid);
     if (el) el.style.display = 'none';
   });
@@ -25178,7 +25190,7 @@ function exitTutorial() {
   if (panel) panel.remove();
   const nameInp = document.getElementById('project-filename');
   if (nameInp) { nameInp.disabled = false; nameInp.value = _tutPrevName; }
-  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn'].forEach(bid => {
+  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn', 'share-btn'].forEach(bid => {
     const el = document.getElementById(bid);
     if (el) el.style.display = '';
   });
@@ -25918,7 +25930,9 @@ function init() {
   // Cloud save/load buttons
   const cloudSaveBtn = document.getElementById('cloud-save-btn');
   const cloudLoadBtn = document.getElementById('cloud-load-btn');
-  if (cloudSaveBtn) cloudSaveBtn.onclick = cloudSave;
+  const shareBtn = document.getElementById('share-btn');
+  if (cloudSaveBtn) cloudSaveBtn.onclick = () => cloudSave();
+  if (shareBtn) shareBtn.onclick = () => cloudSave({ share: true });
   if (cloudLoadBtn) cloudLoadBtn.onclick = () => {
     notifyParent({ type: 'STEMSKETCH_REQUEST_LIST' });
     setStatus('Fetching saved designs…');

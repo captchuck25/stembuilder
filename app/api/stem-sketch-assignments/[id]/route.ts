@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { getChallenge, challengeCheckParams } from '@/lib/stem-sketch/challenges'
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/stem-sketch-assignments/[id]
 // Returns the assignment plus its resolved challenge (reference geometry,
@@ -24,14 +25,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   // Allow access if the caller is either an enrolled student or the teacher
   // who owns the class (so a teacher can try their own assignment).
-  const [{ data: enrollment }, { data: classRow }] = await Promise.all([
+  const [{ data: enrollment }, isOwningTeacher] = await Promise.all([
     db.from('enrollments').select('id')
       .eq('class_id', data.class_id).eq('student_id', session.user.id).is('deleted_at', null).maybeSingle(),
-    db.from('classes').select('teacher_id').eq('id', data.class_id).is('deleted_at', null).maybeSingle(),
+    teacherCanAccessClass(db, session.user.id, data.class_id),
   ])
 
   const isEnrolledStudent = !!enrollment
-  const isOwningTeacher = classRow?.teacher_id === session.user.id
   if (!isEnrolledStudent && !isOwningTeacher) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

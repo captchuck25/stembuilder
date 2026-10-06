@@ -1,20 +1,16 @@
 // Shared access helpers for the Class Arcade API.
 // A user "belongs to" a class if they are a live-enrolled student in it,
-// the teacher who owns it, or an admin (admins may access any class).
+// a teacher on it (owner or co-teacher), or an admin (admins may access any class).
 
 import { adminDb } from '@/lib/db.server';
+import { teacherClassIds } from '@/lib/class-access.server';
 
 type Db = ReturnType<typeof adminDb>;
 type Role = 'teacher' | 'student' | 'admin' | 'district_admin';
 
 export async function classIdsFor(db: Db, userId: string, role: Role): Promise<string[]> {
   if (role !== 'student') {
-    const { data } = await db
-      .from('classes')
-      .select('id')
-      .eq('teacher_id', userId)
-      .is('deleted_at', null);
-    return (data ?? []).map((c: { id: string }) => String(c.id));
+    return (await teacherClassIds(db, userId)).map(String);
   }
   const { data } = await db
     .from('enrollments')

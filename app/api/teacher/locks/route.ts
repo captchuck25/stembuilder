@@ -2,6 +2,7 @@ import { roleAtLeast } from '@/lib/roles'
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { adminDb } from '@/lib/db.server';
+import { teacherCanAccessClass } from '@/lib/class-access.server'
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -11,10 +12,8 @@ export async function POST(req: NextRequest) {
   const { classId, tool, levelIdx, challengeIdx } = await req.json();
   const db = adminDb();
 
-  // Verify teacher owns this class
-  const { data: classData } = await db
-    .from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single();
-  if (!classData || classData.teacher_id !== session.user.id)
+  // Owner or co-teacher of this class
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { data, error } = await db
@@ -40,9 +39,7 @@ export async function DELETE(req: NextRequest) {
   // Verify teacher owns the class this lock belongs to
   const { data: lock } = await db.from('lesson_locks').select('class_id').eq('id', id).single();
   if (lock) {
-    const { data: classData } = await db
-      .from('classes').select('teacher_id').eq('id', lock.class_id).is('deleted_at', null).single();
-    if (!classData || classData.teacher_id !== session.user.id)
+    if (!(await teacherCanAccessClass(db, session.user.id, lock.class_id)))
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

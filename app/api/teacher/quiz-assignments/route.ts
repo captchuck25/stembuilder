@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { normalizeQuizConfig } from '@/lib/quiz'
 import { quizBuilderAllowed } from '@/lib/quiz.server'
+import { teacherCanAccessAssignment, teacherCanAccessClass } from '@/lib/class-access.server'
 
 // Class-scoped quiz assignments (window + config). The take window is
 // enforced on the student attempt route — this is teacher CRUD only.
@@ -28,8 +29,7 @@ export async function GET(req: NextRequest) {
   if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== g.userId)
+  if (!(await teacherCanAccessClass(db, g.userId, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: assignments, error } = await db
@@ -74,12 +74,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'closesAt must be after opensAt' }, { status: 400 })
 
   const db = adminDb()
-  const [{ data: cls }, { data: quiz }] = await Promise.all([
-    db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single(),
-    db.from('quizzes').select('teacher_id').eq('id', quizId).is('deleted_at', null).single(),
-  ])
-  if (!cls || cls.teacher_id !== g.userId)
+  if (!(await teacherCanAccessClass(db, g.userId, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // The quiz itself stays owner-only: a co-teacher assigns from their own bank.
+  const { data: quiz } = await db.from('quizzes').select('teacher_id').eq('id', quizId).is('deleted_at', null).single()
   if (!quiz || quiz.teacher_id !== g.userId)
     return NextResponse.json({ error: 'Quiz not found' }, { status: 404 })
 
@@ -112,7 +110,7 @@ export async function DELETE(req: NextRequest) {
 
   const db = adminDb()
   const { data: a } = await db.from('quiz_assignments').select('teacher_id').eq('id', id).single()
-  if (!a || a.teacher_id !== g.userId)
+  if (!a || !(await teacherCanAccessAssignment(db, g.userId, 'quiz_assignments', id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { error } = await db.from('quiz_assignments').delete().eq('id', id)

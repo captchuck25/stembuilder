@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { stemSketchAssignmentsAllowed } from '@/lib/stem-sketch.server'
 import { getChallenge } from '@/lib/stem-sketch/challenges'
+import { teacherCanAccessAssignment, teacherCanAccessClass } from '@/lib/class-access.server'
 
 // GET /api/teacher/stem-sketch-assignments?classId=X
 export async function GET(req: NextRequest) {
@@ -17,8 +18,7 @@ export async function GET(req: NextRequest) {
   if (!classId) return NextResponse.json({ error: 'Missing classId' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data: assignments } = await db
@@ -55,8 +55,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing or invalid fields' }, { status: 400 })
 
   const db = adminDb()
-  const { data: cls } = await db.from('classes').select('teacher_id').eq('id', classId).is('deleted_at', null).single()
-  if (!cls || cls.teacher_id !== session.user.id)
+  if (!(await teacherCanAccessClass(db, session.user.id, classId)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { data, error } = await db
@@ -86,7 +85,7 @@ export async function DELETE(req: NextRequest) {
 
   const db = adminDb()
   const { data: a } = await db.from('stem_sketch_assignments').select('teacher_id').eq('id', id).single()
-  if (!a || a.teacher_id !== session.user.id)
+  if (!a || !(await teacherCanAccessAssignment(db, session.user.id, 'stem_sketch_assignments', id)))
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { error } = await db.from('stem_sketch_assignments').delete().eq('id', id)

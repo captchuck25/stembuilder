@@ -3,28 +3,45 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { adminDb } from '@/lib/db.server'
 import { generateJoinCode, buildDefaultLocks } from '@/lib/class-defaults.server'
+import { teacherClassIds } from '@/lib/class-access.server'
 
+// GET /api/teacher/classes — every class the teacher owns or co-teaches.
+// Each row carries `role` ('owner' | 'co-teacher') and, for co-taught
+// classes, the owner's name so the dashboard can label them.
 export async function GET() {
   const session = await auth()
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (!roleAtLeast(session.user.role, 'teacher')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const db = adminDb()
+  const classIds = await teacherClassIds(db, session.user.id)
+  if (!classIds.length) return NextResponse.json([])
+
   const { data: classes } = await db
     .from('classes')
     .select('*')
-    .eq('teacher_id', session.user.id)
+    .in('id', classIds)
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
 
+  type ClassRow = { id: string; teacher_id: string }
+  const ownerIds = [...new Set((classes ?? []).map((c: ClassRow) => c.teacher_id).filter(id => id !== session.user.id))]
+  const ownerName: Record<string, string> = {}
+  if (ownerIds.length) {
+    const { data: owners } = await db.from('profiles').select('id, name, email').in('id', ownerIds)
+    for (const o of (owners ?? []) as { id: string; name: string | null; email: string | null }[])
+      ownerName[o.id] = o.name || o.email || 'Teacher'
+  }
+
   const result = await Promise.all(
-    (classes ?? []).map(async (cls: { id: string }) => {
+    (classes ?? []).map(async (cls: ClassRow) => {
       const { count } = await db
         .from('enrollments')
         .select('*', { count: 'exact', head: true })
         .eq('class_id', cls.id)
         .is('deleted_at', null)
-      return { ...cls, studentCount: count ?? 0 }
+      const role = cls.teacher_id === session.user.id ? 'owner' : 'co-teacher'
+      return { ...cls, studentCount: count ?? 0, role, ownerName: role === 'owner' ? null : ownerName[cls.teacher_id] ?? 'Teacher' }
     })
   )
 
