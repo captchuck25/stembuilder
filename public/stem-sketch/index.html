@@ -975,6 +975,21 @@
   .modal p { color: var(--ink-soft); margin: 0 0 14px; font-size: 13px; }
   .modal .field { grid-template-columns: 110px 1fr; }
   .modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  /* Format cards in the Export / Import dialogs. (.action is pinned to 30px
+     tall for toolbar buttons — a two-line tile spilled out of it.) */
+  .format-cards { display: flex; gap: 12px; }
+  .format-card {
+    flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    padding: 18px 14px; border-radius: 10px; cursor: pointer; text-align: center;
+    border: 1.5px solid var(--line-strong); background: white; color: var(--ink); font: inherit;
+    transition: border-color 0.12s, background-color 0.12s, transform 0.08s;
+  }
+  .format-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .format-card:active { transform: scale(0.98); }
+  .format-card .fc-icon { font-size: 26px; line-height: 1; }
+  .format-card .fc-title { font-size: 15px; font-weight: 700; }
+  .format-card .fc-sub { font-size: 12px; color: var(--ink-soft); line-height: 1.3; }
 
   /* ===== Sketch SVG styling ===== */
   .grid-line { stroke: #d4d9e8; stroke-width: 1; }
@@ -21323,15 +21338,17 @@ function bodyDisplayLabel(b) {
 function openExportDialog() {
   openModal({
     title: 'Export project',
-    body: `<p style="margin:0 0 14px;color:var(--ink-soft)">Pick a format. The next step lets you choose which parts to export.</p>
-           <div style="display:flex;gap:12px;flex-wrap:wrap">
-             <button class="action primary" id="exp-stl" style="flex:1;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;line-height:1.3">
-               <span style="font-size:15px;font-weight:700">STL &mdash; 3D model</span>
-               <span style="opacity:0.85;font-size:12px;font-weight:400">For 3D printing</span>
+    body: `<p>Pick a format. The next step lets you choose which parts to export.</p>
+           <div class="format-cards">
+             <button class="format-card" id="exp-stl">
+               <span class="fc-icon">🧊</span>
+               <span class="fc-title">STL &mdash; 3D body</span>
+               <span class="fc-sub">For 3D printing</span>
              </button>
-             <button class="action" id="exp-svg" style="flex:1;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;line-height:1.3">
-               <span style="font-size:15px;font-weight:700">SVG &mdash; 2D sketch</span>
-               <span style="opacity:0.85;font-size:12px;font-weight:400">For laser cutting / vector art</span>
+             <button class="format-card" id="exp-svg">
+               <span class="fc-icon">✏️</span>
+               <span class="fc-title">SVG &mdash; 2D drawing</span>
+               <span class="fc-sub">For laser cutting</span>
              </button>
            </div>
            <div class="hint" style="margin-top:14px">Filename prefix: <b>${getProjectName()}</b></div>`,
@@ -21351,15 +21368,17 @@ function openExportDialog() {
 function openImportDialog() {
   openModal({
     title: 'Import a file',
-    body: `<p style="margin:0 0 14px;color:var(--ink-soft)">Pick what you're bringing in.</p>
-           <div style="display:flex;gap:12px;flex-wrap:wrap">
-             <button class="action primary" id="imp-stl" style="flex:1;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;line-height:1.3">
-               <span style="font-size:15px;font-weight:700">STL &mdash; 3D model</span>
-               <span style="opacity:0.85;font-size:12px;font-weight:400">Becomes a solid part you can sketch on, cut, add to, and re-export</span>
+    body: `<p>Pick what you're bringing in.</p>
+           <div class="format-cards">
+             <button class="format-card" id="imp-stl">
+               <span class="fc-icon">🧊</span>
+               <span class="fc-title">STL &mdash; 3D body</span>
+               <span class="fc-sub">A part to alter and reprint</span>
              </button>
-             <button class="action" id="imp-svg" style="flex:1;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;line-height:1.3">
-               <span style="font-size:15px;font-weight:700">SVG &mdash; 2D drawing</span>
-               <span style="opacity:0.85;font-size:12px;font-weight:400">Shapes go into ${doc.mode === '2d' && doc.sketch ? 'the current sketch' : 'a sketch'} as editable lines, arcs and circles</span>
+             <button class="format-card" id="imp-svg">
+               <span class="fc-icon">✏️</span>
+               <span class="fc-title">SVG &mdash; 2D drawing</span>
+               <span class="fc-sub">Shapes go into ${doc.mode === '2d' && doc.sketch ? 'this sketch' : 'a sketch'}</span>
              </button>
            </div>
            <div class="hint" style="margin-top:14px">STL files are read in millimeters. Text in an SVG is skipped — convert it to outlines first.</div>`,
