@@ -248,6 +248,8 @@ export default function ClassDetailPage() {
   // Designs students shared with this class for feedback (migration 0034).
   interface StemSketchShareRow { id: string; designId: string; designName: string; designDeleted: boolean; units: string; thumbnail: string | null; designUpdatedAt: string; studentId: string; studentName: string; note: string | null; sharedAt: string; updatedAt: string; feedbackCount: number; lastFeedbackAt: string | null; }
   const [stemSketchShares, setStemSketchShares] = useState<StemSketchShareRow[]>([]);
+  // Roster view of the designs gallery: which students' rows are expanded.
+  const [openSketchStudents, setOpenSketchStudents] = useState<Set<string>>(new Set());
 
   // Co-teachers (migration 0033). classRole gates owner-only controls.
   const [classRole, setClassRole] = useState<"owner" | "co-teacher">("owner");
@@ -3618,56 +3620,143 @@ export default function ClassDetailPage() {
           {selectedTool === "stem-sketch" && (
             <div style={{ ...CARD, padding: "26px 28px" }}>
               <h2 style={{ fontSize: 18, fontWeight: 900, color: "#0891b2", marginBottom: 6 }}>STEM Sketch Designs</h2>
-              <p style={{ fontSize: 13, color: "#666", marginBottom: 20 }}>
-                All designs saved by students in this class.
+              <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
+                One row per student, A–Z by last name, with their most recent design. Click a name to see all of their work.
               </p>
               {loadingStemSketch ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>Loading…</div>
-              ) : stemSketchDesigns.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>
-                  No designs saved yet.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-                  {stemSketchDesigns.map(d => (
-                    <div key={d.id} style={{ borderRadius: 12, border: "2px solid #e0f2fe",
-                      background: "#f0f9ff", overflow: "hidden", width: 190, flexShrink: 0 }}>
-                      {/* Thumbnail */}
-                      <div style={{ width: "100%", height: 120, background: "#bae6fd", overflow: "hidden",
-                        display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        {d.thumbnail ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={d.thumbnail} alt={d.name}
-                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                        ) : (
-                          <span style={{ fontSize: 32, opacity: 0.3 }}>✏️</span>
-                        )}
-                      </div>
-                      {/* Info */}
-                      <div style={{ padding: "10px 12px" }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: "#111",
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#0891b2", marginTop: 2 }}>
-                          {d.student_name}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#888", marginTop: 2, marginBottom: 8 }}>
-                          {d.units} · {new Date(d.updated_at).toLocaleDateString()}
-                        </div>
-                        <Link
-                          href={`/tools/stem-sketch?asStudent=${d.user_id}&id=${d.id}`}
-                          target="_blank"
-                          title={`Open ${d.student_name}'s design for projection (read-only)`}
-                          style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
-                            color: "#0e7490", textDecoration: "none",
-                            padding: "5px 10px", borderRadius: 999,
-                            border: "2px solid #0891b2", background: "#ecfeff" }}>
-                          👁 Open
-                        </Link>
-                      </div>
+              ) : (() => {
+                // Group the (updated_at DESC) design list by student, then walk
+                // the roster A–Z so students with no designs still show up.
+                const byStudent = new Map<string, StemSketchRow[]>();
+                for (const d of stemSketchDesigns) {
+                  const list = byStudent.get(d.user_id) ?? [];
+                  list.push(d);
+                  byStudent.set(d.user_id, list);
+                }
+                const rosterIds = new Set(students.map(s => s.id));
+                const rows: { id: string; name: string; designs: StemSketchRow[] }[] = students.map(s => ({
+                  id: s.id, name: s.name, designs: byStudent.get(s.id) ?? [],
+                }));
+                // Designs from students no longer on the roster (dropped, but
+                // their work is still visible) go at the end.
+                for (const [uid, list] of byStudent) {
+                  if (!rosterIds.has(uid)) rows.push({ id: uid, name: list[0].student_name || "Former student", designs: list });
+                }
+                rows.sort(compareByLastName);
+                const sharedDesignIds = new Set(stemSketchShares.map(s => s.designId));
+                const total = stemSketchDesigns.length;
+                if (rows.length === 0) {
+                  return <div style={{ textAlign: "center", padding: "32px 0", color: "#aaa", fontSize: 14 }}>No students enrolled yet.</div>;
+                }
+                const toggle = (id: string) => setOpenSketchStudents(prev => {
+                  const next = new Set(prev);
+                  if (next.has(id)) next.delete(id); else next.add(id);
+                  return next;
+                });
+                const allOpen = rows.every(r => r.designs.length === 0 || openSketchStudents.has(r.id));
+                return (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <span style={{ fontSize: 12, color: "#888", fontWeight: 600 }}>
+                        {total} design{total === 1 ? "" : "s"} across {rows.filter(r => r.designs.length).length} of {rows.length} students
+                      </span>
+                      {total > 0 && (
+                        <button
+                          onClick={() => setOpenSketchStudents(allOpen ? new Set() : new Set(rows.filter(r => r.designs.length).map(r => r.id)))}
+                          style={{ padding: "4px 12px", borderRadius: 999, border: "2px solid #e0f2fe", background: "#fff",
+                            color: "#0e7490", fontWeight: 800, fontSize: 12, cursor: "pointer" }}>
+                          {allOpen ? "Collapse all" : "Expand all"}
+                        </button>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {rows.map(r => {
+                        const latest = r.designs[0] ?? null;
+                        const open = openSketchStudents.has(r.id);
+                        const has = r.designs.length > 0;
+                        return (
+                          <div key={r.id} style={{ borderRadius: 12, border: `2px solid ${open ? "#7dd3fc" : "#e0f2fe"}`,
+                            background: open ? "#f0f9ff" : "#fff", overflow: "hidden" }}>
+                            <button
+                              onClick={() => has && toggle(r.id)}
+                              disabled={!has}
+                              aria-expanded={open}
+                              style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left",
+                                padding: "8px 12px", border: "none", background: "transparent", fontFamily: "inherit",
+                                cursor: has ? "pointer" : "default", opacity: has ? 1 : 0.55 }}>
+                              <div style={{ width: 48, height: 48, borderRadius: 8, background: "#bae6fd", flexShrink: 0,
+                                overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                {latest?.thumbnail ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={latest.thumbnail} alt={latest.name}
+                                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                ) : (
+                                  <span style={{ fontSize: 20, opacity: 0.35 }}>✏️</span>
+                                )}
+                              </div>
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontWeight: 800, fontSize: 14, color: "#111" }}>{r.name}</div>
+                                <div style={{ fontSize: 12, color: "#666", marginTop: 1, overflow: "hidden",
+                                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {has
+                                    ? <>{r.designs.length} design{r.designs.length === 1 ? "" : "s"} · latest <strong style={{ color: "#0e7490" }}>{latest!.name}</strong> · {new Date(latest!.updated_at).toLocaleDateString()}</>
+                                    : "No designs saved yet"}
+                                </div>
+                              </div>
+                              {has && (
+                                <span style={{ fontSize: 12, fontWeight: 800, color: "#0e7490", flexShrink: 0 }}>
+                                  {open ? "▾ Hide" : "▸ Show all"}
+                                </span>
+                              )}
+                            </button>
+                            {open && has && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "4px 12px 12px 72px" }}>
+                                {r.designs.map(d => (
+                                  <div key={d.id} style={{ borderRadius: 10, border: "2px solid #e0f2fe", background: "#fff",
+                                    overflow: "hidden", width: 160, flexShrink: 0 }}>
+                                    <div style={{ width: "100%", height: 96, background: "#bae6fd", overflow: "hidden",
+                                      display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                                      {d.thumbnail ? (
+                                        // eslint-disable-next-line @next/next/no-img-element
+                                        <img src={d.thumbnail} alt={d.name}
+                                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                                      ) : (
+                                        <span style={{ fontSize: 28, opacity: 0.3 }}>✏️</span>
+                                      )}
+                                      {sharedDesignIds.has(String(d.id)) && (
+                                        <span title="Shared with this class for feedback" style={{ position: "absolute", top: 6, right: 6,
+                                          fontSize: 10, fontWeight: 800, color: "#92400e", background: "#fef3c7",
+                                          border: "1px solid #fcd34d", borderRadius: 999, padding: "1px 7px" }}>💬 shared</span>
+                                      )}
+                                    </div>
+                                    <div style={{ padding: "8px 10px" }}>
+                                      <div title={d.name} style={{ fontWeight: 700, fontSize: 12, color: "#111",
+                                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                                      <div style={{ fontSize: 11, color: "#888", marginTop: 2, marginBottom: 6 }}>
+                                        {d.units} · {new Date(d.updated_at).toLocaleDateString()}
+                                      </div>
+                                      <Link
+                                        href={`/tools/stem-sketch?asStudent=${d.user_id}&id=${d.id}`}
+                                        target="_blank"
+                                        title={`Open ${r.name}'s design for projection (read-only)`}
+                                        style={{ display: "block", textAlign: "center", fontSize: 12, fontWeight: 800,
+                                          color: "#0e7490", textDecoration: "none", padding: "4px 10px", borderRadius: 999,
+                                          border: "2px solid #0891b2", background: "#ecfeff" }}>
+                                        👁 Open
+                                      </Link>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
