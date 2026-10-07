@@ -25231,13 +25231,20 @@ const PROJECTS = [
     skills: ['revolve', 'exact-sizes'],
     steps: [
       {
-        text: 'Pull the ink refill out of a cheap ballpoint (a Bic Round Stic works). The thin tube is about **0.152 in across** and **5 in long**, with the writing tip on one end — that tip will poke out of the bottom of your pen. We’ll design the body around it. Click **Sketch** → **Front** to start.',
+        text: 'Pull the ink refill out of a cheap ballpoint (a Bic Round Stic works). The thin tube is about **0.152 in across** and **5 in long**, with the writing tip on one end — that tip will poke out of the bottom of your pen. Now that we know the size of our ink, it’s time to get started: click **Sketch** → **Front**.',
         hint: 'Got calipers? Measure your own refill and use your numbers instead — that’s the real engineering.',
         done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
       },
       {
-        text: 'Pick the **Line** tool and draw the pen’s **right-hand outline**, like the picture: start at the **center point** of the grid, go out to the tip, up the body (about **7 in** tall and no wider than **½ in** across), round over the top, and finish back on the **vertical center line**. Press **Enter** to end the line. Make the shape yours — a fat grip, a tapered end, a bump — then click **← Done**.',
-        hint: 'Every click is a corner. The Arc tool can add grip scallops or a domed top; pieces that touch end-to-end all revolve together.',
+        text: 'We’ll draw **half of the pen’s outline — its right side** — and spin it around the middle. First the middle: pick the **Line** tool, click the **orange dot** at the center of the grid, move straight **up**, type **7** and press **Enter**. That 7-inch line is the pen’s center line. Press **Enter** again (or **Esc**) to stop drawing.',
+        hint: 'The Line tool snaps to the origin and auto-locks vertical, so the typed 7 lands exactly on the center line.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && Array.isArray(e.points) && e.points.length >= 2 &&
+          e.points.some(p => Math.abs(p.x) < 1.5 && Math.abs(p.y) < 4) &&
+          e.points.some(p => Math.abs(p.x) < 1.5 && (Math.abs(p.y - 7 * TUT_IN) < 5 || Math.abs(p.y - 180) < 5))),
+      },
+      {
+        text: 'Now create a **unique outline** that we’ll revolve into your pen, like the picture: with the **Line** tool start at the **top** of the center line, go out and **down the right side** — a grip, a bump, a taper, whatever you like — and finish at the **orange dot** at the bottom so the shape closes. Press **Enter**, then click **← Done**.',
+        hint: 'Every click is a corner. The Arc tool adds scallops or a dome; pieces that touch end-to-end all revolve together. Keep it under about 2½ in across or it stops being a pen.',
         svg: `<svg viewBox="0 0 210 170" style="width:100%;height:auto;display:block">
           <line x1="60" y1="6" x2="60" y2="164" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>
           <polyline points="60,156 70,140 72,118 72,36 68,20 60,16" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round"/>
@@ -25257,7 +25264,9 @@ const PROJECTS = [
           if (!p) return false;
           const xs = p.points.map(q => q.x), ys = p.points.map(q => q.y);
           const h = Math.max(...ys) - Math.min(...ys), r = Math.max(...xs), minX = Math.min(...xs);
-          return h >= 130 && h <= 230 && r >= 2.5 && r <= 14 && minX >= -1 && minX <= 1.5;
+          // Generous on purpose — this is the "make it yours" step. Charlie's
+          // own quick doodle was 2 in across (Starter activity 2, 2026-10-07).
+          return h >= 100 && h <= 260 && r >= 2.5 && r <= 32 && minX >= -1 && minX <= 1.5;
         }),
       },
       {
@@ -25581,10 +25590,11 @@ function _renderTutorialPanel() {
         ${next ? `<button class="ap-check" id="tp-next">▶ Next: ${_apEsc(next.title)}</button>` : ''}
         <button class="tut-exit" id="tp-exit">${project ? '✓ Close panel, keep my design' : '← Back to my design'}</button>
       ` : `
-        <div class="tut-progress">Step ${_tutStep + 1} of ${t.steps.length}${project && t.minutes ? ` · about ${t.minutes} min` : ''}</div>
+        <div class="tut-progress">Step ${_tutStep + 1} of ${t.steps.length}${project && t.minutes ? ` · about ${t.minutes} min` : ''}
+          <span style="float:right;font-weight:600;color:#64748b" title="The checks are a guide, not a gate">click a step to jump</span></div>
         ${t.intro && _tutStep === 0 ? `<div style="font-size:12px;color:#475569;margin-bottom:8px">${_apEsc(t.intro)}</div>` : ''}
         ${t.steps.map((s, i) => `
-          <div class="tut-step ${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}">
+          <div class="tut-step ${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}" data-step="${i}" style="cursor:pointer" title="${i === _tutStep ? 'Current step' : i < _tutStep ? 'Go back to this step' : 'Skip ahead to this step'}">
             <span class="tut-mark">${_tutStepsDone[i] ? '✓' : i === _tutStep ? '▶' : '○'}</span>
             <span>${_tutFmt(s.text)}</span>
           </div>
@@ -25597,6 +25607,26 @@ function _renderTutorialPanel() {
   document.getElementById('tp-exit').onclick = (ev) => { ev.stopPropagation(); exitTutorial(); };
   const nextBtn = document.getElementById('tp-next');
   if (nextBtn) nextBtn.onclick = (ev) => { ev.stopPropagation(); enterTutorial(next.id); };
+  // Steps are navigable (Charlie, Starter activity 2): a learner who's stuck
+  // on a check — or who did a step their own way — can skip ahead, and can
+  // go back to re-read an earlier step. Jumping forward marks the skipped
+  // steps done; jumping back re-arms the checks from that step on.
+  panel.querySelectorAll('[data-step]').forEach(el => {
+    el.onclick = (ev) => { ev.stopPropagation(); _tutJumpTo(parseInt(el.dataset.step, 10)); };
+  });
+}
+
+function _tutJumpTo(i) {
+  const t = window.__tutorial;
+  if (!t || !(i >= 0 && i < t.steps.length) || i === _tutStep) return;
+  if (i > _tutStep) {
+    for (let k = _tutStep; k < i; k++) _tutStepsDone[k] = true;
+  } else {
+    for (let k = i; k < t.steps.length; k++) _tutStepsDone[k] = false;
+  }
+  _tutStep = i;
+  _renderTutorialPanel();
+  setStatus(`Step ${i + 1}: ${t.steps[i].text.replace(/\*\*/g, '').slice(0, 80)}…`);
 }
 
 // ── Picker (🎓 toolbar button) ───────────────────────────────────────────────
