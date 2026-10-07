@@ -85,15 +85,41 @@ export const SKETCH_TUTORIALS: SketchTutorial[] = [
   { id: "export-for-printing", unit: 6, title: "Export for Printing", blurb: "Export an STL your slicer can print.", stepCount: 0, ready: false },
 ];
 
+// ── Quick Projects ───────────────────────────────────────────────────────────
+// Short follow-alongs (authored from Charlie's build videos) that end with a
+// 3D-printable part the student keeps. Same engine and progress table as
+// tutorials (stem_sketch_tutorial_progress.tutorial_id); ids are permanent.
+// KEEP IN SYNC with the PROJECTS array in index.html.
+export type SketchProject = {
+  id: string;
+  title: string;
+  blurb: string;
+  minutes: number;
+  stepCount: number;
+  ready: boolean;
+};
+
+export const SKETCH_PROJECTS: SketchProject[] = [
+  { id: "pen", title: "Design Your Own Pen", blurb: "Measure a real pen refill, revolve a body around it, cut the ink channel, print a pen that writes.", minutes: 15, stepCount: 6, ready: true },
+  { id: "square-pen", title: "Square Pen (sketch + extrude)", blurb: "The same pen the extrude way — exact-size square, 7-inch pull, Negative ink channel, initials engraved on a flat.", minutes: 15, stepCount: 6, ready: true },
+  // Shelved 2026-10-07: too little design for a long print. Hidden in the tool; not trackable.
+  { id: "pencil-cup", title: "Pencil Cup", blurb: "One cylinder, one deep cut, one export — a desk organizer you can print tonight.", minutes: 10, stepCount: 5, ready: false },
+];
+
 const _byId = new Map(SKETCH_TUTORIALS.map(t => [t.id, t]));
+const _projectById = new Map(SKETCH_PROJECTS.map(p => [p.id, p]));
 
 export function getTutorial(id: string): SketchTutorial | undefined {
   return _byId.get(id);
 }
 
-/** Valid tutorial_id values for progress writes (ready ones only). */
+export function getProject(id: string): SketchProject | undefined {
+  return _projectById.get(id);
+}
+
+/** Valid tutorial_id values for progress writes (ready tutorials and projects). */
 export function isTrackableTutorialId(id: string): boolean {
-  return !!_byId.get(id)?.ready;
+  return !!_byId.get(id)?.ready || !!_projectById.get(id)?.ready;
 }
 
 export function tutorialsForUnit(unit: number): SketchTutorial[] {

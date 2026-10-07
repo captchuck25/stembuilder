@@ -1351,6 +1351,7 @@
         <button class="action" id="cloud-save-btn" title="Save to your account" style="font-size:14px;padding:0 8px">☁</button>
         <button class="action" id="share-btn" title="Share this design with your class so your teacher can leave feedback" style="font-size:12px">Share</button>
         <button class="action" id="tutorials-btn" title="Tutorials — short guided lessons" style="font-size:14px;padding:0 8px">🎓</button>
+        <button class="action" id="projects-btn" title="Quick Projects — short follow-alongs that end with something you can 3D print" style="font-size:14px;padding:0 8px">🛠</button>
         <button class="action" id="import-btn" title="Import an STL model (to alter and reprint) or an SVG drawing (into a sketch)">Import ▾</button>
         <input type="file" id="import-file" accept=".stl,.svg,model/stl,image/svg+xml" style="display:none"/>
         <button class="action primary" id="export-btn">Export ▾</button>
@@ -10027,7 +10028,31 @@ function buildBodyMesh(body) {
     let raw = profile.points.map(p => ({ x: Math.max(0, p.x), y: p.y }));
     const AX = 0.01;
     const offAxis = raw.filter(p => p.x > AX);
-    if (offAxis.length && (!profile.closed || raw.some(p => p.x <= AX))) {
+    const touchesAxis = raw.some(p => p.x <= AX);
+    if (profile.closed && offAxis.length && touchesAxis && raw.length >= 3) {
+      // A CLOSED outline that touches the axis — a pen body drawn as a full
+      // loop with its ink channel, a vase traced all the way around. Orient
+      // it counter-clockwise (so the lathe faces outward, matching the
+      // bottom→top open-chain rule below), then open the loop at its
+      // on-axis run: the chain starts and ends on the axis, no capping.
+      let loop = raw.slice();
+      if (loop.length > 1 && Math.hypot(loop[0].x - loop[loop.length - 1].x, loop[0].y - loop[loop.length - 1].y) < 1e-6) loop.pop();
+      let area = 0;
+      for (let i = 0; i < loop.length; i++) { const a = loop[i], b = loop[(i + 1) % loop.length]; area += a.x * b.y - b.x * a.y; }
+      if (area < 0) loop.reverse();
+      const n = loop.length, on = loop.map(p => p.x <= AX);
+      let runStart = -1;
+      for (let i = 0; i < n; i++) if (on[i] && !on[(i - 1 + n) % n]) { runStart = i; break; }
+      if (runStart >= 0) {
+        let runEnd = runStart;
+        while (on[(runEnd + 1) % n] && (runEnd + 1) % n !== runStart) runEnd = (runEnd + 1) % n;
+        const chain = [];
+        for (let i = runEnd; ; i = (i + 1) % n) { chain.push(loop[i]); if (i === runStart) break; }
+        raw = chain;
+      } else {
+        raw = loop;
+      }
+    } else if (offAxis.length && (!profile.closed || touchesAxis)) {
       // Normalize any profile that touches (or should touch) the axis into
       // one bottom→top open chain, then close it to the axis:
       // 1. Trim runs of on-axis points at each end to a single junction —
@@ -13472,7 +13497,9 @@ function flushAutosave() {
   // would clobber the student's own in-progress design draft with
   // assignment scratch work. TUTORIAL MODE: same rule — tutorial scratch is
   // throwaway; the student's real doc is restored from _tutPrevDoc on exit.
-  if (window.__assignment || window.__tutorial) return;
+  // QUICK PROJECTS are the opposite: the work IS the student's design, so
+  // the draft keeps autosaving like a normal session.
+  if (window.__assignment || (window.__tutorial && window.__tutorial.kind !== 'project')) return;
   // Same guard as cloudSave's pre-save validation: refuse to autosave a
   // corrupt state (orphan threadShells, top-level group with no rebuildable
   // geometry). Without this, the cloud save validation could block but the
@@ -18021,6 +18048,62 @@ function applyResize(rs, delta) {
   }
 }
 
+// Stitch every non-construction line/arc in a sketch into ONE profile for
+// Revolve. Students draw an outline as many separate pieces — a spine, a
+// slanted tip, arc scallops for a grip, a dome (all stored as polylines) —
+// and Revolve used to lathe only the FIRST piece it found (a pen came out as
+// a ball on a stick; Starter activity.mov, 2026-10-07). Pieces whose ends
+// meet (within a small tolerance) are chained in order; the longest chain
+// wins. A closed polyline is a complete profile on its own. Returns
+// { points, closed, pieces } or null when there's nothing to revolve.
+function _revolveProfileFromSketch(sketch) {
+  const segs = (sketch.entities || [])
+    .filter(e => e.type === 'polyline' && !e.construction && Array.isArray(e.points) && e.points.length >= 2)
+    .map(e => ({ pts: e.points.map(p => ({ x: p.x, y: p.y })), closed: !!e.closed }));
+  if (!segs.length) return null;
+  const all = segs.flatMap(s => s.pts);
+  const xs = all.map(p => p.x), ys = all.map(p => p.y);
+  const diag = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const tol = Math.max(0.5, diag * 0.004); // mm — snapped ends are exact; hand-drawn ones aren't
+  const tol2 = tol * tol;
+  const d2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+  const bboxArea = (pts) => {
+    const px = pts.map(p => p.x), py = pts.map(p => p.y);
+    return (Math.max(...px) - Math.min(...px)) * (Math.max(...py) - Math.min(...py));
+  };
+  const open = segs.filter(s => !s.closed);
+  const candidates = segs.filter(s => s.closed).map(s => ({ points: s.pts, closed: true, pieces: 1 }));
+  // Greedy chain from each open piece; keep the chain that swallows the most pieces.
+  let best = null;
+  for (let start = 0; start < open.length; start++) {
+    const used = new Set([start]);
+    let pts = open[start].pts.slice();
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (let j = 0; j < open.length; j++) {
+        if (used.has(j)) continue;
+        const s = open[j].pts, a = s[0], b = s[s.length - 1];
+        const head = pts[0], tail = pts[pts.length - 1];
+        if (d2(tail, a) <= tol2)      pts = pts.concat(s.slice(1));
+        else if (d2(tail, b) <= tol2) pts = pts.concat(s.slice().reverse().slice(1));
+        else if (d2(head, b) <= tol2) pts = s.slice(0, -1).concat(pts);
+        else if (d2(head, a) <= tol2) pts = s.slice().reverse().slice(0, -1).concat(pts);
+        else continue;
+        used.add(j); grew = true; break;
+      }
+    }
+    const closed = pts.length > 3 && d2(pts[0], pts[pts.length - 1]) <= tol2;
+    if (closed) pts = pts.slice(0, -1);
+    const cand = { points: pts, closed, pieces: used.size };
+    if (!best || cand.pieces > best.pieces || (cand.pieces === best.pieces && bboxArea(cand.points) > bboxArea(best.points))) best = cand;
+  }
+  if (best) candidates.push(best);
+  // Several candidates (a closed loop plus a stray line): the biggest outline is the part.
+  candidates.sort((a, b) => bboxArea(b.points) - bboxArea(a.points));
+  return candidates[0] || null;
+}
+
 // Revolve / Lathe — spin a 2D polyline profile around the active sketch's Y axis
 // to create a 3D body (chess-pawn-style workflow).
 function revolveCurrentSketch() {
@@ -18030,7 +18113,7 @@ function revolveCurrentSketch() {
     showHint('Revolve needs a sketch: click + Sketch → Front, draw an outline with the Line tool, then click Revolve.');
     return;
   }
-  const profile = sketch.entities.find(e => e.type === 'polyline' && !e.construction && e.points?.length >= 2);
+  const profile = _revolveProfileFromSketch(sketch);
   if (!profile) {
     showHint('Draw the outline first: use the Line tool to click out a shape on the right side of the vertical center line, then click Revolve.');
     return;
@@ -18041,16 +18124,23 @@ function revolveCurrentSketch() {
     showHint('Keep the whole outline on the RIGHT side of the vertical center line — that line is what the shape spins around.');
     return;
   }
+  const strays = sketch.entities.filter(e => e.type === 'polyline' && !e.construction && (e.points || []).length >= 2).length - profile.pieces;
   openModal({
     title: 'Revolve profile',
-    body: `<p>Spin the polyline around the sketch's vertical (Y) axis to make a body.</p>
+    body: `<p>Spin the outline around the sketch's vertical (Y) axis to make a body.</p>
+           <p style="color:var(--ink-muted);font-size:12px">${profile.pieces > 1
+             ? `Using your outline of <b>${profile.pieces} connected pieces</b>${profile.closed ? ' (a closed shape)' : ''}.`
+             : (profile.closed ? 'Using your closed outline.' : 'Using your outline.')}${strays > 0
+             ? ` ${strays} piece${strays === 1 ? '' : 's'} that don’t connect to it will be ignored.` : ''}</p>
            <p style="color:var(--ink-muted);font-size:12px">Tip: works best on a <b>Front</b> or <b>Right</b> reference plane sketch so the body stands up in 3D.</p>
            <div class="field"><label>Smoothness</label><input id="rv-segs" type="number" value="48" min="6" max="128" step="1"/></div>`,
     onConfirm: () => {
       const segs = parseInt($('rv-segs').value, 10) || 48;
       pushUndo();
+      // The body carries ONE stitched profile; the renderer, CSG and export
+      // all read that single polyline.
       const sketchCopy = JSON.parse(JSON.stringify(sketch));
-      sketchCopy.entities = sketchCopy.entities.filter(e => !e.construction);
+      sketchCopy.entities = [{ id: 1, type: 'polyline', closed: profile.closed, points: profile.points.map(p => ({ x: p.x, y: p.y })) }];
       const body = {
         id: doc.nextBodyId++, type: 'revolve',
         sketch: sketchCopy,
@@ -22024,6 +22114,7 @@ function _bodiesToSTL(bodies, solidName = 'mini_cad') {
 }
 
 function exportSTL(opts = {}) {
+  _tutEvents.exported = true; // Quick Project "export it" steps watch this
   if (!doc.bodies.length) {
     showHint('No 3D bodies yet — extrude a sketch or add a cube.');
     return;
@@ -23752,7 +23843,7 @@ async function cloudSave(opts) {
   const share = !!(opts && opts.share);
   // Tutorial scratch must never land in the student's designs (the Save
   // button is hidden in tutorial mode; this guards any other path in).
-  if (window.__tutorial) { setStatus('Tutorials aren’t saved — your own design comes back when you exit.'); return; }
+  if (window.__tutorial && window.__tutorial.kind !== 'project') { setStatus('Tutorials aren’t saved — your own design comes back when you exit.'); return; }
   const btn = document.getElementById('cloud-save-btn');
   if (btn) {
     // Stash the original glyph once, then drop any prior state and enter "saving".
@@ -25102,6 +25193,184 @@ const TUTORIALS = [
   },
 ];
 
+// ── Quick Projects ───────────────────────────────────────────────────────────
+// Same step engine as tutorials, opposite contract: a project is NOT scratch.
+// It starts a fresh design (the student's current work is autosaved/undoable
+// as with "＋ New"), Save/Share/Export stay live, and exiting keeps the work.
+// Each one ends with "Export → STL" so the student walks away with a print.
+// Authored from Charlie's build videos; ids are permanent (progress rows and
+// the lib/stem-sketch/tutorials.ts mirror join on them).
+const _projCutDepthFrac = (d, hostType, lo, hi) => {
+  // A subtract-extrude whose depth is a fraction of the host body's height —
+  // "leave a bottom" without pinning the student to one number.
+  const host = _tutSolids(d, hostType)[0];
+  if (!host) return false;
+  const h = host.h || 0;
+  const scan = (list) => (list || []).some(b =>
+    (b.type === 'extrude' && b.op === 'subtract' && b.height >= lo * h && b.height <= hi * h) ||
+    (Array.isArray(b.children) && scan(b.children)));
+  return h > 0 && scan(d.bodies);
+};
+
+// Find a body anywhere in the tree (groups nest) passing `pred`.
+const _projFindBody = (bodies, pred) => (bodies || []).some(b => pred(b) || (Array.isArray(b.children) && _projFindBody(b.children, pred)));
+// Pen ink channel: a Negative cylinder sized for a Bic refill (Ø0.152 in →
+// 0.16 in with print clearance, 5 in long). Metric classes: 4 mm × 125–130.
+const _projIsInkChannel = (b) => b.type === 'cylinder' && b.op === 'subtract' &&
+  _tutNear(b.w, 0.16 * TUT_IN, 0.8) && _tutNear(b.d, 0.16 * TUT_IN, 0.8) &&
+  (_tutNear(b.h, 5 * TUT_IN, 5) || _tutNear(b.h, 125, 5) || _tutNear(b.h, 130, 5));
+
+const PROJECTS = [
+  {
+    id: 'pen',
+    kind: 'project',
+    title: 'Design Your Own Pen',
+    minutes: 15,
+    intro: 'Measure a real pen refill, design a body around it, and print a pen that actually writes.',
+    print: 'Print it standing up, tip down, with a brim (or lay it on its side — one side goes a little flat). Slide the refill in from the bottom; if it’s too tight, make the channel Width/Depth 0.17 and print again.',
+    skills: ['revolve', 'exact-sizes'],
+    steps: [
+      {
+        text: 'Pull the ink refill out of a cheap ballpoint (a Bic Round Stic works). The thin tube is about **0.152 in across** and **5 in long**, with the writing tip on one end — that tip will poke out of the bottom of your pen. We’ll design the body around it. Click **Sketch** → **Front** to start.',
+        hint: 'Got calipers? Measure your own refill and use your numbers instead — that’s the real engineering.',
+        done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
+      },
+      {
+        text: 'Pick the **Line** tool and draw the pen’s **right-hand outline**, like the picture: start at the **center point** of the grid, go out to the tip, up the body (about **7 in** tall and no wider than **½ in** across), round over the top, and finish back on the **vertical center line**. Press **Enter** to end the line. Make the shape yours — a fat grip, a tapered end, a bump — then click **← Done**.',
+        hint: 'Every click is a corner. The Arc tool can add grip scallops or a domed top; pieces that touch end-to-end all revolve together.',
+        svg: `<svg viewBox="0 0 210 170" style="width:100%;height:auto;display:block">
+          <line x1="60" y1="6" x2="60" y2="164" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>
+          <polyline points="60,156 70,140 72,118 72,36 68,20 60,16" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M72,60 q6,6 0,12 q6,6 0,12 q6,6 0,12" fill="none" stroke="#16a34a" stroke-width="2"/>
+          <circle cx="60" cy="156" r="4" fill="#dc2626"/>
+          ${[[70,140],[72,118],[72,36],[68,20],[60,16]].map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#16a34a"/>`).join('')}
+          <line x1="150" y1="16" x2="150" y2="156" stroke="#64748b" stroke-width="1"/>
+          <line x1="145" y1="16" x2="155" y2="16" stroke="#64748b" stroke-width="1"/>
+          <line x1="145" y1="156" x2="155" y2="156" stroke="#64748b" stroke-width="1"/>
+          <text x="158" y="90" font-size="11" fill="#475569">≈7 in</text>
+          <text x="66" y="167" font-size="9" fill="#dc2626">start at center</text>
+          <text x="20" y="90" font-size="9" fill="#64748b">center</text>
+          <text x="20" y="100" font-size="9" fill="#64748b">line</text>
+        </svg>`,
+        done: (d) => d.mode === '3d' && d.sketches.some(sk => {
+          const p = _revolveProfileFromSketch(sk);
+          if (!p) return false;
+          const xs = p.points.map(q => q.x), ys = p.points.map(q => q.y);
+          const h = Math.max(...ys) - Math.min(...ys), r = Math.max(...xs), minX = Math.min(...xs);
+          return h >= 130 && h <= 230 && r >= 2.5 && r <= 14 && minX >= -1 && minX <= 1.5;
+        }),
+      },
+      {
+        text: 'Click **Revolve** in the toolbar and **OK**. Your outline spins into a solid pen — orbit around it.',
+        done: (d) => _projFindBody(d.bodies, b => b.type === 'revolve'),
+      },
+      {
+        text: 'Now the channel for the ink. Add a **Cylinder** from the Primitive menu and, in **Properties**, set **Width 0.16**, **Depth 0.16** and **Height 5** — the refill is 0.152 across, and the extra 0.008 is clearance so it slides in. Under **Operation**, set **Type** to **Negative (cut-out)**. In **Position** set **X 0** and **Y 0** so it sits on the pen’s center line, and **Z 0** so it starts at the tip.',
+        hint: 'Clearance is the gap between a part and the hole it fits in. Too little and it jams; too much and it rattles.',
+        done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
+      },
+      {
+        text: '**Shift-click** the pen and the red channel so both are selected, then click **Group** — the Negative cylinder cuts the channel out of the pen. Orbit underneath: you should see the hole at the tip.',
+        hint: 'A Negative on its own does nothing; grouping it with a body is what makes the cut.',
+        done: (d) => _projFindBody(d.bodies, b => (b.type === 'group' || b.type === 'combined') &&
+          _projFindBody(b.children, c => c.type === 'revolve') && _projFindBody(b.children, _projIsInkChannel)),
+      },
+      {
+        text: 'Give it a name at the top and press ☁ **Save**. Then **Export ▾ → STL** and print it. Push the refill in from the bottom, tip first — you designed a pen. 🖊️',
+        hint: 'Make it yours before you export: a flat side so it won’t roll, a clip, your initials with the Text tool.',
+        done: (d, ev) => !!ev.exported,
+      },
+    ],
+  },
+  {
+    id: 'square-pen',
+    kind: 'project',
+    title: 'Square Pen (sketch + extrude)',
+    minutes: 15,
+    intro: 'The same pen a different way: a sketch pulled straight up into a solid, with your initials engraved on a flat side.',
+    print: 'Print it standing on its flat end with the channel opening down (or up — either prints without supports). Initials face sideways, so they print clean. Too tight? Make the channel Width/Depth 0.17.',
+    skills: ['exact-sizes', 'extrude', 'cut-a-hole'],
+    steps: [
+      {
+        text: 'Click **Sketch** → **Top**. Pick **Rect** and draw a square near the center. Click it with **Select** and in **Properties** set **Width 0.5**, **Height 0.5**, then **X -0.25** and **Y -0.25** — that centers the square exactly on the grid’s center point. Click **← Done**.',
+        hint: 'A 0.5-inch square is a comfortable pen. X and Y are the square’s corner, so half the size in the negative direction puts its middle on the origin.',
+        done: (d) => d.mode === '3d' && _tutSketchHas(d, e => {
+          if (e.type !== 'rect') return false;
+          const sq = (v) => _tutNear(v, 0.5 * TUT_IN, 1.2) || _tutNear(v, 12, 0.6) || _tutNear(v, 13, 0.6);
+          return sq(e.w) && sq(e.h) && Math.abs(e.x + e.w / 2) < 1.5 && Math.abs(e.y + e.h / 2) < 1.5;
+        }),
+      },
+      {
+        text: 'Click **inside** the square. In the pop-up type **7** and click **Done** — your square becomes a 7-inch pen body. Orbit around it.',
+        done: (d) => _projFindBody(d.bodies, b => b.type === 'extrude' && b.op !== 'subtract' &&
+          (_tutNear(b.height, 7 * TUT_IN, 2) || _tutNear(b.height, 180, 2))),
+      },
+      {
+        text: 'The ink channel, same as the revolved pen: add a **Cylinder** from the Primitive menu, set **Width 0.16**, **Depth 0.16**, **Height 5**, Operation **Type → Negative (cut-out)**, and Position **X 0, Y 0, Z 0** so it runs up the middle from the bottom end.',
+        hint: 'The refill is 0.152 across; 0.16 gives it 0.008 of clearance so it slides in without rattling.',
+        done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
+      },
+      {
+        text: '**Shift-click** the pen and the red channel, then click **Group** — the channel is cut. Check the bottom end for the hole.',
+        done: (d) => _projFindBody(d.bodies, b => (b.type === 'group' || b.type === 'combined') &&
+          _projFindBody(b.children, c => c.type === 'extrude' && c.op !== 'subtract') && _projFindBody(b.children, _projIsInkChannel)),
+      },
+      {
+        text: 'Your initials: pick **On Face** and click one of the pen’s four flat sides. Pick the **Text** tool and click near the top of that face. In the box type your **initials** (2–3 letters), set **Letter height 0.25**, click **OK**, then **← Done**. Back in 3D, click **inside one letter** — the whole word selects — type **0.03**, click **－ Cut**, then **Done**. Engraved.',
+        hint: '0.03 inch is about two printer layers — deep enough to see, shallow enough to stay strong. Positive instead of Cut gives raised letters.',
+        done: (d) => d.sketches.some(sk => sk.textMeta && Object.keys(sk.textMeta).length > 0) &&
+          _projFindBody(d.bodies, b => b.type === 'extrude' && b.op === 'subtract' && b.height > 0 && b.height <= 3),
+      },
+      {
+        text: 'Name it, press ☁ **Save**, then **Export ▾ → STL** and print. Slide the refill in from the bottom, tip first. 🖊️',
+        hint: 'Make it yours: fillet the square’s corners before extruding (Sketch Toolbox tutorial), engrave a pattern, or add a clip with a second extrude.',
+        done: (d, ev) => !!ev.exported,
+      },
+    ],
+  },
+  {
+    id: 'pencil-cup',
+    kind: 'project',
+    // Shelved 2026-10-07 (Charlie): too little design for a 1–2 hour print.
+    // Kept as the authoring template; hidden from the picker and "Next".
+    hidden: true,
+    title: 'Pencil Cup',
+    minutes: 10,
+    intro: 'A real desk organizer in four moves: one cylinder, one hole, one export.',
+    print: 'Prints as-is, open side up — no supports. About 1–2 hours on most printers; scale it down in the slicer for a quicker test.',
+    skills: ['cut-a-hole'],
+    steps: [
+      {
+        text: 'Add a **Cylinder** from the Primitive menu. In the **Properties** panel set **Width 3**, **Depth 3** (that’s the diameter) and **Height 3.5**, pressing Enter after each.',
+        hint: 'A standard pencil is about 7½ inches — a 3½-inch cup holds it steady without hiding it.',
+        done: (d) => _tutSolids(d, 'cylinder').some(b =>
+          (_tutNear(b.w, 3 * TUT_IN, 2) || _tutNear(b.w, 75, 2)) &&
+          (_tutNear(b.h, 3.5 * TUT_IN, 2) || _tutNear(b.h, 90, 2))),
+      },
+      {
+        text: 'Pick **On Face** in the toolbar and click the cylinder’s **top face** — a sketch opens right on the top of the cup.',
+        done: (d) => d.sketches.length >= 1,
+      },
+      {
+        text: 'Draw a **Circle** near the **middle** of the top face. Click it with **Select** and set **Radius 1.375** in Properties (2.75 across) — that leaves walls about ⅛ inch thick. Then click **← Done**.',
+        hint: 'Aim for the center: the cursor snaps to the face’s middle.',
+        done: (d) => _tutSketchHas(d, e => e.type === 'circle' &&
+          (_tutNear(e.r * 2, 2.75 * TUT_IN, 2) || _tutNear(e.r * 2, 70, 2))) && d.mode === '3d',
+      },
+      {
+        text: 'Click **inside** your circle on the cup. In the pop-up type **3.25** for the depth, then click **－ Cut** and **Done**. Not Through — the ¼ inch left at the bottom is the floor of the cup.',
+        hint: 'Orbit underneath afterwards: if you can see daylight, the cut went all the way through — undo and type the depth again.',
+        done: (d) => _projCutDepthFrac(d, 'cylinder', 0.7, 0.97),
+      },
+      {
+        text: 'Give it a name in the box at the top and press ☁ **Save** (signed-in users). Then click **Export ▾ → STL** to download the file your 3D printer’s slicer opens. 🖨️',
+        hint: 'Make it yours before you export: a second smaller cup cut beside the first, a notch in the rim for a ruler, or stretch the height.',
+        done: (d, ev) => !!ev.exported,
+      },
+    ],
+  },
+];
+
 const TUT_UNIT_TITLES = {
   1: '🧭 Unit 1 — Getting Around',
   2: '✏️ Unit 2 — Sketching',
@@ -25116,7 +25385,8 @@ const TUT_COMING_UNITS = [
   '🖨️ Unit 6 — Assemblies & Sharing',
 ];
 
-function _tutById(id) { return TUTORIALS.find(t => t.id === id) || null; }
+function _tutById(id) { return TUTORIALS.find(t => t.id === id) || PROJECTS.find(p => p.id === id) || null; }
+const _tutIsProject = (t) => !!(t && t.kind === 'project');
 // Step text supports **bold** only; everything else is escaped.
 function _tutFmt(s) { return _apEsc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'); }
 
@@ -25128,9 +25398,18 @@ function enterTutorial(id) {
   if (window.__assignment) { showHint('Finish or close your assignment first — tutorials open in a fresh window.'); return; }
   if (window.__tutorial && window.__tutorial.id === id) { _renderTutorialPanel(); return; }
 
-  // First tutorial of the session: park the student's real work. Switching
-  // tutorial-to-tutorial keeps the ORIGINAL parked doc.
-  if (!window.__tutorial) {
+  const project = _tutIsProject(t);
+  if (project) {
+    // Projects work on the REAL doc. Leave any scratch tutorial first (that
+    // restores the student's design), then start fresh exactly like ＋ New:
+    // confirm if unsaved, undoable, draft cleared.
+    if (window.__tutorial && !_tutIsProject(window.__tutorial)) exitTutorial();
+    if (_docDirty && !window.confirm(`Start "${t.title}" on a fresh canvas?\nUnsaved changes to the current design will be lost (Ctrl+Z can bring them back).`)) return;
+    pushUndo();
+    clearLocalDraft();
+  } else if (!window.__tutorial || _tutIsProject(window.__tutorial)) {
+    // First scratch tutorial of the session (or stepping out of a project):
+    // park the student's real work. Tutorial-to-tutorial keeps the ORIGINAL.
     _tutPrevDoc = snapshotDoc();
     const nameInp = document.getElementById('project-filename');
     _tutPrevName = nameInp ? nameInp.value : '';
@@ -25148,18 +25427,27 @@ function enterTutorial(id) {
   doc.bodies = []; doc.nextBodyId = 1;
   doc.selection = null; doc.multiSelectedSketch = []; doc.multiSelectedBodies = [];
   doc.selectedRegions = []; doc.joints = []; doc.nextJointId = 1;
-  undoStack.length = 0; redoStack.length = 0; undoModes.length = 0; redoModes.length = 0;
+  // Scratch tutorials empty the undo stack so Ctrl+Z can't pull the parked
+  // design in; a project keeps it — the pushUndo above makes the previous
+  // design one Ctrl+Z away, same promise as ＋ New.
+  if (!project) { undoStack.length = 0; redoStack.length = 0; undoModes.length = 0; redoModes.length = 0; }
   updateUndoRedoButtons();
   if (t.seed) { try { t.seed(doc); } catch (err) { console.warn('tutorial seed failed:', err); } }
 
   const nameInp = document.getElementById('project-filename');
-  if (nameInp) { nameInp.value = `Tutorial: ${t.title}`; nameInp.disabled = true; }
-  // No New/Open/Save while practicing — tutorial scratch must never overwrite
-  // or sit beside the student's real designs. All restored on exit.
-  ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn', 'share-btn'].forEach(bid => {
-    const el = document.getElementById(bid);
-    if (el) el.style.display = 'none';
-  });
+  if (project) {
+    // The project IS the design: real name, editable, Save/Share/Export live.
+    if (nameInp) { nameInp.value = t.title; nameInp.disabled = false; }
+    setDirty(false);
+  } else {
+    if (nameInp) { nameInp.value = `Tutorial: ${t.title}`; nameInp.disabled = true; }
+    // No New/Open/Save while practicing — tutorial scratch must never overwrite
+    // or sit beside the student's real designs. All restored on exit.
+    ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn', 'share-btn'].forEach(bid => {
+      const el = document.getElementById(bid);
+      if (el) el.style.display = 'none';
+    });
+  }
 
   // ORDER MATTERS: switch to 3D BEFORE any render. The doc reset above
   // cleared the active sketch, and rendering the 2D engine with no active
@@ -25178,16 +25466,28 @@ function enterTutorial(id) {
   _tutHideWelcome();
   clearInterval(_tutTimer);
   _tutTimer = setInterval(_tutTick, 600);
-  setStatus(`🎓 Tutorial: ${t.title} — follow the green panel.`);
+  setStatus(project
+    ? `🛠 Project: ${t.title} — follow the panel; this one you keep and print.`
+    : `🎓 Tutorial: ${t.title} — follow the green panel.`);
 }
 
 function exitTutorial() {
   if (!window.__tutorial) return;
+  const wasProject = _tutIsProject(window.__tutorial);
   window.__tutorial = null;
   clearInterval(_tutTimer);
   _tutTimer = null;
   const panel = document.getElementById('tutorial-panel');
   if (panel) panel.remove();
+  if (wasProject) {
+    // Nothing to restore — the project work stays on the canvas as the
+    // student's design (already autosaving).
+    doc.selection = null; doc.multiSelectedBodies = []; doc.selectedRegions = [];
+    renderTree(); renderProps();
+    scheduleAutosave();
+    setStatus('Project panel closed — your design stays right here. Save ☁ or Export when you’re ready.');
+    return;
+  }
   const nameInp = document.getElementById('project-filename');
   if (nameInp) { nameInp.disabled = false; nameInp.value = _tutPrevName; }
   ['new-design-btn', 'cloud-load-btn', 'cloud-save-btn', 'share-btn'].forEach(bid => {
@@ -25243,7 +25543,7 @@ function _tutComplete(t) {
     notifyParent({ type: 'STEMSKETCH_TUTORIAL_COMPLETE', tutorialId: t.id });
     _tutNotified = true;
   }
-  showHint(`🎉 Tutorial complete: ${t.title}`, 3500);
+  showHint(_tutIsProject(t) ? `🎉 Project complete: ${t.title} — go print it!` : `🎉 Tutorial complete: ${t.title}`, 3500);
   setStatus(`🎉 You finished "${t.title}"!`);
   _renderTutorialPanel();
 }
@@ -25260,24 +25560,28 @@ function _renderTutorialPanel() {
     host.appendChild(panel);
   }
   const finished = _tutStep >= t.steps.length;
-  const idx = TUTORIALS.indexOf(t);
-  const next = idx >= 0 ? TUTORIALS[idx + 1] : null;
+  const project = _tutIsProject(t);
+  const list = project ? PROJECTS.filter(p => !p.hidden || p === t) : TUTORIALS;
+  const idx = list.indexOf(t);
+  const next = idx >= 0 ? list[idx + 1] : null;
   const cur = finished ? null : t.steps[_tutStep];
   panel.innerHTML = `
     <div class="ap-head" id="tp-head" title="Show / hide the steps">
-      <span class="ap-title">🎓 Tutorial: ${_apEsc(t.title)}</span>
+      <span class="ap-title">${project ? '🛠 Project' : '🎓 Tutorial'}: ${_apEsc(t.title)}</span>
       <button class="ap-toggle" id="tp-toggle">▾</button>
     </div>
     <div class="ap-body">
       ${finished ? `
         <div style="text-align:center;font-size:26px;margin:2px 0 6px">🎉</div>
-        <div style="text-align:center;font-weight:800;color:#14532d;margin-bottom:4px">You finished this tutorial!</div>
+        <div style="text-align:center;font-weight:800;color:#14532d;margin-bottom:4px">${project ? 'Project complete — ready to print!' : 'You finished this tutorial!'}</div>
         <div style="text-align:center;font-size:12px;color:#64748b;margin-bottom:10px">
-          ${next ? 'Ready for the next one?' : 'That’s every tutorial we have so far — more are coming.'}</div>
+          ${project
+            ? `${t.print ? `<div style="text-align:left;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;margin-bottom:8px">🖨️ ${_apEsc(t.print)}</div>` : ''}Your design stays here — keep changing it, Save ☁ it, or Share it with your class.`
+            : (next ? 'Ready for the next one?' : 'That’s every tutorial we have so far — more are coming.')}</div>
         ${next ? `<button class="ap-check" id="tp-next">▶ Next: ${_apEsc(next.title)}</button>` : ''}
-        <button class="tut-exit" id="tp-exit">← Back to my design</button>
+        <button class="tut-exit" id="tp-exit">${project ? '✓ Close panel, keep my design' : '← Back to my design'}</button>
       ` : `
-        <div class="tut-progress">Step ${_tutStep + 1} of ${t.steps.length}</div>
+        <div class="tut-progress">Step ${_tutStep + 1} of ${t.steps.length}${project && t.minutes ? ` · about ${t.minutes} min` : ''}</div>
         ${t.intro && _tutStep === 0 ? `<div style="font-size:12px;color:#475569;margin-bottom:8px">${_apEsc(t.intro)}</div>` : ''}
         ${t.steps.map((s, i) => `
           <div class="tut-step ${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}">
@@ -25286,7 +25590,7 @@ function _renderTutorialPanel() {
           </div>
           ${i === _tutStep && s.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${s.svg}</div>` : ''}
           ${i === _tutStep && s.hint ? `<div class="tut-hint-line">💡 ${_apEsc(s.hint)}</div>` : ''}`).join('')}
-        <button class="tut-exit" id="tp-exit">✕ Exit tutorial</button>
+        <button class="tut-exit" id="tp-exit">${project ? '✕ Close panel (keeps my design)' : '✕ Exit tutorial'}</button>
       `}
     </div>`;
   document.getElementById('tp-head').onclick = () => panel.classList.toggle('collapsed');
@@ -25297,9 +25601,27 @@ function _renderTutorialPanel() {
 
 // ── Picker (🎓 toolbar button) ───────────────────────────────────────────────
 
-function showTutorialPicker() {
+// tab: 'tutorials' | 'projects' — both toolbar buttons open the same modal.
+function showTutorialPicker(tab = 'tutorials') {
   const done = _tutDoneMap();
+  const projects = tab === 'projects';
   const units = [...new Set(TUTORIALS.map(t => t.unit))].sort((a, b) => a - b);
+  const tabBar = `
+    <div style="display:flex;gap:6px;margin:-2px 0 10px">
+      ${[['tutorials', '🎓 Tutorials'], ['projects', '🛠 Quick Projects']].map(([k, label]) => `
+        <button data-tab="${k}" style="flex:1;padding:7px 10px;border-radius:8px;font-weight:800;font-size:12.5px;cursor:pointer;
+          border:2px solid ${k === tab ? '#16a34a' : '#e2e8f0'};background:${k === tab ? '#f0fdf4' : '#fff'};color:${k === tab ? '#14532d' : '#475569'}">
+          ${label}</button>`).join('')}
+    </div>`;
+  const projectRows = PROJECTS.filter(p => !p.hidden).map(p => `
+    <div class="tut-picker-row" style="align-items:flex-start">
+      <span class="tp-name">${_apEsc(p.title)}
+        <span class="tp-blurb">${_apEsc(p.intro || '')}</span>
+        <span class="tp-blurb" style="color:#0e7490;font-weight:700">⏱ ${p.minutes || '?'} min · ${p.steps.length} steps · 🖨️ 3D-printable</span>
+      </span>
+      ${done[p.id] ? '<span class="tp-done">✓ Done</span>' : ''}
+      <button class="tp-start" data-tut="${_apEsc(p.id)}">${done[p.id] ? 'Build again' : 'Start'}</button>
+    </div>`).join('');
   const rows = units.map(u => `
     <div class="tut-picker-unit">${_apEsc(TUT_UNIT_TITLES[u] || `Unit ${u}`)}</div>
     ${TUTORIALS.filter(t => t.unit === u).map(t => `
@@ -25313,12 +25635,14 @@ function showTutorialPicker() {
       <span class="tp-name">${_apEsc(u)}</span><span class="tp-soon">coming soon</span>
     </div>`).join('');
   openModal({
-    title: '🎓 Tutorials',
-    body: `<div style="font-size:12.5px;color:#475569;margin-bottom:6px">
-        Short guided lessons — the tool checks your work as you go. Your design is saved and comes right back when you exit.</div>
+    title: projects ? '🛠 Quick Projects' : '🎓 Tutorials',
+    body: `${tabBar}
+      <div style="font-size:12.5px;color:#475569;margin-bottom:6px">
+        ${projects
+          ? 'Short follow-alongs that end with a real part you can 3D print. Each starts a fresh design that’s yours to keep, save, and share — then make it your own.'
+          : 'Short guided lessons — the tool checks your work as you go. Your design is saved and comes right back when you exit.'}</div>
       <div style="max-height:320px;overflow-y:auto">
-        ${rows}
-        ${soon}
+        ${projects ? (projectRows || '<div class="tut-picker-row soon"><span class="tp-name">First projects coming soon</span></div>') : rows + soon}
       </div>`,
     hideOk: true,
     custom: () => {
@@ -25327,6 +25651,9 @@ function showTutorialPicker() {
           document.getElementById('modal-bg').classList.remove('show');
           enterTutorial(b.dataset.tut);
         });
+      });
+      document.querySelectorAll('#modal [data-tab]').forEach(b => {
+        b.addEventListener('click', () => showTutorialPicker(b.dataset.tab));
       });
     },
   });
@@ -25385,7 +25712,9 @@ document.addEventListener('click', (e) => {
 
 {
   const tb = document.getElementById('tutorials-btn');
-  if (tb) tb.onclick = showTutorialPicker;
+  if (tb) tb.onclick = () => showTutorialPicker('tutorials');
+  const pb = document.getElementById('projects-btn');
+  if (pb) pb.onclick = () => showTutorialPicker('projects');
 }
 
 // Give init() time to settle (draft restore, engine boot) before judging the
