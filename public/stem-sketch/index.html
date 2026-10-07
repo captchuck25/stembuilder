@@ -18059,7 +18059,20 @@ function applyResize(rs, delta) {
 function _revolveProfileFromSketch(sketch) {
   const segs = (sketch.entities || [])
     .filter(e => e.type === 'polyline' && !e.construction && Array.isArray(e.points) && e.points.length >= 2)
-    .map(e => ({ pts: e.points.map(p => ({ x: p.x, y: p.y })), closed: !!e.closed }));
+    .map(e => {
+      // Flatten through entityToSegments so Smooth nodes and Arc-tool curves
+      // (cpIn/cpOut Bezier handles) lathe as curves — lathing the raw anchor
+      // points turned a wavy grip into straight chords ("it's simplifying",
+      // pen tutorial.mp4 2026-10-07).
+      const ss = entityToSegments(e);
+      if (!ss.length) return null;
+      const pts = [{ x: ss[0].a.x, y: ss[0].a.y }];
+      for (const s of ss) pts.push({ x: s.b.x, y: s.b.y });
+      const closed = !!e.closed;
+      if (closed && pts.length > 2 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 1e-6) pts.pop();
+      return { pts, closed };
+    })
+    .filter(Boolean);
   if (!segs.length) return null;
   const all = segs.flatMap(s => s.pts);
   const xs = all.map(p => p.x), ys = all.map(p => p.y);
@@ -24882,6 +24895,7 @@ let _tutPrevName = '';         // project-name input value before entry
 let _tutTimer = null;          // predicate poll interval
 let _tutNotified = false;      // completion posted to the wrapper this run
 let _tutEvents = { views: new Set() };  // UI events predicates can consume
+let _tutHold = false;          // learner jumped back: stay here until ▶ Continue
 
 const TUT_IN = 25.4; // mm per inch — doc storage is always mm
 
@@ -25231,8 +25245,13 @@ const PROJECTS = [
     skills: ['revolve', 'exact-sizes'],
     steps: [
       {
-        text: 'Pull the ink refill out of a cheap ballpoint (a Bic Round Stic works). The thin tube is about **0.152 in across** and **5 in long**, with the writing tip on one end — that tip will poke out of the bottom of your pen. Now that we know the size of our ink, it’s time to get started: click **Sketch** → **Front**.',
+        text: 'Pull the ink refill out of a cheap ballpoint (a Bic Round Stic works). The thin tube is about **0.152 in across** and **5 in long**, with the writing tip on one end — that tip will poke out of the bottom of your pen. We’ll design the body around it.',
         hint: 'Got calipers? Measure your own refill and use your numbers instead — that’s the real engineering.',
+        manual: true, // nothing to check — the learner clicks "Got it"
+        done: () => false,
+      },
+      {
+        text: 'Now that we know the size of our ink, it’s time to get started: click **Sketch** → **Front**.',
         done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
       },
       {
@@ -25426,6 +25445,7 @@ function enterTutorial(id) {
   window.__tutorial = t;
   _tutStep = 0;
   _tutStepsDone = t.steps.map(() => false);
+  _tutHold = false;
   _tutNotified = false;
   _tutEvents = { views: new Set() };
 
@@ -25526,7 +25546,12 @@ function _tutTick() {
   const t = window.__tutorial;
   if (!t) { clearInterval(_tutTimer); _tutTimer = null; return; }
   if (_tutStep >= t.steps.length) return; // completed; panel already final
+  // Holding on a step the learner jumped BACK to (its check is usually
+  // already true — auto-advancing would bounce them straight forward again,
+  // pen tutorial.mp4 2026-10-07). They continue with the ▶ button.
+  if (_tutHold) return;
   let step = t.steps[_tutStep];
+  if (step.manual) return; // "Got it" button advances these
   try {
     if (!step.done(doc, _tutEvents)) return;
   } catch (err) {
@@ -25599,7 +25624,8 @@ function _renderTutorialPanel() {
             <span>${_tutFmt(s.text)}</span>
           </div>
           ${i === _tutStep && s.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${s.svg}</div>` : ''}
-          ${i === _tutStep && s.hint ? `<div class="tut-hint-line">💡 ${_apEsc(s.hint)}</div>` : ''}`).join('')}
+          ${i === _tutStep && s.hint ? `<div class="tut-hint-line">💡 ${_apEsc(s.hint)}</div>` : ''}
+          ${i === _tutStep && (s.manual || _tutHold) ? `<button class="ap-check" id="tp-continue" style="margin:2px 0 8px 23px;width:calc(100% - 23px)">${s.manual ? '✓ Got it — next step' : `▶ Continue to step ${i + 2 > t.steps.length ? 'finish' : i + 2}`}</button>` : ''}`).join('')}
         <button class="tut-exit" id="tp-exit">${project ? '✕ Close panel (keeps my design)' : '✕ Exit tutorial'}</button>
       `}
     </div>`;
@@ -25614,6 +25640,20 @@ function _renderTutorialPanel() {
   panel.querySelectorAll('[data-step]').forEach(el => {
     el.onclick = (ev) => { ev.stopPropagation(); _tutJumpTo(parseInt(el.dataset.step, 10)); };
   });
+  const cont = document.getElementById('tp-continue');
+  if (cont) cont.onclick = (ev) => { ev.stopPropagation(); _tutAdvance(); };
+}
+
+// Mark the current step done and move on (manual steps, or continuing
+// after a jump back). Finishing the last step completes the tutorial.
+function _tutAdvance() {
+  const t = window.__tutorial;
+  if (!t || _tutStep >= t.steps.length) return;
+  _tutHold = false;
+  _tutStepsDone[_tutStep] = true;
+  _tutStep++;
+  if (_tutStep < t.steps.length) _renderTutorialPanel();
+  else _tutComplete(t);
 }
 
 function _tutJumpTo(i) {
@@ -25621,8 +25661,10 @@ function _tutJumpTo(i) {
   if (!t || !(i >= 0 && i < t.steps.length) || i === _tutStep) return;
   if (i > _tutStep) {
     for (let k = _tutStep; k < i; k++) _tutStepsDone[k] = true;
+    _tutHold = false;
   } else {
     for (let k = i; k < t.steps.length; k++) _tutStepsDone[k] = false;
+    _tutHold = true; // stay here; the check won't bounce them forward
   }
   _tutStep = i;
   _renderTutorialPanel();
