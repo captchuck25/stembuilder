@@ -8222,6 +8222,13 @@ class Viewer3D {
                 tube: bodyH.tube, height: bodyH.height,
               };
               resizeState.startPos = { x: bodyH.x || 0, y: bodyH.y || 0, z: bodyH.z || 0 };
+              // Sketch-built bodies (revolve / extrude) resize through body.scale
+              // against their bounding box at drag start (see applyResize).
+              const s0 = bodyH.scale || { x: 1, y: 1, z: 1 };
+              resizeState.startScale = { x: s0.x || 1, y: s0.y || 1, z: s0.z || 1 };
+              const bb0 = new THREE.Box3().setFromObject(bodyH.mesh);
+              const sz0 = bb0.isEmpty() ? new THREE.Vector3(1, 1, 1) : bb0.getSize(new THREE.Vector3());
+              resizeState.startSize = { x: sz0.x, y: sz0.y, z: sz0.z };
               const axisDir = hh.resizeAxis === 'x' ? new THREE.Vector3(1, 0, 0)
                             : hh.resizeAxis === 'y' ? new THREE.Vector3(0, 1, 0)
                             :                         new THREE.Vector3(0, 0, 1);
@@ -13244,6 +13251,9 @@ function snapshotDoc() {
     nextJointId: doc.nextJointId || 1,
     collisionWarnGround: doc.collisionWarnGround !== false,
     collisionWarnBodies: doc.collisionWarnBodies !== false,
+    // Quick Project attached to this design (id + step progress) — travels
+    // with saves and drafts so reopening the design reopens its panel.
+    project: doc.project ? JSON.parse(JSON.stringify(doc.project)) : null,
   };
 }
 function applySnapshot(s, opts = {}) {
@@ -13320,6 +13330,7 @@ function applySnapshot(s, opts = {}) {
   doc.nextJointId = typeof s.nextJointId === 'number' ? s.nextJointId : 1;
   doc.collisionWarnGround = s.collisionWarnGround !== false;
   doc.collisionWarnBodies = s.collisionWarnBodies !== false;
+  doc.project = (s.project && typeof s.project === 'object' && s.project.id) ? JSON.parse(JSON.stringify(s.project)) : null;
   doc.jointPickStage = null;
   doc.jointDraft = null;
   doc.selection = null;
@@ -13631,6 +13642,7 @@ function restoreLocalDraft() {
     if (draft.units && draft.units !== doc.units) setUnits(draft.units);
     applySnapshot(draft.docJson, { sanitize: true });
     setStatus('Restored unsaved work from last session');
+    if (typeof _tutMaybeResumeProject === 'function') _tutMaybeResumeProject();
     return true;
   } catch (err) {
     // Most useful error to surface — applySnapshot blowing up means the
@@ -18090,12 +18102,33 @@ function applyResize(rs, delta) {
     } else {
       b.r = Math.max(MIN, rs.startDims.r + Math.abs(Δ));
     }
-  } else if (b.type === 'extrude') {
-    if (rs.axis === 'y') {
-      const factor = anchorAxis('height', 'y', true);
-      if (rs.uniform) {
-        // No XZ scaling for extrude in v1 — would require sketch transform
-      }
+  } else if (b.type === 'extrude' || b.type === 'revolve') {
+    // The vertical dot on a workplane extrude still edits the exact pull
+    // (Extrude depth) as before; every other dot — and every dot on a
+    // revolve — drives the body's resize (body.scale, see _applyBodyScale),
+    // the same thing the Properties Width/Height/Depth fields do. The
+    // dragged face follows the cursor; the opposite face stays put.
+    const n = (b.plane && b.plane.n) || [0, 1, 0];
+    const groundExtrude = b.type === 'extrude' && Math.abs(n[1]) > 0.99;
+    if (groundExtrude && rs.axis === 'y') {
+      anchorAxis('height', 'y', true);
+      return;
+    }
+    const ss = rs.startScale || { x: 1, y: 1, z: 1 };
+    const sz = rs.startSize || { x: 1, y: 1, z: 1 };
+    const cur = sz[rs.axis] || 1;
+    const next = Math.max(MIN, cur + Δ);
+    const f = next / cur;
+    const axes = rs.uniform ? ['x', 'y', 'z'] : [rs.axis];
+    b.scale = { x: ss.x, y: ss.y, z: ss.z };
+    for (const k of axes) b.scale[k] = ss[k] * f;
+    // Re-anchor: scaling is about the bottom center, so grow the dragged
+    // side by moving the body. Y grows upward on its own; a bottom-dot
+    // drag moves the body down by the growth.
+    for (const k of axes) {
+      const grow = sz[k] * (f - 1);
+      if (k === 'y') { if (k === rs.axis && sign < 0) b.y = rs.startPos.y - grow; else b.y = rs.startPos.y; }
+      else if (k === rs.axis) b[k] = rs.startPos[k] + sign * grow / 2;
     }
   }
 }
@@ -24104,6 +24137,9 @@ function startNewDesign() {
     if (!window.confirm('Discard the current design and start blank?\nUnsaved changes will be lost (but Ctrl+Z will undo this).')) return;
   }
   pushUndo();
+  // A blank design has no project attached — close an open project panel.
+  if (window.__tutorial && typeof _tutIsProject === 'function' && _tutIsProject(window.__tutorial)) exitTutorial();
+  doc.project = null;
   // Reset doc to the same shape as the initial seed — blank, no sketches.
   doc.sketches = [];
   doc.activeSketchId = null;
@@ -24141,6 +24177,7 @@ function loadDesignFromJson(name, docJson, units) {
   if (units && units !== doc.units) setUnits(units);
   applySnapshot(docJson, { sanitize: true });
   setStatus('Loaded: ' + name);
+  if (typeof _tutMaybeResumeProject === 'function') _tutMaybeResumeProject();
 }
 
 function showCloudLoadDialog(designs) {
@@ -25581,6 +25618,9 @@ function enterTutorial(id) {
   _tutStepsDone = t.steps.map(() => false);
   _tutHold = false;
   _tutNotified = false;
+  // A project rides with the design (snapshotDoc → saves/drafts) so the
+  // panel comes back when the design is reopened. Scratch tutorials don't.
+  if (project) doc.project = { id: t.id, step: 0, done: [], finished: false };
   _tutEvents = { views: new Set() };
 
   // Fresh canvas — same reset as assignment mode: no confirm, no draft
@@ -25634,7 +25674,7 @@ function enterTutorial(id) {
     : `🎓 Tutorial: ${t.title} — follow the green panel.`);
 }
 
-function exitTutorial() {
+function exitTutorial(opts) {
   if (!window.__tutorial) return;
   const wasProject = _tutIsProject(window.__tutorial);
   window.__tutorial = null;
@@ -25644,7 +25684,10 @@ function exitTutorial() {
   if (panel) panel.remove();
   if (wasProject) {
     // Nothing to restore — the project work stays on the canvas as the
-    // student's design (already autosaving).
+    // student's design (already autosaving). Closing the panel by hand
+    // detaches the project from the design (so it won't pop back up on the
+    // next open); a load-time swap keeps whatever the loaded doc carries.
+    if (!(opts && opts.keepProject)) doc.project = null;
     doc.selection = null; doc.multiSelectedBodies = []; doc.selectedRegions = [];
     renderTree(); renderProps();
     scheduleAutosave();
@@ -25704,14 +25747,52 @@ function _tutTick() {
   if (_tutStep < t.steps.length) {
     showHint('✓ Step complete!');
     _renderTutorialPanel();
+    _projSyncToDoc();
   } else {
     _tutComplete(t);
   }
 }
 
+// Mirror the panel's progress into doc.project (and the autosave draft) so a
+// reload or reopen resumes at the same step.
+function _projSyncToDoc() {
+  const t = window.__tutorial;
+  if (!t || !_tutIsProject(t)) return;
+  if (!doc.project || doc.project.id !== t.id) doc.project = { id: t.id };
+  doc.project.step = _tutStep;
+  doc.project.done = _tutStepsDone.slice();
+  doc.project.finished = _tutStep >= t.steps.length;
+  scheduleAutosave();
+}
+
+// After a design loads (cloud open, draft restore): reopen its project panel
+// at the saved step — or close a panel that belonged to a different design.
+function _tutMaybeResumeProject() {
+  const active = window.__tutorial;
+  const p = doc.project;
+  if (active && !_tutIsProject(active)) return; // scratch tutorial owns the screen
+  if (active && (!p || p.id !== active.id)) exitTutorial({ keepProject: true });
+  if (!p || p.finished) return;
+  const t = _tutById(p.id);
+  if (!t || !_tutIsProject(t)) return;
+  if (window.__tutorial && window.__tutorial.id === t.id) { _tutStep = Math.min(p.step || 0, t.steps.length); _tutStepsDone = t.steps.map((_, i) => !!(p.done && p.done[i]) || i < _tutStep); _renderTutorialPanel(); return; }
+  window.__tutorial = t;
+  _tutStep = Math.min(Math.max(0, p.step || 0), t.steps.length);
+  _tutStepsDone = t.steps.map((_, i) => !!(p.done && p.done[i]) || i < _tutStep);
+  _tutHold = false;
+  _tutNotified = !!p.finished;
+  _tutEvents = { views: new Set() };
+  _renderTutorialPanel();
+  _tutHideWelcome();
+  clearInterval(_tutTimer);
+  _tutTimer = setInterval(_tutTick, 600);
+  setStatus(`🛠 Project: ${t.title} — picking up at step ${_tutStep + 1}.`);
+}
+
 function _tutComplete(t) {
   const already = !!_tutDoneMap()[t.id];
   _tutMarkDone(t.id);
+  _projSyncToDoc();
   if (!already || !_tutNotified) {
     // The wrapper persists this for signed-in users (fire-and-forget); for
     // anonymous users localStorage above is all there is, and that's fine.
@@ -25793,7 +25874,7 @@ function _tutAdvance() {
   _tutHold = false;
   _tutStepsDone[_tutStep] = true;
   _tutStep++;
-  if (_tutStep < t.steps.length) _renderTutorialPanel();
+  if (_tutStep < t.steps.length) { _renderTutorialPanel(); _projSyncToDoc(); }
   else _tutComplete(t);
 }
 
@@ -25813,6 +25894,7 @@ function _tutJumpTo(i) {
   }
   _tutStep = i;
   _renderTutorialPanel();
+  _projSyncToDoc();
   setStatus(`Step ${i + 1}: ${t.steps[i].text.replace(/\*\*/g, '').slice(0, 80)}…`);
 }
 
