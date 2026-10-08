@@ -351,7 +351,11 @@
   .assignment-panel .ap-title { font-weight: 800; color: #155e75; flex: 1; font-size: 13px; }
   .assignment-panel .ap-toggle { border: none; background: none; font-size: 14px; cursor: pointer; color: #155e75; }
   .assignment-panel.collapsed .ap-body { display: none; }
-  .assignment-panel .ap-body { padding: 10px 12px; }
+  /* Long step lists (the 9-step pen) must scroll inside the panel instead of
+     running off the bottom of the canvas (pen tutorial video, 2026-10-07). */
+  .assignment-panel { max-height: calc(100% - 24px); display: flex; flex-direction: column; }
+  .assignment-panel .ap-head { flex: 0 0 auto; }
+  .assignment-panel .ap-body { padding: 10px 12px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
   .assignment-panel .ap-step { margin: 0 0 6px; color: #333c4d; line-height: 1.4; }
   .assignment-panel .ap-check {
     display: block; width: 100%; margin-top: 8px; padding: 9px 0; border: none;
@@ -9832,6 +9836,19 @@ function buildBodyMesh(body) {
       THREE.MathUtils.degToRad(body.rotation.y || 0),
       THREE.MathUtils.degToRad(body.rotation.z || 0),
     );
+    // Revolve / extrude / group geometry lives in world coordinates, so a
+    // plain mesh rotation spins it about the workplane origin (a pen at the
+    // origin pivoted on its tip — pen tutorial video 2026-10-07). Bodies
+    // rotated from the Properties panel carry rotPivot:'center': offset the
+    // position so the rotation happens about the geometry's own center.
+    // Legacy bodies without the flag keep their old pivot, so saved designs
+    // don't shift.
+    if (body.rotPivot === 'center' && m.geometry) {
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      const c = m.geometry.boundingBox.getCenter(new THREE.Vector3());
+      const rc = c.clone().applyEuler(m.rotation);
+      m.position.add(c).sub(rc);
+    }
   };
   let geo = null, mesh = null;
   if (body.type === 'combined' || body.type === 'group' || body.type === 'baked' || body.type === 'mesh') {
@@ -21258,6 +21275,9 @@ function renderProps() {
           // stored absolute in body.rotation (degrees, no unit conversion).
           body.rotation = body.rotation || { x: 0, y: 0, z: 0 };
           body.rotation[inp.dataset.rk] = v + ((body.rotZero || {})[inp.dataset.rk] || 0);
+          // World-coordinate geometry types spin about their own center (see
+          // applyRotation); primitives already pivot on their geometry origin.
+          if (['revolve', 'extrude', 'group', 'combined', 'baked', 'mesh'].includes(body.type) && !body.rotPivot) body.rotPivot = 'center';
         } else if (inp.dataset.k) {
           body[inp.dataset.k] = fromUnit(v);
         }
@@ -25234,6 +25254,17 @@ const _projIsInkChannel = (b) => b.type === 'cylinder' && b.op === 'subtract' &&
   _tutNear(b.w, 0.16 * TUT_IN, 0.8) && _tutNear(b.d, 0.16 * TUT_IN, 0.8) &&
   (_tutNear(b.h, 5 * TUT_IN, 5) || _tutNear(b.h, 125, 5) || _tutNear(b.h, 130, 5));
 
+// The ink channel and the pen body share a vertical axis: top-level channel
+// cylinder and host body within 1 mm on X and Z (after grouping the pair is
+// one body, which also counts — the cut already happened).
+const _projBodiesCoaxial = (d, isHost) => {
+  const top = d.bodies || [];
+  const host = top.find(isHost), cyl = top.find(_projIsInkChannel);
+  if (host && cyl) return Math.abs((host.x || 0) - (cyl.x || 0)) < 1 && Math.abs((host.z || 0) - (cyl.z || 0)) < 1;
+  return _projFindBody(top, b => (b.type === 'group' || b.type === 'combined') &&
+    _projFindBody(b.children, isHost) && _projFindBody(b.children, _projIsInkChannel));
+};
+
 const PROJECTS = [
   {
     id: 'pen',
@@ -25284,8 +25315,9 @@ const PROJECTS = [
           const xs = p.points.map(q => q.x), ys = p.points.map(q => q.y);
           const h = Math.max(...ys) - Math.min(...ys), r = Math.max(...xs), minX = Math.min(...xs);
           // Generous on purpose — this is the "make it yours" step. Charlie's
-          // own quick doodle was 2 in across (Starter activity 2, 2026-10-07).
-          return h >= 100 && h <= 260 && r >= 2.5 && r <= 32 && minX >= -1 && minX <= 1.5;
+          // own doodles were 2 in, then 3.5 in across (2026-10-07) — no width
+          // gate; the Continue button is always there anyway.
+          return h >= 100 && h <= 260 && r >= 2.5 && minX >= -1 && minX <= 1.5;
         }),
       },
       {
@@ -25293,9 +25325,14 @@ const PROJECTS = [
         done: (d) => _projFindBody(d.bodies, b => b.type === 'revolve'),
       },
       {
-        text: 'Now the channel for the ink. Add a **Cylinder** from the Primitive menu and, in **Properties**, set **Width 0.16**, **Depth 0.16** and **Height 5** — the refill is 0.152 across, and the extra 0.008 is clearance so it slides in. Under **Operation**, set **Type** to **Negative (cut-out)**. In **Position** set **X 0** and **Y 0** so it sits on the pen’s center line, and **Z 0** so it starts at the tip.',
+        text: 'Now the channel for the ink. Add a **Cylinder** from the Primitive menu — it drops in at the center, so it may be hidden inside your pen: find it in the **BODIES** list on the left and click **Cylinder** there. In **Properties**, set **Width 0.16**, **Depth 0.16** and **Height 5** — the refill is 0.152 across, and the extra 0.008 is clearance so it slides in. Under **Operation**, set **Type** to **Negative (cut-out)**; it turns red.',
         hint: 'Clearance is the gap between a part and the hole it fits in. Too little and it jams; too much and it rattles.',
         done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
+      },
+      {
+        text: 'Line them up. The channel must sit exactly on the pen’s center line — **Shift-click** the pen and then the red cylinder, click **Align** in the toolbar, then click the **middle red dot** and the **middle blue dot** so their centers match. (If nothing was ever moved they already match and this step ticks itself.)',
+        hint: 'Never assume two parts are centered just because they look close — Align makes it exact.',
+        done: (d) => _projBodiesCoaxial(d, b => b.type === 'revolve'),
       },
       {
         text: '**Shift-click** the pen and the red channel so both are selected, then click **Group** — the Negative cylinder cuts the channel out of the pen. Orbit underneath: you should see the hole at the tip.',
@@ -25334,9 +25371,13 @@ const PROJECTS = [
           (_tutNear(b.height, 7 * TUT_IN, 2) || _tutNear(b.height, 180, 2))),
       },
       {
-        text: 'The ink channel, same as the revolved pen: add a **Cylinder** from the Primitive menu, set **Width 0.16**, **Depth 0.16**, **Height 5**, Operation **Type → Negative (cut-out)**, and Position **X 0, Y 0, Z 0** so it runs up the middle from the bottom end.',
+        text: 'The ink channel, same as the revolved pen: add a **Cylinder** from the Primitive menu (it drops in at the center — if it’s hidden inside the pen, click **Cylinder** in the **BODIES** list on the left), set **Width 0.16**, **Depth 0.16**, **Height 5**, and Operation **Type → Negative (cut-out)**.',
         hint: 'The refill is 0.152 across; 0.16 gives it 0.008 of clearance so it slides in without rattling.',
         done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
+      },
+      {
+        text: 'Line them up: **Shift-click** the pen and the red cylinder, click **Align**, then click the **middle red dot** and the **middle blue dot** so the channel runs exactly up the middle. (Already centered? This step ticks itself.)',
+        done: (d) => _projBodiesCoaxial(d, b => b.type === 'extrude' && b.op !== 'subtract'),
       },
       {
         text: '**Shift-click** the pen and the red channel, then click **Group** — the channel is cut. Check the bottom end for the hole.',
@@ -25549,9 +25590,16 @@ function _tutTick() {
   // Holding on a step the learner jumped BACK to (its check is usually
   // already true — auto-advancing would bounce them straight forward again,
   // pen tutorial.mp4 2026-10-07). They continue with the ▶ button.
-  if (_tutHold) return;
   let step = t.steps[_tutStep];
   if (step.manual) return; // "Got it" button advances these
+  if (_tutHold) {
+    // Held only while the check is STILL true from before the jump; once it
+    // goes false (they undid / changed something) normal auto-advance resumes.
+    let still = false;
+    try { still = !!step.done(doc, _tutEvents); } catch (_) { still = false; }
+    if (still) return;
+    _tutHold = false;
+  }
   try {
     if (!step.done(doc, _tutEvents)) return;
   } catch (err) {
@@ -25625,7 +25673,7 @@ function _renderTutorialPanel() {
           </div>
           ${i === _tutStep && s.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${s.svg}</div>` : ''}
           ${i === _tutStep && s.hint ? `<div class="tut-hint-line">💡 ${_apEsc(s.hint)}</div>` : ''}
-          ${i === _tutStep && (s.manual || _tutHold) ? `<button class="ap-check" id="tp-continue" style="margin:2px 0 8px 23px;width:calc(100% - 23px)">${s.manual ? '✓ Got it — next step' : `▶ Continue to step ${i + 2 > t.steps.length ? 'finish' : i + 2}`}</button>` : ''}`).join('')}
+          ${i === _tutStep ? `<button class="ap-check" id="tp-continue" style="margin:2px 0 8px 23px;width:calc(100% - 23px)" title="${s.manual ? 'Next step' : 'The tool ticks this step off when it sees the work — or press this to move on anyway'}">${s.manual ? '✓ Got it — next step' : (i + 1 >= t.steps.length ? '✓ Done — finish' : `▶ Continue to step ${i + 2}`)}</button>` : ''}`).join('')}
         <button class="tut-exit" id="tp-exit">${project ? '✕ Close panel (keeps my design)' : '✕ Exit tutorial'}</button>
       `}
     </div>`;
@@ -25664,7 +25712,11 @@ function _tutJumpTo(i) {
     _tutHold = false;
   } else {
     for (let k = i; k < t.steps.length; k++) _tutStepsDone[k] = false;
-    _tutHold = true; // stay here; the check won't bounce them forward
+    // Stay here if the check is already satisfied (otherwise it would bounce
+    // them straight forward); if there's still work to do, auto-advance as usual.
+    let already = false;
+    try { already = !t.steps[i].manual && !!t.steps[i].done(doc, _tutEvents); } catch (_) { already = false; }
+    _tutHold = already;
   }
   _tutStep = i;
   _renderTutorialPanel();
