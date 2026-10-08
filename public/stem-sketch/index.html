@@ -10094,6 +10094,7 @@ function buildBodyMesh(body) {
     const revPlaneMat = makePlaneMatrix(body.plane || GROUND_PLANE);
     geo.applyMatrix4(revPlaneMat);
     fixWindingIfMirrored(geo, revPlaneMat);
+    _applyBodyScale(geo, body);
     mesh = new THREE.Mesh(geo, matSolid);
     mesh.position.set(body.x || 0, body.y || 0, body.z || 0);
     applyRotation(mesh);
@@ -10192,12 +10193,46 @@ function buildBodyMesh(body) {
     // normals to keep front faces outward. Non-mirrored extrudes keep
     // ExtrudeGeometry's pre-smoothed normals (avoids facet seams on curves).
     fixWindingIfMirrored(geo, planeMat);
+    _applyBodyScale(geo, body);
     mesh = new THREE.Mesh(geo, matSolid);
     mesh.position.set(body.x || 0, body.y || 0, body.z || 0);
     applyRotation(mesh);
     return mesh;
   }
   return null;
+}
+
+// Properties note + restore button for a body carrying a resize (body.scale).
+function _bodyScaleNote(body) {
+  const sc = body.scale || { x: 1, y: 1, z: 1 };
+  const resized = Math.abs(sc.x - 1) > 1e-6 || Math.abs(sc.y - 1) > 1e-6 || Math.abs(sc.z - 1) > 1e-6;
+  if (!resized) return '';
+  const uni = Math.abs(sc.x - sc.y) < 0.001 && Math.abs(sc.x - sc.z) < 0.001;
+  return `<div class="hint" style="margin-top:2px">Resized ×${sc.x.toFixed(2)}${uni ? '' : ` / ×${sc.y.toFixed(2)} / ×${sc.z.toFixed(2)}`} from the sketch.</div>
+    <button class="action" id="body-restore-size" style="display:block;width:100%;margin-top:4px" title="Back to exactly the size it was drawn at">↩ Return to sketch size</button>`;
+}
+
+// Resize from Properties for sketch-built bodies (revolve, extrude): a
+// persisted world-axis factor (body.scale) applied to the freshly built
+// geometry — the sketch underneath stays the source of truth, so "Return to
+// sketch size" is exact. Anchored at the bottom center of the body (its
+// center for a cut), so a standing part keeps its feet on the workplane and
+// stays put sideways. Charlie, 2026-10-08.
+function _applyBodyScale(geo, body) {
+  const s = body.scale;
+  if (!s) return;
+  const sx = s.x || 1, sy = s.y || 1, sz = s.z || 1;
+  if (Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9 && Math.abs(sz - 1) < 1e-9) return;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const ax = (bb.min.x + bb.max.x) / 2, az = (bb.min.z + bb.max.z) / 2;
+  const ay = body.op === 'subtract' ? (bb.min.y + bb.max.y) / 2 : bb.min.y;
+  geo.translate(-ax, -ay, -az);
+  geo.scale(sx, sy, sz);
+  geo.translate(ax, ay, az);
+  // Uniform scaling keeps normals valid; a stretch needs them recomputed.
+  if (Math.abs(sx - sy) > 1e-9 || Math.abs(sx - sz) > 1e-9) geo.computeVertexNormals();
+  geo.computeBoundingBox();
 }
 
 // ==================================================================
@@ -21096,9 +21131,47 @@ function renderProps() {
       // Soften moved OUT of Properties (user call, ssissues 2026-09-02
       // evening): edge rounding is edge SELECTION work — it lives in the
       // 3D toolbar's Soften pick tool only.
+      // Overall size is editable like a revolve (Charlie, 2026-10-08):
+      // "Extrude depth" is the exact pull; Width/Height/Depth stretch the
+      // whole body about its bottom center.
+      let esz = null;
+      if (body.mesh) {
+        viewer && viewer.scene && viewer.scene.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(body.mesh);
+        if (!bb.isEmpty()) { const sz = bb.getSize(new THREE.Vector3()); esz = { x: sz.x, y: sz.y, z: sz.z }; }
+      }
       dimFields = `<h4>Extrude</h4>
-        <div class="field"><label>Height (${u})</label><input type="number" data-k="height" value="${fmtU(body.height)}" min="0.01" step="0.5"/></div>
+        <div class="field"><label>Extrude depth (${u})</label><input type="number" data-k="height" value="${fmtU(body.height)}" min="0.01" step="0.5"/></div>
+        ${esz ? `<div style="font-size:11px;font-weight:800;color:var(--ink-muted);margin:8px 0 2px">Overall size</div>
+        <div class="field"><label>Width (${u})</label><input type="number" data-gdim="x" value="${fmtU(esz.x)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Height (${u})</label><input type="number" data-gdim="y" value="${fmtU(esz.y)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Depth (${u})</label><input type="number" data-gdim="z" value="${fmtU(esz.z)}" step="0.5" min="0.01"/></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="group-uniform-scale" style="width:auto;margin:0" checked/>
+          <label for="group-uniform-scale" style="margin:0;cursor:pointer">Resize all three together (keep proportions)</label>
+        </div>` : ''}
+        ${_bodyScaleNote(body)}
         <div class="hint">Edit the source sketch in 2D to change the profile, then come back.</div>`;
+    } else if (body.type === 'revolve') {
+      // Overall size is editable (Charlie, 2026-10-08): the three fields are
+      // the body's current bounding box; typing a new one scales the shape.
+      let rsz = null;
+      if (body.mesh) {
+        viewer && viewer.scene && viewer.scene.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(body.mesh);
+        if (!bb.isEmpty()) { const sz = bb.getSize(new THREE.Vector3()); rsz = { x: sz.x, y: sz.y, z: sz.z }; }
+      }
+      dimFields = `<h4>Revolved</h4>
+        ${rsz ? `
+        <div class="field"><label>Width (${u})</label><input type="number" data-gdim="x" value="${fmtU(rsz.x)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Height (${u})</label><input type="number" data-gdim="y" value="${fmtU(rsz.y)}" step="0.5" min="0.01"/></div>
+        <div class="field"><label>Depth (${u})</label><input type="number" data-gdim="z" value="${fmtU(rsz.z)}" step="0.5" min="0.01"/></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="group-uniform-scale" style="width:auto;margin:0" checked/>
+          <label for="group-uniform-scale" style="margin:0;cursor:pointer">Resize all three together (keep proportions)</label>
+        </div>` : ''}
+        ${_bodyScaleNote(body)}
+        <div class="hint">Resizing stretches the whole shape; to change the outline itself, edit its sketch in 2D and revolve again.</div>`;
     } else if (body.type === 'fastener') {
       const spec = getFastenerSpec(body.size);
       const headOpts = FASTENER_HEAD_TYPES.map(t =>
@@ -21305,6 +21378,17 @@ function renderProps() {
         const fx = uni || axis === 'x' ? f : 1;
         const fy = uni || axis === 'y' ? f : 1;
         const fz = uni || axis === 'z' ? f : 1;
+        if (body.type === 'revolve' || body.type === 'extrude') {
+          // Persisted factor; the renderer applies it when it rebuilds the body.
+          pushUndo();
+          const s = body.scale || { x: 1, y: 1, z: 1 };
+          body.scale = { x: s.x * fx, y: s.y * fy, z: s.z * fz };
+          setDirty(true);
+          if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo && viewer.updateGizmo(); }
+          renderTree(); renderProps();
+          setStatus(`Resized to ${fmtUL(sz.x * fx)} × ${fmtUL(sz.y * fy)} × ${fmtUL(sz.z * fz)}${uni ? ' (proportions kept)' : ''}`);
+          return;
+        }
         if (scaleGroupBody(body, fx, fy, fz)) {
           setStatus(`Resized group to ${fmtUL(sz.x * fx)} × ${fmtUL(sz.y * fy)} × ${fmtUL(sz.z * fz)}${uni ? ' (proportions kept)' : ''}`);
         }
@@ -21312,6 +21396,15 @@ function renderProps() {
     });
     const restoreBtn = $('group-restore-size');
     if (restoreBtn) restoreBtn.onclick = () => restoreGroupSketchSize(body);
+    const revRestore = $('body-restore-size');
+    if (revRestore) revRestore.onclick = () => {
+      pushUndo();
+      delete body.scale;
+      setDirty(true);
+      if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo && viewer.updateGizmo(); }
+      renderTree(); renderProps();
+      setStatus('Back to the size the outline was drawn at.');
+    };
     // Group soften — 'change' (not per-keystroke): the re-bake is a CSG
     // union of all children, too heavy to run on every digit typed.
     const groupSoftInp = $('group-soft-input');

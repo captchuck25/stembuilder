@@ -279,9 +279,17 @@ export default function ClassDetailPage() {
   const [editName, setEditName] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState("");
+  // Custom class code (join code) editing — see PATCH /api/teacher/classes/[id].
+  const [editCode, setEditCode] = useState("");
+  const [codeSaving, setCodeSaving] = useState(false);
+  const [codeError, setCodeError] = useState("");
   const [confirmDeleteClass, setConfirmDeleteClass] = useState(false);
   const [deletingClass, setDeletingClass] = useState(false);
   const [removingStudentId, setRemovingStudentId] = useState<string | null>(null);
+  // "Start a new year": remove every student, keep the class (owner only).
+  const [confirmClearRoster, setConfirmClearRoster] = useState(false);
+  const [clearingRoster, setClearingRoster] = useState(false);
+  const [clearRosterError, setClearRosterError] = useState("");
   const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
   // Rostering (path A): teacher provisions a username-only account directly
   // into this class. The one-time temp password is revealed once, like resets.
@@ -868,6 +876,28 @@ export default function ClassDetailPage() {
     setRenameSaving(false);
   }
 
+  async function handleCodeSave() {
+    if (!cls) return;
+    const code = editCode.trim().toUpperCase();
+    if (!code || code === cls.join_code) return;
+    setCodeSaving(true);
+    setCodeError("");
+    const res = await fetch(`/api/teacher/classes/${classId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ joinCode: code }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setCls(data);
+      setEditCode(data.join_code);
+    } else {
+      const e = await res.json().catch(() => ({}));
+      setCodeError(e.error ?? "Could not change the class code");
+    }
+    setCodeSaving(false);
+  }
+
   async function handleDeleteClass() {
     setDeletingClass(true);
     const res = await fetch(`/api/teacher/classes/${classId}`, { method: "DELETE" });
@@ -938,6 +968,22 @@ export default function ClassDetailPage() {
     setNewStudentName("");
     setNewStudentUsername("");
     setAddingStudent(false);
+  }
+
+  async function handleClearRoster() {
+    setClearingRoster(true);
+    setClearRosterError("");
+    const res = await fetch(`/api/teacher/classes/${classId}?reset=year`, { method: "DELETE" });
+    if (res.ok) {
+      // Everything class-scoped changed (roster, assignments, locks, shares):
+      // a full reload is the honest way to show the fresh class.
+      window.location.reload();
+      return;
+    } else {
+      const e = await res.json().catch(() => ({}));
+      setClearRosterError(e.error ?? "Could not remove the students");
+    }
+    setClearingRoster(false);
   }
 
   async function handleRemoveStudent(studentId: string) {
@@ -1852,7 +1898,7 @@ export default function ClassDetailPage() {
                 </div>
               </div>
               <button
-                onClick={() => { setShowSettings(s => !s); setEditName(cls.name); setRenameError(""); setConfirmDeleteClass(false); }}
+                onClick={() => { setShowSettings(s => !s); setEditName(cls.name); setRenameError(""); setEditCode(cls.join_code); setCodeError(""); setConfirmDeleteClass(false); }}
                 style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #e5e7eb",
                   background: showSettings ? "#f3f4f6" : "#fff", color: "#374151",
                   fontWeight: 700, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
@@ -1890,6 +1936,41 @@ export default function ClassDetailPage() {
                     </button>
                   </div>
                   {renameError && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{renameError}</div>}
+                </div>
+
+                {/* Class code */}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginBottom: 4 }}>Class Code</div>
+                  <div style={{ fontSize: 12, color: "#666", marginBottom: 10, maxWidth: 560 }}>
+                    Students type this to join. Make it something they can read off a sign — 4 to 15 letters, numbers, or dashes,
+                    like <strong>MAKER-24</strong> or <strong>LIBRARY1</strong>. It has to be different from every other class on StemBuilder.
+                  </div>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      value={editCode}
+                      onChange={e => { setEditCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "")); setCodeError(""); }}
+                      onKeyDown={e => e.key === "Enter" && handleCodeSave()}
+                      maxLength={15}
+                      spellCheck={false}
+                      style={{ flex: 1, maxWidth: 260, padding: "10px 14px", borderRadius: 10,
+                        border: codeError ? "2px solid #dc2626" : "2px solid #e0e0e0",
+                        fontSize: 16, fontWeight: 900, letterSpacing: "2px", fontFamily: "monospace", color: "#2563eb", outline: "none" }}
+                    />
+                    <button
+                      onClick={handleCodeSave}
+                      disabled={codeSaving || editCode.trim().length < 4 || editCode.trim() === cls.join_code}
+                      style={{ padding: "10px 20px", borderRadius: 10, border: "none",
+                        background: (editCode.trim().length < 4 || editCode.trim() === cls.join_code) ? "#e5e7eb" : "#2563eb",
+                        color: (editCode.trim().length < 4 || editCode.trim() === cls.join_code) ? "#9ca3af" : "#fff",
+                        fontWeight: 800, fontSize: 14,
+                        cursor: (editCode.trim().length < 4 || editCode.trim() === cls.join_code) ? "not-allowed" : "pointer" }}>
+                      {codeSaving ? "Saving…" : "Save Code"}
+                    </button>
+                  </div>
+                  {codeError && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>{codeError}</div>}
+                  <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>
+                    Changing it only affects students joining from now on — everyone already enrolled stays enrolled.
+                  </div>
                 </div>
 
                 {/* Co-teachers */}
@@ -2090,6 +2171,49 @@ export default function ClassDetailPage() {
                     </div>
                   )}
                 </div>
+
+                {/* New school year — owner only: empty the roster, keep everything else */}
+                {classRole === "owner" && (
+                  <div style={{ borderTop: "2px solid #fef3c7", paddingTop: 20 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#b45309", marginBottom: 4 }}>New School Year</div>
+                    <div style={{ fontSize: 12, color: "#666", marginBottom: 10, maxWidth: 560 }}>
+                      Reset this class for a new group: removes every student, erases every assignment in every tool
+                      (and the work turned in for them), and re-locks all tools the way a brand-new class starts. Your class
+                      code and co-teachers stay, so the same code on the wall keeps working. Students keep their own saved
+                      designs and progress in My Work.
+                    </div>
+                    {!confirmClearRoster ? (
+                      <button
+                        onClick={() => { setConfirmClearRoster(true); setClearRosterError(""); }}
+                        style={{ padding: "10px 20px", borderRadius: 10, border: "2px solid #f59e0b",
+                          background: "#fff", color: "#b45309", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+                        🧹 Start a new school year
+                      </button>
+                    ) : (
+                      <div style={{ background: "#fffbeb", border: "2px solid #fcd34d", borderRadius: 12,
+                        padding: "16px 20px", maxWidth: 480 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111", marginBottom: 6 }}>
+                          Reset <strong>{cls.name}</strong>? This removes {students.length} student{students.length === 1 ? "" : "s"},
+                          erases all assignments and their submissions, and locks every tool again. This can&apos;t be undone.
+                        </div>
+                        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                          <button onClick={() => setConfirmClearRoster(false)}
+                            style={{ padding: "8px 20px", borderRadius: 8, border: "2px solid #e5e7eb",
+                              background: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", color: "#555" }}>
+                            Cancel
+                          </button>
+                          <button onClick={handleClearRoster} disabled={clearingRoster}
+                            style={{ padding: "8px 20px", borderRadius: 8, border: "none",
+                              background: clearingRoster ? "#fcd34d" : "#d97706", color: "#fff",
+                              fontWeight: 800, fontSize: 13, cursor: clearingRoster ? "not-allowed" : "pointer" }}>
+                            {clearingRoster ? "Removing…" : "Yes, start fresh"}
+                          </button>
+                        </div>
+                        {clearRosterError && <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 600, marginTop: 8 }}>{clearRosterError}</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Danger zone — owner only; a co-teacher leaves via the Teachers list above */}
                 {classRole === "co-teacher" ? (
