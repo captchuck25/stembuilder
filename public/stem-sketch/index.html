@@ -1446,6 +1446,7 @@
       </div>
 
       <div class="tools" id="tools-3d">
+        <button class="tool" data-action="select-mode" title="Select (Esc) — leave whatever tool you're in and go back to picking bodies"><svg class="ico"><use href="#i-select"/></svg><span class="tool-label">Select</span></button>
         <button class="tool" data-action="orbit-mode" title="Orbit toggle — drag rotates the view. Also: hold Ctrl/⌘/Space/Alt or right-drag."><svg class="ico"><use href="#i-orbit"/></svg><span class="tool-label">Orbit</span></button>
         <button class="tool" data-action="pan-mode" title="Pan toggle — drag slides the view (middle-drag also pans)"><svg class="ico"><use href="#i-pan"/></svg><span class="tool-label">Pan</span></button>
         <button class="tool" data-view="top" title="Look straight down at the part"><svg class="ico"><use href="#i-view-top"/></svg><span class="tool-label">Top</span></button>
@@ -18274,6 +18275,65 @@ function revolveCurrentSketch() {
   });
 }
 
+// Leave Sketch-on-Face / fastener placement / fillet & bevel picking and
+// restore the plain cursor. Shared by Esc and the 3D Select button.
+function _cancelFacePickModes() {
+  const wasFastener = !!doc.fastenerPlaceTarget;
+  const wasBevel = !!doc.bevelPickMode;
+  const wasFillet = !!doc.filletPickMode;
+  // Un-hide the fastener that was riding the cursor as a ghost
+  const pendingFastener = doc.fastenerPlaceTarget
+    ? doc.bodies.find(b => b.id === doc.fastenerPlaceTarget) : null;
+  if (pendingFastener) pendingFastener.hidden = false;
+  if (viewer) viewer.clearFastenerGhost && viewer.clearFastenerGhost();
+  if (pendingFastener && viewer) viewer.rebuildBodies();
+  doc.faceMode = false;
+  doc.curvedPickBody = null;
+  doc.fastenerPlaceTarget = null;
+  doc.bevelPickMode = false;
+  doc.bevelSelected = [];
+  _clearBevelHighlight();
+  if (wasFillet) _exitFilletPickMode(null);
+  if (viewer) {
+    viewer.canvas.style.cursor = '';
+    viewer.clearBboxFacePicker && viewer.clearBboxFacePicker();
+  }
+  setStatus(wasFastener ? 'Fastener placement cancelled'
+          : wasBevel    ? 'Fillet cancelled'
+          : wasFillet   ? 'Fillet cancelled'
+          : 'Sketch on Face cancelled');
+}
+
+// 3D toolbar "Select" (Charlie, 2026-10-09): students raised on other tools
+// click the arrow to get out of whatever they're in. One click cancels every
+// 3D mode Esc knows about — orbit/pan toggles, On Face, fastener placement,
+// fillet/soften picks, Align, Cut, Mirror, joint creation, a half-done
+// extrude — and leaves the current selection alone.
+function returnToSelect3D() {
+  let left = [];
+  if (typeof _jointPlay !== 'undefined' && _jointPlay) { stopJointPlay(); left.push('articulation'); }
+  if (doc.orbitMode && typeof toggleOrbitMode === 'function') { toggleOrbitMode(); left.push('orbit'); }
+  if (doc.panMode && typeof togglePanMode === 'function') { togglePanMode(); left.push('pan'); }
+  if (doc.softenPickMode) { exitSoftenPickMode('Soften cancelled'); left.push('soften'); }
+  if (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode || doc.filletPickMode || doc.fastenerPlaceTarget) { _cancelFacePickModes(); left.push('face pick'); }
+  if (doc.alignMode) { exitAlignMode(); left.push('align'); }
+  if (doc.cutMode) { exitBooleanCut('Cut cancelled'); left.push('cut'); }
+  if (doc.mirrorMode) { exitMirrorPick('Mirror cancelled'); left.push('mirror'); }
+  if (doc.jointPickStage) { exitJointCreation('Joint cancelled'); left.push('joint'); }
+  const st = viewer && viewer.extrudeState;
+  const tooltipOpen = document.getElementById('extrude-tooltip')?.classList.contains('show');
+  if ((st && st.active) || tooltipOpen) {
+    if (st) st.active = false;
+    if (viewer) viewer.clearExtrudePreview();
+    hideExtrudeTooltip();
+    left.push('extrude');
+  }
+  if (viewer && viewer.canvas) viewer.canvas.style.cursor = '';
+  setStatus(left.length
+    ? 'Select — click a body to pick it, drag on empty space to box-select.'
+    : 'Select tool is already active — click a body to pick it, Shift-click to add more.');
+}
+
 function startAlignMode() {
   if (!doc.multiSelectedBodies?.length || doc.multiSelectedBodies.length < 2) {
     showHint('Shift-click 2+ bodies first, then click Align.');
@@ -26689,6 +26749,7 @@ function init() {
       case 'fillet-2d': enterFilletPickMode(); break;
       case 'fillet-3d': enterBevelPickMode(); break;
       case 'revolve': revolveCurrentSketch(); break;
+      case 'select-mode': returnToSelect3D(); break;
       case 'soften-pick': enterSoftenPickMode(); break;
       case 'array-2d': openArrayDialog(); break;
       case 'scale-2d': openScaleDialog(); break;
@@ -26978,36 +27039,16 @@ function init() {
       return;
     }
     if (e.key === 'Escape' && (doc.faceMode || doc.curvedPickBody || doc.bevelPickMode || doc.filletPickMode)) {
-      const wasFastener = !!doc.fastenerPlaceTarget;
-      const wasBevel = !!doc.bevelPickMode;
-      const wasFillet = !!doc.filletPickMode;
-      // Un-hide the fastener that was riding the cursor as a ghost
-      const pendingFastener = doc.fastenerPlaceTarget
-        ? doc.bodies.find(b => b.id === doc.fastenerPlaceTarget) : null;
-      if (pendingFastener) pendingFastener.hidden = false;
-      if (viewer) viewer.clearFastenerGhost && viewer.clearFastenerGhost();
-      if (pendingFastener && viewer) viewer.rebuildBodies();
-      doc.faceMode = false;
-      doc.curvedPickBody = null;
-      doc.fastenerPlaceTarget = null;
-      doc.bevelPickMode = false;
-      doc.bevelSelected = [];
-      _clearBevelHighlight();
-      if (wasFillet) _exitFilletPickMode(null);
-      if (viewer) {
-        viewer.canvas.style.cursor = '';
-        viewer.clearBboxFacePicker && viewer.clearBboxFacePicker();
-      }
-      setStatus(wasFastener ? 'Fastener placement cancelled'
-              : wasBevel    ? 'Fillet cancelled'
-              : wasFillet   ? 'Fillet cancelled'
-              : 'Sketch on Face cancelled');
+      _cancelFacePickModes();
     }
     // Cancel align mode
     if (e.key === 'Escape' && doc.alignMode) {
       exitAlignMode();
       setStatus('Align cancelled');
     }
+    // (The 3D toolbar's Select button runs returnToSelect3D(), which applies
+    // every cancellation below in one go — students who learned "click the
+    // arrow to get out of a tool" elsewhere expect that.)
     // Cancel boolean cut mode
     if (e.key === 'Escape' && doc.cutMode) {
       exitBooleanCut('Cut cancelled');
