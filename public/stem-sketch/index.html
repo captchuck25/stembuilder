@@ -396,10 +396,27 @@
      so students never confuse "graded work" with "guided practice". */
   /* Slimmer than assignment panels — tutorial steps are numerous and wordy,
      and the panel was crowding the canvas (ssissues.mp4 feedback). */
-  .assignment-panel.tut { border-color: #16a34a; width: 272px; font-size: 12.5px; }
-  .assignment-panel.tut .ap-body { padding: 9px 11px; }
-  .assignment-panel.tut .ap-head { background: #f0fdf4; }
-  .assignment-panel.tut .ap-title { color: #14532d; }
+  /* Tutorial / project panel: ONE step at a time in large type, parked
+     bottom-right just above the grid bar (Chromebook-readable; Charlie,
+     2026-10-09). Draggable by its header; ▾ collapses it to the title bar. */
+  .assignment-panel.tut { border-color: #16a34a; top: auto; bottom: 12px; right: 12px;
+    width: min(400px, calc(100% - 24px)); font-size: 15px; }
+  .assignment-panel.tut .ap-body { padding: 12px 14px 12px; }
+  .assignment-panel.tut .ap-head { background: #f0fdf4; cursor: grab; touch-action: none; }
+  .assignment-panel.tut.dragging .ap-head { cursor: grabbing; }
+  .assignment-panel.tut .ap-title { color: #14532d; font-size: 15px; }
+  .assignment-panel.tut .tut-progress { font-size: 13px; margin-bottom: 6px; }
+  .tut-bar { display: flex; gap: 4px; margin: 0 0 12px; }
+  .tut-bar span { flex: 1; height: 8px; border-radius: 4px; background: #e2e8f0; cursor: pointer; }
+  .tut-bar span:hover { background: #cbd5e1; }
+  .tut-bar span.done { background: #16a34a; }
+  .tut-bar span.current { background: #0ea5e9; box-shadow: 0 0 0 2px #bae6fd; }
+  .tut-step-big { font-size: 17px; line-height: 1.5; color: #1f2937; margin: 0 0 10px; }
+  .assignment-panel.tut .tut-hint-line { margin: 0 0 10px; font-size: 13.5px; }
+  .tut-nav { display: flex; gap: 8px; margin-top: 8px; }
+  .tut-nav .tut-exit { margin-top: 0; width: auto; flex: 0 0 auto; padding: 10px 16px; font-size: 14px; }
+  .tut-nav .tut-exit:disabled { opacity: 0.4; cursor: default; }
+  .tut-nav .ap-check { margin-top: 0; flex: 1; font-size: 15px; padding: 11px 0; }
   .assignment-panel.tut .ap-toggle { color: #14532d; }
   .assignment-panel.tut .ap-check { background: #16a34a; }
   .assignment-panel.tut .ap-check:hover { background: #15803d; }
@@ -25838,23 +25855,31 @@ function _renderTutorialPanel() {
         <button class="tut-exit" id="tp-exit">${project ? '✓ Close panel, keep my design' : '← Back to my design'}</button>
       ` : `
         <div class="tut-progress">Step ${_tutStep + 1} of ${t.steps.length}${project && t.minutes ? ` · about ${t.minutes} min` : ''}
-          <span style="float:right;font-weight:600;color:#64748b" title="The checks are a guide, not a gate">click a step to jump</span></div>
-        ${t.intro && _tutStep === 0 ? `<div style="font-size:12px;color:#475569;margin-bottom:8px">${_apEsc(t.intro)}</div>` : ''}
-        ${t.steps.map((s, i) => `
-          <div class="tut-step ${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}" data-step="${i}" style="cursor:pointer" title="${i === _tutStep ? 'Current step' : i < _tutStep ? 'Go back to this step' : 'Skip ahead to this step'}">
-            <span class="tut-mark">${_tutStepsDone[i] ? '✓' : i === _tutStep ? '▶' : '○'}</span>
-            <span>${_tutFmt(s.text)}</span>
-          </div>
-          ${i === _tutStep && s.svg ? `<div style="margin:2px 0 8px 23px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${s.svg}</div>` : ''}
-          ${i === _tutStep && s.hint ? `<div class="tut-hint-line">💡 ${_apEsc(s.hint)}</div>` : ''}
-          ${i === _tutStep ? `<button class="ap-check" id="tp-continue" style="margin:2px 0 8px 23px;width:calc(100% - 23px)" title="${s.manual ? 'Next step' : 'The tool ticks this step off when it sees the work — or press this to move on anyway'}">${s.manual ? '✓ Got it — next step' : (i + 1 >= t.steps.length ? '✓ Done — finish' : `▶ Continue to step ${i + 2}`)}</button>` : ''}`).join('')}
-        <button class="tut-exit" id="tp-exit">${project ? '✕ Close panel (keeps my design)' : '✕ Exit tutorial'}</button>
+          <span style="float:right;font-weight:600;color:#64748b" title="The checks are a guide, not a gate">tap a bar to jump</span></div>
+        <div class="tut-bar">${t.steps.map((s, i) =>
+          `<span data-step="${i}" class="${_tutStepsDone[i] ? 'done' : i === _tutStep ? 'current' : ''}" title="Step ${i + 1}${i === _tutStep ? ' (current)' : i < _tutStep ? ' — go back' : ' — skip ahead'}"></span>`).join('')}</div>
+        ${t.intro && _tutStep === 0 ? `<div style="font-size:13.5px;color:#475569;margin-bottom:8px">${_apEsc(t.intro)}</div>` : ''}
+        <div class="tut-step-big" data-step="${_tutStep}">${_tutFmt(cur.text)}</div>
+        ${cur.svg ? `<div style="margin:0 0 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${cur.svg}</div>` : ''}
+        ${cur.hint ? `<div class="tut-hint-line">💡 ${_apEsc(cur.hint)}</div>` : ''}
+        <div class="tut-nav">
+          <button class="tut-exit" id="tp-back" ${_tutStep === 0 ? 'disabled' : ''} title="Back to the previous step">◀ Back</button>
+          <button class="ap-check" id="tp-continue" title="${cur.manual ? 'Next step' : 'The tool ticks this step off when it sees the work — or press this to move on anyway'}">${cur.manual ? '✓ Got it — next' : (_tutStep + 1 >= t.steps.length ? '✓ Done — finish' : 'Continue ▶')}</button>
+        </div>
+        ${project ? '' : `<button class="tut-exit" id="tp-exit">✕ Exit tutorial</button>`}
       `}
     </div>`;
-  document.getElementById('tp-head').onclick = () => panel.classList.toggle('collapsed');
-  document.getElementById('tp-exit').onclick = (ev) => { ev.stopPropagation(); exitTutorial(); };
+  document.getElementById('tp-head').onclick = () => {
+    if (performance.now() - (panel._dragEndedAt || 0) < 300) return; // trailing click of a drag
+    panel.classList.toggle('collapsed');
+  };
+  const exitBtn = document.getElementById('tp-exit');
+  if (exitBtn) exitBtn.onclick = (ev) => { ev.stopPropagation(); exitTutorial(); };
+  const backBtn = document.getElementById('tp-back');
+  if (backBtn) backBtn.onclick = (ev) => { ev.stopPropagation(); _tutJumpTo(_tutStep - 1); };
   const nextBtn = document.getElementById('tp-next');
   if (nextBtn) nextBtn.onclick = (ev) => { ev.stopPropagation(); enterTutorial(next.id); };
+  _tutMakeDraggable(panel);
   // Steps are navigable (Charlie, Starter activity 2): a learner who's stuck
   // on a check — or who did a step their own way — can skip ahead, and can
   // go back to re-read an earlier step. Jumping forward marks the skipped
@@ -25864,6 +25889,69 @@ function _renderTutorialPanel() {
   });
   const cont = document.getElementById('tp-continue');
   if (cont) cont.onclick = (ev) => { ev.stopPropagation(); _tutAdvance(); };
+}
+
+// The panel moves: drag it by the header anywhere over the canvas (position
+// remembered per device), double-click the header to park it back at the
+// default bottom-right. A plain click on the header still collapses it.
+const TUT_PANEL_POS_KEY = 'stem-sketch:tut-panel-pos';
+function _tutPlacePanel(panel, x, y) {
+  const host = panel.parentElement;
+  if (!host) return;
+  const hw = host.clientWidth, hh = host.clientHeight;
+  const w = panel.offsetWidth, h = panel.offsetHeight;
+  x = Math.max(0, Math.min(Math.max(0, hw - w), x));
+  y = Math.max(0, Math.min(Math.max(0, hh - Math.min(h, 48)), y)); // header always stays reachable
+  panel.style.left = x + 'px'; panel.style.top = y + 'px';
+  panel.style.right = 'auto'; panel.style.bottom = 'auto';
+  panel._pos = { x, y };
+}
+function _tutResetPanelPos(panel) {
+  panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = '';
+  panel._pos = null;
+  try { localStorage.removeItem(TUT_PANEL_POS_KEY); } catch (_) {}
+}
+function _tutMakeDraggable(panel) {
+  if (panel._dragWired) return;
+  panel._dragWired = true;
+  try {
+    const p = JSON.parse(localStorage.getItem(TUT_PANEL_POS_KEY) || 'null');
+    if (p && isFinite(p.x) && isFinite(p.y)) _tutPlacePanel(panel, p.x, p.y);
+  } catch (_) {}
+  let drag = null;
+  panel.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !e.target.closest || !e.target.closest('.ap-head') || e.target.closest('.ap-toggle')) return;
+    const r = panel.getBoundingClientRect(), hr = panel.parentElement.getBoundingClientRect();
+    // No pointer capture yet: capturing here would retarget the following
+    // click/dblclick to the panel, so the header's collapse toggle and
+    // double-click reset would never fire. Capture only once a drag is real.
+    drag = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: r.left - hr.left, oy: r.top - hr.top, moved: false };
+  });
+  panel.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved) { try { panel.setPointerCapture(drag.id); } catch (_) {} }
+    drag.moved = true;
+    panel.classList.add('dragging');
+    _tutPlacePanel(panel, drag.ox + dx, drag.oy + dy);
+  });
+  const end = () => {
+    if (!drag) return;
+    if (drag.moved) {
+      try { panel.releasePointerCapture(drag.id); } catch (_) {}
+      panel.classList.remove('dragging');
+      try { localStorage.setItem(TUT_PANEL_POS_KEY, JSON.stringify(panel._pos)); } catch (_) {}
+      // The click that follows a drag must not toggle the collapse.
+      panel._dragEndedAt = performance.now();
+    }
+    drag = null;
+  };
+  panel.addEventListener('pointerup', end);
+  panel.addEventListener('pointercancel', end);
+  panel.addEventListener('dblclick', (e) => {
+    if (e.target.closest && e.target.closest('.ap-head')) { _tutResetPanelPos(panel); panel.classList.remove('collapsed'); }
+  });
 }
 
 // Mark the current step done and move on (manual steps, or continuing
