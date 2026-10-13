@@ -1177,6 +1177,7 @@
     pointer-events: all;
   }
   .bbox-handle:hover { fill: #2f5fe0; }
+  .text-group-bbox { fill: none; stroke: #2f5fe0; stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.7; pointer-events: none; }
   .bbox-handle.h-nw, .bbox-handle.h-se { cursor: nwse-resize; }
   .bbox-handle.h-ne, .bbox-handle.h-sw { cursor: nesw-resize; }
   .bbox-handle.h-n,  .bbox-handle.h-s  { cursor: ns-resize; }
@@ -1425,6 +1426,21 @@
         <span class="tool-sep"></span>
         <button class="tool" data-tool="eraser" title="Eraser (E) — click a shape to delete"><svg class="ico"><use href="#i-eraser"/></svg><span class="tool-label">Erase</span></button>
         <button class="tool" data-action="mirror-2d" title="Mirror selected shape across an axis"><svg class="ico"><use href="#i-mirror"/></svg><span class="tool-label">Mirror</span></button>
+        <div class="dropdown" id="align2d-dropdown">
+          <button class="tool has-dropdown" data-action="align2d-menu" title="Line up two or more selected shapes (Shift-click to select several). The biggest shape stays put; the others move to it."><svg class="ico"><use href="#i-align"/></svg><span class="tool-label">Align</span></button>
+          <div class="dropdown-menu">
+            <button data-align2d="left"><span class="ico">⇤</span> Left edges</button>
+            <button data-align2d="hcenter"><span class="ico">↔</span> Centers, left–right</button>
+            <button data-align2d="right"><span class="ico">⇥</span> Right edges</button>
+            <div class="dropdown-sep"></div>
+            <button data-align2d="top"><span class="ico">⤒</span> Top edges</button>
+            <button data-align2d="vcenter"><span class="ico">↕</span> Middles, up–down</button>
+            <button data-align2d="bottom"><span class="ico">⤓</span> Bottom edges</button>
+            <div class="dropdown-sep"></div>
+            <button data-align2d="center"><span class="ico">⌖</span> Centers, both ways</button>
+            <button data-align2d="origin"><span class="ico">◎</span> Center on the grid origin</button>
+          </div>
+        </div>
         <button class="tool" data-action="copy" title="Copy selected (Ctrl+C)"><svg class="ico"><use href="#i-copy"/></svg><span class="tool-label">Copy</span></button>
         <button class="tool" data-action="paste" title="Paste (Ctrl+V)"><svg class="ico"><use href="#i-paste"/></svg><span class="tool-label">Paste</span></button>
         <button class="tool" data-action="duplicate" title="Duplicate (Ctrl+D) — copies the selection in place, on top of the original"><svg class="ico"><use href="#i-duplicate"/></svg><span class="tool-label">Duplicate</span></button>
@@ -3200,6 +3216,31 @@ class SketchEngine {
       if (handleEl) {
         const entId = parseInt(handleEl.dataset.entId, 10);
         const handle = handleEl.dataset.handle;
+        // Text group corner: the whole word scales uniformly about the
+        // opposite corner (live preview on the letter shapes; the real
+        // height is committed through regenerateTextGroup on release).
+        const tgid = handleEl.dataset.textGroup;
+        if (tgid && doc.sketch.textMeta && doc.sketch.textMeta[tgid]) {
+          const bb = textGroupBBox(tgid);
+          if (bb) {
+            const anchor = anchorForHandle(handle, bb);
+            const grabX = (handle === 'nw' || handle === 'sw') ? bb.minX : bb.maxX;
+            const grabY = (handle === 'sw' || handle === 'se') ? bb.minY : bb.maxY;
+            const members = doc.sketch.entities.filter(en => en.groupId === tgid);
+            pushUndo();
+            this.dragMode = 'bbox-resize';
+            this.bboxResize = {
+              textGroup: tgid, handle, anchor,
+              origVecX: grabX - anchor.x, origVecY: grabY - anchor.y,
+              members: members.map(m => ({ id: m.id, snapshot: JSON.parse(JSON.stringify(m)) })),
+              lastF: 1,
+            };
+            try { this.svg.setPointerCapture(e.pointerId); } catch(_) {}
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+        }
         const ent = doc.sketch.entities.find(en => en.id === entId);
         if (ent && handle) {
           const bb = entityBBox(ent);
@@ -4060,6 +4101,21 @@ class SketchEngine {
     // (otherwise repeated scale-around-anchor applications compound).
     if (this.dragMode === 'bbox-resize' && this.bboxResize) {
       const s = this.bboxResize;
+      if (s.textGroup) {
+        let fx = Math.abs(s.origVecX) > 1e-6 ? (wx - s.anchor.x) / s.origVecX : 1;
+        let fy = Math.abs(s.origVecY) > 1e-6 ? (wy - s.anchor.y) / s.origVecY : 1;
+        const f = Math.max(0.05, Math.min(Math.abs(fx), Math.abs(fy)));
+        for (const m of s.members) {
+          const ent = doc.sketch.entities.find(en => en.id === m.id);
+          if (!ent) continue;
+          restoreEntityFromSnapshot(ent, m.snapshot);
+          scaleEntityAround(ent, s.anchor, f, f);
+        }
+        s.lastF = f;
+        this.snap = null;
+        this.scheduleRender();
+        return;
+      }
       const ent = doc.sketch.entities.find(en => en.id === s.entId);
       if (ent) {
         restoreEntityFromSnapshot(ent, s.snapshot);
@@ -4154,15 +4210,26 @@ class SketchEngine {
              <div class="field"><label>Text</label><input id="tx-str" type="text" maxlength="40" placeholder="MY NAME"/></div>
              <div class="field"><label>Style</label><select id="tx-font">${fontChoiceOptions('block')}</select></div>
              <div class="field"><label>Letter height (${u})</label><input id="tx-h" type="number" value="${defH}" min="0.05" step="0.25"/></div>
-             <div class="field"><label>Spacing (%)</label><input id="tx-sp" type="number" value="0" min="-20" max="200" step="5"/></div>`,
+             <div class="field"><label>Spacing (%)</label><input id="tx-sp" type="number" value="0" min="-40" max="200" step="5"/></div>
+             <div class="field"><label>Curve</label><select id="tx-curve">
+               <option value="0">Straight</option>
+               <option value="up">Arch up ⌒ (rainbow)</option>
+               <option value="down">Arch down ⌣ (smile)</option>
+             </select></div>
+             <div class="field" style="display:flex;align-items:center;gap:8px">
+               <input type="checkbox" id="tx-bar" style="width:auto;margin:0"/>
+               <label for="tx-bar" style="margin:0;cursor:pointer">Connect the letters with a bar — prints as one piece</label>
+             </div>`,
       onConfirm: () => {
         const str = ($('tx-str').value || '').replace(/\s+$/, '');
         const h = fromUnit(parseFloat($('tx-h').value));
         const fontKey = $('tx-font')?.value || 'block';
         const sp = parseFloat($('tx-sp')?.value) || 0;
+        const curve = $('tx-curve')?.value || '0';
+        const bar = !!$('tx-bar')?.checked;
         if (!str.trim()) { showHint('Type some text first.'); return; }
         if (!(h > 0)) { showHint('Letter height must be positive.'); return; }
-        insertTextEntities(str, h, start, fontKey, sp);
+        insertTextEntities(str, h, start, fontKey, sp, { curve: curve === '0' ? 0 : curve, bar });
       },
     });
     setTimeout(() => $('tx-str')?.focus(), 60);
@@ -4216,8 +4283,20 @@ class SketchEngine {
 
     // Finalize bbox resize drag — snapshot done in onDown via pushUndo
     if (this.dragMode === 'bbox-resize') {
+      const s = this.bboxResize;
       this.dragMode = null;
       this.bboxResize = null;
+      if (s && s.textGroup && s.lastF && Math.abs(s.lastF - 1) > 1e-3) {
+        // Commit the preview as a real letter height so the text stays
+        // parametric (font / wording / curve still editable afterwards).
+        const meta = doc.sketch.textMeta && doc.sketch.textMeta[s.textGroup];
+        const bb = textGroupBBox(s.textGroup);
+        if (meta && bb) regenerateTextGroup(s.textGroup, {
+          height: meta.height * s.lastF,
+          curveR: meta.curveR ? meta.curveR * s.lastF : 0,
+          alignMinTo: { x: bb.minX, y: bb.minY },
+        });
+      }
       renderProps();
       this.render();
       return;
@@ -4813,6 +4892,24 @@ class SketchEngine {
       }
     }
 
+    // Placed text: dashed box + four corner handles so a word scales like any
+    // other shape (drag a corner; Properties also has typed Width / Height).
+    if (this.tool === 'select' && doc.selection && doc.selection.kind === 'sketch' && doc.sketch.textMeta) {
+      const selEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
+      const gid = selEnt && selEnt.groupId;
+      if (gid && doc.sketch.textMeta[gid] && !doc.sketch.locked) {
+        const bb = textGroupBBox(gid);
+        if (bb) {
+          const [x1, y1] = this.worldToScreen(bb.minX, bb.maxY);
+          const [x2, y2] = this.worldToScreen(bb.maxX, bb.minY);
+          svg += `<rect class="text-group-bbox" x="${x1}" y="${y1}" width="${x2 - x1}" height="${y2 - y1}"/>`;
+          const SZ = 8;
+          const hdl = (hx, hy, hh) => `<rect class="bbox-handle h-${hh}" data-handle="${hh}" data-text-group="${gid}" data-ent-id="${selEnt.id}" x="${hx - SZ / 2}" y="${hy - SZ / 2}" width="${SZ}" height="${SZ}" rx="1"/>`;
+          svg += hdl(x1, y1, 'nw') + hdl(x2, y1, 'ne') + hdl(x1, y2, 'sw') + hdl(x2, y2, 'se');
+        }
+      }
+    }
+
     // Snap marker — distinct visual + label per kind so the user can tell at
     // a glance what they're locking onto.
     if (this.snap) {
@@ -4915,9 +5012,15 @@ class SketchEngine {
 // closed shapes as holes. Font: vendored helvetiker_bold typeface.json
 // (three.js format), lazy-loaded on first use.
 const FONT_CHOICES = {
-  block:  { label: 'Block — bold & sturdy',  file: 'helvetiker_bold.typeface.json' },
-  simple: { label: 'Simple — clean & thin',  file: 'helvetiker_regular.typeface.json' },
-  fancy:  { label: 'Fancy — serif',          file: 'gentilis_bold.typeface.json' },
+  block:   { label: 'Block — bold & sturdy',      file: 'helvetiker_bold.typeface.json' },
+  simple:  { label: 'Simple — clean & thin',      file: 'helvetiker_regular.typeface.json' },
+  fancy:   { label: 'Fancy — serif',              file: 'gentilis_bold.typeface.json' },
+  // Added 2026-10-13 (three.js example fonts; licenses in droid_fonts_NOTICE.txt
+  // and mgopen_fonts_LICENSE.txt beside them).
+  rounded: { label: 'Rounded — soft & friendly',  file: 'optimer_bold.typeface.json' },
+  sans:    { label: 'Modern — clean sans',        file: 'droid_sans_bold.typeface.json' },
+  serif:   { label: 'Classic — book serif',       file: 'droid_serif_bold.typeface.json' },
+  mono:    { label: 'Typewriter — fixed width',   file: 'droid_sans_mono_regular.typeface.json' },
 };
 const _sketchFonts = {}; // key → { font, capH }
 function loadSketchFont(key = 'block') {
@@ -4997,7 +5100,10 @@ function _glyphContours(glyph, scale, penX, baseY) {
   return out;
 }
 // Build the contour list for one text run.
-function _buildTextContours(fd, text, height, origin, spacingPct) {
+// opts.curveR: signed radius (mm) — + arches the word up (rainbow), − arches
+// it down (smile), 0 = straight. opts.bar: add a connecting strip along the
+// baseline so the word prints as ONE piece (Charlie, 2026-10-13).
+function _buildTextContours(fd, text, height, origin, spacingPct, opts = {}) {
   const scale = height / (fd.capH || 1000);
   const extra = ((spacingPct || 0) / 100) * height;
   let penX = origin.x;
@@ -5011,7 +5117,59 @@ function _buildTextContours(fd, text, height, origin, spacingPct) {
     for (const c of _glyphContours(glyph, scale, penX, origin.y)) contours.push(c);
     penX += (glyph.ha || 600) * scale + extra;
   }
+  const W = Math.max(0, penX - origin.x - extra);
+  if (opts.bar && contours.length) {
+    // One closed strip every letter overlaps (letters sit on the baseline;
+    // descenders cross it). Dense so it bends along with curved text.
+    const pad = 0.08 * height, top = origin.y + 0.16 * height, bot = origin.y - 0.10 * height;
+    const x0 = origin.x - pad, x1 = origin.x + W + pad, N = 24, pts = [];
+    for (let i = 0; i <= N; i++) pts.push({ x: x0 + (x1 - x0) * i / N, y: bot });
+    for (let i = N; i >= 0; i--) pts.push({ x: x0 + (x1 - x0) * i / N, y: top });
+    pts.isBar = true;
+    contours.push(pts);
+  }
+  if (opts.curveR && Math.abs(opts.curveR) > 1e-6 && W > 1e-6) _curveTextContours(contours, origin, W, opts.curveR);
   return contours;
+}
+// Straight word width for a given font/height/spacing (used to pick a
+// sensible default curve radius).
+function _textWidth(fd, text, height, spacingPct) {
+  const scale = height / (fd.capH || 1000);
+  const extra = ((spacingPct || 0) / 100) * height;
+  let w = 0;
+  for (const ch of text) { const g = fd.font.glyphs[ch]; w += ((g ? g.ha : fd.font.glyphs[' ']?.ha) || 500) * scale + extra; }
+  return Math.max(0, w - extra);
+}
+// Bend contours built along a straight baseline onto a circle: the baseline
+// becomes an arc of radius |R| centered under (R > 0) or over (R < 0) the
+// word's middle; letters stay upright relative to the arc. Bezier handles are
+// re-derived from their transformed absolute positions.
+function _curveTextContours(contours, origin, W, R) {
+  const cx = origin.x + W / 2, cy = origin.y - R;
+  const T = (x, y) => {
+    const s = (x - origin.x) - W / 2, v = y - origin.y, th = s / R;
+    return { x: cx + (R + v) * Math.sin(th), y: cy + (R + v) * Math.cos(th) };
+  };
+  for (const c of contours) {
+    for (const p of c) {
+      const q = T(p.x, p.y);
+      if (p.cpOut) { const a = T(p.x + p.cpOut.dx, p.y + p.cpOut.dy); p.cpOut = { dx: a.x - q.x, dy: a.y - q.y }; }
+      if (p.cpIn)  { const a = T(p.x + p.cpIn.dx,  p.y + p.cpIn.dy);  p.cpIn  = { dx: a.x - q.x, dy: a.y - q.y }; }
+      p.x = q.x; p.y = q.y;
+    }
+  }
+}
+// Union bounding box of a text group's letters (and bar).
+function textGroupBBox(gid) {
+  if (!doc.sketch) return null;
+  let bb = null;
+  for (const e of doc.sketch.entities) {
+    if (e.groupId !== gid) continue;
+    const b = entityBBox(e);
+    if (!b) continue;
+    bb = bb ? { minX: Math.min(bb.minX, b.minX), minY: Math.min(bb.minY, b.minY), maxX: Math.max(bb.maxX, b.maxX), maxY: Math.max(bb.maxY, b.maxY) } : { ...b };
+  }
+  return bb;
 }
 function _textGroupBBoxMin(ids) {
   let mn = null;
@@ -5029,15 +5187,25 @@ function _textGroupBBoxMin(ids) {
 // sketch so the Properties panel can re-generate them — change the text,
 // the font, the height, or the letter spacing at any time. "Explode"
 // drops the meta and leaves plain letter shapes.
-function insertTextEntities(str, height, start, fontKey = 'block', spacingPct = 0) {
+function insertTextEntities(str, height, start, fontKey = 'block', spacingPct = 0, opts = {}) {
   setStatus('Loading letter shapes…');
   loadSketchFont(fontKey).then(fd => {
     if (!doc.sketch) return;
     pushUndo();
     const gid = 'txt' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    // Curve: 'up' / 'down' pick a radius that bends the word about 60°;
+    // a signed number is an explicit radius in mm.
+    let curveR = 0;
+    if (typeof opts.curve === 'number') curveR = opts.curve;
+    else if (opts.curve === 'up' || opts.curve === 'down') {
+      const r = Math.max(_textWidth(fd, str, height, spacingPct), 2 * height);
+      curveR = opts.curve === 'up' ? r : -r;
+    }
+    const bar = !!opts.bar;
     const created = [];
-    for (const contour of _buildTextContours(fd, str, height, start, spacingPct)) {
+    for (const contour of _buildTextContours(fd, str, height, start, spacingPct, { curveR, bar })) {
       const ent = { id: doc.sketch.nextId++, type: 'polyline', closed: true, points: contour, groupId: gid };
+      if (contour.isBar) ent.textBar = true;
       doc.sketch.entities.push(ent);
       created.push(ent.id);
     }
@@ -5045,6 +5213,7 @@ function insertTextEntities(str, height, start, fontKey = 'block', spacingPct = 
     doc.sketch.textMeta = doc.sketch.textMeta || {};
     doc.sketch.textMeta[gid] = {
       text: str, height, font: fontKey, spacing: spacingPct || 0,
+      curveR, bar,
       origin: { x: start.x, y: start.y },
       builtMin: _textGroupBBoxMin(created) || { x: start.x, y: start.y },
     };
@@ -5070,17 +5239,31 @@ function regenerateTextGroup(gid, patch = {}) {
   const drift = (curMin && meta.builtMin)
     ? { x: curMin.x - meta.builtMin.x, y: curMin.y - meta.builtMin.y }
     : { x: 0, y: 0 };
-  const next = Object.assign({}, meta, patch);
-  const origin = { x: meta.origin.x + drift.x, y: meta.origin.y + drift.y };
+  // alignMinTo: after rebuilding, slide the word so its bottom-left corner
+  // lands exactly there (used by corner-handle and typed-size scaling).
+  const { alignMinTo, ...rest } = patch;
+  const next = Object.assign({}, meta, rest);
+  let origin = { x: meta.origin.x + drift.x, y: meta.origin.y + drift.y };
   loadSketchFont(next.font).then(fd => {
     if (!doc.sketch || doc.sketch !== sk) return;
     pushUndo();
     sk.entities = sk.entities.filter(e => e.groupId !== gid);
     const created = [];
-    for (const contour of _buildTextContours(fd, next.text, next.height, origin, next.spacing)) {
+    for (const contour of _buildTextContours(fd, next.text, next.height, origin, next.spacing, { curveR: next.curveR || 0, bar: !!next.bar })) {
       const ent = { id: sk.nextId++, type: 'polyline', closed: true, points: contour, groupId: gid };
+      if (contour.isBar) ent.textBar = true;
       sk.entities.push(ent);
       created.push(ent.id);
+    }
+    if (alignMinTo && created.length) {
+      const mn = _textGroupBBoxMin(created);
+      if (mn) {
+        const dx = alignMinTo.x - mn.x, dy = alignMinTo.y - mn.y;
+        if (Math.abs(dx) > 1e-9 || Math.abs(dy) > 1e-9) {
+          for (const id of created) { const e = sk.entities.find(x => x.id === id); moveEntity(e, JSON.parse(JSON.stringify(e)), dx, dy); }
+          origin = { x: origin.x + dx, y: origin.y + dy };
+        }
+      }
     }
     if (!created.length) {
       delete sk.textMeta[gid];
@@ -17426,6 +17609,75 @@ function openFastenerDialog() {
   });
 }
 
+// ─── 2D Align (Charlie, 2026-10-13: "no align tools when selecting multiple
+// objects") ───────────────────────────────────────────────────────────────────
+// Line up the multi-selection. A text group counts as one unit. The LARGEST
+// unit (by bounding-box area) stays put and the others move to it — so
+// "center the hole in the tag" is one click and the tag never jumps.
+function _align2DUnits() {
+  const sk = doc.sketch;
+  if (!sk) return [];
+  const ids = new Set(doc.multiSelectedSketch || []);
+  if (doc.selection && doc.selection.kind === 'sketch') ids.add(doc.selection.id);
+  const units = new Map();
+  for (const e of sk.entities) {
+    if (!ids.has(e.id) || e.facePerimeter || e.construction || e.type === 'dimension') continue;
+    const bb = entityBBox(e);
+    if (!bb) continue;
+    const key = e.groupId != null ? 'g:' + e.groupId : 'e:' + e.id;
+    const u = units.get(key) || { ents: [], bb: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity } };
+    u.ents.push(e);
+    u.bb.minX = Math.min(u.bb.minX, bb.minX); u.bb.maxX = Math.max(u.bb.maxX, bb.maxX);
+    u.bb.minY = Math.min(u.bb.minY, bb.minY); u.bb.maxY = Math.max(u.bb.maxY, bb.maxY);
+    units.set(key, u);
+  }
+  return [...units.values()];
+}
+function align2DSelection(mode) {
+  if (!doc.sketch || doc.mode !== '2d') { showHint('Open a sketch first, then select the shapes to line up.'); return; }
+  const units = _align2DUnits();
+  if (!units.length) { showHint('Select a shape first (Shift-click to add more), then pick how to line them up.'); return; }
+  if (mode !== 'origin' && units.length < 2) { showHint('Shift-click a second shape first. The biggest one stays put and the others move to it.'); return; }
+  pushUndo();
+  const area = (bb) => (bb.maxX - bb.minX) * (bb.maxY - bb.minY);
+  const cx = (bb) => (bb.minX + bb.maxX) / 2, cy = (bb) => (bb.minY + bb.maxY) / 2;
+  const shift = (u, dx, dy) => {
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return;
+    for (const e of u.ents) moveEntity(e, JSON.parse(JSON.stringify(e)), dx, dy);
+  };
+  if (mode === 'origin') {
+    const all = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (const u of units) { all.minX = Math.min(all.minX, u.bb.minX); all.maxX = Math.max(all.maxX, u.bb.maxX); all.minY = Math.min(all.minY, u.bb.minY); all.maxY = Math.max(all.maxY, u.bb.maxY); }
+    const dx = -cx(all), dy = -cy(all);
+    for (const u of units) shift(u, dx, dy);
+  } else {
+    const anchor = units.reduce((a, u) => area(u.bb) > area(a.bb) ? u : a, units[0]);
+    for (const u of units) {
+      if (u === anchor) continue;
+      let dx = 0, dy = 0;
+      switch (mode) {
+        case 'left':    dx = anchor.bb.minX - u.bb.minX; break;
+        case 'hcenter': dx = cx(anchor.bb) - cx(u.bb); break;
+        case 'right':   dx = anchor.bb.maxX - u.bb.maxX; break;
+        case 'top':     dy = anchor.bb.maxY - u.bb.maxY; break;
+        case 'vcenter': dy = cy(anchor.bb) - cy(u.bb); break;
+        case 'bottom':  dy = anchor.bb.minY - u.bb.minY; break;
+        case 'center':  dx = cx(anchor.bb) - cx(u.bb); dy = cy(anchor.bb) - cy(u.bb); break;
+        default: return;
+      }
+      shift(u, dx, dy);
+    }
+  }
+  setDirty(true);
+  if (sketchEng) sketchEng.render();
+  renderTree(); renderProps();
+  if (viewer) viewer.updateSketchOverlay && viewer.updateSketchOverlay();
+  const names = { left: 'left edges', hcenter: 'centers left–right', right: 'right edges', top: 'top edges', vcenter: 'middles up–down', bottom: 'bottom edges', center: 'centers' };
+  setStatus(mode === 'origin'
+    ? 'Centered the selection on the grid origin.'
+    : `Aligned ${names[mode]} — the biggest shape stayed put, the others moved to it.`);
+}
+
 // Insert a closed-polyline pre-made shape (hexagon, pentagon, octagon, star,
 // heart, teardrop) into the active sketch, centered on the visible origin.
 // Sized to match grid spacing so swapping with the rect/circle defaults feels
@@ -21064,7 +21316,21 @@ function renderProps() {
         <div class="field"><label>Text</label><input id="tprop-str" type="text" maxlength="40" value="${safeText}"/></div>
         <div class="field"><label>Style</label><select id="tprop-font">${fontChoiceOptions(tMeta.font)}</select></div>
         <div class="field"><label>Letter height (${u})</label><input id="tprop-h" type="number" value="${fmtU(tMeta.height)}" min="0.05" step="0.25"/></div>
-        <div class="field"><label>Spacing (%)</label><input id="tprop-sp" type="number" value="${tMeta.spacing || 0}" min="-20" max="200" step="5"/></div>
+        <div class="field"><label>Spacing (%)</label><input id="tprop-sp" type="number" value="${tMeta.spacing || 0}" min="-40" max="200" step="5"/></div>
+        ${(() => { const bb = textGroupBBox(gid); return bb ? `
+        <div style="font-size:11px;font-weight:800;color:var(--ink-muted);margin:8px 0 2px">Overall size (drag a corner handle, or type)</div>
+        <div class="field"><label>Width (${u})</label><input id="tprop-w" type="number" value="${fmtU(bb.maxX - bb.minX)}" min="0.05" step="0.25"/></div>
+        <div class="field"><label>Height (${u})</label><input id="tprop-bh" type="number" value="${fmtU(bb.maxY - bb.minY)}" min="0.05" step="0.25"/></div>` : ''; })()}
+        <div class="field"><label>Curve</label><select id="tprop-curve">
+          <option value="0"${!tMeta.curveR ? ' selected' : ''}>Straight</option>
+          <option value="up"${tMeta.curveR > 0 ? ' selected' : ''}>Arch up ⌒ (rainbow)</option>
+          <option value="down"${tMeta.curveR < 0 ? ' selected' : ''}>Arch down ⌣ (smile)</option>
+        </select></div>
+        ${tMeta.curveR ? `<div class="field"><label>Curve radius (${u})</label><input id="tprop-curve-r" type="number" value="${fmtU(Math.abs(tMeta.curveR))}" min="0.1" step="0.25"/></div>` : ''}
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="tprop-bar" style="width:auto;margin:0"${tMeta.bar ? ' checked' : ''}/>
+          <label for="tprop-bar" style="margin:0;cursor:pointer">Connect the letters with a bar (prints as one piece)</label>
+        </div>
         <div class="hint">The word moves as one. <b>Extrude</b> to raise it, set <b>Negative</b> + extrude to engrave. Explode to edit letters one by one.</div>
         <button class="action" id="tprop-explode" style="margin-top:8px">⚡ Explode into letters</button>
         <button class="action" id="del-text-group" style="margin-top:8px">Delete text</button>`;
@@ -21083,6 +21349,32 @@ function renderProps() {
         const v = parseFloat($('tprop-sp').value);
         if (isFinite(v)) regenerateTextGroup(gid, { spacing: v });
       });
+      // Typed overall size: scale the letter height (and curve radius) by the
+      // ratio, keeping the word's bottom-left corner where it is.
+      const scaleTo = (inputId, axis) => {
+        const v = fromUnit(parseFloat($(inputId).value));
+        const bb = textGroupBBox(gid);
+        if (!(v > 0) || !bb) { renderProps(); return; }
+        const cur = axis === 'w' ? bb.maxX - bb.minX : bb.maxY - bb.minY;
+        if (!(cur > 1e-6)) return;
+        const f = v / cur;
+        if (Math.abs(f - 1) < 1e-6) return;
+        regenerateTextGroup(gid, { height: tMeta.height * f, curveR: tMeta.curveR ? tMeta.curveR * f : 0, alignMinTo: { x: bb.minX, y: bb.minY } });
+      };
+      $('tprop-w')?.addEventListener('change', () => scaleTo('tprop-w', 'w'));
+      $('tprop-bh')?.addEventListener('change', () => scaleTo('tprop-bh', 'h'));
+      $('tprop-curve')?.addEventListener('change', () => {
+        const v = $('tprop-curve').value;
+        if (v === '0') { regenerateTextGroup(gid, { curveR: 0 }); return; }
+        const bb = textGroupBBox(gid);
+        const r = Math.abs(tMeta.curveR) || Math.max(bb ? bb.maxX - bb.minX : 0, 2 * tMeta.height);
+        regenerateTextGroup(gid, { curveR: v === 'up' ? r : -r });
+      });
+      $('tprop-curve-r')?.addEventListener('change', () => {
+        const v = fromUnit(parseFloat($('tprop-curve-r').value));
+        if (v > 0) regenerateTextGroup(gid, { curveR: (tMeta.curveR < 0 ? -1 : 1) * v });
+      });
+      $('tprop-bar')?.addEventListener('change', () => regenerateTextGroup(gid, { bar: !!$('tprop-bar').checked }));
       $('tprop-explode')?.addEventListener('click', () => explodeTextGroup(gid));
       $('del-text-group')?.addEventListener('click', () => {
         pushUndo();
@@ -25472,6 +25764,22 @@ const _projBodiesCoaxial = (d, isHost) => {
     _projFindBody(b.children, isHost) && _projFindBody(b.children, _projIsInkChannel));
 };
 
+// Bounding box of a sketch entity (rect, circle, or a polyline incl. curve
+// handles — the tag outline becomes a polyline once it's filleted).
+const _projEntBox = (e) => {
+  if (e.construction) return null;
+  const segs = entityToSegments(e);
+  if (!segs.length) return null;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const s of segs) for (const p of [s.a, s.b]) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  return { w: maxX - minX, h: maxY - minY };
+};
+// Keychain-tag sized: roughly 1.5–3.5 in long and 0.6–1.75 in wide, either way round.
+const _projTagSized = (bb) => {
+  const L = Math.max(bb.w, bb.h), S = Math.min(bb.w, bb.h);
+  return L >= 38 && L <= 90 && S >= 15 && S <= 45;
+};
+
 const PROJECTS = [
   {
     id: 'pen',
@@ -25600,6 +25908,62 @@ const PROJECTS = [
       {
         text: 'Name it, press ☁ **Save**, then **Export ▾ → STL** and print. Slide the refill in from the bottom, tip first. 🖊️',
         hint: 'Make it yours: fillet the square’s corners before extruding (Sketch Toolbox tutorial), engrave a pattern, or add a clip with a second extrude.',
+        done: (d, ev) => !!ev.exported,
+      },
+    ],
+  },
+  {
+    id: 'keychain',
+    kind: 'project',
+    title: 'Keychain Tag',
+    minutes: 15,
+    intro: 'A flat tag with a ring hole and your name on it — the fastest thing you can design and actually carry around.',
+    print: 'Prints flat on the bed, no supports, about 10–15 minutes. Any split ring or keyring fits the hole. Letters print best standing up (raised) at 0.06 in; engraved letters want a lighter color plate.',
+    skills: ['sketch-toolbox', 'extrude', 'cut-a-hole'],
+    steps: [
+      {
+        text: 'We’ll make a basic tag first — a rounded rectangle, a hole for the ring, your name on top — and then you change it into whatever you want: a heart, a star, your initials, a second hole, a pattern. Follow along, then make it yours.',
+        manual: true,
+        done: () => false,
+      },
+      {
+        text: 'Click **Sketch** → **Top**. Pick **Rect**, draw a rectangle near the center, then click it with **Select** and set **Width 2** and **Height 1** in Properties (press Enter after each). A business-card-ish tag.',
+        hint: 'Want a different shape already? Fine — anything about 2 in long and 1 in wide works for the checks. The Shape ▾ menu has hearts and stars.',
+        done: (d) => _tutSketchHas(d, e => {
+          const bb = _projEntBox(e);
+          return bb && _projTagSized(bb);
+        }),
+      },
+      {
+        text: 'Round the corners: pick **Fillet** and click **all four corners** of the rectangle (each gets a dot), press **Enter**, type **0.25**, click **Apply**. Then click **← Done**.',
+        hint: 'Rounded corners don’t snag in a pocket, and the printer likes them better than sharp ones.',
+        done: (d) => d.mode === '3d' && _tutSketchHas(d, e => {
+          if (e.type !== 'polyline' || !e.closed) return false;
+          const bb = _projEntBox(e);
+          return bb && _projTagSized(bb) && ((e.points || []).length >= 12 || (e.points || []).some(p => p.cpIn || p.cpOut));
+        }),
+      },
+      {
+        text: 'Click **inside** your shape. In the pop-up type **0.125** and click **Done** — an eighth of an inch thick is sturdy but still light.',
+        done: (d) => _projFindBody(d.bodies, b => b.type === 'extrude' && b.op !== 'subtract' && b.height >= 2 && b.height <= 5),
+      },
+      {
+        text: 'The ring hole: pick **On Face** and click the tag’s **top face**. Draw a **Circle** near the **left end** (keep it about a quarter inch in from the edges), click it with **Select** and set **Radius 0.125**. Click **← Done**, click **inside the circle**, then **－ Cut** and **⇣ Through**.',
+        hint: 'Too close to the edge and the ring tears out; too far in and it eats your name space. About ¼ in from the end is right.',
+        done: (d) => _projFindBody(d.bodies, b => b.type === 'extrude' && b.op === 'subtract' &&
+          (b.sketch?.entities || []).some(e => e.type === 'circle' && e.r >= 2 && e.r <= 5)),
+      },
+      {
+        text: 'Your name: pick **On Face** again and click the **top face**. Pick the **Text** tool, click to the right of the hole, type your **name or initials**, set **Letter height 0.4**, click **OK**, then **← Done**. Back in 3D, click **inside one letter** (the whole word selects), type **0.06**, and click **＋ Add** for raised letters — or **－ Cut** to engrave them. Your call.',
+        hint: 'Raised letters you can feel with a thumb; engraved ones keep the tag flat on both sides. Short names fit at 0.4; drop to 0.3 for a long one.',
+        done: (d) => d.sketches.some(sk => sk.textMeta && Object.keys(sk.textMeta).length > 0) &&
+          _projFindBody(d.bodies, b => b.type === 'extrude' && b.height > 0 && b.height <= 3 &&
+            (b.sketch?.entities || []).filter(e => e.type === 'polyline' && e.closed).length >= 1 &&
+            !(b.sketch?.entities || []).some(e => e.type === 'circle')),
+      },
+      {
+        text: 'Now make it yours before you print: swap the rectangle for a heart or star from **Shape ▾**, add a second hole, engrave a pattern, or stack two colors. Then name it, press ☁ **Save**, and **Export ▾ → STL**. 🔑',
+        hint: 'Print flat, letters up. Slide a split ring through the hole and it’s done.',
         done: (d, ev) => !!ev.exported,
       },
     ],
@@ -26766,6 +27130,9 @@ function init() {
       case 'shape2d-menu':
         $('shape2d-dropdown').classList.toggle('open');
         break;
+      case 'align2d-menu':
+        $('align2d-dropdown').classList.toggle('open');
+        break;
       case 'align': startAlignMode(); break;
       case 'joint': startJointCreation(); break;
       case 'orbit-mode': toggleOrbitMode(); break;
@@ -26807,12 +27174,21 @@ function init() {
       $('shape2d-dropdown').classList.remove('open');
     });
   });
+  // 2D align dropdown items
+  document.querySelectorAll('#align2d-dropdown .dropdown-menu button').forEach(b => {
+    b.addEventListener('click', () => {
+      align2DSelection(b.dataset.align2d);
+      $('align2d-dropdown').classList.remove('open');
+    });
+  });
   // Close dropdowns on outside click
   document.addEventListener('click', (e) => {
     const dd = $('prim-dropdown');
     if (dd && !dd.contains(e.target)) dd.classList.remove('open');
     const dd2 = $('shape2d-dropdown');
     if (dd2 && !dd2.contains(e.target)) dd2.classList.remove('open');
+    const dd3 = $('align2d-dropdown');
+    if (dd3 && !dd3.contains(e.target)) dd3.classList.remove('open');
   });
 
   // Units toggle
