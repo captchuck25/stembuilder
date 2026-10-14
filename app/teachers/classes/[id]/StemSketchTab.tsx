@@ -430,9 +430,9 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                     style={{ color: "#0e7490", fontWeight: 800, textDecoration: "none" }}>
                     ▶ Try it first
                   </Link>
-                  <Link href={`/tools/stem-sketch/worksheet?challenge=${encodeURIComponent(selected.id)}`}
+                  <Link href={selected.worksheetPdfPath ?? `/tools/stem-sketch/worksheet?challenge=${encodeURIComponent(selected.id)}`}
                     target="_blank"
-                    title="Printable orthographic worksheet — third-angle view boxes at true 1:1 scale with an eighth-inch grid"
+                    title="Printable orthographic worksheet — third-angle view boxes at true 1:1 scale"
                     style={{ color: "#0e7490", fontWeight: 800, textDecoration: "none" }}>
                     🖨 Worksheet
                   </Link>

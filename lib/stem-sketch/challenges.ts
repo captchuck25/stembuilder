@@ -84,6 +84,10 @@ export interface SketchChallenge {
   /** Public path of a rendered image of the block (shown in the teacher picker
    *  so the on-screen name matches the object being passed around the room). */
   imagePath: string | null;
+  /** Public path of a hand-authored printable worksheet PDF. When set, the
+   *  picker's 🖨 link opens it instead of the generated
+   *  /tools/stem-sketch/worksheet page (which stays as the fallback). */
+  worksheetPdfPath?: string | null;
   /** Pass tolerance for the fit check. 0.5 mm ≈ 1/50", far below the 1/8" (3.175 mm) design increment. */
   toleranceMm: number;
   /** Stage 2 only: edge length (inches) of the target cube the printed void
@@ -123,40 +127,44 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
     stage: 1,
     title: "Step Block",
     description:
-      "A 3-inch cube with a staircase cut into it — every dimension is a whole inch. Measure the printed block, draw its three views on paper, then model it exactly.",
+      "A 2-inch cube with a four-step staircase cut straight through it — every step is half an inch tall and half an inch deep. One good front view describes the whole block. Measure the printed block, draw its views on paper, then model it exactly.",
     studentInstructions:
       "1. Get the printed Step Block from your teacher.\n" +
-      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
-      "3. Measure it with your ruler — every dimension is a whole inch.\n" +
+      "2. Hold it so the stairs climb UP toward the LEFT — that's your front view. Keep it facing you.\n" +
+      "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Draw its front, top, and side views on paper first.\n" +
       "5. Build it here exactly as you measured it.\n" +
       "6. Click Check My Model — if it matches, hit Submit!",
-    precision: "whole",
+    precision: "quarter",
     refDocJson: refS101,
-    // Teacher print carries an engraved FRONT label; refDocJson stays the
-    // CLEAN geometry — the engraving must never reach the fit check.
+    // 2x2x2 redesign (2026-10-13, saved as "Recreate #1"). The print is the
+    // clean geometry — no FRONT engraving on this one; step 2 orients the
+    // block by its stairs instead.
     stlPath: "/stem-sketch/challenges/s1-01-step-block-teacher-print.stl",
     imagePath: "/stem-sketch/challenges/s1-01-step-block.jpg",
+    worksheetPdfPath: "/stem-sketch/challenges/s1-01-step-block-worksheet.pdf",
     toleranceMm: 0.5,
   },
   {
     id: "s1-02-double-steps",
     stage: 1,
-    title: "Double Steps",
+    title: "Four Posts",
     description:
-      "Three stacked steps that shrink in BOTH directions — a front view alone can't describe it, so students need the right-side view too. Every dimension is still a whole inch: the step up from the Step Block is seeing in two views, not smaller fractions.",
+      "A 2-inch block with a half-inch base and four square posts, one at each corner — three are the same height and the back-left one is taller. A front view alone can't tell which post is which, so students need the top and right-side views too. Quarter-inch dimensions; the step up from the Step Block is seeing in more than one view.",
     studentInstructions:
-      "1. Get the printed Double Steps block from your teacher.\n" +
-      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
-      "3. Measure it with your ruler — every dimension is a whole inch.\n" +
+      "1. Get the printed Four Posts block from your teacher.\n" +
+      "2. Hold it so the TALLEST post is at the back on your LEFT — that's your front view. Keep it facing you.\n" +
+      "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Draw its front, top, AND right-side views on paper — one view isn't enough for this block!\n" +
       "5. Build it here exactly as you measured it.\n" +
       "6. Click Check My Model — if it matches, hit Submit!",
-    precision: "whole",
+    precision: "quarter",
     refDocJson: refS102,
-    // Teacher print carries an engraved FRONT label; refDocJson stays clean.
+    // 2x2x2 redesign (2026-10-14, saved as "Recreate #2"): base slab + four
+    // corner posts (three 1¼", back-left 2"). Clean print, no FRONT engraving.
     stlPath: "/stem-sketch/challenges/s1-02-double-steps-teacher-print.stl",
     imagePath: "/stem-sketch/challenges/s1-02-double-steps.jpg",
+    worksheetPdfPath: "/stem-sketch/challenges/s1-02-double-steps-worksheet.pdf",
     toleranceMm: 0.5,
   },
   {
