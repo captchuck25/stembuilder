@@ -13,7 +13,6 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
-  PRECISION_LABEL,
   STAGE_META,
   challengesForStage,
   getChallenge,
@@ -408,7 +407,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                   borderRadius: 8, border: "2px solid #e0e0e0", fontSize: 14, fontWeight: 600 }}>
                 {challengesForStage(createStage).map(c => (
                   <option key={c.id} value={c.id}>
-                    {c.title} — {PRECISION_LABEL[c.precision]}{challengeReady(c) ? "" : " (geometry pending)"}
+                    {c.title}{challengeReady(c) ? "" : " (geometry pending)"}
                   </option>
                 ))}
               </select>
@@ -504,7 +503,7 @@ export default function StemSketchTab({ classId }: { classId: string }) {
                     <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                       {challenge ? (
                         <span style={{ fontSize: 12, color: "#555", fontWeight: 600 }}>
-                          {STAGE_META[challenge.stage].icon} Level {challenge.stage} · {STAGE_META[challenge.stage].name} · {challenge.title} · {PRECISION_LABEL[challenge.precision]}
+                          {STAGE_META[challenge.stage].icon} Level {challenge.stage} · {STAGE_META[challenge.stage].name} · {challenge.title}
                           {challengeReady(challenge) ? "" : " · geometry pending"}
                         </span>
                       ) : (
