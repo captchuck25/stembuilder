@@ -1,5 +1,5 @@
-// Headless fit-check smoke for a STEM Sketch challenge (needs a dev server on :3000).
-// Usage: node scripts/stem-sketch-fitcheck-smoke.mjs <slug> [stage] [targetCubeIn]
+// Headless fit-check smoke for a STEM Sketch challenge (needs a server on :3000 — `python -m http.server 3000 --directory public` is enough).
+// Usage: node scripts/stem-sketch-fitcheck-smoke.mjs <slug> [stage] [targetCubeIn] [mustPassDoc.json]
 // loads the iframe
 // straight from the dev server, enters assignment preview mode with the
 // challenge's reference, then checks (a) the reference itself as the student
@@ -82,11 +82,15 @@ async function check(label, docJson) {
   return res;
 }
 
-// (a) the reference itself → must pass
-const a = await check("reference as model", ref);
-// (b) a plain cube of the same envelope → must fail
+// Stage 2: the student must build the COMPLEMENT, so the must-pass model is a
+// hand-built solution doc (argv[5]) and the printed block itself must FAIL.
+const passDocPath = process.argv[5];
+const passDoc = passDocPath ? JSON.parse(readFileSync(passDocPath, "utf8")) : ref;
+// (a) the correct model → must pass
+const a = await check(passDocPath ? "solution piece" : "reference as model", passDoc);
+// (b) a wrong model → must fail: the block itself for stage 2, else a plain cube
 const plain = JSON.parse(JSON.stringify(ref));
-(function strip(b) { if (b.children) { b.children = b.children.filter(c => c.op !== "subtract"); b.children.forEach(strip); } })({ children: plain.bodies });
+if (stage !== 2) (function strip(b) { if (b.children) { b.children = b.children.filter(c => c.op !== "subtract"); b.children.forEach(strip); } })({ children: plain.bodies });
 // Drop any baked geometry the save carries on groups — the loader trusts it
 // over the children, so a stripped group would otherwise keep the old solid.
 (function unbake(b) {

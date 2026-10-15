@@ -176,7 +176,32 @@ def visible_runs(edge, tris, samples=400, eps=1e-4):
 
 
 # ── Sheet ──────────────────────────────────────────────────────────────────
-def draw_sheet(c, stl_path):
+def draw_void_envelope(c, cube_in, bbox):
+    """Fill the Void sheets: dashed outline of the full target cube around the
+    printed block, so the missing space is visible on paper. Only the nine
+    edges a viewer can see from the isometric direction are drawn."""
+    lo = bbox[0]
+    L = cube_in
+    P = lambda x, y, z: project(np.array([lo[0] + x, lo[1] + y, lo[2] + z]), bbox)
+    edges = [
+        # top face (y = L)
+        ((0, L, L), (L, L, L)), ((L, L, L), (L, L, 0)), ((L, L, 0), (0, L, 0)), ((0, L, 0), (0, L, L)),
+        # three visible verticals
+        ((0, 0, L), (0, L, L)), ((L, 0, L), (L, L, L)), ((L, 0, 0), (L, L, 0)),
+        # bottom front + bottom right
+        ((0, 0, L), (L, 0, L)), ((L, 0, L), (L, 0, 0)),
+    ]
+    c.saveState()
+    c.setLineWidth(0.6)
+    c.setDash(4, 3)
+    c.setStrokeColorRGB(0.35, 0.35, 0.35)
+    for a, b in edges:
+        (ax, ay), (bx, by) = P(*a), P(*b)
+        c.line(*tl(ax, ay), *tl(bx, by))
+    c.restoreState()
+
+
+def draw_sheet(c, stl_path, void_cube_in=None, label=None):
     c.setLineWidth(LINE_W)
     c.setStrokeColorRGB(0, 0, 0)
     c.setFillColorRGB(0, 0, 0)
@@ -194,9 +219,14 @@ def draw_sheet(c, stl_path):
                 c.circle(px, py, DOT_R, stroke=0, fill=1)
     c.setFont("Helvetica-Bold", 9.5)
     c.drawString(24, 23.6, "STEMBUILDER.IO")
+    if label:
+        # centered in the middle title cell (x 249.5 .. 541)
+        c.drawCentredString((TITLE_DIVIDERS[0] + TITLE_DIVIDERS[1]) / 2, 23.6, label)
 
     tris = read_stl(stl_path)
     bbox = (tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0))
+    if void_cube_in:
+        draw_void_envelope(c, void_cube_in, bbox)
     c.setLineWidth(ISO_LINE_W)
     c.setLineCap(1)
     n_vis = 0
@@ -209,9 +239,17 @@ def draw_sheet(c, stl_path):
 
 
 def main():
-    stl, out = sys.argv[1], sys.argv[2]
+    """python scripts/stem-sketch-worksheet-pdf.py <block.stl> <out.pdf> [--void <cubeIn>] [--label "Recreate 1"]"""
+    args = sys.argv[1:]
+    void = None
+    label = None
+    if "--void" in args:
+        i = args.index("--void"); void = float(args[i + 1]); del args[i:i + 2]
+    if "--label" in args:
+        i = args.index("--label"); label = args[i + 1]; del args[i:i + 2]
+    stl, out = args[0], args[1]
     c = canvas.Canvas(out, pagesize=landscape(letter))
-    n = draw_sheet(c, stl)
+    n = draw_sheet(c, stl, void_cube_in=void, label=label)
     c.save()
     print(f"wrote {out} ({n} visible edge segments)")
 

@@ -21,8 +21,6 @@
 import refS101 from "./challenges/s1-01-starter-brick.json";
 import refS102 from "./challenges/s1-02-double-steps.json";
 import refS103 from "./challenges/s1-03-triple-view.json";
-import refS201 from "./challenges/s2-01-reverse-step.json";
-import refS202 from "./challenges/s2-02-double-take.json";
 import refS203 from "./challenges/s2-03-funky-towers.json";
 
 export type SketchPrecision = "whole" | "half" | "quarter" | "eighth";
@@ -198,41 +196,46 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
     stage: 2,
     title: "Reverse Step",
     description:
-      "A staircase that fills most of a 3-inch cube — students measure it, then design the MISSING piece (the upside-down staircase) that completes the cube. Quarter-inch dimensions. The first Fill the Void challenge.",
+      "The Step Block from Recreate, reused — no new print needed. Students measure it, then design the MISSING piece (an upside-down 3-step staircase) that completes the 2-inch cube. Quarter-inch dimensions. The first Fill the Void challenge.",
     studentInstructions:
-      "1. Get the printed Reverse Step block from your teacher.\n" +
-      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "1. Get the printed Step Block from your teacher — the same block from Recreate.\n" +
+      "2. The side with the letter F is your front view — keep it facing you.\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
-      "4. Picture the missing piece: block + your piece = a perfect 3-inch cube.\n" +
+      "4. Picture the missing piece: block + your piece = a perfect 2-inch cube.\n" +
       "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block!\n" +
       "6. Click Check My Model — if your piece completes the cube, hit Submit!",
     precision: "quarter",
-    refDocJson: refS201,
-    stlPath: "/stem-sketch/challenges/s2-01-reverse-step-teacher-print.stl",
-    imagePath: "/stem-sketch/challenges/s2-01-reverse-step.jpg",
+    // Same block as s1-01 (2026-10-14): reference, print, and picker image
+    // are shared so a teacher's one print set covers both units.
+    refDocJson: refS101,
+    stlPath: "/stem-sketch/challenges/s1-01-step-block-teacher-print.stl",
+    imagePath: "/stem-sketch/challenges/s1-01-step-block.jpg",
+    worksheetPdfPath: "/stem-sketch/challenges/s2-01-reverse-step-worksheet.pdf",
     toleranceMm: 0.5,
-    targetCubeIn: 3,
+    targetCubeIn: 2,
     solutionStlPath: "/stem-sketch/challenges/s2-01-reverse-step-solution.stl",
   },
   {
     id: "s2-02-double-take",
     stage: 2,
-    title: "Double Take",
+    title: "Four Pockets",
     description:
-      "A thick base with a tall tower in one corner — the missing piece is the L-shaped lid that sits on the base and wraps around the tower to finish the 3-inch cube. Quarter-inch dimensions; worth a second look before you draw.",
+      "The Four Posts block from Recreate, reused — the missing piece is a lid that drops over all four posts: three shallow pockets and one deep one for the tall post. Quarter-inch dimensions; worth a second look before you draw.",
     studentInstructions:
-      "1. Get the printed Double Take block from your teacher.\n" +
-      "2. The side with the word FRONT is your front view — keep it facing you.\n" +
+      "1. Get the printed Four Posts block from your teacher — the same block from Recreate.\n" +
+      "2. The side with the letter F is your front view — keep it facing you.\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
-      "4. Picture the missing piece: block + your piece = a perfect 3-inch cube.\n" +
+      "4. Picture the missing piece: block + your piece = a perfect 2-inch cube.\n" +
       "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block!\n" +
       "6. Click Check My Model — if your piece completes the cube, hit Submit!",
     precision: "quarter",
-    refDocJson: refS202,
-    stlPath: "/stem-sketch/challenges/s2-02-double-take-teacher-print.stl",
-    imagePath: "/stem-sketch/challenges/s2-02-double-take.jpg",
+    // Same block as s1-02 (2026-10-14): shared reference, print, and image.
+    refDocJson: refS102,
+    stlPath: "/stem-sketch/challenges/s1-02-double-steps-teacher-print.stl",
+    imagePath: "/stem-sketch/challenges/s1-02-double-steps.jpg",
+    worksheetPdfPath: "/stem-sketch/challenges/s2-02-double-take-worksheet.pdf",
     toleranceMm: 0.5,
-    targetCubeIn: 3,
+    targetCubeIn: 2,
     solutionStlPath: "/stem-sketch/challenges/s2-02-double-take-solution.stl",
   },
   {
