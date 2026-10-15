@@ -10857,8 +10857,8 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
     for (let j = i + 1; j < segs.length; j++) {
       const r = segmentIntersection(segs[i].a, segs[i].b, segs[j].a, segs[j].b);
       if (r) {
-        ix[i].push({ t: r.t, x: r.x, y: r.y });
-        ix[j].push({ t: r.u, x: r.x, y: r.y });
+        ix[i].push({ t: r.t, x: r.x, y: r.y, _ix: true });
+        ix[j].push({ t: r.u, x: r.x, y: r.y, _ix: true });
       }
     }
   }
@@ -10895,29 +10895,38 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
         const t = ((p.x - s.a.x) * dx + (p.y - s.a.y) * dy) / L2;
         if (t <= 1e-6 || t >= 1 - 1e-6) continue;
         const px = s.a.x + t * dx, py = s.a.y + t * dy;
-        if (Math.hypot(p.x - px, p.y - py) < T_TOL) ix[i].push({ t, x: px, y: py });
+        if (Math.hypot(p.x - px, p.y - py) < T_TOL) ix[i].push({ t, x: px, y: py, _ix: true });
       }
     }
   }
-  // Dedupe nodes by position with a small tolerance
+  // Dedupe nodes by position. Two tolerances: computed junction points
+  // (crossings, T-junction projections) and the TERMINAL ends of open lines
+  // weld within 0.5 mm — that is what closes a hand-drawn corner and lands
+  // a trim line on the outline. Plain vertices of different shapes weld
+  // only when they truly coincide: welding a near-miss (a trimmed arc
+  // passing 0.36 mm from the tip of an S — Charlie's keychain, 2026-10-15)
+  // glued the two curves into a false 4-way touch with two edges leaving at
+  // the same angle, and the face tracing lost every face of that component.
   const nodes = [];
-  const NODE_TOL = 0.5; // mm
-  const findOrAdd = (p) => {
+  const NODE_TOL = 0.5;        // mm — junctions + open-line ends
+  const NODE_TOL_PLAIN = 0.05; // mm — ordinary vertices
+  const findOrAdd = (p, tol) => {
     for (let i = 0; i < nodes.length; i++) {
-      if (Math.hypot(nodes[i].x - p.x, nodes[i].y - p.y) < NODE_TOL) return i;
+      if (Math.hypot(nodes[i].x - p.x, nodes[i].y - p.y) < tol) return i;
     }
     nodes.push({ x: p.x, y: p.y });
     return nodes.length - 1;
   };
+  const tolFor = (p) => (p._ix || p._term) ? NODE_TOL : NODE_TOL_PLAIN;
   // Split each segment at its intersections; each piece is a graph edge
   const rawEdges = [];
   for (let i = 0; i < segs.length; i++) {
     const s = segs[i];
-    const pts = [{ t: 0, x: s.a.x, y: s.a.y }, ...ix[i], { t: 1, x: s.b.x, y: s.b.y }];
+    const pts = [{ t: 0, x: s.a.x, y: s.a.y, _term: !!s._termA }, ...ix[i], { t: 1, x: s.b.x, y: s.b.y, _term: !!s._termB }];
     pts.sort((p1, p2) => p1.t - p2.t);
-    let prev = findOrAdd(pts[0]);
+    let prev = findOrAdd(pts[0], tolFor(pts[0]));
     for (let k = 1; k < pts.length; k++) {
-      const cur = findOrAdd(pts[k]);
+      const cur = findOrAdd(pts[k], tolFor(pts[k]));
       if (cur !== prev) rawEdges.push({ a: prev, b: cur });
       prev = cur;
     }
@@ -10950,13 +10959,19 @@ function findPlanarFaces(graph) {
   // the edge IMMEDIATELY CW (previous index) of the reverse direction (v → u)
   // in the CCW-sorted adjacency list.
   const nextEdge = (u, v) => {
-    const back = Math.atan2(nodes[u].y - nodes[v].y, nodes[u].x - nodes[v].x);
     const list = adj[v];
-    let idx = -1, bestDiff = Infinity;
-    for (let i = 0; i < list.length; i++) {
-      let d = Math.abs(list[i].angle - back);
-      if (d > Math.PI) d = 2 * Math.PI - d;
-      if (d < bestDiff) { bestDiff = d; idx = i; }
+    // The reverse edge (v → u) is identified by its node, exactly; edges are
+    // deduped so it is unique. (Nearest-angle matching could pick a
+    // different edge leaving v in almost the same direction.)
+    let idx = list.findIndex(e => e.to === u);
+    if (idx < 0) {
+      const back = Math.atan2(nodes[u].y - nodes[v].y, nodes[u].x - nodes[v].x);
+      let bestDiff = Infinity;
+      for (let i = 0; i < list.length; i++) {
+        let d = Math.abs(list[i].angle - back);
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        if (d < bestDiff) { bestDiff = d; idx = i; }
+      }
     }
     if (idx < 0) return null;
     return list[(idx - 1 + list.length) % list.length].to;
@@ -11446,37 +11461,40 @@ function regionToSyntheticSketch(region, sourceSketch) {
     ? { id: 1, type: 'circle', cx: region.circle.cx, cy: region.circle.cy, r: region.circle.r }
     : { id: 1, type: 'polyline', closed: true, points: region.points.map(p => ({ x: p.x, y: p.y })) };
   const entities = [ent];
-  // Pick up any closed entities in the source sketch that are fully inside
-  // this region's boundary — those become holes in the extruded body via
-  // sketchToShape's hole-detection. Lets the user click an outline + get
-  // the cut-outs in one extrude operation.
   let nextId = 2;
-  for (const e of (sourceSketch.entities || [])) {
-    if (e.construction) continue;
-    if (e.type !== 'rect' && e.type !== 'circle' &&
-        !(e.type === 'polyline' && e.closed)) continue;
-    if (!entityFullyInside(e, ent)) continue;
-    // Carried CIRCLES become their canonical tessellation polygon — the SAME
-    // vertices the region graph used. An analytic circle here tessellates on
-    // a different vertex grid than region-polygon cutters at the same
-    // radius, and the sub-mm mismatch left paper-thin tube membranes
-    // between a hole cut and a recess cut around it.
-    const copy = e.type === 'circle'
-      ? { type: 'polyline', closed: true,
-          points: entityToSegments(e).map(s => ({ x: s.a.x, y: s.a.y })) }
-      : JSON.parse(JSON.stringify(e));
-    copy.id = nextId++;
-    entities.push(copy);
+  // HOLES. A region is a planar FACE, and a face can't have a hole of its
+  // own (the inner boundary is a separate component of the graph), so the
+  // ring between two circles arrives as the full outer disc. What gets cut
+  // out of it comes from the OTHER faces lying inside — unioned into clean
+  // outlines (`_holesFromInnerFaces`). That handles every way a student can
+  // draw an inner boundary: a closed circle, letters crossing it, a circle
+  // TRIMMED into arcs that end on the letters (Charlie's keychain video
+  // 2026-10-15 — arcs aren't closed shapes, so the old "closed entities
+  // fully inside" carry left the middle filled in), or a loop of lines.
+  let holes = null;
+  if (ent.type === 'polyline') {
+    try { holes = _holesFromInnerFaces(ent.points, sourceSketch, region.id); }
+    catch (err) { console.warn('regionToSyntheticSketch: face-based holes failed, carrying drawn shapes —', err); holes = null; }
   }
-  // Holes that CROSS each other are unioned into one outline first — see
-  // _mergeCrossingHoles. Untouched when nothing crosses.
-  const carried = entities.slice(1);
-  const holes = _mergeCrossingHoles(carried);
-  if (holes !== carried) {
-    entities.length = 1;
-    nextId = 2;
-    for (const h of holes) { const copy = Object.assign({}, h, { id: nextId++ }); entities.push(copy); }
+  if (holes === null) {
+    // Fallback (no Manifold / no regions): closed entities fully inside the
+    // boundary become holes via sketchToShape's hole-detection.
+    holes = [];
+    for (const e of (sourceSketch.entities || [])) {
+      if (e.construction) continue;
+      if (e.type !== 'rect' && e.type !== 'circle' &&
+          !(e.type === 'polyline' && e.closed)) continue;
+      if (!entityFullyInside(e, ent)) continue;
+      // Carried CIRCLES become their canonical tessellation polygon — the
+      // SAME vertices the region graph used, so coincident cuts merge cleanly.
+      holes.push(e.type === 'circle'
+        ? { type: 'polyline', closed: true,
+            points: entityToSegments(e).map(s => ({ x: s.a.x, y: s.a.y })) }
+        : JSON.parse(JSON.stringify(e)));
+    }
+    holes = _mergeCrossingHoles(holes);
   }
+  for (const h of holes) entities.push(Object.assign({}, h, { id: nextId++ }));
   return {
     id: sourceSketch.id,
     plane: JSON.parse(JSON.stringify(sourceSketch.plane)),
@@ -11484,6 +11502,79 @@ function regionToSyntheticSketch(region, sourceSketch) {
     nextId,
     name: sourceSketch.name + ' · region',
   };
+}
+
+// INNER FACES → HOLES. Every planar face of the sketch that lies inside
+// `outerPts` (all vertices inside or on the boundary, interior strictly
+// inside, not the face itself) is unioned (Manifold CrossSection) and each
+// outer loop of the union becomes one hole outline. Faces nested inside
+// another inner face (a B's counters) are swallowed by the union — a
+// one-outer-plus-holes profile can't carry islands. Returns [] when nothing
+// lies inside, null when the engine or the regions aren't available (the
+// caller then falls back to carrying drawn closed shapes).
+function _holesFromInnerFaces(outerPts, sourceSketch, selfId) {
+  const CS = window.__manifold && window.__manifold.CrossSection;
+  if (!CS || !Array.isArray(outerPts) || outerPts.length < 3) return null;
+  let regions;
+  try { regions = computeSketchRegions(sourceSketch) || []; } catch (_) { return null; }
+  if (!regions.length) return null;
+  const signedArea = (pts) => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; }
+    return a / 2;
+  };
+  const outerArea = Math.abs(signedArea(outerPts));
+  const ON = 0.3; // mm — a vertex this close to the boundary counts as on it
+  const onBoundary = (p) => {
+    for (let i = 0; i < outerPts.length; i++) {
+      const a = outerPts[i], b = outerPts[(i + 1) % outerPts.length];
+      if (pointSegDist(p.x, p.y, a.x, a.y, b.x, b.y) < ON) return true;
+    }
+    return false;
+  };
+  const inner = [];
+  for (const r of regions) {
+    const pts = r.points;
+    if (!pts || pts.length < 3 || r.id === selfId) continue;
+    const area = Math.abs(r.area != null ? r.area : signedArea(pts));
+    if (area < 0.05 || area >= outerArea - 0.05) continue;
+    let allIn = true, anyStrict = false;
+    for (const p of pts) {
+      if (onBoundary(p)) continue;
+      if (pointInPolygon(p.x, p.y, outerPts)) anyStrict = true;
+      else { allIn = false; break; }
+    }
+    if (!allIn) continue;
+    if (!anyStrict) {
+      // every vertex sits on the boundary — a re-derivation of this same
+      // region (pass B) or a face glued along it; use the centroid to decide
+      let cx = 0, cy = 0; for (const p of pts) { cx += p.x; cy += p.y; }
+      cx /= pts.length; cy /= pts.length;
+      if (!pointInPolygon(cx, cy, outerPts) || onBoundary({ x: cx, y: cy })) continue;
+    }
+    inner.push(pts);
+  }
+  if (!inner.length) return [];
+  const scratch = [];
+  const out = [];
+  try {
+    let cs = null;
+    for (const pts of inner) {
+      const ccw = signedArea(pts) < 0 ? pts.slice().reverse() : pts;
+      const one = new CS([ccw.map(p => [p.x, p.y])], 'Positive');
+      scratch.push(one);
+      if (!cs) cs = one;
+      else { const u = cs.add(one); scratch.push(u); cs = u; }
+    }
+    for (const loop of cs.toPolygons()) {
+      if (!loop || loop.length < 3) continue;
+      const pts = loop.map(pt => ({ x: pt[0], y: pt[1] }));
+      if (signedArea(pts) > 0) out.push({ type: 'polyline', closed: true, points: pts });
+    }
+  } finally {
+    for (const s of scratch) { try { s.delete(); } catch (_) {} }
+  }
+  return out;
 }
 
 // CROSSING HOLES. A region's carried holes are the closed shapes drawn
