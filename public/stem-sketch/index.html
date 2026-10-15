@@ -11468,6 +11468,15 @@ function regionToSyntheticSketch(region, sourceSketch) {
     copy.id = nextId++;
     entities.push(copy);
   }
+  // Holes that CROSS each other are unioned into one outline first — see
+  // _mergeCrossingHoles. Untouched when nothing crosses.
+  const carried = entities.slice(1);
+  const holes = _mergeCrossingHoles(carried);
+  if (holes !== carried) {
+    entities.length = 1;
+    nextId = 2;
+    for (const h of holes) { const copy = Object.assign({}, h, { id: nextId++ }); entities.push(copy); }
+  }
   return {
     id: sourceSketch.id,
     plane: JSON.parse(JSON.stringify(sourceSketch.plane)),
@@ -11475,6 +11484,110 @@ function regionToSyntheticSketch(region, sourceSketch) {
     nextId,
     name: sourceSketch.name + ' · region',
   };
+}
+
+// CROSSING HOLES. A region's carried holes are the closed shapes drawn
+// inside it — fine while they nest or sit apart, but when two of them
+// CROSS (ssissues 2026-10-14: "SB" letters straddling the 2" circle of a
+// keychain, click the ring, Add) ExtrudeGeometry's triangulator gets
+// overlapping hole loops and fills the overlap with garbage: the ring came
+// up carrying letter chunks and triangle slivers. Every group of mutually
+// crossing holes is unioned into ONE outline (Manifold CrossSection), and a
+// hole the union swallows (a B's counters sitting inside the 2" circle) is
+// dropped with it. Holes that cross nothing are returned as-is, so every
+// existing design builds byte-identical. Returns the (possibly new) hole
+// list; the same array when nothing changed.
+function _mergeCrossingHoles(holes) {
+  if (!Array.isArray(holes) || holes.length < 2) return holes;
+  const CS = window.__manifold && window.__manifold.CrossSection;
+  if (!CS) return holes;
+  const polys = holes.map(e => entityToSegments(e).map(s => ({ x: s.a.x, y: s.a.y })));
+  const bbs = polys.map(pts => {
+    const b = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    for (const p of pts) { b.minX = Math.min(b.minX, p.x); b.minY = Math.min(b.minY, p.y); b.maxX = Math.max(b.maxX, p.x); b.maxY = Math.max(b.maxY, p.y); }
+    return b;
+  });
+  const crosses = (i, j) => {
+    const A = bbs[i], B = bbs[j];
+    if (A.maxX < B.minX || B.maxX < A.minX || A.maxY < B.minY || B.maxY < A.minY) return false;
+    const P = polys[i], Q = polys[j];
+    for (let a = 0; a < P.length; a++) {
+      const p1 = P[a], p2 = P[(a + 1) % P.length];
+      for (let b = 0; b < Q.length; b++) {
+        if (segmentIntersection(p1, p2, Q[b], Q[(b + 1) % Q.length])) return true;
+      }
+    }
+    return false;
+  };
+  const comp = holes.map((_, i) => i);
+  const find = (i) => { while (comp[i] !== i) { comp[i] = comp[comp[i]]; i = comp[i]; } return i; };
+  let any = false;
+  for (let i = 0; i < holes.length; i++) {
+    for (let j = i + 1; j < holes.length; j++) {
+      if (polys[i].length < 3 || polys[j].length < 3) continue;
+      if (crosses(i, j)) { comp[find(i)] = find(j); any = true; }
+    }
+  }
+  if (!any) return holes;
+  const groups = new Map();
+  for (let i = 0; i < holes.length; i++) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  }
+  const signedArea = (pts) => {
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; }
+    return a / 2;
+  };
+  const merged = [];       // new outline polylines
+  const swallowed = new Set();
+  const scratch = [];
+  try {
+    for (const idxs of groups.values()) {
+      if (idxs.length < 2) continue;
+      let cs = null;
+      for (const i of idxs) {
+        const pts = signedArea(polys[i]) < 0 ? polys[i].slice().reverse() : polys[i];
+        const one = new CS([pts.map(p => [p.x, p.y])], 'Positive');
+        scratch.push(one);
+        if (!cs) cs = one;
+        else { const u = cs.add(one); scratch.push(u); cs = u; }
+      }
+      for (const loop of cs.toPolygons()) {
+        if (!loop || loop.length < 3) continue;
+        const pts = loop.map(pt => ({ x: pt[0], y: pt[1] }));
+        // Outer loops of the union become the hole outline. Inner loops
+        // (islands the union would leave inside the hole) can't ride along
+        // in a one-outer-plus-holes profile — the outline wins.
+        if (signedArea(pts) > 0) merged.push({ type: 'polyline', closed: true, points: pts });
+      }
+      for (const i of idxs) swallowed.add(i);
+    }
+  } catch (err) {
+    console.warn('_mergeCrossingHoles: union failed, cutting holes as drawn —', err);
+    return holes;
+  } finally {
+    for (const s of scratch) { try { s.delete(); } catch (_) {} }
+  }
+  if (!merged.length) return holes;
+  const out = [];
+  for (let i = 0; i < holes.length; i++) {
+    if (swallowed.has(i)) continue;
+    // A standalone hole that now sits inside a merged outline is part of
+    // that hole already.
+    const pts = polys[i];
+    const step = Math.max(1, Math.floor(pts.length / 8));
+    let inside = false;
+    for (const m of merged) {
+      let all = pts.length > 0;
+      for (let k = 0; k < pts.length && all; k += step) if (!pointInPolygon(pts[k].x, pts[k].y, m.points)) all = false;
+      if (all) { inside = true; break; }
+    }
+    if (!inside) out.push(holes[i]);
+  }
+  for (const m of merged) out.push(m);
+  return out;
 }
 
 // Centroid of a region (circle's center, or polygon vertex average). Used
@@ -13689,7 +13802,10 @@ function applySnapshot(s, opts = {}) {
     viewer.updateSketchOverlay && viewer.updateSketchOverlay();
   }
   hideExtrudeTooltip && hideExtrudeTooltip();
-  if (sketchEng) sketchEng.render();
+  // The restored state may have no sketch at all while we're still in 2D
+  // (undo past the sketch's own creation) — 2D rendering needs one.
+  _leave2DIfSketchGone();
+  if (sketchEng && doc.sketch) sketchEng.render();
   renderTree(); renderProps();
   // Post-restore sanity check — surface any top-level body that came back
   // without a renderable mesh so the user isn't staring at a blank canvas
@@ -14002,6 +14118,17 @@ function redo() {
     console.error('redo failed:', err);
     setStatus('⚠ Redo failed: ' + err.message);
   }
+}
+// A 2D undo can step back past the sketch's OWN creation (Ctrl+Z right
+// after "+ Sketch", before anything is drawn — ssissues 2026-10-14): the
+// mode stayed 2D with no sketch and every render threw "reading
+// 'entities'", a dead white canvas. Called from applySnapshot: fall back
+// to 3D instead.
+function _leave2DIfSketchGone() {
+  if (doc.mode !== '2d' || doc.sketch) return;
+  if (typeof sketchEng !== 'undefined' && sketchEng) { try { sketchEng.setTool('select'); } catch (_) {} }
+  setMode('3d');
+  setStatus('That sketch no longer exists — back in 3D. Click + Sketch to start again.');
 }
 function updateUndoRedoButtons() {
   const u = document.getElementById('undo-btn');
@@ -25870,13 +25997,48 @@ const _projEntBox = (e) => {
   if (!segs.length) return null;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const s of segs) for (const p of [s.a, s.b]) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
-  return { w: maxX - minX, h: maxY - minY };
+  return { w: maxX - minX, h: maxY - minY, minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
 };
-// Keychain-tag sized: roughly 1.5–3.5 in long and 0.6–1.75 in wide, either way round.
-const _projTagSized = (bb) => {
-  const L = Math.max(bb.w, bb.h), S = Math.min(bb.w, bb.h);
-  return L >= 38 && L <= 90 && S >= 15 && S <= 45;
+// Keychain Tag (Charlie's round build, video 2026-10-14): the tag outline is
+// the biggest closed non-text shape in any sketch, about 3 in across
+// (2.3–3.8 in, so a heart or star from Shape ▾ counts). Returns
+// { e, bb, L } or null.
+const _projTagOutline = (d) => {
+  let best = null;
+  for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) {
+    if (e.construction || e.groupId != null) continue;
+    if (e.type !== 'circle' && e.type !== 'rect' && !(e.type === 'polyline' && e.closed)) continue;
+    const bb = _projEntBox(e); if (!bb) continue;
+    const L = Math.max(bb.w, bb.h), S = Math.min(bb.w, bb.h);
+    if (L < 58 || L > 97 || S < 45) continue;
+    if (!best || L > best.L) best = { e, bb, L };
+  }
+  return best;
 };
+// Union bbox of every placed-text letter in the design (null without text).
+const _projTextBox = (d) => {
+  let box = null;
+  for (const sk of (d.sketches || [])) {
+    const meta = sk.textMeta || {};
+    for (const e of (sk.entities || [])) {
+      if (e.groupId == null || !meta[e.groupId]) continue;
+      const bb = _projEntBox(e); if (!bb) continue;
+      box = box ? { minX: Math.min(box.minX, bb.minX), minY: Math.min(box.minY, bb.minY), maxX: Math.max(box.maxX, bb.maxX), maxY: Math.max(box.maxY, bb.maxY) } : { minX: bb.minX, minY: bb.minY, maxX: bb.maxX, maxY: bb.maxY };
+    }
+  }
+  return box;
+};
+// An extrude's footprint: bbox of its profile's outer loop (+ centroid of the
+// region it was pulled from). Null for anything that isn't a region extrude.
+const _projExtrudeFoot = (b) => {
+  if (!b || b.type !== 'extrude' || !b.sketch || !Array.isArray(b.sketch.entities) || !b.sketch.entities[0]) return null;
+  const bb = _projEntBox(b.sketch.entities[0]); if (!bb) return null;
+  const c = b.regionCentroid || { x: bb.cx, y: bb.cy };
+  return { bb, L: Math.max(bb.w, bb.h), cx: c.x, cy: c.y, holes: b.sketch.entities.length - 1 };
+};
+// A raised (Add) extrude between lo and hi mm tall whose footprint passes `pred`.
+const _projRaised = (d, lo, hi, pred) => _projFindBody(d.bodies, b =>
+  b.type === 'extrude' && b.op !== 'subtract' && b.height >= lo && b.height <= hi && (() => { const f = _projExtrudeFoot(b); return !!f && pred(f); })());
 
 const PROJECTS = [
   {
@@ -26015,53 +26177,96 @@ const PROJECTS = [
     kind: 'project',
     title: 'Keychain Tag',
     minutes: 15,
-    intro: 'A flat tag with a ring hole and your name on it — the fastest thing you can design and actually carry around.',
-    print: 'Prints flat on the bed, no supports, about 10–15 minutes. Any split ring or keyring fits the hole. Letters print best standing up (raised) at 0.06 in; engraved letters want a lighter color plate.',
-    skills: ['sketch-toolbox', 'extrude', 'cut-a-hole'],
+    // Reshaped 2026-10-14 to Charlie's own build (ssissues video): one Top
+    // sketch — 3" circle, 2" circle, initials centered with Align, a loop
+    // overlapping the rim — then each piece pulled up on its own.
+    intro: 'A round tag with a raised rim, your initials in the middle and a loop for the ring — all from one sketch. Follow along, then change anything: a heart instead of a circle, a script font, your whole name.',
+    print: 'Prints flat on the bed, letters up, no supports — about 20 minutes. Any split ring or keyring fits the loop. Two colors? Pause the print when the rim finishes and swap filament for the letters.',
+    skills: ['sketch-toolbox', 'extrude'],
     steps: [
       {
-        text: 'We’ll make a basic tag first — a rounded rectangle, a hole for the ring, your name on top — and then you change it into whatever you want: a heart, a star, your initials, a second hole, a pattern. Follow along, then make it yours.',
+        text: 'We’ll build a round tag: an outer rim, a lower middle, your initials standing up, and a loop for the keyring. Everything comes from one sketch — then you make it yours.',
         manual: true,
         done: () => false,
       },
       {
-        text: 'Click **Sketch** → **Top**. Pick **Rect**, draw a rectangle near the center, then click it with **Select** and set **Width 2** and **Height 1** in Properties (press Enter after each). A business-card-ish tag.',
-        hint: 'Want a different shape already? Fine — anything about 2 in long and 1 in wide works for the checks. The Shape ▾ menu has hearts and stars.',
-        done: (d) => _tutSketchHas(d, e => {
-          const bb = _projEntBox(e);
-          return bb && _projTagSized(bb);
-        }),
+        text: 'Click **Sketch** → **Top**. Pick **Circle**, click the **center dot**, click again to place it. Then click it with **Select** and set **Radius 1.5** in Properties (press Enter). That’s a 3-inch tag.',
+        hint: 'Any outline about 3 in across works — a heart or star from Shape ▾ too.',
+        done: (d) => !!_projTagOutline(d),
       },
       {
-        text: 'Round the corners: pick **Fillet** and click **all four corners** of the rectangle (each gets a dot), press **Enter**, type **0.25**, click **Apply**. Then click **← Done**.',
-        hint: 'Rounded corners don’t snag in a pocket, and the printer likes them better than sharp ones.',
-        done: (d) => d.mode === '3d' && _tutSketchHas(d, e => {
-          if (e.type !== 'polyline' || !e.closed) return false;
-          const bb = _projEntBox(e);
-          return bb && _projTagSized(bb) && ((e.points || []).length >= 12 || (e.points || []).some(p => p.cpIn || p.cpOut));
-        }),
+        text: 'Pick **Circle** again, click the **same center dot**, and set **Radius 1**. Everything between the two circles will be a raised rim; the middle stays lower so your letters pop.',
+        hint: 'Both circles share the center dot — the cursor snaps to it.',
+        done: (d) => {
+          const tag = _projTagOutline(d);
+          if (!tag) return false;
+          return _tutSketchHas(d, e => {
+            if (e === tag.e || e.groupId != null) return false;
+            if (e.type !== 'circle' && e.type !== 'rect' && !(e.type === 'polyline' && e.closed)) return false;
+            const bb = _projEntBox(e); if (!bb) return false;
+            const L = Math.max(bb.w, bb.h);
+            return L >= 38 && L <= tag.L - 8 && Math.hypot(bb.cx - tag.bb.cx, bb.cy - tag.bb.cy) < 6;
+          });
+        },
       },
       {
-        text: 'Click **inside** your shape. In the pop-up type **0.125** and click **Done** — an eighth of an inch thick is sturdy but still light.',
-        done: (d) => _projFindBody(d.bodies, b => b.type === 'extrude' && b.op !== 'subtract' && b.height >= 2 && b.height <= 5),
+        text: 'Pick **Text**, click near the middle, type your **initials** (2 or 3 letters), set **Letter height 1**, pick any style, click **OK**. Then drag a box around **everything**, open **Align ▾** and click **Center** — the letters land dead center.',
+        hint: 'Letters poking past the inner circle are fine — the rim goes around them. Too big? Drag a corner of the letters’ box to shrink them.',
+        done: (d) => {
+          const tag = _projTagOutline(d), tb = _projTextBox(d);
+          if (!tag || !tb) return false;
+          const cx = (tb.minX + tb.maxX) / 2, cy = (tb.minY + tb.maxY) / 2;
+          return Math.hypot(cx - tag.bb.cx, cy - tag.bb.cy) < 5 && (tb.maxX - tb.minX) < tag.L;
+        },
       },
       {
-        text: 'The ring hole: pick **On Face** and click the tag’s **top face**. Draw a **Circle** near the **left end** (keep it about a quarter inch in from the edges), click it with **Select** and set **Radius 0.125**. Click **← Done**, click **inside the circle**, then **－ Cut** and **⇣ Through**.',
-        hint: 'Too close to the edge and the ring tears out; too far in and it eats your name space. About ¼ in from the end is right.',
-        done: (d) => _projFindBody(d.bodies, b => b.type === 'extrude' && b.op === 'subtract' &&
-          (b.sketch?.entities || []).some(e => e.type === 'circle' && e.r >= 2 && e.r <= 5)),
+        text: 'The loop for the keyring: pick **Circle**, click **on the rim near the top**, set **Radius 0.3**. Then a second circle at the **same spot**, **Radius 0.15**. Let the loop overlap the rim so it’s attached. Click **← Done**.',
+        hint: 'The loop’s center should sit right on the outer circle — half in, half out.',
+        done: (d) => {
+          if (d.mode !== '3d') return false;
+          const tag = _projTagOutline(d);
+          if (!tag) return false;
+          const R = tag.L / 2;
+          const circles = [];
+          for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) if (e.type === 'circle' && !e.construction && e !== tag.e) circles.push(e);
+          return circles.some(o => o.r >= 5 && o.r <= 11 &&
+            circles.some(i => i !== o && i.r >= 2.5 && i.r < o.r - 1 && Math.hypot(i.cx - o.cx, i.cy - o.cy) < 1.5) &&
+            (() => { const dd = Math.hypot(o.cx - tag.bb.cx, o.cy - tag.bb.cy); return dd > R - o.r - 2 && dd < R + o.r - 2; })());
+        },
       },
       {
-        text: 'Your name: pick **On Face** again and click the **top face**. Pick the **Text** tool, click to the right of the hole, type your **name or initials**, set **Letter height 0.4**, click **OK**, then **← Done**. Back in 3D, click **inside one letter** (the whole word selects), type **0.06**, and click **＋ Add** for raised letters — or **－ Cut** to engrave them. Your call.',
-        hint: 'Raised letters you can feel with a thumb; engraved ones keep the tag flat on both sides. Short names fit at 0.4; drop to 0.3 for a long one.',
-        done: (d) => d.sketches.some(sk => sk.textMeta && Object.keys(sk.textMeta).length > 0) &&
-          _projFindBody(d.bodies, b => b.type === 'extrude' && b.height > 0 && b.height <= 3 &&
-            (b.sketch?.entities || []).filter(e => e.type === 'polyline' && e.closed).length >= 1 &&
-            !(b.sketch?.entities || []).some(e => e.type === 'circle')),
+        text: 'Click the **rim** (between the two circles) — only the rim lights up. Type **0.2**, click **＋ Add**, then **Done**.',
+        hint: 'The letters crossing the inner circle don’t come along — the rim is its own piece.',
+        done: (d) => _projRaised(d, 4, 7, f => f.L >= 58 && f.holes >= 1),
       },
       {
-        text: 'Now make it yours before you print: swap the rectangle for a heart or star from **Shape ▾**, add a second hole, engrave a pattern, or stack two colors. Then name it, press ☁ **Save**, and **Export ▾ → STL**. 🔑',
-        hint: 'Print flat, letters up. Slide a split ring through the hole and it’s done.',
+        text: 'Click the **middle** of the tag, type **0.12**, **＋ Add**, **Done** — a lower floor for the letters to stand on.',
+        done: (d) => _projRaised(d, 2, 4.5, f => f.L >= 38 && f.L <= 70),
+      },
+      {
+        text: 'Click **one letter** — the whole word selects — type **0.25**, **＋ Add**, **Done**. Your initials now stand a little taller than the rim.',
+        hint: 'Want them engraved instead? Pick **－ Cut**. Raised letters you can feel; engraved ones keep the top flat.',
+        done: (d) => {
+          const tb = _projTextBox(d);
+          if (!tb) return false;
+          return _projFindBody(d.bodies, b => {
+            if (b.type !== 'extrude' || b.height < 1.5 || b.height > 10) return false; // engraving can be shallow
+            const f = _projExtrudeFoot(b);
+            return !!f && f.L <= 45 && f.cx > tb.minX - 2 && f.cx < tb.maxX + 2 && f.cy > tb.minY - 2 && f.cy < tb.maxY + 2;
+          });
+        },
+      },
+      {
+        text: 'Click the **loop** — it’s in two pieces where it crosses the rim, so **Shift-click** the second piece too — type **0.2**, **＋ Add**, **Done**. The small circle inside stays open: that’s where the ring goes.',
+        done: (d) => {
+          const tag = _projTagOutline(d);
+          if (!tag) return false;
+          return _projRaised(d, 4, 7, f => f.L <= 24 && Math.hypot(f.cx - tag.bb.cx, f.cy - tag.bb.cy) > tag.L / 2 - 14);
+        },
+      },
+      {
+        text: '**Shift-click** every piece (rim, middle, letters, loop) and click **Group** so the tag is one solid. Name it, press ☁ **Save**, then **Export ▾ → STL**. 🔑',
+        hint: 'Make it yours first: a heart outline, a script font, your whole name curved along the rim.',
         done: (d, ev) => !!ev.exported,
       },
     ],
