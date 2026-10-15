@@ -2594,6 +2594,38 @@ class SketchEngine {
     this.render();
   }
 
+  // Double-click on a text letter: select just that letter and show its
+  // nodes (textEditGroup) so it edits like any polyline. Anything else
+  // double-clicked just leaves letter-edit mode.
+  onDblClick(e) {
+    if (!doc.sketch || doc.mode !== '2d' || this.tool !== 'select' || doc.sketch.locked) return;
+    const [wx, wy] = this.pointerWorld(e);
+    const tolMm = 5 / this.view.pxPerMm;
+    let hit = null;
+    for (let i = doc.sketch.entities.length - 1; i >= 0; i--) {
+      const ent = doc.sketch.entities[i];
+      if (ent.facePerimeter) continue;
+      if (entityHit(ent, wx, wy, tolMm)) { hit = ent; break; }
+    }
+    const meta = hit && hit.groupId != null && doc.sketch.textMeta && doc.sketch.textMeta[hit.groupId];
+    if (!meta) { this.textEditGroup = null; return; }
+    this._enterLetterEdit(hit);
+  }
+  _enterLetterEdit(hit) {
+    const meta = doc.sketch.textMeta[hit.groupId];
+    // The clicks before this already selected the whole word and may have
+    // armed a move — drop that so the letter stays put.
+    this.dragMode = null; this.dragStart = null;
+    this.textEditGroup = hit.groupId;
+    doc.selection = { kind: 'sketch', id: hit.id };
+    doc.multiSelectedSketch = [hit.id];
+    this.selectedNode = null;
+    this.updateNodeActions && this.updateNodeActions();
+    renderProps();
+    this.render();
+    setStatus(`Editing one letter of “${meta.text}” — drag its nodes. Click empty space, then the word, to move it as one again.`);
+  }
+
   // Find the entity segment closest to (px, py) within a small tolerance.
   // Used by the line tool to capture a reference for perpendicular snap when
   // the user starts drawing from a feature on an existing entity.
@@ -2616,6 +2648,9 @@ class SketchEngine {
 
   bind() {
     this.svg.addEventListener('pointerdown', (e) => this.onDown(e));
+    // Double-click a letter of a placed word → edit that letter's nodes
+    // (Charlie, 2026-10-13). A single click keeps selecting the whole word.
+    this.svg.addEventListener('dblclick', (e) => this.onDblClick(e));
     this.svg.addEventListener('pointermove', (e) => this.onMove(e));
     window.addEventListener('pointerup', (e) => this.onUp(e));
     this.svg.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
@@ -3353,6 +3388,25 @@ class SketchEngine {
     }
 
     if (this.tool === 'select') {
+      // Double-click a letter of placed text → edit that letter's nodes.
+      // Detected here from two quick pointerdowns on the same text group:
+      // pointer capture + preventDefault in this handler keep the browser's
+      // own dblclick from reaching the SVG. Runs before the vertex-handle
+      // checks below, which would otherwise swallow the second click.
+      {
+        const nowMs = performance.now();
+        const ld = this._lastDown;
+        const th = this.hitTest(wx, wy);
+        this._lastDown = th ? { t: nowMs, x: e.clientX, y: e.clientY, id: th.id, gid: th.groupId } : null;
+        if (ld && th && !e.shiftKey && !sketchLocked && nowMs - ld.t < 450 &&
+            Math.hypot(e.clientX - ld.x, e.clientY - ld.y) < 6 &&
+            th.groupId != null && (ld.id === th.id || ld.gid === th.groupId) &&
+            doc.sketch.textMeta && doc.sketch.textMeta[th.groupId] && this.textEditGroup !== th.groupId) {
+          this._lastDown = null;
+          this._enterLetterEdit(th);
+          return;
+        }
+      }
       // CP / vertex handle hits — skip them entirely when Shift is held.
       // Shift means "add to selection," and the vertex of the currently-
       // selected polyline sits on top of any neighbour line's endpoint at a
@@ -3363,16 +3417,29 @@ class SketchEngine {
         const selEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
         // Traced face outlines expose no vertex/Bezier handles: node drags
         // would deform reference geometry that must keep matching the part.
-        if (selEnt && selEnt.type === 'polyline' && !selEnt.facePerimeter) {
+        // Text letters expose theirs only after a double-click (letter edit)
+        // so a click-drag on a word moves the whole word, not one vertex.
+        const selIsTextWord = selEnt && selEnt.groupId != null && doc.sketch.textMeta &&
+                              doc.sketch.textMeta[selEnt.groupId] && this.textEditGroup !== selEnt.groupId;
+        if (selEnt && selEnt.type === 'polyline' && !selEnt.facePerimeter && !selIsTextWord) {
           const cpTolPx = 8;
           const svgRect = this.rect();
           const screenX = e.clientX - svgRect.left;
           const screenY = e.clientY - svgRect.top;
+          // When a Bezier arm's end sits on top of a vertex (small text,
+          // zoomed-out curves) the closer handle wins instead of the arm
+          // always hijacking the click.
+          let nearestVertexPx = Infinity;
+          for (const q of selEnt.points) {
+            const [qx, qy] = this.worldToScreen(q.x, q.y);
+            nearestVertexPx = Math.min(nearestVertexPx, Math.hypot(screenX - qx, screenY - qy));
+          }
           for (let i = 0; i < selEnt.points.length; i++) {
             const p = selEnt.points[i];
             if (p.cpOut) {
               const [ox, oy] = this.worldToScreen(p.x + p.cpOut.dx, p.y + p.cpOut.dy);
-              if (Math.hypot(screenX - ox, screenY - oy) < cpTolPx) {
+              const d = Math.hypot(screenX - ox, screenY - oy);
+              if (d < cpTolPx && d <= nearestVertexPx) {
                 pushUndo();
                 this.cpDrag = { entId: selEnt.id, pointIdx: i, type: 'cpOut' };
                 this.dragMode = 'cp-drag';
@@ -3381,7 +3448,8 @@ class SketchEngine {
             }
             if (p.cpIn) {
               const [ix, iy] = this.worldToScreen(p.x + p.cpIn.dx, p.y + p.cpIn.dy);
-              if (Math.hypot(screenX - ix, screenY - iy) < cpTolPx) {
+              const d = Math.hypot(screenX - ix, screenY - iy);
+              if (d < cpTolPx && d <= nearestVertexPx) {
                 pushUndo();
                 this.cpDrag = { entId: selEnt.id, pointIdx: i, type: 'cpIn' };
                 this.dragMode = 'cp-drag';
@@ -3389,11 +3457,19 @@ class SketchEngine {
               }
             }
           }
-          // Node vertex handle hit: select node + start a potential drag-to-move
+          // Node vertex handle hit: select node + start a potential drag-to-move.
+          // Nearest vertex within tolerance wins (letters pack vertices a few
+          // px apart when zoomed out).
           const handleTolPx = 7;
+          let bestI = -1, bestD = handleTolPx;
           for (let i = 0; i < selEnt.points.length; i++) {
             const [sx, sy] = this.worldToScreen(selEnt.points[i].x, selEnt.points[i].y);
-            if (Math.hypot(screenX - sx, screenY - sy) < handleTolPx) {
+            const d = Math.hypot(screenX - sx, screenY - sy);
+            if (d < bestD) { bestD = d; bestI = i; }
+          }
+          if (bestI >= 0) {
+            const i = bestI;
+            {
               const wasSel = this.selectedNode?.entId === selEnt.id && this.selectedNode?.pointIdx === i;
               this.selectedNode = { entId: selEnt.id, pointIdx: i };
               this.nodeMoveState = {
@@ -3430,6 +3506,7 @@ class SketchEngine {
         if (!e.shiftKey) {
           doc.selection = null;
           doc.multiSelectedSketch = [];
+          this.textEditGroup = null;
         }
         renderProps();
         this.render();
@@ -3469,10 +3546,17 @@ class SketchEngine {
             doc.selection = { kind: 'sketch', id: target.id };
           }
         } else {
+          // Letter-edit mode survives a click on the very letter being
+          // edited (its node handles stay usable); any other click ends it
+          // and a click on a word selects the whole word again.
+          const keepLetterEdit = !!this.textEditGroup && hit.groupId === this.textEditGroup &&
+            doc.selection && doc.selection.kind === 'sketch' && doc.selection.id === hit.id &&
+            (doc.multiSelectedSketch || []).length === 1;
+          if (!keepLetterEdit) this.textEditGroup = null;
           // Replace; auto-include group members
           doc.selection = { kind: 'sketch', id: hit.id };
           doc.multiSelectedSketch = [hit.id];
-          if (hit.groupId != null) {
+          if (hit.groupId != null && !keepLetterEdit) {
             for (const e2 of doc.sketch.entities) {
               if (e2.groupId === hit.groupId && e2.id !== hit.id) {
                 doc.multiSelectedSketch.push(e2.id);
@@ -3496,6 +3580,7 @@ class SketchEngine {
         renderProps();
         this.render();
       } else {
+        this.textEditGroup = null;
         doc.selection = null;
         doc.multiSelectedSketch = [];
         renderProps();
@@ -4218,7 +4303,7 @@ class SketchEngine {
              </select></div>
              <div class="field" style="display:flex;align-items:center;gap:8px">
                <input type="checkbox" id="tx-bar" style="width:auto;margin:0"/>
-               <label for="tx-bar" style="margin:0;cursor:pointer">Connect the letters with a bar — prints as one piece</label>
+               <label for="tx-bar" style="margin:0;cursor:pointer">Add a baseline bar under block letters (joins them for printing)</label>
              </div>`,
       onConfirm: () => {
         const str = ($('tx-str').value || '').replace(/\s+$/, '');
@@ -4733,7 +4818,8 @@ class SketchEngine {
       // Single-selected (no multi-select) gets clickable dim pills.
       // Text-group members never do — the word is one piece; per-letter
       // pills/nodes just add noise (edit it via the Properties panel).
-      const inTextGroup = ent.groupId && doc.sketch.textMeta && doc.sketch.textMeta[ent.groupId];
+      const inTextGroup = ent.groupId && doc.sketch.textMeta && doc.sketch.textMeta[ent.groupId] &&
+                          this.textEditGroup !== ent.groupId; // double-clicked letter edits like a polyline
       const isSingle = isSelected && multiCount <= 1 && !inTextGroup;
       svg += renderEntitySVG(ent, this, isSelected, false, isSingle);
     }
@@ -4845,10 +4931,12 @@ class SketchEngine {
     }
 
     // Bezier handles for the currently selected polyline — but NOT for
-    // text-group letters, which are edited as one word via Properties.
+    // text-group letters, which are edited as one word via Properties,
+    // unless a double-click opened that letter for node editing.
     if (doc.selection?.kind === 'sketch') {
       const selEnt = doc.sketch.entities.find(e => e.id === doc.selection.id);
-      const selIsText = selEnt?.groupId && doc.sketch.textMeta && doc.sketch.textMeta[selEnt.groupId];
+      const selIsText = selEnt?.groupId && doc.sketch.textMeta && doc.sketch.textMeta[selEnt.groupId] &&
+                        this.textEditGroup !== selEnt.groupId;
       if (selEnt && selEnt.type === 'polyline' && !selIsText) {
         for (const p of selEnt.points) {
           const [px, py] = this.worldToScreen(p.x, p.y);
@@ -5021,6 +5109,12 @@ const FONT_CHOICES = {
   sans:    { label: 'Modern — clean sans',        file: 'droid_sans_bold.typeface.json' },
   serif:   { label: 'Classic — book serif',       file: 'droid_serif_bold.typeface.json' },
   mono:    { label: 'Typewriter — fixed width',   file: 'droid_sans_mono_regular.typeface.json' },
+  // Connected scripts (Charlie, 2026-10-13: "letters are continuous"):
+  // Google Fonts, SIL OFL — converted from TTF, licenses in *_OFL.txt.
+  // Their glyphs reach past their own advance, so neighbouring letters
+  // overlap and a word extrudes/prints as one flowing piece.
+  script:  { label: 'Script — brush, letters flow together',   file: 'pacifico_regular.typeface.json' },
+  cursive: { label: 'Cursive — handwriting, letters flow together', file: 'dancingscript_regular.typeface.json' },
 };
 const _sketchFonts = {}; // key → { font, capH }
 function loadSketchFont(key = 'block') {
@@ -6482,7 +6576,9 @@ function renderEntitySVG(ent, eng, selected = false, preview = false, singleSele
     // polylines with ≤10 vertices keep their per-vertex handles.
     if ((singleSelected || preview) && !ent.facePerimeter) {
       const n = ent.points.length;
-      const dense = n > 10;
+      // A letter opened with a double-click shows every node, dense or not.
+      const letterEdit = ent.groupId != null && eng.textEditGroup === ent.groupId;
+      const dense = n > 10 && !letterEdit;
       if (!dense) {
         for (const p of ent.points) {
           const [sx, sy] = eng.worldToScreen(p.x, p.y);
@@ -21329,9 +21425,11 @@ function renderProps() {
         ${tMeta.curveR ? `<div class="field"><label>Curve radius (${u})</label><input id="tprop-curve-r" type="number" value="${fmtU(Math.abs(tMeta.curveR))}" min="0.1" step="0.25"/></div>` : ''}
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="tprop-bar" style="width:auto;margin:0"${tMeta.bar ? ' checked' : ''}/>
-          <label for="tprop-bar" style="margin:0;cursor:pointer">Connect the letters with a bar (prints as one piece)</label>
+          <label for="tprop-bar" style="margin:0;cursor:pointer">Baseline bar under block letters (joins them for printing)</label>
         </div>
-        <div class="hint">The word moves as one. <b>Extrude</b> to raise it, set <b>Negative</b> + extrude to engrave. Explode to edit letters one by one.</div>
+        ${(typeof sketchEng !== 'undefined' && sketchEng && sketchEng.textEditGroup === gid)
+          ? `<div class="hint" style="background:#fff7ed;border-color:#fdba74;color:#9a3412">✏️ Editing this letter’s nodes — drag them like any shape. Changing the text, font, size, curve or bar rebuilds the letters and drops node edits.</div>`
+          : `<div class="hint">The word moves as one — <b>double-click a letter</b> to edit its nodes. <b>Extrude</b> to raise it, set <b>Negative</b> + extrude to engrave. Explode to edit letters as separate shapes.</div>`}
         <button class="action" id="tprop-explode" style="margin-top:8px">⚡ Explode into letters</button>
         <button class="action" id="del-text-group" style="margin-top:8px">Delete text</button>`;
       const commitStr = () => {
