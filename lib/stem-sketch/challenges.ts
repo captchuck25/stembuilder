@@ -131,7 +131,7 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
       "2. The side with the letter F is your front view — keep it facing you. (The stairs climb up toward the left.)\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Draw its front, top, and side views on paper first.\n" +
-      "5. Build it here exactly as you measured it.\n" +
+      "5. Build it here exactly as you measured it — set the Grid to ¼ in with Snap on (bottom-right corner) so every edge lands on a quarter inch.\n" +
       "6. Click Check My Model — if it matches, hit Submit!",
     precision: "quarter",
     refDocJson: refS101,
@@ -153,7 +153,7 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
       "2. The side with the letter F is your front view — keep it facing you. (The tallest post ends up at the back on your left.)\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Draw its front, top, AND right-side views on paper — one view isn't enough for this block!\n" +
-      "5. Build it here exactly as you measured it.\n" +
+      "5. Build it here exactly as you measured it — set the Grid to ¼ in with Snap on (bottom-right corner) so every edge lands on a quarter inch.\n" +
       "6. Click Check My Model — if it matches, hit Submit!",
     precision: "quarter",
     refDocJson: refS102,
@@ -176,7 +176,7 @@ export const SKETCH_CHALLENGES: SketchChallenge[] = [
       "2. The side with the letter F is your front view — keep it facing you.\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Draw its front, right-side, AND top views on paper — this block needs all three!\n" +
-      "5. Build it here exactly as you measured it.\n" +
+      "5. Build it here exactly as you measured it — set the Grid to ¼ in with Snap on (bottom-right corner) so every edge lands on a quarter inch.\n" +
       "6. Click Check My Model — if it matches, hit Submit!",
     precision: "quarter",
     refDocJson: refS103,
@@ -202,7 +202,7 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
       "2. The side with the letter F is your front view — keep it facing you.\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Picture the missing piece: block + your piece = a perfect 2-inch cube.\n" +
-      "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block!\n" +
+      "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block! Set the Grid to ¼ in with Snap on (bottom-right corner).\n" +
       "6. Click Check My Model — if your piece completes the cube, hit Submit!",
     precision: "quarter",
     // Same block as s1-01 (2026-10-14): reference, print, and picker image
@@ -226,7 +226,7 @@ export const SKETCH_CHALLENGES_S2: SketchChallenge[] = [
       "2. The side with the letter F is your front view — keep it facing you.\n" +
       "3. Measure it with your ruler — dimensions go to the nearest quarter inch (¼ = .25, ½ = .5, ¾ = .75).\n" +
       "4. Picture the missing piece: block + your piece = a perfect 2-inch cube.\n" +
-      "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block!\n" +
+      "5. Draw the MISSING piece's views on paper, then build ONLY that piece here — not the block! Set the Grid to ¼ in with Snap on (bottom-right corner).\n" +
       "6. Click Check My Model — if your piece completes the cube, hit Submit!",
     precision: "quarter",
     // Same block as s1-02 (2026-10-14): shared reference, print, and image.
