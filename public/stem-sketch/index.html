@@ -866,6 +866,13 @@
     margin-left: 4px;
   }
   .extrude-tooltip .extrude-through:hover { background: rgba(229, 62, 62, 0.85); }
+  .extrude-tooltip .extrude-both {
+    background: rgba(255, 255, 255, 0.14); color: #dfe7ff;
+    border: none; font: inherit; font-size: 11px; font-weight: 600;
+    padding: 3px 9px; border-radius: 4px; cursor: pointer; pointer-events: auto; margin-left: 4px;
+  }
+  .extrude-tooltip .extrude-both:hover { background: rgba(255, 255, 255, 0.3); }
+  .extrude-tooltip .extrude-both.active { background: rgba(79, 124, 255, 0.9); color: #fff; }
   .dim-label-3d {
     position: absolute;
     color: #1f2540;
@@ -1582,6 +1589,7 @@
       </span>
       <button type="button" id="extrude-toface-btn" class="extrude-flip" title="Then click any face on the part — the extrude length and direction are set so it ends exactly on that face" style="display:none">▸ To face</button>
       <button type="button" id="extrude-through-btn" class="extrude-through" title="Cut all the way through the body" style="display:none">⇣ Through</button>
+      <button type="button" id="extrude-both-btn" class="extrude-both" title="Grow half in front of the sketch and half behind it — letters that stand proud on both faces" style="display:none">⇔ Both sides</button>
       <button type="button" id="extrude-done-btn" class="extrude-done" title="Commit extrude (Enter)">Done</button>
       <button type="button" id="extrude-cancel-btn" class="extrude-cancel" title="Cancel (Esc)">×</button>
     </div>
@@ -4468,6 +4476,16 @@ class SketchEngine {
             if (p.x < wMinX || p.x > wMaxX || p.y < wMinY || p.y > wMaxY) { allInside = false; break; }
           }
           if (allInside) picked.push(ent.id);
+        }
+      }
+      // Groups (a word's letters, a Grouped outline) select whole, like a
+      // click does — a box that catches part of a grouped outline used to
+      // leave the rest behind, so Align moved only half of it.
+      const gids = new Set();
+      for (const id of picked) { const ent = doc.sketch.entities.find(x => x.id === id); if (ent && ent.groupId != null) gids.add(ent.groupId); }
+      if (gids.size) {
+        for (const ent of doc.sketch.entities) {
+          if (ent.groupId != null && gids.has(ent.groupId) && !picked.includes(ent.id)) picked.push(ent.id);
         }
       }
       if (additive) {
@@ -7470,7 +7488,8 @@ function projectBodiesOntoPlane(plane, onlyBodyId) {
           bevelEnabled: false,
           curveSegments: 32,
         });
-        if (child.op === 'subtract' || child.dir === -1) tmpGeo.translate(0, 0, -(child.height || 1));
+        if (child.sym && child.op !== 'subtract') tmpGeo.translate(0, 0, -(child.height || 1) / 2);
+        else if (child.op === 'subtract' || child.dir === -1) tmpGeo.translate(0, 0, -(child.height || 1));
         const planeMChild = makePlaneMatrix(child.plane);
         tmpGeo.applyMatrix4(planeMChild);
         // Apply parent group's offset
@@ -8963,7 +8982,12 @@ class Viewer3D {
         const t = projectRayOnAxis(this.raycaster.ray, extrudeState.origin, extrudeState.axis);
         let signed = t - extrudeState.startT;
         const canCut = !!extrudeState.sketch?.boundary;
-        if (!canCut && signed < 0) signed = 0;
+        // A free sketch on the GROUND can't go backwards (that's below the
+        // table). Front/Right reference sketches can: the Add simply grows
+        // along −n (letters pushed out the back of a standing keychain —
+        // Charlie 2026-10-15).
+        const onGround = !canCut && (extrudeState.sketch?.plane?.kind === 'ground' || !extrudeState.sketch?.plane?.kind);
+        if (onGround && signed < 0) signed = 0;
         if (doc.grid?.snap) {
           const step = doc.grid.spacing || 1;
           signed = Math.round(signed / step) * step;
@@ -9400,7 +9424,8 @@ class Viewer3D {
       // disagree with what Done will produce. It used to follow only the
       // drag direction, so a Cut typed in the tooltip previewed OUTWARD
       // and then cut inward on commit (ssissues #2).
-      if (isCut || direction < 0) geo.translate(0, 0, -Math.abs(length));
+      if (!isCut && typeof getExtrudeTooltipSym === 'function' && getExtrudeTooltipSym()) geo.translate(0, 0, -Math.abs(length) / 2);
+      else if (isCut || direction < 0) geo.translate(0, 0, -Math.abs(length));
       geo.applyMatrix4(makePlaneMatrix(job.sketch.plane));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.renderOrder = 9;
@@ -10489,7 +10514,8 @@ function buildBodyMesh(body) {
     // For Negative extrudes, flip extrusion direction so it goes INTO the body
     // (along plane −n) instead of outward — that's the natural "cut a hole"
     // direction. An Add dragged INWARD (body.dir === -1) grows along −n too.
-    if (body.op === 'subtract' || body.dir === -1) geo.translate(0, 0, -body.height);
+    if (body.sym && body.op !== 'subtract') geo.translate(0, 0, -body.height / 2);
+    else if (body.op === 'subtract' || body.dir === -1) geo.translate(0, 0, -body.height);
     const plane = body.plane || GROUND_PLANE;
     const planeMat = makePlaneMatrix(plane);
     geo.applyMatrix4(planeMat);
@@ -13063,7 +13089,7 @@ function _coalesceSoftSiblings(children, opts) {
       const q = (v) => (v || [0, 0, 0]).map(n => Math.round(n * 100)).join(',');
       const r = c.rotation || {};
       const key = [q(p.origin), q(p.u), q(p.v), q(p.n),
-        Math.round((c.height || 0) * 100),
+        Math.round((c.height || 0) * 100), c.sym ? 's' : (c.dir === -1 ? 'b' : 'f'),
         Math.round((c.x || 0) * 100), Math.round((c.y || 0) * 100), Math.round((c.z || 0) * 100),
         Math.round((r.x || 0) * 10), Math.round((r.y || 0) * 10), Math.round((r.z || 0) * 10)].join('|');
       if (!buckets.has(key)) buckets.set(key, []);
@@ -14296,6 +14322,19 @@ function setMode(mode) {
 // after each extrude. Defaults to 'add'.
 let extrudeTooltipOp = 'add';
 function getExtrudeTooltipOp() { return extrudeTooltipOp; }
+// "⇔ Both sides": an Add that grows half along +n and half along −n, so a
+// word pushed through a standing plate stands proud on both faces (Charlie's
+// keychain 2026-10-15 — the workaround was 2× depth + Align z-mid). Not
+// sticky: resets whenever the tooltip closes.
+let extrudeTooltipSym = false;
+function getExtrudeTooltipSym() { return extrudeTooltipSym; }
+function setExtrudeTooltipSym(on) {
+  extrudeTooltipSym = !!on;
+  const b = document.getElementById('extrude-both-btn');
+  if (b) b.classList.toggle('active', extrudeTooltipSym);
+  const st = viewer?.extrudeState;
+  if (viewer && st && st.length > 0.001 && viewer.extrudeArrows?.visible) viewer.updateExtrudePreview(st.length, st.direction || 1);
+}
 function setExtrudeTooltipOp(op) {
   extrudeTooltipOp = (op === 'subtract') ? 'subtract' : 'add';
   // Reflect in UI
@@ -14314,6 +14353,16 @@ function setExtrudeTooltipOp(op) {
     const hasTarget = !!(st?.sketch?.sourceBodyId &&
       doc.bodies.find(b => b.id === st.sketch.sourceBodyId));
     thBtn.style.display = (extrudeTooltipOp === 'subtract' && hasTarget) ? '' : 'none';
+  }
+  // "Both sides" is an Add-only option, and not for a sketch on the ground
+  // (half of it would be under the table).
+  const bothBtn = document.getElementById('extrude-both-btn');
+  if (bothBtn) {
+    const stB = viewer?.extrudeState;
+    const pk = stB?.sketch?.plane?.kind;
+    const allowed = extrudeTooltipOp !== 'subtract' && !!stB?.sketch && pk && pk !== 'ground';
+    bothBtn.style.display = allowed ? '' : 'none';
+    if (!allowed && extrudeTooltipSym) setExtrudeTooltipSym(false);
   }
   // ("Other side" was tried here and removed on Charlie's call 2026-09-27:
   // dragging the arrow through the face already flips the direction, and
@@ -14386,6 +14435,9 @@ function hideExtrudeTooltip() {
   if (viewer?.canvas) viewer.canvas.style.cursor = '';
   const tf = document.getElementById('extrude-toface-btn');
   if (tf) tf.classList.remove('flipped');
+  extrudeTooltipSym = false;
+  const bb = document.getElementById('extrude-both-btn');
+  if (bb) bb.classList.remove('active');
 }
 function updateExtrudeTooltipText(lengthMm, worldPos) {
   const t = document.getElementById('extrude-tooltip');
@@ -14501,6 +14553,8 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
       // body (the dowel pushed in toward the far side — ssissues
       // 2026-09-26). Cuts ignore the sign: a cut always goes INTO the body.
       ...(op !== 'subtract' && direction < 0 ? { dir: -1 } : {}),
+      // "Both sides": centered on the sketch plane (half along +n, half −n).
+      ...(op !== 'subtract' && getExtrudeTooltipSym() ? { sym: true } : {}),
       // Live re-extrude metadata — used by rebuildExtrudesForSketch to find
       // the same region after the user edits the source sketch and switches
       // back to 3D. Centroid match within ~5mm finds the updated region.
@@ -14667,6 +14721,18 @@ function commitExtrudeFromGizmo(jobs, lengthMm, direction, opOverride) {
         // Force op to subtract so commitExtrudeFromGizmo doesn't fall back.
         setExtrudeTooltipOp('subtract');
         commitExtrudeFromGizmo(st.jobs || [{ region: st.region, sketch: st.sketch }], depth, -1, 'subtract');
+      });
+    }
+    // Both sides — toggle a symmetric Add (half in front, half behind)
+    const bothBtn = document.getElementById('extrude-both-btn');
+    if (bothBtn) {
+      bothBtn.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setExtrudeTooltipSym(!getExtrudeTooltipSym());
+        setStatus(getExtrudeTooltipSym()
+          ? 'Both sides — the extrude will be centered on the sketch plane. Type a total thickness and click Done.'
+          : 'One side — the extrude grows away from the sketch plane.');
       });
     }
     // Cancel — close tooltip without creating a body
@@ -26094,15 +26160,31 @@ const _projEntBox = (e) => {
 // the biggest closed non-text shape in any sketch, about 3 in across
 // (2.3–3.8 in, so a heart or star from Shape ▾ counts). Returns
 // { e, bb, L } or null.
+const _projIsTextEnt = (d, e) => e.groupId != null && (d.sketches || []).some(sk => sk.textMeta && !!sk.textMeta[e.groupId]);
 const _projTagOutline = (d) => {
   let best = null;
   for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) {
-    if (e.construction || e.groupId != null) continue;
+    if (e.construction || _projIsTextEnt(d, e)) continue; // a Grouped shell still counts
     if (e.type !== 'circle' && e.type !== 'rect' && !(e.type === 'polyline' && e.closed)) continue;
     const bb = _projEntBox(e); if (!bb) continue;
     const L = Math.max(bb.w, bb.h), S = Math.min(bb.w, bb.h);
     if (L < 58 || L > 97 || S < 45) continue;
     if (!best || L > best.L) best = { e, bb, L };
+  }
+  if (!best) {
+    // Once the outline has been TRIMMED (ring + loop joined) no single closed
+    // shape remains — the shell as a whole still is the tag outline. e: null.
+    let bb = null;
+    for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) {
+      if (e.construction || _projIsTextEnt(d, e) || e.type === 'dimension') continue;
+      const b = _projEntBox(e); if (!b) continue;
+      bb = bb ? { minX: Math.min(bb.minX, b.minX), minY: Math.min(bb.minY, b.minY), maxX: Math.max(bb.maxX, b.maxX), maxY: Math.max(bb.maxY, b.maxY) } : { minX: b.minX, minY: b.minY, maxX: b.maxX, maxY: b.maxY };
+    }
+    if (bb) {
+      bb.w = bb.maxX - bb.minX; bb.h = bb.maxY - bb.minY; bb.cx = (bb.minX + bb.maxX) / 2; bb.cy = (bb.minY + bb.maxY) / 2;
+      const L = Math.max(bb.w, bb.h), S = Math.min(bb.w, bb.h);
+      if (L >= 58 && L <= 97 && S >= 45) best = { e: null, bb, L };
+    }
   }
   return best;
 };
@@ -26130,6 +26212,59 @@ const _projExtrudeFoot = (b) => {
 // A raised (Add) extrude between lo and hi mm tall whose footprint passes `pred`.
 const _projRaised = (d, lo, hi, pred) => _projFindBody(d.bodies, b =>
   b.type === 'extrude' && b.op !== 'subtract' && b.height >= lo && b.height <= hi && (() => { const f = _projExtrudeFoot(b); return !!f && pred(f); })());
+// The ring's INNER circle while it still exists: the largest closed circle
+// 0.6–1.2 in radius that isn't a text member. Null once it's been trimmed
+// into arcs (that's the signal for the "trim the inner circle" step).
+const _projInnerCircle = (d) => {
+  let best = null;
+  for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) {
+    if (e.type !== 'circle' || e.construction || _projIsTextEnt(d, e)) continue;
+    if (e.r < 15 || e.r > 31) continue;
+    if (!best || e.r > best.r) best = e;
+  }
+  return best;
+};
+const _projOpenCount = (d) => {
+  let n = 0;
+  for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) if (e.type === 'polyline' && !e.closed && !e.construction) n++;
+  return n;
+};
+// Ring + loop joined by Trim (or Trim + Group, which merges the arcs into
+// one closed outline): no full outer circle is left, and the outline is
+// either several open arcs or one big closed polyline.
+const _projRingJoined = (d) => {
+  let bigCircle = false, bigPoly = false;
+  for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) {
+    if (e.construction || _projIsTextEnt(d, e)) continue;
+    if (e.type === 'circle' && e.r >= 27) bigCircle = true;
+    if (e.type === 'polyline' && e.closed) { const bb = _projEntBox(e); if (bb && Math.max(bb.w, bb.h) >= 50) bigPoly = true; }
+  }
+  return !bigCircle && (bigPoly || _projOpenCount(d) >= 2);
+};
+// Letters centered through the ring: the letter extrudes are "Both sides"
+// (sym), or their centers along the sketch normal match the ring's within 1 mm.
+const _projLettersCentered = (d) => {
+  const tb = _projTextBox(d);
+  if (!tb) return false;
+  const all = [];
+  const walk = (list) => { for (const b of (list || [])) { if (b.type === 'extrude' && b.op !== 'subtract') all.push(b); if (Array.isArray(b.children)) walk(b.children); } };
+  walk(d.bodies);
+  const feet = all.map(b => ({ b, f: _projExtrudeFoot(b) })).filter(x => x.f);
+  const letters = feet.filter(x => x.f.L <= 50 && x.f.cx > tb.minX - 2 && x.f.cx < tb.maxX + 2 && x.f.cy > tb.minY - 2 && x.f.cy < tb.maxY + 2 && x.b.height >= 7);
+  if (!letters.length) return false;
+  const ring = feet.find(x => x.f.L >= 50 && x.f.holes >= 1);
+  if (!ring) return false;
+  const centerAlong = (b) => {
+    const n = (b.plane && b.plane.n) || [0, 1, 0];
+    const ax = Math.abs(n[0]) > 0.9 ? 'x' : (Math.abs(n[2]) > 0.9 ? 'z' : 'y');
+    const sgn = n[{ x: 0, y: 1, z: 2 }[ax]] >= 0 ? 1 : -1;
+    const h = b.height || 0;
+    const local = b.sym ? 0 : (b.dir === -1 ? -h / 2 : h / 2);
+    return (b[ax] || 0) + sgn * local;
+  };
+  const rc = centerAlong(ring.b);
+  return letters.every(x => Math.abs(centerAlong(x.b) - rc) < 1);
+};
 
 const PROJECTS = [
   {
@@ -26268,96 +26403,107 @@ const PROJECTS = [
     kind: 'project',
     title: 'Keychain Tag',
     minutes: 15,
-    // Reshaped 2026-10-14 to Charlie's own build (ssissues video): one Top
-    // sketch — 3" circle, 2" circle, initials centered with Align, a loop
-    // overlapping the rim — then each piece pulled up on its own.
-    intro: 'A round tag with a raised rim, your initials in the middle and a loop for the ring — all from one sketch. Follow along, then change anything: a heart instead of a circle, a script font, your whole name.',
-    print: 'Prints flat on the bed, letters up, no supports — about 20 minutes. Any split ring or keyring fits the loop. Two colors? Pause the print when the rim finishes and swap filament for the letters.',
+    // Charlie's build, video 2026-10-15 ("this is the type of keychain they
+    // should make first"): ONE Front sketch — a ring, a loop joined to it
+    // by Trim, initials centered with Align and nudged to overlap the inner
+    // circle, the inner circle trimmed where the letters cross — then the
+    // ring pulled 0.2 and the letters pulled 0.4 ⇔ Both sides.
+    intro: 'A ring with your initials bridging the middle and a loop on top. It stands up on the Front plane, so the letters can poke out of both faces. One sketch, two pulls.',
+    print: 'Lay it flat in the slicer (letters up or down — they stick out equally). No supports, about 20 minutes. Any split ring fits the loop.',
     skills: ['sketch-toolbox', 'extrude'],
     steps: [
       {
-        text: 'We’ll build a round tag: an outer rim, a lower middle, your initials standing up, and a loop for the keyring. Everything comes from one sketch — then you make it yours.',
+        text: 'We’ll draw a ring with a loop on top, put your initials across the middle so they fuse to the ring, then pull it into a tag that stands on its own. Everything comes from one sketch — then you make it yours.',
         manual: true,
         done: () => false,
       },
       {
-        text: 'Click **Sketch** → **Top**. Pick **Circle**, click the **center dot**, click again to place it. Then click it with **Select** and set **Radius 1.5** in Properties (press Enter). That’s a 3-inch tag.',
-        hint: 'Any outline about 3 in across works — a heart or star from Shape ▾ too.',
+        text: 'Click **Sketch** → **Front**. Set the **Grid** to **1/4 in** with **Snap** on. Pick **Circle**, click a point about **1¼ in above the ground line**, click again to place it, then click it with **Select** and set **Radius 1.25**. A 2½-inch ring sitting on the ground.',
+        hint: 'Front (not Top) is on purpose: the tag stands up, so later the letters can stick out of both faces.',
         done: (d) => !!_projTagOutline(d),
       },
       {
-        text: 'Pick **Circle** again, click the **same center dot**, and set **Radius 1**. Everything between the two circles will be a raised rim; the middle stays lower so your letters pop.',
-        hint: 'Both circles share the center dot — the cursor snaps to it.',
+        text: '**Circle** again, click the **same center dot**, set **Radius 0.875** (seven-eighths). The band between the two circles is the ring.',
         done: (d) => {
           const tag = _projTagOutline(d);
           if (!tag) return false;
           return _tutSketchHas(d, e => {
-            if (e === tag.e || e.groupId != null) return false;
+            if (e === tag.e || _projIsTextEnt(d, e)) return false;
             if (e.type !== 'circle' && e.type !== 'rect' && !(e.type === 'polyline' && e.closed)) return false;
             const bb = _projEntBox(e); if (!bb) return false;
             const L = Math.max(bb.w, bb.h);
-            return L >= 38 && L <= tag.L - 8 && Math.hypot(bb.cx - tag.bb.cx, bb.cy - tag.bb.cy) < 6;
+            return L >= 35 && L <= tag.L - 6 && Math.hypot(bb.cx - tag.bb.cx, bb.cy - tag.bb.cy) < 6;
           });
         },
       },
       {
-        text: 'Pick **Text**, click near the middle, type your **initials** (2 or 3 letters), set **Letter height 1**, pick any style, click **OK**. Then drag a box around **everything**, open **Align ▾** and click **Center** — the letters land dead center.',
-        hint: 'Letters poking past the inner circle are fine — the rim goes around them. Too big? Drag a corner of the letters’ box to shrink them.',
+        text: 'The loop: set the **Grid** to **1/8 in**. **Circle** right on the ring at the **top-right**, **Radius 0.2**. Then another at the **same spot**, **Radius 0.1** — the hole the keyring goes through.',
+        hint: 'Center the loop ON the outer circle, half in and half out, so the two overlap.',
         done: (d) => {
-          const tag = _projTagOutline(d), tb = _projTextBox(d);
-          if (!tag || !tb) return false;
-          const cx = (tb.minX + tb.maxX) / 2, cy = (tb.minY + tb.maxY) / 2;
-          return Math.hypot(cx - tag.bb.cx, cy - tag.bb.cy) < 5 && (tb.maxX - tb.minX) < tag.L;
-        },
-      },
-      {
-        text: 'The loop for the keyring: pick **Circle**, click **on the rim near the top**, set **Radius 0.3**. Then a second circle at the **same spot**, **Radius 0.15**. Let the loop overlap the rim so it’s attached. Click **← Done**.',
-        hint: 'The loop’s center should sit right on the outer circle — half in, half out.',
-        done: (d) => {
-          if (d.mode !== '3d') return false;
           const tag = _projTagOutline(d);
           if (!tag) return false;
           const R = tag.L / 2;
           const circles = [];
           for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) if (e.type === 'circle' && !e.construction && e !== tag.e) circles.push(e);
-          return circles.some(o => o.r >= 5 && o.r <= 11 &&
-            circles.some(i => i !== o && i.r >= 2.5 && i.r < o.r - 1 && Math.hypot(i.cx - o.cx, i.cy - o.cy) < 1.5) &&
+          return circles.some(o => o.r >= 4 && o.r <= 10 &&
+            circles.some(i => i !== o && i.r >= 2 && i.r < o.r - 1 && Math.hypot(i.cx - o.cx, i.cy - o.cy) < 1.5) &&
             (() => { const dd = Math.hypot(o.cx - tag.bb.cx, o.cy - tag.bb.cy); return dd > R - o.r - 2 && dd < R + o.r - 2; })());
         },
       },
       {
-        text: 'Click the **rim** (between the two circles) — only the rim lights up. Type **0.2**, click **＋ Add**, then **Done**.',
-        hint: 'The letters crossing the inner circle don’t come along — the rim is its own piece.',
-        done: (d) => _projRaised(d, 4, 7, f => f.L >= 58 && f.holes >= 1),
+        text: 'Join them: pick **Trim**, click the piece of the **loop that’s inside the ring**, then the piece of the **ring that’s inside the loop**. One outline. Then drag a box around the whole outline and click **Group** so it moves as one piece.',
+        hint: 'Trim shows the piece it will remove in red before you click.',
+        done: (d) => _projRingJoined(d),
       },
       {
-        text: 'Click the **middle** of the tag, type **0.12**, **＋ Add**, **Done** — a lower floor for the letters to stand on.',
-        done: (d) => _projRaised(d, 2, 4.5, f => f.L >= 38 && f.L <= 70),
+        text: 'Pick **Text**, click in the middle of the ring, type your **initials**, set **Letter height 1.2**, pick a style, **OK**. Then drag a box around **everything** (loop included) and **Align ▾ → Center** — the letters land dead center.',
+        hint: 'Two or three initials fit best. They need to reach the ring on both sides but stay inside the outer circle.',
+        done: (d) => {
+          const ic = _projInnerCircle(d), tb = _projTextBox(d);
+          if (!ic || !tb) return false;
+          const cx = (tb.minX + tb.maxX) / 2, cy = (tb.minY + tb.maxY) / 2;
+          return Math.hypot(cx - ic.cx, cy - ic.cy) < 6;
+        },
       },
       {
-        text: 'Click **one letter** — the whole word selects — type **0.25**, **＋ Add**, **Done**. Your initials now stand a little taller than the rim.',
-        hint: 'Want them engraved instead? Pick **－ Cut**. Raised letters you can feel; engraved ones keep the top flat.',
+        text: 'Make the letters reach the ring: turn **Snap off**, then nudge with the **arrow keys** (a tap is 0.01 in; Shift = 4×) or drag a corner of the letters’ box, until the first and last letters **overlap the inner circle** a little on both sides.',
+        hint: 'Narrow initials? Raise **Letter height** or **Spacing** in Properties until they touch both sides. Poking out past the outer circle? Make them a little smaller. The overlap is what fuses them to the ring.',
+        done: (d) => {
+          const ic = _projInnerCircle(d), tb = _projTextBox(d);
+          if (!ic || !tb) return false;
+          return tb.minX <= ic.cx - ic.r + 1.5 && tb.maxX >= ic.cx + ic.r - 1.5;
+        },
+      },
+      {
+        text: 'Pick **Trim** and click each piece of the **inner circle that runs through a letter** — one click per piece — so the letters open into the ring. Then click **← Done**.',
+        hint: 'Four clicks for two initials, usually. Leave the arcs between the letters alone.',
+        done: (d) => d.mode === '3d' && !_projInnerCircle(d) && _projOpenCount(d) >= 2,
+      },
+      {
+        text: 'Click the **ring**, type **0.2**, click **⇔ Both sides**, then **＋ Add** and **Done**. Both sides grows the ring half in front of the sketch and half behind it.',
+        hint: 'Only the ring comes up — the letters and the middle stay open.',
+        done: (d) => _projRaised(d, 4, 7, f => f.L >= 50 && f.holes >= 1),
+      },
+      {
+        text: 'Click **one letter** — the whole word selects — type **0.4**, **⇔ Both sides** again, **＋ Add**, **Done**. Twice the ring’s thickness, centered the same way: the letters stand proud of both faces.',
+        hint: 'Pulled the ring one way instead? Pull the letters 0.4 one way too, then Shift-click ring + letters, **Align**, middle dot of the front/back axis.',
         done: (d) => {
           const tb = _projTextBox(d);
           if (!tb) return false;
           return _projFindBody(d.bodies, b => {
-            if (b.type !== 'extrude' || b.height < 1.5 || b.height > 10) return false; // engraving can be shallow
+            if (b.type !== 'extrude' || b.op === 'subtract' || b.height < 7 || b.height > 13) return false;
             const f = _projExtrudeFoot(b);
-            return !!f && f.L <= 45 && f.cx > tb.minX - 2 && f.cx < tb.maxX + 2 && f.cy > tb.minY - 2 && f.cy < tb.maxY + 2;
+            return !!f && f.L <= 50 && f.cx > tb.minX - 2 && f.cx < tb.maxX + 2 && f.cy > tb.minY - 2 && f.cy < tb.maxY + 2;
           });
         },
       },
       {
-        text: 'Click the **loop** — it’s in two pieces where it crosses the rim, so **Shift-click** the second piece too — type **0.2**, **＋ Add**, **Done**. The small circle inside stays open: that’s where the ring goes.',
-        done: (d) => {
-          const tag = _projTagOutline(d);
-          if (!tag) return false;
-          return _projRaised(d, 4, 7, f => f.L <= 24 && Math.hypot(f.cx - tag.bb.cx, f.cy - tag.bb.cy) > tag.L / 2 - 14);
-        },
+        text: 'Check the letters are centered through the ring: orbit to the side — they should stick out the same amount front and back. (If you pulled them one way, Shift-click ring + letters, **Align**, middle dot of the front/back axis.)',
+        done: (d) => _projLettersCentered(d),
       },
       {
-        text: '**Shift-click** every piece (rim, middle, letters, loop) and click **Group** so the tag is one solid. Name it, press ☁ **Save**, then **Export ▾ → STL**. 🔑',
-        hint: 'Make it yours first: a heart outline, a script font, your whole name curved along the rim.',
+        text: 'Hide the sketch (click its **eye** in the tree), **Shift-click** the ring and the letters, click **Group** — one solid. Name it, press ☁ **Save**, then **Export ▾ → STL**. 🔑',
+        hint: 'Make it yours first: a script font, your whole name, a heart instead of a ring.',
         done: (d, ev) => !!ev.exported,
       },
     ],
@@ -27870,7 +28016,11 @@ function init() {
       // Don't hijack arrows when an input is focused
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      const step = (doc.grid.spacing || 1) * (e.shiftKey ? 4 : 1);
+      // Snap ON → one grid step. Snap OFF → a fine nudge (0.01 in / 0.1 mm):
+      // with the grid off, the arrows used to still jump by the grid size
+      // (Charlie's keychain video 2026-10-15 — centering letters by eye).
+      const fine = doc.units === 'in' ? 0.254 : 0.1;
+      const step = (doc.grid.snap ? (doc.grid.spacing || 1) : fine) * (e.shiftKey ? 4 : 1);
       e.preventDefault();
       if (doc.mode === '2d' && doc.selection?.kind === 'sketch') {
         pushUndo();

@@ -102,7 +102,7 @@ export type SketchProject = {
 export const SKETCH_PROJECTS: SketchProject[] = [
   { id: "pen", title: "Design Your Own Pen", blurb: "Measure a real pen refill, revolve a body around it, cut the ink channel, print a pen that writes.", minutes: 15, stepCount: 9, ready: true },
   { id: "square-pen", title: "Square Pen (sketch + extrude)", blurb: "The same pen the extrude way — exact-size square, 7-inch pull, Negative ink channel, initials engraved on a flat.", minutes: 15, stepCount: 7, ready: true },
-  { id: "keychain", title: "Keychain Tag", blurb: "A round tag with a raised rim, your initials in the middle and a loop for the ring — all from one sketch.", minutes: 15, stepCount: 10, ready: true },
+  { id: "keychain", title: "Keychain Tag", blurb: "A ring with your initials bridging the middle and a loop on top — one Front sketch, letters standing proud of both faces.", minutes: 15, stepCount: 12, ready: true },
   // Shelved 2026-10-07: too little design for a long print. Hidden in the tool; not trackable.
   { id: "pencil-cup", title: "Pencil Cup", blurb: "One cylinder, one deep cut, one export — a desk organizer you can print tonight.", minutes: 10, stepCount: 5, ready: false },
 ];
