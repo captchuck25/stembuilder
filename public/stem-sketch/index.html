@@ -21330,18 +21330,22 @@ function pasteSelection() {
   if (doc.clipboard.kind === 'sketch') {
     const newEnts = [];
     const idMap = new Map();
+    // Paste offset = ONE GRID STEP when snap is on (a fixed 5 mm knocked the
+    // copy off the 1/8-in grid for good — a pasted grip scallop could never
+    // be dragged back end-to-end with the original; Charlie 2026-10-16).
+    const off = (doc.grid && doc.grid.snap && doc.grid.spacing > 0) ? doc.grid.spacing : 5;
     for (const item of doc.clipboard.items) {
       const ent = JSON.parse(JSON.stringify(item));
       ent.id = doc.sketch.nextId++;
       idMap.set(item.id, ent.id);
-      if (ent.type === 'rect') { ent.x += 5; ent.y += 5; }
-      else if (ent.type === 'circle') { ent.cx += 5; ent.cy += 5; }
+      if (ent.type === 'rect') { ent.x += off; ent.y += off; }
+      else if (ent.type === 'circle') { ent.cx += off; ent.cy += off; }
       // Spread keeps Bezier handles (cpIn/cpOut are relative offsets) — the
       // old bare {x, y} rebuild flattened every curved shape on paste.
-      else if (ent.type === 'polyline') ent.points = ent.points.map(p => ({ ...p, x: p.x + 5, y: p.y + 5 }));
+      else if (ent.type === 'polyline') ent.points = ent.points.map(p => ({ ...p, x: p.x + off, y: p.y + off }));
       else if (ent.type === 'dimension') {
-        ent.p1 = { x: ent.p1.x + 5, y: ent.p1.y + 5 };
-        ent.p2 = { x: ent.p2.x + 5, y: ent.p2.y + 5 };
+        ent.p1 = { x: ent.p1.x + off, y: ent.p1.y + off };
+        ent.p2 = { x: ent.p2.x + off, y: ent.p2.y + off };
       }
       doc.sketch.entities.push(ent);
       newIds.push(ent.id);
@@ -26962,16 +26966,19 @@ const PROJECTS = [
     skills: ['revolve', 'exact-sizes'],
     steps: [
       {
+        img: 'tut/pen/00-intro.jpg',
         text: 'Pull the ink refill out of a cheap ballpoint (a Bic Round Stic works). The thin tube is about **0.152 in across** and **5 in long**, with the writing tip on one end — that tip will poke out of the bottom of your pen. We’ll design the body around it.',
         hint: 'Got calipers? Measure your own refill and use your numbers instead — that’s the real engineering.',
         manual: true, // nothing to check — the learner clicks "Got it"
         done: () => false,
       },
       {
-        text: 'Now that we know the size of our ink, it’s time to get started: click **Sketch** → **Front**.',
+        img: 'tut/pen/02-sketch-front.png',
+        text: 'Now that we know the size of our ink, it’s time to get started: click **Sketch** → **Front**. Set the **Grid** to **1/8 in** with **Snap** on.',
         done: (d) => d.sketches.some(sk => /front|right/i.test((sk.plane && sk.plane.name) || '')),
       },
       {
+        img: 'tut/pen/03-center-line.png',
         text: 'We’ll draw **half of the pen’s outline — its right side** — and spin it around the middle. First the middle: pick the **Line** tool, click the **orange dot** at the center of the grid, move straight **up**, type **7** and press **Enter**. That 7-inch line is the pen’s center line. Press **Enter** again (or **Esc**) to stop drawing.',
         hint: 'The Line tool snaps to the origin and auto-locks vertical, so the typed 7 lands exactly on the center line.',
         done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && Array.isArray(e.points) && e.points.length >= 2 &&
@@ -26979,8 +26986,9 @@ const PROJECTS = [
           e.points.some(p => Math.abs(p.x) < 1.5 && (Math.abs(p.y - 7 * TUT_IN) < 5 || Math.abs(p.y - 180) < 5))),
       },
       {
+        img: 'tut/pen/04-outline.png',
         text: 'Now create a **unique outline** that we’ll revolve into your pen, like the picture: with the **Line** tool start at the **top** of the center line, go out and **down the right side** — a grip, a bump, a taper, whatever you like — and finish at the **orange dot** at the bottom so the shape closes. Press **Enter**, then click **← Done**.',
-        hint: 'Every click is a corner. The Arc tool adds scallops or a dome; pieces that touch end-to-end all revolve together. Keep it under about 2½ in across or it stops being a pen.',
+        hint: 'Every click is a corner. The Arc tool adds scallops or a dome; pieces that touch end-to-end all revolve together. A grip: draw one scallop with Arc, then **Duplicate** (Ctrl+D) and tap the **↑ arrow** to stack the copy on top. Keep it under about 2½ in across or it stops being a pen.',
         svg: `<svg viewBox="0 0 210 170" style="width:100%;height:auto;display:block">
           <line x1="60" y1="6" x2="60" y2="164" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="5 4"/>
           <polyline points="60,156 70,140 72,118 72,36 68,20 60,16" fill="none" stroke="#16a34a" stroke-width="3" stroke-linejoin="round"/>
@@ -27007,26 +27015,31 @@ const PROJECTS = [
         }),
       },
       {
+        img: 'tut/pen/05-revolved.jpg',
         text: 'Click **Revolve** in the toolbar and **OK**. Your outline spins into a solid pen — orbit around it.',
         done: (d) => _projFindBody(d.bodies, b => b.type === 'revolve'),
       },
       {
+        img: 'tut/pen/06-channel-props.png',
         text: 'Now the channel for the ink. Add a **Cylinder** from the Primitive menu — it drops in at the center, so it may be hidden inside your pen: find it in the **BODIES** list on the left and click **Cylinder** there. In **Properties**, set **Width 0.16**, **Depth 0.16** and **Height 5** — the refill is 0.152 across, and the extra 0.008 is clearance so it slides in. Under **Operation**, set **Type** to **Negative (cut-out)**; it turns red.',
         hint: 'Clearance is the gap between a part and the hole it fits in. Too little and it jams; too much and it rattles.',
         done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
       },
       {
+        img: 'tut/pen/07-align.jpg',
         text: 'Line them up. The channel must sit exactly on the pen’s center line — **Shift-click** the pen and then the red cylinder, click **Align** in the toolbar, then click the **middle red dot** and the **middle blue dot** so their centers match. (If nothing was ever moved they already match and this step ticks itself.)',
         hint: 'Never assume two parts are centered just because they look close — Align makes it exact.',
         done: (d) => _projBodiesCoaxial(d, b => b.type === 'revolve'),
       },
       {
+        img: 'tut/pen/08-grouped.jpg',
         text: '**Shift-click** the pen and the red channel so both are selected, then click **Group** — the Negative cylinder cuts the channel out of the pen. Orbit underneath: you should see the hole at the tip.',
         hint: 'A Negative on its own does nothing; grouping it with a body is what makes the cut.',
         done: (d) => _projFindBody(d.bodies, b => (b.type === 'group' || b.type === 'combined') &&
           _projFindBody(b.children, c => c.type === 'revolve') && _projFindBody(b.children, _projIsInkChannel)),
       },
       {
+        img: 'tut/pen/09-final.jpg',
         text: 'Give it a name at the top and press ☁ **Save**. Then **Export ▾ → STL** and print it. Push the refill in from the bottom, tip first — you designed a pen. 🖊️',
         hint: 'Make it yours before you export: a flat side so it won’t roll, a clip, your initials with the Text tool.',
         done: (d, ev) => !!ev.exported,
@@ -27043,6 +27056,7 @@ const PROJECTS = [
     skills: ['exact-sizes', 'extrude', 'cut-a-hole'],
     steps: [
       {
+        img: 'tut/square-pen/01-square.png',
         text: 'Click **Sketch** → **Top**. Pick **Rect** and draw a square near the center. Click it with **Select** and in **Properties** set **Width 0.5**, **Height 0.5**, then **X -0.25** and **Y -0.25** — that centers the square exactly on the grid’s center point. Click **← Done**.',
         hint: 'A 0.5-inch square is a comfortable pen. X and Y are the square’s corner, so half the size in the negative direction puts its middle on the origin.',
         done: (d) => d.mode === '3d' && _tutSketchHas(d, e => {
@@ -27052,31 +27066,37 @@ const PROJECTS = [
         }),
       },
       {
+        img: 'tut/square-pen/02-extruded.jpg',
         text: 'Click **inside** the square. In the pop-up type **7** and click **Done** — your square becomes a 7-inch pen body. Orbit around it.',
         done: (d) => _projFindBody(d.bodies, b => b.type === 'extrude' && b.op !== 'subtract' &&
           (_tutNear(b.height, 7 * TUT_IN, 2) || _tutNear(b.height, 180, 2))),
       },
       {
+        img: 'tut/square-pen/03-channel-props.png',
         text: 'The ink channel, same as the revolved pen: add a **Cylinder** from the Primitive menu (it drops in at the center — if it’s hidden inside the pen, click **Cylinder** in the **BODIES** list on the left), set **Width 0.16**, **Depth 0.16**, **Height 5**, and Operation **Type → Negative (cut-out)**.',
         hint: 'The refill is 0.152 across; 0.16 gives it 0.008 of clearance so it slides in without rattling.',
         done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
       },
       {
+        img: 'tut/square-pen/04-align.jpg',
         text: 'Line them up: **Shift-click** the pen and the red cylinder, click **Align**, then click the **middle red dot** and the **middle blue dot** so the channel runs exactly up the middle. (Already centered? This step ticks itself.)',
         done: (d) => _projBodiesCoaxial(d, b => b.type === 'extrude' && b.op !== 'subtract'),
       },
       {
+        img: 'tut/square-pen/05-grouped.jpg',
         text: '**Shift-click** the pen and the red channel, then click **Group** — the channel is cut. Check the bottom end for the hole.',
         done: (d) => _projFindBody(d.bodies, b => (b.type === 'group' || b.type === 'combined') &&
           _projFindBody(b.children, c => c.type === 'extrude' && c.op !== 'subtract') && _projFindBody(b.children, _projIsInkChannel)),
       },
       {
+        img: 'tut/square-pen/06-initials.png',
         text: 'Your initials: pick **On Face** and click one of the pen’s four flat sides. Pick the **Text** tool and click near the top of that face. In the box type your **initials** (2–3 letters), set **Letter height 0.25**, click **OK**, then **← Done**. Back in 3D, click **inside one letter** — the whole word selects — type **0.03**, click **－ Cut**, then **Done**. Engraved.',
         hint: '0.03 inch is about two printer layers — deep enough to see, shallow enough to stay strong. Positive instead of Cut gives raised letters.',
         done: (d) => d.sketches.some(sk => sk.textMeta && Object.keys(sk.textMeta).length > 0) &&
           _projFindBody(d.bodies, b => b.type === 'extrude' && b.op === 'subtract' && b.height > 0 && b.height <= 3),
       },
       {
+        img: 'tut/square-pen/07-final.jpg',
         text: 'Name it, press ☁ **Save**, then **Export ▾ → STL** and print. Slide the refill in from the bottom, tip first. 🖊️',
         hint: 'Make it yours: fillet the square’s corners before extruding (Sketch Toolbox tutorial), engrave a pattern, or add a clip with a second extrude.',
         done: (d, ev) => !!ev.exported,
