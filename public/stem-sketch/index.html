@@ -1358,6 +1358,7 @@
   <symbol id="i-fillet-3d" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4 8L4 18L14 21L20 17L20 9L11 5L4 8Z"/><path d="M4 8L11 11L20 9 M11 11L11 21"/><path d="M11 5 Q 17 5 20 9" stroke-width="2.2"/></g></symbol>
   <symbol id="i-revolve" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L12 21" stroke-dasharray="2 2"/><ellipse cx="12" cy="12" rx="6" ry="3"/><path d="M15 4L18 5L17 8"/></g></symbol>
   <symbol id="i-soften" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="12" rx="5"/><path d="M8 4 q4 2.6 8 0" opacity="0.55"/></g></symbol>
+  <symbol id="i-magnet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v8a5 5 0 0 0 10 0V4"/><path d="M7 4h4v8a1 1 0 0 1-2 0" opacity="0"/><path d="M4 4h6v4H4zM14 4h6v4h-6z" fill="currentColor" stroke="none"/><path d="M12 19v2"/><path d="M9.5 20.5l-.8 1.4M14.5 20.5l.8 1.4"/></g></symbol>
   <symbol id="i-joint" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12L19 12" stroke-dasharray="2 2"/><path d="M9 7L15 7L15 17L9 17Z"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></g></symbol>
 </svg>
 
@@ -1445,6 +1446,7 @@
         <span class="tool-sep"></span>
         <button class="tool" data-tool="eraser" title="Eraser (E) — click a shape to delete"><svg class="ico"><use href="#i-eraser"/></svg><span class="tool-label">Erase</span></button>
         <button class="tool" data-action="mirror-2d" title="Mirror selected shape across an axis"><svg class="ico"><use href="#i-mirror"/></svg><span class="tool-label">Mirror</span></button>
+        <button class="tool" data-tool="magnet" title="Magnet — click a corner, midpoint or center that stays put, then click a point on the shape that should move. That shape jumps so the two points meet."><svg class="ico"><use href="#i-magnet"/></svg><span class="tool-label">Magnet</span></button>
         <div class="dropdown" id="align2d-dropdown">
           <button class="tool has-dropdown" data-action="align2d-menu" title="Line up two or more selected shapes (Shift-click to select several). The biggest shape stays put; the others move to it."><svg class="ico"><use href="#i-align"/></svg><span class="tool-label">Align</span></button>
           <div class="dropdown-menu">
@@ -1523,6 +1525,7 @@
              was redundant. Action 'boolean-cut' is still wired in JS. -->
         <button class="tool" data-action="joint" title="Joint (J) — click two bodies, then click near an edge to set the hinge axis"><svg class="ico"><use href="#i-joint"/></svg><span class="tool-label">Joint</span></button>
         <button class="tool" data-action="align" title="Align — Shift-click 2+ bodies first, then click a colored axis handle"><svg class="ico"><use href="#i-align"/></svg><span class="tool-label">Align</span></button>
+        <button class="tool" data-action="magnet-3d" title="Magnet — click a corner or hole that stays put, then click a corner or hole on the part that should move. That part jumps so the two points meet."><svg class="ico"><use href="#i-magnet"/></svg><span class="tool-label">Magnet</span></button>
         <button class="tool" data-action="mirror-3d" title="Mirror body across XY/YZ/XZ plane"><svg class="ico"><use href="#i-mirror-3d"/></svg><span class="tool-label">Mirror</span></button>
         <span class="tool-sep"></span>
         <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
@@ -1833,6 +1836,7 @@ class SketchEngine {
     if (this.activeLine && t !== 'line' && t !== 'construction') this.finalizeLine();
     if (this.activeArc && t !== 'arc') this.activeArc = null;
     if (this.activeDim && t !== 'dimension') this.activeDim = null;
+    if (t !== 'magnet') this.magnetAnchor = null;
     // Clear transient drag state on tool switch
     if (this.offsetMode) { this.offsetMode = null; hideOffsetTooltip(); }
     if (this.mirrorAxis && t !== 'select') this.mirrorAxis = null;
@@ -1862,6 +1866,7 @@ class SketchEngine {
       construction: 'Same as the Line tool, but lines are <b>construction</b> — dashed reference lines that don\'t export or extrude.',
       eraser: 'The shape under your cursor turns red — click to delete it (works on dimensions too). Press <b>V</b> to return to Select.',
       trim: 'Hover a shape — the piece that would be removed shows in red. Click to remove it. Crossings with other shapes set the cut points.',
+      magnet: 'Click the <b>corner, midpoint or center</b> that stays put. Then click a point on the shape that should move — it jumps so the two points meet.',
       dimension: 'Click two points, then move to place the dimension and click to drop it. Snap to corners/centers and it sticks to the shapes — click its number to type the exact distance. Esc cancels.',
     };
     // Tips are surfaced via the status bar instead of a dedicated panel
@@ -2831,14 +2836,18 @@ class SketchEngine {
       // onto from anywhere inside the circle.
       const isCenterPt = ent.type === 'circle';
       const tol = isCenterPt ? Math.max(endpointTolMm, (ent.r || 0) * 0.5) : endpointTolMm;
-      for (const p of pts) {
+      // A rectangle's 5th key point is its centre — label it so (it used to
+      // read "endpoint"; ssissues 2026-10-16 "center mark").
+      const rectCenterIdx = ent.type === 'rect' ? 4 : -1;
+      for (let pi = 0; pi < pts.length; pi++) {
+        const p = pts[pi];
         const d = Math.hypot(wx - p.x, wy - p.y);
         if (d < tol) {
           // Strength scales 1.6 → 0.5 across the range so even a barely-
           // in-range endpoint still beats grid (strength 0.05).
           candidates.push({
             x: p.x, y: p.y,
-            kind: isCenterPt ? 'center' : 'endpoint',
+            kind: (isCenterPt || pi === rectCenterIdx) ? 'center' : 'endpoint',
             strength: 1.6 - 1.1 * (d / tol),
           });
         }
@@ -3080,7 +3089,17 @@ class SketchEngine {
     if (!candidates.length) return null;
     // prefer endpoints/origin over grid
     candidates.sort((a, b) => (b.strength || 0) - (a.strength || 0));
-    return candidates[0];
+    let best = candidates[0];
+    // A grid point sitting exactly ON a feature (the midpoint of a 4.5 in
+    // edge lands on the 1/4 in grid) used to win as "grid" — same spot, but
+    // no midpoint triangle, so the student was never told they were centred
+    // (ssissues 2026-10-16). Same coordinates → name the feature.
+    if (best.kind === 'grid') {
+      const feat = candidates.find(c => c.kind !== 'grid' && c.kind !== 'edge' && c.kind !== 'face-edge' &&
+        Math.abs(c.x - best.x) < 0.02 && Math.abs(c.y - best.y) < 0.02);
+      if (feat) best = feat;
+    }
+    return best;
   }
 
   axisSnap(fromX, fromY, toX, toY) {
@@ -3827,6 +3846,56 @@ class SketchEngine {
       return;
     }
 
+    // MAGNET (point-to-point placement). Charlie's idea (ssupgrades video
+    // 2026-10-16): the FIRST click is the point that stays put; the SECOND
+    // click is a point on the shape that should move — that shape jumps so
+    // the two points meet. Works the same in 3D (corners / holes).
+    if (this.tool === 'magnet') {
+      const isFeature = snap && snap.kind !== 'grid' && snap.kind !== 'edge' && snap.kind !== 'face-edge';
+      if (!this.magnetAnchor) {
+        this.magnetAnchor = { x: px, y: py, kind: isFeature ? snap.kind : null };
+        setStatus(`Magnet — anchor set${isFeature ? ' on a ' + snap.kind : ''}. Now click a corner / midpoint / center on the shape that should move. Esc cancels.`);
+        this.render();
+        return;
+      }
+      // Second click: which shape owns this point? The shape under the
+      // cursor; if it's part of the current selection, the whole selection
+      // moves together (letters of a word always travel together).
+      const hitEnt = this.hitTest(px, py) || this.hitTest(wx, wy);
+      if (!hitEnt || hitEnt.facePerimeter) {
+        showHint('Click a corner, midpoint or center ON the shape that should move.');
+        return;
+      }
+      const selIds = (doc.multiSelectedSketch?.length ? doc.multiSelectedSketch :
+                     (doc.selection?.kind === 'sketch' ? [doc.selection.id] : []));
+      let ids = selIds.includes(hitEnt.id) ? [...selIds] : [hitEnt.id];
+      if (hitEnt.groupId) {
+        for (const en of doc.sketch.entities) if (en.groupId === hitEnt.groupId && !ids.includes(en.id)) ids.push(en.id);
+      }
+      const dx = this.magnetAnchor.x - px, dy = this.magnetAnchor.y - py;
+      this.magnetAnchor = null;
+      if (Math.hypot(dx, dy) < 1e-6) { setStatus('Already there — nothing moved.'); this.render(); return; }
+      pushUndo();
+      let n = 0;
+      for (const id of ids) {
+        const ent = doc.sketch.entities.find(x => x.id === id);
+        if (!ent || ent.facePerimeter) continue;
+        if (ent.type === 'dimension') {
+          if (!ent.a1) ent.p1 = { x: ent.p1.x + dx, y: ent.p1.y + dy };
+          if (!ent.a2) ent.p2 = { x: ent.p2.x + dx, y: ent.p2.y + dy };
+        } else {
+          moveEntity(ent, JSON.parse(JSON.stringify(ent)), dx, dy);
+        }
+        n++;
+      }
+      doc.multiSelectedSketch = ids;
+      doc.selection = { kind: 'sketch', id: ids[ids.length - 1] };
+      this.snap = null;
+      this.render(); renderProps();
+      setStatus(`Magnet — moved ${n} shape${n === 1 ? '' : 's'} ${fmtUL(Math.hypot(dx, dy))} so the points meet. Click a new anchor to go again, or press V for Select.`);
+      return;
+    }
+
     if (this.tool === 'dimension') {
       if (!this.activeDim) {
         // Remember which entity feature (corner/center/vertex/midpoint) the
@@ -4079,6 +4148,13 @@ class SketchEngine {
     // the user chooses its side/direction before the final click.
     if (this.tool === 'dimension' && this.activeDim && !this.dragMode) {
       this.snap = this.activeDim.p2 ? null : this.computeSnap(wx, wy);
+      this.scheduleRender();
+      return;
+    }
+    // Magnet tool — always show the snap target (and the rubber-band back
+    // to the anchor once it's set).
+    if (this.tool === 'magnet' && !this.dragMode) {
+      this.snap = this.computeSnap(wx, wy);
       this.scheduleRender();
       return;
     }
@@ -5048,6 +5124,18 @@ class SketchEngine {
 
     // Snap marker — distinct visual + label per kind so the user can tell at
     // a glance what they're locking onto.
+    // Magnet tool: the anchor + a rubber-band from the cursor's snap target.
+    if (this.tool === 'magnet' && this.magnetAnchor) {
+      const [fx, fy] = this.worldToScreen(this.magnetAnchor.x, this.magnetAnchor.y);
+      const tgt = this.snap || this.cursorWorld;
+      if (tgt) {
+        const [tx, ty] = this.worldToScreen(tgt.x, tgt.y);
+        svg += `<line x1="${tx}" y1="${ty}" x2="${fx}" y2="${fy}" stroke="#2f9e44" stroke-width="1.5" stroke-dasharray="5 4" pointer-events="none"/>`;
+      }
+      svg += `<circle cx="${fx}" cy="${fy}" r="7" fill="none" stroke="#2f9e44" stroke-width="2" pointer-events="none"/>`;
+      svg += `<circle cx="${fx}" cy="${fy}" r="2" fill="#2f9e44" pointer-events="none"/>`;
+      svg += `<text x="${fx + 10}" y="${fy - 9}" font-size="11" font-weight="700" fill="#2f9e44" pointer-events="none">anchor</text>`;
+    }
     if (this.snap) {
       const [sx, sy] = this.worldToScreen(this.snap.x, this.snap.y);
       let label = '';
@@ -8181,7 +8269,7 @@ class Viewer3D {
       // dialog. The hit-disc is invisible but raycastable; tagged with
       // userData.kind === 'threadMark'.
       if (e.button === 0 && doc.mode === '3d' && !doc.faceMode && !doc.curvedPickBody &&
-          !doc.mirrorMode && !doc.alignMode && !doc.cutMode && !doc.jointPickStage) {
+          !doc.mirrorMode && !doc.alignMode && !doc.cutMode && !doc.jointPickStage && !doc.magnetMode) {
         this.raycaster.setFromCamera(ndc(e), this.camera);
         const markTargets = [];
         this.sketchGroup.traverse(o => { if (o.userData?.kind === 'threadMark') markTargets.push(o); });
@@ -8499,6 +8587,50 @@ class Viewer3D {
         // Missed all handles — exit align mode and continue normally
         exitAlignMode();
         // Fall through so the empty-area click also processes (deselect / box-select)
+      }
+      // Magnet — first click: the corner / hole that STAYS PUT (anchor).
+      // Second click: a corner / hole on the part that MOVES; that part
+      // (with its move-together group / multi-selection) jumps so the
+      // two points meet.
+      if (doc.magnetMode && e.button === 0) {
+        this.raycaster.setFromCamera(ndc(e), this.camera);
+        const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false)
+          .filter(h => h.object.userData && h.object.userData.bodyId != null && !h.object.userData.isShell);
+        if (!hits.length) { exitMagnetMode('Magnet cancelled.'); return; }
+        const hit = hits[0];
+        const body = doc.bodies.find(b => b.id === hit.object.userData.bodyId);
+        if (!body) { exitMagnetMode('Magnet cancelled.'); return; }
+        const mm = doc.magnetMode;
+        const feat = magnetFeatureAt(this, hit, body, e);
+        if (!feat) { showHint('Click right on a corner or a hole — the marker lights up when you are on one.'); return; }
+        if (mm.stage === 'anchor') {
+          mm.anchor = feat.point.clone();
+          mm.anchorBodyId = body.id;
+          mm.stage = 'mover';
+          this.showMagnetMarker(mm.anchor, 0x2f9e44, true);
+          setStatus(`Magnet — anchor set on a ${feat.kind}. Now click the corner or hole on the part that should move. Esc cancels.`);
+          return;
+        }
+        if (body.id === mm.anchorBodyId) { showHint('That is the anchor part. Click a corner or hole on the part that should MOVE.'); return; }
+        if (body.locked) { showHint('That part is locked — unlock it in the tree first.'); return; }
+        // Who moves: the clicked body, plus its move-together group, plus
+        // the rest of the multi-selection when the clicked body is in it.
+        const ids = new Set([body.id]);
+        if (body.bodyGroupId != null) for (const b of doc.bodies) if (b.bodyGroupId === body.bodyGroupId) ids.add(b.id);
+        if (doc.multiSelectedBodies?.includes(body.id)) for (const id of doc.multiSelectedBodies) ids.add(id);
+        ids.delete(mm.anchorBodyId);
+        const d = mm.anchor.clone().sub(feat.point);
+        pushUndo();
+        for (const id of ids) {
+          const b = doc.bodies.find(x => x.id === id);
+          if (!b || b.locked) continue;
+          b.x = (b.x || 0) + d.x; b.y = (b.y || 0) + d.y; b.z = (b.z || 0) + d.z;
+        }
+        doc.selection = { kind: 'body', id: body.id };
+        doc.multiSelectedBodies = [...ids];
+        this.rebuildBodies(); this.updateGizmo(); renderTree(); renderProps();
+        exitMagnetMode(`Magnet — moved ${ids.size > 1 ? ids.size + ' parts' : 'the part'} ${fmtUL(d.length())} so the ${feat.kind === 'hole' ? 'holes' : 'corners'} meet.`);
+        return;
       }
       // Joint creation — pivot-to-pivot: click part A's pivot marker, then
       // part B's. B swings; A stays put.
@@ -8868,6 +9000,20 @@ class Viewer3D {
     });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('pointermove', (e) => {
+      // Magnet mode hover — light up the corner / hole under the cursor.
+      if (doc.magnetMode && e.buttons === 0 && e.pointerType !== 'touch') {
+        this.raycaster.setFromCamera(ndc(e), this.camera);
+        const hits = this.raycaster.intersectObjects(this.bodyGroup.children, false)
+          .filter(h => h.object.userData && h.object.userData.bodyId != null && !h.object.userData.isShell);
+        let feat = null;
+        if (hits.length) {
+          const body = doc.bodies.find(b => b.id === hits[0].object.userData.bodyId);
+          if (body) feat = magnetFeatureAt(this, hits[0], body, e);
+        }
+        if (feat) this.showMagnetMarker(feat.point, feat.kind === 'hole' ? 0x7c3aed : 0xf59e0b, false);
+        else this.hideMagnetMarker(false);
+        return;
+      }
       // Touch pinch — zoom by finger distance, pan by midpoint drag
       if (e.pointerType === 'touch' && touch3.has(e.pointerId)) {
         touch3.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -9642,6 +9788,30 @@ class Viewer3D {
     return true;
   }
 
+  // Magnet markers: a hover marker (follows the cursor) and the pinned
+  // anchor. Sized by camera distance so they read the same at any zoom.
+  showMagnetMarker(point, color, pinned) {
+    const key = pinned ? '_magnetAnchor' : '_magnetHover';
+    if (!this[key]) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
+        new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+      m.renderOrder = 50;
+      this.scene.add(m);
+      this[key] = m;
+    }
+    const m = this[key];
+    m.material.color.setHex(color);
+    const r = Math.max(0.6, (this.spherical?.radius || 300) * (pinned ? 0.007 : 0.006));
+    m.scale.setScalar(r);
+    m.position.copy(point);
+    m.visible = true;
+    this.canvas.style.cursor = 'crosshair';
+  }
+  hideMagnetMarker(anchorToo) {
+    for (const key of anchorToo ? ['_magnetHover', '_magnetAnchor'] : ['_magnetHover']) {
+      if (this[key]) this[key].visible = false;
+    }
+  }
   clearAlignWidget() {
     if (!this.alignWidget) return;
     this.scene.remove(this.alignWidget);
@@ -14373,6 +14543,7 @@ function setMode(mode) {
     if (doc.alignMode) exitAlignMode();
     if (doc.cutMode) exitBooleanCut();
     if (doc.mirrorMode) exitMirrorPick();
+    if (doc.magnetMode) exitMagnetMode();
     // Defer by one frame so the SVG has been laid out with non-zero dimensions.
     // The iframe's viewport isn't resolved until the parent page finishes flex layout.
     requestAnimationFrame(() => sketchEng.render());
@@ -18783,13 +18954,20 @@ function openNewSheetDialog() {
   });
 }
 
+// The sheet's 3D frame: Top plane with its ORIGIN at the sheet centre, so
+// parts land around the workplane instead of a quadrant away (the 12×18
+// layout used to sit off to the side of the 8 in grid — ssupgrades video
+// 2026-10-16). Sketch coords stay 0..w × 0..h; v maps to −Z.
+function sheetPlane(wMm, hMm) {
+  return { ...GROUND_PLANE, origin: [-wMm / 2, 0, hMm / 2], name: 'Sheet' };
+}
 function createSheet(wMm, hMm, tMm, label) {
   commitActiveSheetIfAny();
   pushUndo();
   const id = doc.nextSketchId++;
   const n = doc.sketches.filter(s => s.stock).length + 1;
   const sk = {
-    id, plane: { ...GROUND_PLANE, name: 'Sheet' }, entities: [], nextId: 1,
+    id, plane: sheetPlane(wMm, hMm), entities: [], nextId: 1,
     name: `Sheet ${n}`,
     boundary: { type: 'rect', x: 0, y: 0, w: wMm, h: hMm },
     stock: { w: wMm, h: hMm, t: tMm, label: label || '' },
@@ -18883,6 +19061,10 @@ function sheetStats(sk) {
 function syncSheetParts(sk) {
   if (!sk || !sk.stock) return null;
   const t = sk.stock.t;
+  // Sheets saved before centring carry an origin-cornered plane: recentre
+  // (the parts move together, relative poses untouched).
+  const want = sheetPlane(sk.stock.w, sk.stock.h);
+  if (!sk.plane || sk.plane.origin.some((v, i) => Math.abs(v - want.origin[i]) > 1e-6)) sk.plane = want;
   const { regions, graphSketch } = sheetPartRegions(sk);
   const existing = doc.bodies.filter(b => b.type === 'extrude' && b.sheetPart && b.sourceSketchId === sk.id);
   const pairs = [];
@@ -19039,7 +19221,7 @@ document.addEventListener('change', (e) => {
   if (!(v > 0)) { showHint('Needs to be bigger than 0.'); renderProps(); return; }
   pushUndo();
   sk.stock[k] = fromUnit(v);
-  if (k === 'w' || k === 'h') sk.boundary = { type: 'rect', x: 0, y: 0, w: sk.stock.w, h: sk.stock.h };
+  if (k === 'w' || k === 'h') { sk.boundary = { type: 'rect', x: 0, y: 0, w: sk.stock.w, h: sk.stock.h }; sk.plane = sheetPlane(sk.stock.w, sk.stock.h); }
   if (sketchEng) sketchEng.render();
   renderTree(); renderProps();
   setStatus(k === 't' ? `Thickness ${fmtStock(sk.stock.t)} — every part on this sheet will be rebuilt that thick when you click Done.` : `${sk.name} is now ${sheetSizeLabel(sk)}`);
@@ -19420,6 +19602,7 @@ function returnToSelect3D() {
   if (doc.cutMode) { exitBooleanCut('Cut cancelled'); left.push('cut'); }
   if (doc.mirrorMode) { exitMirrorPick('Mirror cancelled'); left.push('mirror'); }
   if (doc.jointPickStage) { exitJointCreation('Joint cancelled'); left.push('joint'); }
+  if (doc.magnetMode) { exitMagnetMode('Magnet cancelled.'); left.push('magnet'); }
   const st = viewer && viewer.extrudeState;
   const tooltipOpen = document.getElementById('extrude-tooltip')?.classList.contains('show');
   if ((st && st.active) || tooltipOpen) {
@@ -19448,6 +19631,71 @@ function startAlignMode() {
     doc.alignMode = false;
   }
 }
+// ── Magnet (3D) ─────────────────────────────────────────────────────────────
+function startMagnetMode() {
+  if (doc.bodies.length < 2) { showHint('Magnet needs two parts: one that stays put and one that moves to it.'); return; }
+  if (doc.mode !== '3d') setMode('3d');
+  if (doc.cutMode) exitBooleanCut();
+  if (doc.mirrorMode) exitMirrorPick();
+  if (doc.alignMode) exitAlignMode();
+  if (doc.jointPickStage) exitJointCreation();
+  if (doc.faceMode) { doc.faceMode = false; }
+  doc.magnetMode = { stage: 'anchor', anchor: null, anchorBodyId: null };
+  if (viewer) viewer.canvas.style.cursor = 'crosshair';
+  document.querySelectorAll('[data-action="magnet-3d"]').forEach(b => b.classList.add('active'));
+  setStatus('Magnet — click the corner or hole that STAYS PUT. Esc cancels.');
+}
+function exitMagnetMode(msg) {
+  doc.magnetMode = null;
+  if (viewer) { viewer.hideMagnetMarker(true); viewer.canvas.style.cursor = ''; }
+  document.querySelectorAll('[data-action="magnet-3d"]').forEach(b => b.classList.remove('active'));
+  if (msg) setStatus(msg);
+}
+// The snap feature nearest the click on a body: a hole mouth (centre of a
+// hole where it meets the clicked face) beats a corner (mesh vertex); both
+// are judged in SCREEN pixels so it works at any zoom. null = nothing close.
+function magnetFeatureAt(viewer, hit, body, e) {
+  const rect = viewer.canvas.getBoundingClientRect();
+  const toScreen = (v) => {
+    const p = v.clone().project(viewer.camera);
+    return { x: (p.x + 1) / 2 * rect.width + rect.left, y: (1 - p.y) / 2 * rect.height + rect.top };
+  };
+  const click = { x: e.clientX, y: e.clientY };
+  const pxTo = (v) => { const sp = toScreen(v); return Math.hypot(sp.x - click.x, sp.y - click.y); };
+  // Holes: the cursor is inside the hole (or on its rim) when its distance
+  // from the hole axis is about the radius or less. The mouth is the axis
+  // point at the clicked face — for a flat sheet part that's ±thickness/2.
+  try {
+    let bestHole = null, bestHoleD = Infinity;
+    for (const cyl of findHoleCylindersInBody(body)) {
+      const d = hit.point.clone().sub(cyl.center);
+      let along = d.dot(cyl.axis);
+      const radial = d.clone().addScaledVector(cyl.axis, -along).length();
+      if (radial > cyl.radius * 1.4 + 0.6) continue;
+      if (body.type === 'extrude' && body.height > 0) along = (along >= 0 ? 1 : -1) * body.height / 2;
+      const mouth = cyl.center.clone().addScaledVector(cyl.axis, along);
+      const dp = pxTo(mouth);
+      if (dp < bestHoleD) { bestHoleD = dp; bestHole = mouth; }
+    }
+    if (bestHole && bestHoleD < 60) return { point: bestHole, kind: 'hole' };
+  } catch (_) {}
+  // Corners: nearest mesh vertex within 14 px of the click.
+  const mesh = hit.object;
+  const pos = mesh.geometry && mesh.geometry.attributes && mesh.geometry.attributes.position;
+  if (!pos) return null;
+  mesh.updateMatrixWorld(true);
+  const v = new THREE.Vector3();
+  let best = null, bestD = 14;
+  const near = Math.max(25, (viewer.spherical?.radius || 300) * 0.12);
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+    if (v.distanceTo(hit.point) > near) continue;
+    const dp = pxTo(v);
+    if (dp < bestD) { bestD = dp; best = v.clone(); }
+  }
+  return best ? { point: best, kind: 'corner' } : null;
+}
+
 function exitAlignMode() {
   doc.alignMode = false;
   if (viewer) viewer.clearAlignWidget();
@@ -28393,6 +28641,7 @@ function init() {
         $('align2d-dropdown').classList.toggle('open');
         break;
       case 'align': startAlignMode(); break;
+      case 'magnet-3d': startMagnetMode(); break;
       case 'joint': startJointCreation(); break;
       case 'orbit-mode': toggleOrbitMode(); break;
       case 'pan-mode': togglePanMode(); break;
@@ -28599,6 +28848,11 @@ function init() {
       if (e.key === 'f' || e.key === 'F') fitSketchViewToBodies();
       if (e.key === 'Enter' && sketchEng.activeLine) sketchEng.finalizeLine(true);
       if (e.key === 'Escape') {
+        // Magnet tool: drop the anchor first
+        if (sketchEng.tool === 'magnet' && sketchEng.magnetAnchor) {
+          sketchEng.magnetAnchor = null;
+          sketchEng.render(); setStatus('Magnet — click the point that stays put (V for Select).'); return;
+        }
         // Cancel mirror axis-pick first if it's active
         if (sketchEng.mirrorAxis) {
           sketchEng.mirrorAxis = null;
@@ -28695,6 +28949,9 @@ function init() {
     // Cancel in-progress joint creation
     if (e.key === 'Escape' && doc.jointPickStage) {
       exitJointCreation('Joint cancelled');
+    }
+    if (e.key === 'Escape' && doc.magnetMode) {
+      exitMagnetMode('Magnet cancelled.');
     }
     // Cancel an in-progress drag-to-extrude (or just close the typing tooltip)
     if (e.key === 'Escape' && doc.mode === '3d') {
