@@ -1022,6 +1022,7 @@
   /* ===== Sketch SVG styling ===== */
   .grid-line { stroke: #d4d9e8; stroke-width: 1; }
   .grid-line.major { stroke: #b8bed4; stroke-width: 1; }
+  .tut-step-img { display: block; width: 100%; height: auto; margin: 0 0 10px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
   .workplane-border {
     fill: none;
     stroke: #9aa0b8;
@@ -4541,10 +4542,13 @@ class SketchEngine {
     // Hit rect — guarantees pointer events register everywhere on the canvas
     svg += `<rect x="0" y="0" width="${w}" height="${h}" fill="white" pointer-events="all"/>`;
 
-    // Grid — spacing from doc.grid.spacing (in mm). Major every 5 minor lines.
+    // Grid — spacing from doc.grid.spacing (in mm). Major (darker) lines mark
+    // the UNIT — every inch in inch mode, every centimeter in mm mode — not
+    // every 5th line (5 × 1/4 in = a meaningless 1¼ in; Charlie 2026-10-16).
     // Clamp to ±size/2 so the grid only fills the workplane.
     const step = doc.grid.spacing;
-    const majorN = 5;
+    const majorUnit = doc.units === 'in' ? 25.4 : 10;
+    const isMajor = (v) => { const r = ((v % majorUnit) + majorUnit) % majorUnit; return r < 1e-6 || majorUnit - r < 1e-6; };
     const minPxBetween = 4;
     const visStep = step * this.view.pxPerMm < minPxBetween ? step * Math.ceil(minPxBetween / (step * this.view.pxPerMm)) : step;
     const visHalfX = Math.ceil((w / 2 + Math.abs(this.view.panX)) / this.view.pxPerMm / visStep) * visStep;
@@ -4565,14 +4569,12 @@ class SketchEngine {
     const [gxR] = this.worldToScreen(halfX, 0);
     for (let x = -halfX + phase(anch.x + halfX); x <= halfX + 1e-6; x += visStep) {
       const [sx] = this.worldToScreen(x, 0);
-      const idx = Math.round((x - anch.x) / visStep);
-      const major = idx % majorN === 0;
+      const major = isMajor(x - anch.x);
       svg += `<line class="grid-line ${major ? 'major' : ''}" x1="${sx}" y1="${gyTop}" x2="${sx}" y2="${gyBot}"/>`;
     }
     for (let y = -halfY + phase(anch.y + halfY); y <= halfY + 1e-6; y += visStep) {
       const [, sy] = this.worldToScreen(0, y);
-      const idx = Math.round((y - anch.y) / visStep);
-      const major = idx % majorN === 0;
+      const major = isMajor(y - anch.y);
       svg += `<line class="grid-line ${major ? 'major' : ''}" x1="${gxL}" y1="${sy}" x2="${gxR}" y2="${sy}"/>`;
     }
     // Workplane border — clearer "edge of the work area"
@@ -14332,8 +14334,14 @@ function setExtrudeTooltipSym(on) {
   extrudeTooltipSym = !!on;
   const b = document.getElementById('extrude-both-btn');
   if (b) b.classList.toggle('active', extrudeTooltipSym);
+  // Re-draw the live preview with the new centering — from the typed value
+  // when the user typed before toggling (st.length only tracks drags).
   const st = viewer?.extrudeState;
-  if (viewer && st && st.length > 0.001 && viewer.extrudeArrows?.visible) viewer.updateExtrudePreview(st.length, st.direction || 1);
+  if (!viewer || !st || !st.region) return;
+  const inp = document.getElementById('extrude-input');
+  const typed = inp ? parseFloat(inp.value) : NaN;
+  const len = (isFinite(typed) && typed > 0) ? fromUnit(typed) : (st.length || 0);
+  if (len > 0.001) viewer.updateExtrudePreview(len, st.direction || 1);
 }
 function setExtrudeTooltipOp(op) {
   extrudeTooltipOp = (op === 'subtract') ? 'subtract' : 'add';
@@ -26413,17 +26421,21 @@ const PROJECTS = [
     skills: ['sketch-toolbox', 'extrude'],
     steps: [
       {
+        img: 'tut/keychain/00-intro.jpg',
         text: 'We’ll draw a ring with a loop on top, put your initials across the middle so they fuse to the ring, then pull it into a tag that stands on its own. Everything comes from one sketch — then you make it yours.',
         manual: true,
         done: () => false,
       },
       {
-        text: 'Click **Sketch** → **Front**. Set the **Grid** to **1/4 in** with **Snap** on. Pick **Circle**, click a point about **1¼ in above the ground line**, click again to place it, then click it with **Select** and set **Radius 1.25**. A 2½-inch ring sitting on the ground.',
+        img: 'tut/keychain/01-outer-circle.png',
+        text: 'Click **Sketch** → **Front**. Set the **Grid** to **1/8 in** with **Snap** on — we stay in eighths the whole way. Pick **Circle**, click a point **1¼ in above the ground line** (10 squares up), click again to place it, then click it with **Select** and set **Radius 1.25**. A 2½-inch ring sitting on the ground.',
         hint: 'Front (not Top) is on purpose: the tag stands up, so later the letters can stick out of both faces.',
         done: (d) => !!_projTagOutline(d),
       },
       {
-        text: '**Circle** again, click the **same center dot**, set **Radius 0.875** (seven-eighths). The band between the two circles is the ring.',
+        img: 'tut/keychain/02-inner-circle.png',
+        text: '**Circle** again, click the **same center dot**, set **Radius 0.875** — seven-eighths, right on the grid. The band between the two circles is the ring.',
+        hint: 'Why 7/8 and not 1? The wider band is what your letters grab onto — a 1-inch middle leaves 1.2-inch letters hanging in the air.',
         done: (d) => {
           const tag = _projTagOutline(d);
           if (!tag) return false;
@@ -26437,7 +26449,8 @@ const PROJECTS = [
         },
       },
       {
-        text: 'The loop: set the **Grid** to **1/8 in**. **Circle** right on the ring at the **top-right**, **Radius 0.2**. Then another at the **same spot**, **Radius 0.1** — the hole the keyring goes through.',
+        img: 'tut/keychain/03-loop.png',
+        text: 'The loop: **Circle** right on the ring at the **top-right**, then click it and **type Radius 0.2** (it’s not a grid size — type it). Another circle at the **same spot**, **Radius 0.1** — the hole the keyring goes through.',
         hint: 'Center the loop ON the outer circle, half in and half out, so the two overlap.',
         done: (d) => {
           const tag = _projTagOutline(d);
@@ -26451,11 +26464,13 @@ const PROJECTS = [
         },
       },
       {
+        img: 'tut/keychain/04-joined-grouped.png',
         text: 'Join them: pick **Trim**, click the piece of the **loop that’s inside the ring**, then the piece of the **ring that’s inside the loop**. One outline. Then drag a box around the whole outline and click **Group** so it moves as one piece.',
         hint: 'Trim shows the piece it will remove in red before you click.',
         done: (d) => _projRingJoined(d),
       },
       {
+        img: 'tut/keychain/05-text-centered.png',
         text: 'Pick **Text**, click in the middle of the ring, type your **initials**, set **Letter height 1.2**, pick a style, **OK**. Then drag a box around **everything** (loop included) and **Align ▾ → Center** — the letters land dead center.',
         hint: 'Two or three initials fit best. They need to reach the ring on both sides but stay inside the outer circle.',
         done: (d) => {
@@ -26466,7 +26481,8 @@ const PROJECTS = [
         },
       },
       {
-        text: 'Make the letters reach the ring: turn **Snap off**, then nudge with the **arrow keys** (a tap is 0.01 in; Shift = 4×) or drag a corner of the letters’ box, until the first and last letters **overlap the inner circle** a little on both sides.',
+        img: 'tut/keychain/06-overlap.png',
+        text: 'Make the letters reach the ring: turn **Snap off**, then nudge with the **arrow keys** (a tap is 0.01 in; Shift = 4×) or drag a corner of the letters’ box, until the first and last letters **overlap the inner circle** on both sides — about 1/16 in. That overlap is the glue: too little and a letter snaps off the ring.',
         hint: 'Narrow initials? Raise **Letter height** or **Spacing** in Properties until they touch both sides. Poking out past the outer circle? Make them a little smaller. The overlap is what fuses them to the ring.',
         done: (d) => {
           const ic = _projInnerCircle(d), tb = _projTextBox(d);
@@ -26475,16 +26491,19 @@ const PROJECTS = [
         },
       },
       {
+        img: 'tut/keychain/07-inner-trimmed.png',
         text: 'Pick **Trim** and click each piece of the **inner circle that runs through a letter** — one click per piece — so the letters open into the ring. Then click **← Done**.',
         hint: 'Four clicks for two initials, usually. Leave the arcs between the letters alone.',
         done: (d) => d.mode === '3d' && !_projInnerCircle(d) && _projOpenCount(d) >= 2,
       },
       {
+        img: 'tut/keychain/08-ring.jpg',
         text: 'Click the **ring**, type **0.2**, click **⇔ Both sides**, then **＋ Add** and **Done**. Both sides grows the ring half in front of the sketch and half behind it.',
         hint: 'Only the ring comes up — the letters and the middle stay open.',
         done: (d) => _projRaised(d, 4, 7, f => f.L >= 50 && f.holes >= 1),
       },
       {
+        img: 'tut/keychain/09-letters.jpg',
         text: 'Click **one letter** — the whole word selects — type **0.4**, **⇔ Both sides** again, **＋ Add**, **Done**. Twice the ring’s thickness, centered the same way: the letters stand proud of both faces.',
         hint: 'Pulled the ring one way instead? Pull the letters 0.4 one way too, then Shift-click ring + letters, **Align**, middle dot of the front/back axis.',
         done: (d) => {
@@ -26498,10 +26517,12 @@ const PROJECTS = [
         },
       },
       {
+        img: 'tut/keychain/10-side.jpg',
         text: 'Check the letters are centered through the ring: orbit to the side — they should stick out the same amount front and back. (If you pulled them one way, Shift-click ring + letters, **Align**, middle dot of the front/back axis.)',
         done: (d) => _projLettersCentered(d),
       },
       {
+        img: 'tut/keychain/11-final.jpg',
         text: 'Hide the sketch (click its **eye** in the tree), **Shift-click** the ring and the letters, click **Group** — one solid. Name it, press ☁ **Save**, then **Export ▾ → STL**. 🔑',
         hint: 'Make it yours first: a script font, your whole name, a heart instead of a ring.',
         done: (d, ev) => !!ev.exported,
@@ -26825,6 +26846,7 @@ function _renderTutorialPanel() {
         ${t.intro && _tutStep === 0 ? `<div style="font-size:13.5px;color:#475569;margin-bottom:8px">${_apEsc(t.intro)}</div>` : ''}
         <div class="tut-step-big" data-step="${_tutStep}">${_tutFmt(cur.text)}</div>
         ${cur.svg ? `<div style="margin:0 0 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px 3px">${cur.svg}</div>` : ''}
+        ${cur.img ? `<img class="tut-step-img" src="${_apEsc(cur.img)}" alt="" loading="lazy" decoding="async" title="What this step looks like">` : ''}
         ${cur.hint ? `<div class="tut-hint-line">💡 ${_apEsc(cur.hint)}</div>` : ''}
         <div class="tut-nav">
           <button class="tut-exit" id="tp-back" ${_tutStep === 0 ? 'disabled' : ''} title="Back to the previous step">◀ Back</button>
