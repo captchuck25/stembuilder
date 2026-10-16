@@ -2727,7 +2727,9 @@ class SketchEngine {
     return pts;
   }
 
-  computeSnap(wx, wy, ignoreId = null) {
+  computeSnap(wx, wy, ignoreId = null, opts = null) {
+    // opts.noGrid: skip the grid candidate — used when the click must land
+    // on a drawn shape (Magnet's second click, ssissues video 2026-10-16).
     // Snap behaviour by grid-snap toggle:
     //   ON  → grid + KEY FEATURE points only (endpoint, midpoint,
     //         intersection, center, face corner / mid, origin). The
@@ -2925,7 +2927,7 @@ class SketchEngine {
     // grid wins. This is what makes 'place a thread mark on the midpoint
     // of a construction line' work even if that midpoint doesn't fall
     // on a grid intersection.
-    if (snapOn) {
+    if (snapOn && !(opts && opts.noGrid)) {
       const step = doc.grid.spacing;
       // Same face-corner phase as the rendered grid (sk.gridAnchor) — snap
       // points must land exactly on the lines the user sees.
@@ -3362,7 +3364,7 @@ class SketchEngine {
 
     const [wx, wy] = this.pointerWorld(e);
     const snap = this.computeSnap(wx, wy);
-    const px = snap ? snap.x : wx, py = snap ? snap.y : wy;
+    let px = snap ? snap.x : wx, py = snap ? snap.y : wy;
 
     // If the active sketch is locked, block any creation / edit tool. We
     // allow only the Select tool, which falls through to passive selection
@@ -3858,9 +3860,19 @@ class SketchEngine {
         this.render();
         return;
       }
-      // Second click: which shape owns this point? The shape under the
-      // cursor; if it's part of the current selection, the whole selection
-      // moves together (letters of a word always travel together).
+      // Second click: a corner / midpoint / center ON a shape — never the
+      // grid (with snap on, a grid point near the shape used to win and
+      // nothing moved; ssissues video 2026-10-16). Re-snap features-only.
+      const FEAT = new Set(['endpoint', 'midpoint', 'center', 'intersection', 'face-corner', 'face-mid']);
+      const s2 = this.computeSnap(wx, wy, null, { noGrid: true });
+      if (!s2 || !FEAT.has(s2.kind)) {
+        showHint('Click right on a corner, midpoint or center of the shape that should move — the marker shows when you are on one.');
+        return;
+      }
+      px = s2.x; py = s2.y;
+      // Which shape owns this point? The shape under it; if it's part of the
+      // current selection, the whole selection moves together (letters of a
+      // word always travel together).
       const hitEnt = this.hitTest(px, py) || this.hitTest(wx, wy);
       if (!hitEnt || hitEnt.facePerimeter) {
         showHint('Click a corner, midpoint or center ON the shape that should move.');
@@ -4154,7 +4166,9 @@ class SketchEngine {
     // Magnet tool — always show the snap target (and the rubber-band back
     // to the anchor once it's set).
     if (this.tool === 'magnet' && !this.dragMode) {
-      this.snap = this.computeSnap(wx, wy);
+      // Anchor may be a grid point; the mover must be a shape feature.
+      this.snap = this.magnetAnchor ? this.computeSnap(wx, wy, null, { noGrid: true }) : this.computeSnap(wx, wy);
+      if (this.magnetAnchor && this.snap && (this.snap.kind === 'edge' || this.snap.kind === 'face-edge')) this.snap = null;
       this.scheduleRender();
       return;
     }
@@ -8001,7 +8015,10 @@ class Viewer3D {
     window.addEventListener('pagehide', this._teardown);
 
     // lighting
-    const amb = new THREE.AmbientLight(0xffffff, 0.38); this.scene.add(amb);
+    // Ambient + the back fill were raised 2026-10-16 (ssissues video: the
+    // dark side of an assembly was too dim to work on); a third soft fill
+    // from the front-left covers the faces neither key light reaches.
+    const amb = new THREE.AmbientLight(0xffffff, 0.5); this.scene.add(amb);
     const dir = new THREE.DirectionalLight(0xffffff, 1.05);
     dir.position.set(120, 220, 160);
     dir.castShadow = true;
@@ -8009,8 +8026,10 @@ class Viewer3D {
     dir.shadow.camera.left = -300; dir.shadow.camera.right = 300;
     dir.shadow.camera.top = 300; dir.shadow.camera.bottom = -300;
     this.scene.add(dir);
-    const dir2 = new THREE.DirectionalLight(0xb0c5ff, 0.22);
+    const dir2 = new THREE.DirectionalLight(0xb0c5ff, 0.42);
     dir2.position.set(-150, 80, -120); this.scene.add(dir2);
+    const dir3 = new THREE.DirectionalLight(0xffffff, 0.28);
+    dir3.position.set(-90, 140, 200); this.scene.add(dir3);
 
     // Workplane visuals — a sized grid + border, rebuilt when doc.grid.size changes
     this.workplaneGroup = new THREE.Group();
@@ -19770,7 +19789,16 @@ function groupSelected(skipUndo) {
       return;
     }
     if (doc.multiSelectedBodies.some(id => doc.bodies.find(b => b.id === id)?.sheetPart)) {
-      showHint('📄 Sheet parts stay separate pieces (each one is cut out of the sheet). Use Joint to pin them together, or Shift-click to move several at once.');
+      // Sheet parts stay separate pieces (each is cut from the sheet), so
+      // Group here means MOVE TOGETHER: one click selects them all, a drag
+      // or Magnet moves them all. Nothing on the sheet changes. Ungroup
+      // splits them again. (Charlie, ssissues video 2026-10-16.)
+      pushUndo();
+      const gid = Math.max(0, ...doc.bodies.map(b => b.bodyGroupId || 0)) + 1;
+      const ids = [...doc.multiSelectedBodies];
+      for (const id of ids) { const b = doc.bodies.find(x => x.id === id); if (b) b.bodyGroupId = gid; }
+      renderTree(); renderProps();
+      setStatus(`Grouped ${ids.length} parts to move together — click any one to grab them all. Ungroup splits them again. The sheet is unchanged.`);
       return;
     }
     if (!skipUndo) pushUndo();
@@ -19980,6 +20008,15 @@ function ungroupSelected() {
   if (doc.mode === '3d') {
     // Restore the children of any selected group bodies (reverses the boolean)
     if (!doc.multiSelectedBodies?.length) { showHint('Select a group first.'); return; }
+    // Move-together groups (sheet parts): just unlink them.
+    const linked = doc.multiSelectedBodies.map(id => doc.bodies.find(b => b.id === id)).filter(b => b && b.bodyGroupId != null);
+    if (linked.length && !doc.multiSelectedBodies.some(id => doc.bodies.find(b => b.id === id)?.type === 'group')) {
+      pushUndo();
+      for (const b of linked) delete b.bodyGroupId;
+      renderTree(); renderProps();
+      setStatus(`Ungrouped ${linked.length} parts — they move on their own again.`);
+      return;
+    }
     pushUndo();
     const ids = [...doc.multiSelectedBodies];
     const newSelection = [];
@@ -21912,7 +21949,8 @@ function renderTree() {
                 body.type === 'teardrop' ? '💧' :
                 body.type === 'combined' ? '⊕' :
                 body.type === 'group' ? '⊞' : '▣';
-    const negTag = body.op === 'subtract' ? ' <span style="color:#e53e3e;font-size:10px">(neg)</span>' : '';
+    const negTag = (body.op === 'subtract' ? ' <span style="color:#e53e3e;font-size:10px">(neg)</span>' : '') +
+                   (body.bodyGroupId != null ? ` <span style="color:var(--ink-soft);font-size:10px" title="Moves together with the other parts in group ${body.bodyGroupId}">⛓${body.bodyGroupId}</span>` : '');
     const eye = body.hidden ? '◌' : '◉';
     const eyeTitle = body.hidden ? 'Show body' : 'Hide body';
     const lock = body.locked ? '🔒' : '🔓';
@@ -28851,8 +28889,9 @@ function init() {
         // Magnet tool: drop the anchor first
         if (sketchEng.tool === 'magnet' && sketchEng.magnetAnchor) {
           sketchEng.magnetAnchor = null;
-          sketchEng.render(); setStatus('Magnet — click the point that stays put (V for Select).'); return;
+          sketchEng.render(); setStatus('Magnet — click the point that stays put (Esc again for Select).'); return;
         }
+        if (sketchEng.tool === 'magnet') { sketchEng.setTool('select'); return; }
         // Cancel mirror axis-pick first if it's active
         if (sketchEng.mirrorAxis) {
           sketchEng.mirrorAxis = null;
