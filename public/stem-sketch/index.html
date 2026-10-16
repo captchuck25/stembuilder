@@ -1517,7 +1517,7 @@
         <button class="tool" data-action="sketch-on-face" title="Sketch on a Face — click then pick a face"><svg class="ico"><use href="#i-sketch-on-face"/></svg><span class="tool-label">On Face</span></button>
         <button class="tool" data-action="revolve" title="Revolve — spin a sketch profile around its vertical center line into a 3D body. Open a sketch (Front works best), draw the outline with the Line tool, then Revolve."><svg class="ico"><use href="#i-revolve"/></svg><span class="tool-label">Revolve</span></button>
         <!-- Soften tucked away 2026-09-03 (Charlie: "it needs to either work or not work") — engine stays so saved designs still render -->
-        <button class="tool" data-action="soften-pick" hidden title="Soften — click near the top or bottom edge of an extruded piece to pick that whole rim (click more edges to add). Then set a radius to round them. Works on pieces inside groups too."><svg class="ico"><use href="#i-soften"/></svg><span class="tool-label">Soften</span></button>
+        <button class="tool" data-action="soften-pick" hidden style="display:none" title="Soften — click near the top or bottom edge of an extruded piece to pick that whole rim (click more edges to add). Then set a radius to round them. Works on pieces inside groups too."><svg class="ico"><use href="#i-soften"/></svg><span class="tool-label">Soften</span></button>
         <!-- 3D Fillet temporarily hidden — the CSG-prism approach (enterBevelPickMode /
              _bevelOnce / applyBevelsBatch) is preserved in the JS but pulled from the
              toolbar pending a composite-tool rewrite. STEM workflow: round corners in
@@ -26336,6 +26336,9 @@ function _tutMarkDone(id) {
 // aren't asked to type 50.8.
 const _tutNear = (v, target, tol = 1.5) => Math.abs(v - target) <= tol;
 const _tutIs2in = (v) => _tutNear(v, 2 * TUT_IN) || _tutNear(v, 50);
+// Any size: the imperial target (inches) OR a round metric sibling (mm), so
+// mm-mode classes type 75, not 76.2. tol is in mm.
+const _tutInOrMm = (v, inches, mm, tol = 1.5) => _tutNear(v, inches * TUT_IN, tol) || (mm != null && _tutNear(v, mm, tol));
 const _tutSolids = (d, type) => d.bodies.filter(b => b.type === type && b.op !== 'subtract' && !b.hidden);
 // Snowman checks: all three axes at the inch target (or a round-5mm metric
 // sibling), and elevation — body.y is the BOTTOM offset above the workplane,
@@ -26616,6 +26619,139 @@ const TUTORIALS = [
       {
         text: 'Click **Revolve** in the toolbar and click **OK** — your outline spins all the way around into a solid vase. Orbit around it and admire your work. 🏺',
         done: (d) => d.bodies.some(b => b.type === 'revolve'),
+      },
+    ],
+  },
+  // ── Unit 4 — Building Real Parts ───────────────────────────────────────────
+  // Four coherent builds (a mallet, a pencil tray, an L-bracket, a goal post).
+  // Every size has an imperial target and a round-metric sibling so mm-mode
+  // classes aren't asked to type 76.2.
+  {
+    id: 'group-it',
+    unit: 4,
+    title: 'Group It',
+    intro: 'Real parts are usually a few shapes stuck together. Group turns them into ONE part — and Ungroup takes it apart again.',
+    steps: [
+      {
+        text: 'Add a **Cylinder** from the Primitive menu. In the **Properties** panel set **Width 0.75**, **Depth 0.75**, and **Height 3** (press Enter after each) — a handle standing up on the grid.',
+        done: (d) => _tutSolids(d, 'cylinder').some(b => _tutInOrMm(b.w, 0.75, 20) && _tutInOrMm(b.d, 0.75, 20) && _tutInOrMm(b.h, 3, 75, 2)),
+      },
+      {
+        text: 'Add a **Cube**. Set **Width 2.5**, **Height 1**, **Depth 1**, then set **Z 3** — it lifts up and sits right on top of the handle. A mallet! 🔨',
+        hint: 'Z is the box under Position. 3 = the height of the handle, so the head rests on it.',
+        done: (d) => _tutSolids(d, 'cube').some(b => _tutInOrMm(b.w, 2.5, 60, 2) && _tutInOrMm(b.h, 1, 25) && _tutInOrMm(b.d, 1, 25) && _tutInOrMm(b.y || 0, 3, 75, 2)),
+      },
+      {
+        text: 'Click the handle, then **hold Shift** and click the head — both light up. Now click **Group** in the toolbar. In the **BODIES** list on the left they become one line: **Group (2)**.',
+        done: (d) => d.bodies.some(b => b.type === 'group' && _projFindBody(b.children, c => c.type === 'cylinder') && _projFindBody(b.children, c => c.type === 'cube')),
+      },
+      {
+        text: 'Click the mallet. In **Properties** set **X 2** and press Enter — the whole mallet slides over as one piece. That’s the point of a group.',
+        done: (d) => d.bodies.some(b => b.type === 'group' && _tutInOrMm(b.x || 0, 2, 50, 3)),
+      },
+      {
+        text: 'Changed your mind? With the mallet selected click **Ungroup** — the handle and head come back as two separate bodies, exactly where they were.',
+        done: (d) => !d.bodies.some(b => b.type === 'group') && _tutSolids(d, 'cylinder').length >= 1 && _tutSolids(d, 'cube').length >= 1,
+      },
+    ],
+  },
+  {
+    id: 'add-and-subtract',
+    unit: 4,
+    title: 'Add and Subtract',
+    intro: 'A Negative body is a cutting shape. Overlap it with a solid, group the two, and the Negative carves its shape out — that’s how you hollow and notch.',
+    steps: [
+      {
+        text: 'Add a **Cube** from the Primitive menu and set **Width 4**, **Height 1**, **Depth 2** (press Enter after each). A solid block — this will become a pencil tray.',
+        done: (d) => _tutSolids(d, 'cube').some(b => _tutInOrMm(b.w, 4, 100, 2) && _tutInOrMm(b.h, 1, 25) && _tutInOrMm(b.d, 2, 50)),
+      },
+      {
+        text: 'Add a **second Cube** and set **Width 3.5**, **Height 1**, **Depth 1.5**, then **Z 0.25**. It pokes out the top of the block — that’s fine. It will cut only where the two overlap.',
+        hint: 'Z 0.25 lifts it a quarter inch, so the tray keeps a floor.',
+        done: (d) => d.bodies.some(b => b.type === 'cube' && _tutInOrMm(b.w, 3.5, 90, 2) && _tutInOrMm(b.h, 1, 25) && _tutInOrMm(b.d, 1.5, 40, 2) && _tutInOrMm(b.y || 0, 0.25, 5, 1.5)),
+      },
+      {
+        text: 'With the second cube still selected, scroll the **Properties** panel to **Operation** and set **Type → Negative (cut-out)**. It turns red: a cutting shape.',
+        done: (d) => d.bodies.some(b => b.type === 'cube' && b.op === 'subtract' && _tutInOrMm(b.w, 3.5, 90, 2)),
+      },
+      {
+        text: 'Click the block, **hold Shift** and click the red cube, then click **Group**. The inside is carved out. Orbit around and look in — a tray with a quarter-inch floor.',
+        done: (d) => d.bodies.some(b => b.type === 'group' &&
+          _projFindBody(b.children, c => c.type === 'cube' && c.op !== 'subtract' && _tutInOrMm(c.w, 4, 100, 2)) &&
+          _projFindBody(b.children, c => c.type === 'cube' && c.op === 'subtract')),
+      },
+      {
+        text: 'Now a finger notch. Add a **Cylinder**, set **Width 1**, **Depth 1**, **Height 1**, then **Y 1** so it sits half on the front edge of the tray. Set its **Type → Negative (cut-out)**. Shift-click the tray and the red cylinder, then **Group** — a round scoop in the front wall. 🖊️',
+        hint: 'If the cylinder lands on the back edge instead, type Y -1.',
+        done: (d) => d.bodies.some(b => b.type === 'group' &&
+          _projFindBody(b.children, c => c.type === 'cylinder' && c.op === 'subtract' && _tutInOrMm(c.w, 1, 25, 2))),
+      },
+    ],
+  },
+  {
+    id: 'smooth-the-edges',
+    unit: 4,
+    title: 'Smooth the Edges',
+    intro: 'Sharp corners snag, crack, and look unfinished. Round the corners of a shape you drew yourself — outside AND inside — then extrude it.',
+    steps: [
+      {
+        text: 'Click **Sketch** → **Top**. Pick the **Line** tool and click the six corners of the L in the picture, starting at the **center point** of the grid: **right 3**, **up 1**, **left 2**, **up 1**, **left 1**, then click the **start point** again to close it.',
+        hint: 'Each click adds a corner. With Snap on, every point lands on a quarter-inch grid line.',
+        svg: `<svg viewBox="0 0 230 150" style="width:100%;height:auto;display:block">
+          <polyline points="30,120 174,120 174,84 102,84 102,48 30,48 30,120" fill="#dcfce7" stroke="#16a34a" stroke-width="3" stroke-linejoin="round"/>
+          <circle cx="30" cy="120" r="4.5" fill="#dc2626"/>
+          ${[[174,120,'2'],[174,84,'3'],[102,84,'4'],[102,48,'5'],[30,48,'6']].map(([x,y,n]) => `<circle cx="${x}" cy="${y}" r="3.2" fill="#16a34a"/><text x="${x + 6}" y="${y - 5}" font-size="9" fill="#15803d">${n}</text>`).join('')}
+          <text x="14" y="133" font-size="9" fill="#dc2626">start</text>
+          <line x1="30" y1="136" x2="174" y2="136" stroke="#64748b" stroke-width="1"/><text x="94" y="147" font-size="10" fill="#475569">3 in</text>
+          <line x1="190" y1="84" x2="190" y2="120" stroke="#64748b" stroke-width="1"/><text x="195" y="106" font-size="10" fill="#475569">1 in</text>
+          <line x1="16" y1="48" x2="16" y2="120" stroke="#64748b" stroke-width="1"/><text x="2" y="88" font-size="10" fill="#475569">2</text>
+          <line x1="30" y1="36" x2="102" y2="36" stroke="#64748b" stroke-width="1"/><text x="56" y="32" font-size="10" fill="#475569">1 in</text>
+        </svg>`,
+        done: (d) => _tutSketchHas(d, e => {
+          if (e.type !== 'polyline' || !e.closed || !Array.isArray(e.points)) return false;
+          if (e.points.length < 6 || e.points.length > 9) return false;
+          const xs = e.points.map(p => p.x), ys = e.points.map(p => p.y);
+          const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+          return (_tutInOrMm(w, 3, 75, 4) && _tutInOrMm(h, 2, 50, 4)) || (_tutInOrMm(h, 3, 75, 4) && _tutInOrMm(w, 2, 50, 4));
+        }),
+      },
+      {
+        text: 'Pick **Fillet** and click the **three corners** marked in the picture — the two tips of the L and the **inside** corner (each gets a dot). Press **Enter**, type **0.25**, and click **Apply**. Inside corners round just like outside ones.',
+        svg: `<svg viewBox="0 0 230 110" style="width:100%;height:auto;display:block">
+          <polyline points="30,100 174,100 174,64 102,64 102,28 30,28 30,100" fill="#dcfce7" stroke="#16a34a" stroke-width="3" stroke-linejoin="round"/>
+          ${[[174,64],[102,64],[102,28]].map(([x,y]) => `<circle cx="${x}" cy="${y}" r="6" fill="#f97316" stroke="#fff" stroke-width="1.5"/>`).join('')}
+          <text x="108" y="60" font-size="9" fill="#9a3412">inside corner</text>
+        </svg>`,
+        done: (d) => _tutSketchHas(d, e => e.type === 'polyline' && e.closed && (e.points || []).length >= 30),
+      },
+      {
+        text: 'Click **← Done**. Back in 3D, click **inside** the L, type **0.5** in the pop-up, and click **Done** — a half-inch-thick bracket with smooth corners.',
+        done: (d) => d.mode === '3d' && _projFindBody(d.bodies, b => b.type === 'extrude' && b.op !== 'subtract' && _tutInOrMm(b.height, 0.5, 12, 2)),
+      },
+    ],
+  },
+  {
+    id: 'mirror-a-body',
+    unit: 4,
+    title: 'Mirror a Body',
+    intro: 'Lots of parts are symmetrical. Build one half, mirror it, and the other half is exact — no measuring twice.',
+    steps: [
+      {
+        text: 'Add a **Cube** from the Primitive menu. Set **Width 1**, **Height 3**, **Depth 1**, then set **X 1.5** — a tall post standing to the right of center.',
+        done: (d) => _tutSolids(d, 'cube').some(b => _tutInOrMm(b.w, 1, 25) && _tutInOrMm(b.h, 3, 75, 2) && _tutInOrMm(b.d, 1, 25) && _tutInOrMm(b.x || 0, 1.5, 40, 3)),
+      },
+      {
+        text: 'With the post selected, click **Mirror** in the toolbar. Three see-through planes appear around it — click the **red** one. A twin post appears on the left, the same distance from the center.',
+        hint: 'Red = the YZ plane, the wall that stands at X 0. Mirroring across it flips left and right.',
+        done: (d) => _tutSolids(d, 'cube').some(b => b.mirrored && _tutInOrMm(-(b.x || 0), 1.5, 40, 3)),
+      },
+      {
+        text: 'Add one more **Cube** for the crossbar: **Width 4**, **Height 0.75**, **Depth 1**, then **Z 3** — it rests across the tops of both posts.',
+        done: (d) => _tutSolids(d, 'cube').some(b => _tutInOrMm(b.w, 4, 100, 2) && _tutInOrMm(b.h, 0.75, 20, 1.5) && _tutInOrMm(b.d, 1, 25) && _tutInOrMm(b.y || 0, 3, 75, 2)),
+      },
+      {
+        text: 'Click one post, then **hold Shift** and click the other post and the crossbar. Click **Group** — one goal post, ready to print. 🥅',
+        done: (d) => d.bodies.some(b => b.type === 'group' && Array.isArray(b.children) && b.children.filter(c => c.type === 'cube').length >= 3),
       },
     ],
   },
@@ -27081,12 +27217,12 @@ const TUT_UNIT_TITLES = {
   1: '🧭 Unit 1 — Getting Around',
   2: '✏️ Unit 2 — Sketching',
   3: '🧱 Unit 3 — Sketch to Solid',
+  4: '🔧 Unit 4 — Building Real Parts',
 };
 // Units that exist in the ladder but aren't authored yet — listed in the
 // picker as "coming soon" so students see the road ahead. Mirrors
 // lib/stem-sketch/tutorials.ts.
 const TUT_COMING_UNITS = [
-  '🔧 Unit 4 — Building Real Parts',
   '🔩 Unit 5 — Hardware',
   '🖨️ Unit 6 — Assemblies & Sharing',
 ];

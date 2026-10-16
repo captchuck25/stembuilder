@@ -70,10 +70,10 @@ export const SKETCH_TUTORIALS: SketchTutorial[] = [
   { id: "cut-a-hole", unit: 3, title: "Cut a Hole", blurb: "Sketch a circle on a cube's face and punch it all the way through.", stepCount: 4, ready: true },
   { id: "revolve", unit: 3, title: "Revolve", blurb: "Draw half a vase on a Front sketch and spin it into a solid.", stepCount: 3, ready: true },
   // ── Unit 4 — Building Real Parts ───────────────────────────────────────────
-  { id: "add-and-subtract", unit: 4, title: "Add and Subtract", blurb: "Use negative shapes to hollow and notch a body.", stepCount: 0, ready: false },
-  { id: "group-it", unit: 4, title: "Group It", blurb: "Combine bodies into one part — and take them apart again.", stepCount: 0, ready: false },
-  { id: "smooth-the-edges", unit: 4, title: "Smooth the Edges", blurb: "Round off corners with fillets before you extrude.", stepCount: 0, ready: false },
-  { id: "mirror-a-body", unit: 4, title: "Mirror a Body", blurb: "Build one half, mirror the other.", stepCount: 0, ready: false },
+  { id: "group-it", unit: 4, title: "Group It", blurb: "Stack a handle and a head into a mallet, group it, move it as one, then take it apart.", stepCount: 5, ready: true },
+  { id: "add-and-subtract", unit: 4, title: "Add and Subtract", blurb: "Hollow a block into a pencil tray with a Negative cube, then scoop a finger notch.", stepCount: 5, ready: true },
+  { id: "smooth-the-edges", unit: 4, title: "Smooth the Edges", blurb: "Draw an L with the Line tool, fillet its tips and inside corner, extrude a bracket.", stepCount: 3, ready: true },
+  { id: "mirror-a-body", unit: 4, title: "Mirror a Body", blurb: "Build one post, mirror it across the center, add a crossbar, group a goal post.", stepCount: 4, ready: true },
   // ── Unit 5 — Hardware ──────────────────────────────────────────────────────
   { id: "bolt-holes", unit: 5, title: "Bolt Holes", blurb: "Put correctly-sized holes in a plate with the Bolt Holes tool.", stepCount: 0, ready: false },
   { id: "insert-a-bolt", unit: 5, title: "Insert a Bolt", blurb: "Pull a real fastener from the library and size it to your part.", stepCount: 0, ready: false },
