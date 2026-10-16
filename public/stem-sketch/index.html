@@ -27268,7 +27268,7 @@ const PROJECTS = [
         done: (d) => _projFindBody(d.bodies, b => b.type === 'revolve'),
       },
       {
-        img: 'tut/pen/06-channel-props.png',
+        img: 'tut/pen/06-channel-props.jpg',
         text: 'Now the channel for the ink. Add a **Cylinder** from the Primitive menu — it drops in at the center, so it may be hidden inside your pen: find it in the **BODIES** list on the left and click **Cylinder** there. In **Properties**, set **Width 0.16**, **Depth 0.16** and **Height 5** — the refill is 0.152 across, and the extra 0.008 is clearance so it slides in. Under **Operation**, set **Type** to **Negative (cut-out)**; it turns red.',
         hint: 'Clearance is the gap between a part and the hole it fits in. Too little and it jams; too much and it rattles.',
         done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
@@ -27320,7 +27320,7 @@ const PROJECTS = [
           (_tutNear(b.height, 7 * TUT_IN, 2) || _tutNear(b.height, 180, 2))),
       },
       {
-        img: 'tut/square-pen/03-channel-props.png',
+        img: 'tut/square-pen/03-channel-props.jpg',
         text: 'The ink channel, same as the revolved pen: add a **Cylinder** from the Primitive menu (it drops in at the center — if it’s hidden inside the pen, click **Cylinder** in the **BODIES** list on the left), set **Width 0.16**, **Depth 0.16**, **Height 5**, and Operation **Type → Negative (cut-out)**.',
         hint: 'The refill is 0.152 across; 0.16 gives it 0.008 of clearance so it slides in without rattling.',
         done: (d) => _projFindBody(d.bodies, _projIsInkChannel),
