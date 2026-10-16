@@ -10961,10 +10961,30 @@ function buildPlanarGraph(entities, boundary, extraSegs) {
   }
   // Dedupe identical undirected edges
   const seen = new Set();
-  const edges = [];
+  let edges = [];
   for (const e of rawEdges) {
     const k = e.a < e.b ? `${e.a},${e.b}` : `${e.b},${e.a}`;
     if (!seen.has(k)) { seen.add(k); edges.push(e); }
+  }
+  // PRUNE SHORT TAILS. Two trimmed arcs that should meet end-to-end (a loop
+  // joined to a ring) re-tessellate a hair differently from the chords the
+  // trim cut them on, so they cross a fraction of a mm before their ends:
+  // a tiny X with two dangling stubs. The face tracer then splits the loop
+  // bump off as its own face and the ring comes up without its loop
+  // (Charlie 2026-10-16). A dangling edge never bounds a face, so drop any
+  // stub under 1.5 mm hanging off a degree-1 node (iterate: stubs can be
+  // two segments long).
+  for (let pass = 0; pass < 6; pass++) {
+    const deg = new Map();
+    for (const e of edges) { deg.set(e.a, (deg.get(e.a) || 0) + 1); deg.set(e.b, (deg.get(e.b) || 0) + 1); }
+    const keep = edges.filter(e => {
+      const tip = deg.get(e.a) === 1 ? e.a : (deg.get(e.b) === 1 ? e.b : -1);
+      if (tip < 0) return true;
+      const A = nodes[e.a], B = nodes[e.b];
+      return Math.hypot(A.x - B.x, A.y - B.y) >= 1.5;
+    });
+    if (keep.length === edges.length) break;
+    edges = keep;
   }
   return { nodes, edges };
 }
@@ -26450,8 +26470,8 @@ const PROJECTS = [
       },
       {
         img: 'tut/keychain/03-loop.png',
-        text: 'The loop: **Circle** right on the ring at the **top-right**, then click it and **type Radius 0.2** (it’s not a grid size — type it). Another circle at the **same spot**, **Radius 0.1** — the hole the keyring goes through.',
-        hint: 'Center the loop ON the outer circle, half in and half out, so the two overlap.',
+        text: 'The loop: pick **Circle** and click the grid point **8 squares right and 8 squares up** from the ring’s center (1 in over, 1 in up — just outside the top-right of the ring). Set **Radius 0.25**. Another circle at the **same spot**, **Radius 0.125** — the hole the keyring goes through.',
+        hint: 'The loop should bite into the ring a little — that overlap is what the Trim in the next step joins.',
         done: (d) => {
           const tag = _projTagOutline(d);
           if (!tag) return false;
@@ -26460,7 +26480,7 @@ const PROJECTS = [
           for (const sk of (d.sketches || [])) for (const e of (sk.entities || [])) if (e.type === 'circle' && !e.construction && e !== tag.e) circles.push(e);
           return circles.some(o => o.r >= 4 && o.r <= 10 &&
             circles.some(i => i !== o && i.r >= 2 && i.r < o.r - 1 && Math.hypot(i.cx - o.cx, i.cy - o.cy) < 1.5) &&
-            (() => { const dd = Math.hypot(o.cx - tag.bb.cx, o.cy - tag.bb.cy); return dd > R - o.r - 2 && dd < R + o.r - 2; })());
+            (() => { const dd = Math.hypot(o.cx - tag.bb.cx, o.cy - tag.bb.cy); return dd > R - o.r - 2 && dd < R + o.r - 1; })());
         },
       },
       {
