@@ -4556,6 +4556,11 @@ class SketchEngine {
     const wpHalf = doc.grid.size / 2;
     const halfX = Math.min(visHalfX, wpHalf);
     const halfY = Math.min(visHalfY, wpHalf);
+    // Grid extents. A SHEET's grid is the sheet itself (0..w × 0..h) — the
+    // material is the work area, not an 8" square around the origin.
+    const stockG = doc.sketch.stock;
+    let gx0 = -halfX, gx1 = halfX, gy0 = -halfY, gy1 = halfY;
+    if (stockG) { gx0 = 0; gx1 = stockG.w; gy0 = 0; gy1 = stockG.h; }
     // Grid phase: face sketches anchor the grid to the face's bbox corner
     // (sk.gridAnchor, set in createSketchOnPlane) so block edges land ON grid
     // lines even though the plane origin is at the face center. No anchor
@@ -4563,22 +4568,23 @@ class SketchEngine {
     const anch = doc.sketch.gridAnchor || { x: 0, y: 0 };
     const phase = (a) => ((a % visStep) + visStep) % visStep;
     // Y-extent of grid lines along the X-grid (vertical lines): clamp to [-halfY, halfY] in world coords
-    const [, gyTop] = this.worldToScreen(0, halfY);
-    const [, gyBot] = this.worldToScreen(0, -halfY);
-    const [gxL] = this.worldToScreen(-halfX, 0);
-    const [gxR] = this.worldToScreen(halfX, 0);
-    for (let x = -halfX + phase(anch.x + halfX); x <= halfX + 1e-6; x += visStep) {
+    const [, gyTop] = this.worldToScreen(0, gy1);
+    const [, gyBot] = this.worldToScreen(0, gy0);
+    const [gxL] = this.worldToScreen(gx0, 0);
+    const [gxR] = this.worldToScreen(gx1, 0);
+    for (let x = gx0 + phase(anch.x - gx0); x <= gx1 + 1e-6; x += visStep) {
       const [sx] = this.worldToScreen(x, 0);
       const major = isMajor(x - anch.x);
       svg += `<line class="grid-line ${major ? 'major' : ''}" x1="${sx}" y1="${gyTop}" x2="${sx}" y2="${gyBot}"/>`;
     }
-    for (let y = -halfY + phase(anch.y + halfY); y <= halfY + 1e-6; y += visStep) {
+    for (let y = gy0 + phase(anch.y - gy0); y <= gy1 + 1e-6; y += visStep) {
       const [, sy] = this.worldToScreen(0, y);
       const major = isMajor(y - anch.y);
       svg += `<line class="grid-line ${major ? 'major' : ''}" x1="${gxL}" y1="${sy}" x2="${gxR}" y2="${sy}"/>`;
     }
-    // Workplane border — clearer "edge of the work area"
-    if (wpHalf > 0) {
+    // Workplane border — clearer "edge of the work area" (a sheet draws its
+    // own outline instead)
+    if (wpHalf > 0 && !stockG) {
       const [bx1, by1] = this.worldToScreen(-wpHalf, wpHalf);
       const [bx2, by2] = this.worldToScreen(wpHalf, -wpHalf);
       svg += `<rect class="workplane-border" x="${bx1}" y="${by1}" width="${bx2 - bx1}" height="${by2 - by1}"/>`;
@@ -4812,7 +4818,18 @@ class SketchEngine {
     const hasFaceOutline = (this._projSegs || []).some(s => !s._ground &&
       Math.abs(s.dz1 || 0) < 0.5 && Math.abs(s.dz2 || 0) < 0.5) ||
       (doc.sketch?.entities || []).some(e => e.facePerimeter);
-    if (fb && !hasFaceOutline && fb.type === 'rect') {
+    if (fb && doc.sketch.stock && fb.type === 'rect') {
+      // SHEET: the stock itself — a warm, barely-tinted slab with a solid
+      // edge and its size in the corner, so the student sees the material
+      // they are spending (not a dashed face-pick box).
+      const [bx1, by1] = this.worldToScreen(fb.x, fb.y);
+      const [bx2, by2] = this.worldToScreen(fb.x + fb.w, fb.y + fb.h);
+      const left = Math.min(bx1, bx2), top = Math.min(by1, by2);
+      const w = Math.abs(bx2 - bx1), h = Math.abs(by2 - by1);
+      svg += `<rect x="${left}" y="${top}" width="${w}" height="${h}" fill="rgba(222,196,150,0.13)" stroke="#8a6d3b" stroke-width="2" pointer-events="none"/>`;
+      const lbl = sheetSizeLabel(doc.sketch).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      svg += `<text x="${left}" y="${top - 7}" font-size="12" font-weight="700" fill="#8a6d3b" pointer-events="none">${doc.sketch.name} — ${lbl}</text>`;
+    } else if (fb && !hasFaceOutline && fb.type === 'rect') {
       const [bx1, by1] = this.worldToScreen(fb.x, fb.y);
       const [bx2, by2] = this.worldToScreen(fb.x + fb.w, fb.y + fb.h);
       const left = Math.min(bx1, bx2), top = Math.min(by1, by2);
@@ -8439,6 +8456,12 @@ class Viewer3D {
           const dist = bodyCenter.clone().sub(hit.point).dot(normalWorld);
           const planeOrigin = bodyCenter.clone().sub(normalWorld.clone().multiplyScalar(dist));
           const plane = planeFromFace(planeOrigin, normalWorld);
+          if (sourceBody && sourceBody.sheetPart) {
+            showHint('📄 ' + SHEET_LOCK_HINT);
+            doc.faceMode = false;
+            this.canvas.style.cursor = '';
+            return;
+          }
           const boundary = computeFaceBoundary(bbox, plane, sourceBody);
           createSketchOnPlane(plane, { boundary, sourceBodyId: hit.object.userData.bodyId });
           doc.faceMode = false;
@@ -9446,7 +9469,7 @@ class Viewer3D {
       c.material?.dispose();
     }
     for (const sketch of doc.sketches) {
-      if (sketch.hidden) continue;
+      if (sketch.hidden || sketch.stock) continue; // sheet outlines are never hand-extruded
       const planeM = makePlaneMatrix(sketch.plane);
       const regs = computeSketchRegions(sketch);
       for (const r of regs) {
@@ -9802,6 +9825,9 @@ class Viewer3D {
     // distort the helix. Skip resize handles entirely; the properties panel
     // still exposes every parameter.
     if (body.type === 'fastener') return;
+    // Sheet parts: the outline lives on the sheet, the thickness is the
+    // stock's — nothing here to resize.
+    if (body.sheetPart) return;
 
     this.scene.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(body.mesh);
@@ -9956,7 +9982,7 @@ class Viewer3D {
     };
 
     for (const sketch of doc.sketches) {
-      if (sketch.hidden) continue;
+      if (sketch.hidden || sketch.stock) continue; // sheets live in 2D only
       const planeM = makePlaneMatrix(sketch.plane);
       const isActive = sketch.id === doc.activeSketchId;
       const baseMat = isActive ? matActive : matInactive;
@@ -14293,8 +14319,13 @@ function setMode(mode) {
   // sketch — picks up edits the user just made to that sketch's shapes.
   // (Idempotent — if nothing changed, it builds the same geometry.)
   const wasIn2D = doc.mode === '2d';
+  let sheetCommit = null;
   if (wasIn2D && mode === '3d' && doc.activeSketchId != null) {
-    rebuildExtrudesForSketch(doc.activeSketchId);
+    // A sheet has no Extrude step: leaving it IS the extrude (every closed
+    // outline → a part of the sheet's thickness). Plain sketches rebuild
+    // the extrudes the user made from them.
+    if (doc.sketch?.stock) sheetCommit = commitActiveSheetIfAny();
+    else rebuildExtrudesForSketch(doc.activeSketchId);
     // 2D-mode autosave debounces to 4 s to keep editing snappy; a quick
     // Done would otherwise leave the just-finished sketch unsaved until
     // the next 3D edit. Flush now so the work lands the moment the user
@@ -14311,8 +14342,15 @@ function setMode(mode) {
   const newSketch = document.getElementById('new-sketch-btn');
   if (back) back.style.display = mode === '2d' ? '' : 'none';
   if (newSketch) newSketch.style.display = mode === '3d' ? '' : 'none';
+  // Sheet view: Revolve makes no sense on stock material (a sheet part is
+  // flat by definition) — hide it while a sheet is active.
+  const onSheet = mode === '2d' && !!doc.sketch?.stock;
+  document.querySelectorAll('#tools-2d [data-action="revolve"]').forEach(b => { b.style.display = onSheet ? 'none' : ''; });
+  if (back) back.title = onSheet ? 'Done drawing — turn every closed outline into a part and return to 3D' : 'Finish editing this sketch and return to 3D';
   if (mode === '2d') {
-    setStatus('2D Sketch — draw your part with real dimensions');
+    setStatus(onSheet
+      ? `${doc.sketch.name} — ${sheetSizeLabel(doc.sketch)}. Draw each part as a closed outline; shapes inside a part are holes.`
+      : '2D Sketch — draw your part with real dimensions');
     if (viewer) {
       viewer.gizmo.visible = false;
       viewer.clearRotationHandles();
@@ -14328,12 +14366,21 @@ function setMode(mode) {
     // The iframe's viewport isn't resolved until the parent page finishes flex layout.
     requestAnimationFrame(() => sketchEng.render());
   } else {
-    setStatus('3D Model — orbit, extrude, drag the gizmo to move bodies');
+    if (sheetCommit && (sheetCommit.created || sheetCommit.updated || sheetCommit.removed)) { /* commitActiveSheetIfAny already wrote the status */ }
+    else if (sheetCommit) setStatus(`${sheetCommit.total} sheet part${sheetCommit.total === 1 ? '' : 's'} — drag a part to lift it off the sheet; rotate it in Properties. Shapes are edited back on the sheet.`);
+    else setStatus('3D Model — orbit, extrude, drag the gizmo to move bodies');
     if (viewer) {
       viewer.rebuildBodies();
       viewer.updateSketchOverlay();
       viewer.updateGizmo();
       viewer.resize();
+      // Fresh sheet parts: frame them so the student sees what Done made
+      // (setStandardView writes its own status — keep the sheet summary).
+      if (sheetCommit && sheetCommit.created) {
+        const keep = $('status-msg').textContent;
+        try { viewer.setStandardView('iso'); } catch (_) {}
+        setStatus(keep);
+      }
     }
   }
   renderProps();
@@ -14934,6 +14981,7 @@ function extrudeCurrentSketch() {
   // Resolve every picked region back to its source sketch so we can build bodies
   const allRegions = [];
   for (const s of doc.sketches) {
+    if (s.stock) continue; // sheets extrude themselves on Done
     for (const r of computeSketchRegions(s)) allRegions.push({ region: r, sketch: s });
   }
   const regionJobs = picked
@@ -18132,6 +18180,19 @@ function insert2DShape(kind) {
 // and fills ~60% of the canvas. Used when entering a sketch — esp. Sketch on Face.
 function fitSketchViewToBodies() {
   if (!sketchEng) return;
+  // Sheet: frame the whole piece of material.
+  const stock = doc.sketch?.stock;
+  if (stock) {
+    const rect = sketchEng.svg.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) { sketchEng.render(); return; }
+    const fill = 0.8;
+    sketchEng.view.pxPerMm = clamp(Math.min((rect.width * fill) / stock.w, (rect.height * fill) / stock.h), 0.5, 80);
+    sketchEng.view.panX = -(stock.w / 2) * sketchEng.view.pxPerMm;
+    sketchEng.view.panY = (stock.h / 2) * sketchEng.view.pxPerMm;
+    const zd = $('zoom-display'); if (zd) zd.textContent = Math.round(sketchEng.view.pxPerMm * 25) + '%';
+    sketchEng.render();
+    return;
+  }
   // Only fit the view to projected body silhouettes when this sketch is
   // pinned to a body (Sketch-on-Face). A free sketch shouldn't show body
   // outlines, so don't try to center on them either.
@@ -18598,6 +18659,13 @@ function openNewSketchDialog() {
              <button class="action" id="np-top" style="flex:1">Top (XZ)</button>
              <button class="action" id="np-front" style="flex:1">Front (XY)</button>
              <button class="action" id="np-right" style="flex:1">Right (YZ)</button>
+           </div>
+           <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+             <button class="action" id="np-sheet" style="width:100%;text-align:left;display:flex;gap:10px;align-items:center">
+               <span style="font-size:20px">📄</span>
+               <span><b>Sheet</b> — design on a piece of material<br>
+               <span style="font-size:11px;color:var(--ink-soft);font-weight:400">Plywood, acrylic, cardboard… Set its size and thickness; every closed outline you draw becomes a part that thick in 3D. Export the sheet as SVG for the laser.</span></span>
+             </button>
            </div>`,
     hideOk: true,
     custom: () => {
@@ -18605,9 +18673,353 @@ function openNewSketchDialog() {
       $('np-top').onclick = () => { newSketchOnPlane('top'); close(); };
       $('np-front').onclick = () => { newSketchOnPlane('front'); close(); };
       $('np-right').onclick = () => { newSketchOnPlane('right'); close(); };
+      $('np-sheet').onclick = () => { close(); openNewSheetDialog(); };
     },
   });
 }
+
+// ───────────────────────── Sheet (stock material) ─────────────────────────
+// A SHEET is a sketch with `stock = { w, h, t, label }` (mm) and a rect
+// boundary of that size on the Top plane. Charlie's premise (2026-10-16):
+// "I have a 36×36 piece of 3/4 ply and want everything to fit on it." The
+// student only DRAWS on a sheet — there is no Extrude step. Leaving sheet
+// view runs syncSheetParts(): every closed outline becomes an extrude body
+// of the sheet's thickness (inner outlines are holes), existing parts are
+// re-matched so a lifted/rotated part keeps its pose, vanished outlines
+// drop their part. In 3D the sheet itself is never drawn (a 12×24 rectangle
+// around the parts is clutter) — parts sit flat at their sheet coordinates.
+// Sheet parts are locked against shape edits in 3D (move / rotate / lay
+// flat only): the laser cuts through-lines, and a pocket or chamfer made in
+// 3D could never be in the SVG. SVG export reads the sheet's entities, so
+// assembling in 3D never changes the laser file.
+const SHEET_PRESETS_IN = [
+  [12, 12, 0.125], [12, 18, 0.125], [12, 24, 0.25], [18, 24, 0.25],
+  [24, 24, 0.5], [24, 48, 0.5], [36, 36, 0.75], [48, 96, 0.75],
+];
+const SHEET_PRESETS_MM = [
+  [300, 300, 3], [300, 450, 3], [300, 600, 6], [450, 600, 6],
+  [600, 600, 12], [600, 1200, 12], [900, 900, 18], [1220, 2440, 18],
+];
+// Inch thicknesses read as fractions ("1/8 in"), everything else as decimals.
+function fmtStock(mm) {
+  if (doc.units !== 'in') return `${fmt(mm)} mm`;
+  const v = mm / MM_PER_IN;
+  const FR = [[0.0625, '1/16'], [0.125, '1/8'], [0.1875, '3/16'], [0.25, '1/4'], [0.375, '3/8'],
+              [0.5, '1/2'], [0.625, '5/8'], [0.75, '3/4'], [0.875, '7/8']];
+  const whole = Math.floor(v + 1e-9), frac = v - whole;
+  for (const [f, label] of FR) {
+    if (Math.abs(frac - f) < 0.004) return `${whole ? whole + ' ' : ''}${label} in`;
+  }
+  if (Math.abs(frac) < 0.004) return `${whole} in`;
+  return `${fmt(v)} in`;
+}
+// Exact display value for an editable stock field — up to 4 decimals,
+// trailing zeros trimmed, so 1/8 in shows as 0.125 (fmtU's 2 decimals would
+// re-save a tabbed-through field as 0.13).
+function fmtStockInput(mm) {
+  return String(+toUnit(mm).toFixed(4));
+}
+function sheetSizeLabel(sk) {
+  const st = sk && sk.stock;
+  if (!st) return '';
+  return `${fmtStock(st.w).replace(/ (in|mm)$/, '')} × ${fmtStock(st.h)} · ${fmtStock(st.t)}${st.label ? ' ' + st.label : ''}`;
+}
+function isSheetPart(b) { return !!(b && b.sheetPart); }
+
+function openNewSheetDialog() {
+  const u = unitLabel();
+  const presets = doc.units === 'in' ? SHEET_PRESETS_IN : SHEET_PRESETS_MM;
+  const show = (v) => doc.units === 'in' ? fmtStock(v * MM_PER_IN).replace(/ in$/, '') : String(v);
+  const opts = presets.map(([w, h, t], i) =>
+    `<option value="${i}"${i === 1 ? ' selected' : ''}>${show(w)} × ${show(h)} ${u} · ${show(t)} ${u} thick</option>`).join('');
+  const step = doc.units === 'in' ? '0.125' : '0.5';
+  const p0 = presets[1];
+  openModal({
+    title: 'New sheet',
+    body: `<p>The piece of material you have. Draw every part on it — when you click <b>← Done</b>, each closed outline becomes a part this thick in 3D.</p>
+           <div class="field"><label>Common sizes</label><select id="sh-preset"><option value="">custom…</option>${opts}</select></div>
+           <div class="field"><label>Width (${u})</label><input type="number" id="sh-w" value="${p0[0]}" min="0.1" step="${step}"/></div>
+           <div class="field"><label>Height (${u})</label><input type="number" id="sh-h" value="${p0[1]}" min="0.1" step="${step}"/></div>
+           <div class="field"><label>Thickness (${u})</label><input type="number" id="sh-t" value="${p0[2]}" min="0.01" step="${step}"/></div>
+           <div class="field"><label>Material</label><input type="text" id="sh-label" placeholder="plywood, acrylic, cardboard…" maxlength="40"/></div>
+           <div class="modal-actions" style="margin-top:12px">
+             <button class="action" id="sh-cancel">Cancel</button>
+             <button class="action primary" id="sh-ok">Create sheet</button>
+           </div>`,
+    hideOk: true,
+    custom: () => {
+      const close = () => $('modal-bg').classList.remove('show');
+      // openModal already rendered a Close button; this dialog has its own.
+      const builtin = $('m-cancel'); if (builtin) builtin.parentElement.style.display = 'none';
+      $('sh-cancel').onclick = close;
+      $('sh-preset').onchange = () => {
+        const i = $('sh-preset').value;
+        if (i === '') return;
+        const [w, h, t] = presets[parseInt(i, 10)];
+        $('sh-w').value = w; $('sh-h').value = h; $('sh-t').value = t;
+      };
+      for (const id of ['sh-w', 'sh-h', 'sh-t']) $(id).oninput = () => { $('sh-preset').value = ''; };
+      $('sh-ok').onclick = () => {
+        const w = parseFloat($('sh-w').value), h = parseFloat($('sh-h').value), t = parseFloat($('sh-t').value);
+        if (!(w > 0) || !(h > 0) || !(t > 0)) { showHint('Width, height and thickness all need to be bigger than 0.'); return; }
+        close();
+        createSheet(fromUnit(w), fromUnit(h), fromUnit(t), ($('sh-label').value || '').trim());
+      };
+      setTimeout(() => $('sh-w')?.focus(), 30);
+    },
+  });
+}
+
+function createSheet(wMm, hMm, tMm, label) {
+  commitActiveSheetIfAny();
+  pushUndo();
+  const id = doc.nextSketchId++;
+  const n = doc.sketches.filter(s => s.stock).length + 1;
+  const sk = {
+    id, plane: { ...GROUND_PLANE, name: 'Sheet' }, entities: [], nextId: 1,
+    name: `Sheet ${n}`,
+    boundary: { type: 'rect', x: 0, y: 0, w: wMm, h: hMm },
+    stock: { w: wMm, h: hMm, t: tMm, label: label || '' },
+  };
+  doc.sketches.push(sk);
+  doc.activeSketchId = id;
+  doc.selection = null;
+  doc.multiSelectedSketch = [];
+  setMode('2d');
+  requestAnimationFrame(() => requestAnimationFrame(fitSketchViewToBodies));
+  renderTree();
+  renderProps();
+  setStatus(`${sk.name} — ${sheetSizeLabel(sk)}. Draw each part as a closed outline; shapes inside a part are holes. Click ← Done to see the parts in 3D.`);
+}
+
+// The sheet's part outlines: every closed face of the drawn entities,
+// minus faces that sit inside a bigger face (those are holes / scrap). The
+// sheet boundary is deliberately NOT in the graph — a part has to be a
+// fully drawn outline (the laser needs the whole cut line), and leaving the
+// boundary out means there is no giant "sheet minus parts" leftover face
+// to filter. Returns regions from computeSketchRegions on a boundary-less
+// shallow copy; pass that same copy to regionToSyntheticSketch so face ids
+// line up for its inner-face hole pass.
+function _sheetGraphSketch(sk) { const c = Object.assign({}, sk); delete c.boundary; return c; }
+function sheetPartRegions(sk) {
+  if (!sk || !sk.stock) return { regions: [], graphSketch: sk };
+  const graphSketch = _sheetGraphSketch(sk);
+  let regs = [];
+  try { regs = computeSketchRegions(graphSketch) || []; } catch (err) { console.warn('sheetPartRegions:', err); return { regions: [], graphSketch }; }
+  const faces = regs.filter(r => !r._usedBoundary && !r._usedOutline &&
+    Array.isArray(r.points) && r.points.length >= 3 && Math.abs(r.area || 0) > 1);
+  const out = [];
+  for (const r of faces) {
+    const c = regionCentroidOf(r);
+    const a = Math.abs(r.area);
+    let inner = false;
+    for (const o of faces) {
+      if (o === r || Math.abs(o.area) <= a) continue;
+      if (c && pointInPolygon(c.x, c.y, o.points)) { inner = true; break; }
+    }
+    if (!inner) out.push(r);
+  }
+  return { regions: out, graphSketch };
+}
+
+// Material readout + advisory warnings for the sheet card. Report only —
+// nesting rules are never enforced (Charlie: keep Stage 3 open-ended).
+function sheetStats(sk) {
+  const st = sk.stock;
+  const { regions } = sheetPartRegions(sk);
+  let used = 0;
+  let outside = 0;
+  const EPS = 0.05;
+  for (const r of regions) {
+    used += Math.abs(r.area || 0);
+    if (r.points.some(p => p.x < -EPS || p.y < -EPS || p.x > st.w + EPS || p.y > st.h + EPS)) outside++;
+  }
+  // Crossing outlines: two different drawn shapes whose segments intersect
+  // (not just touching at a shared endpoint). The laser cuts every line, so
+  // a crossing usually means two parts overlap or a trim was left undone.
+  let crossing = false;
+  try {
+    const ents = sk.entities.filter(e => !e.construction && e.type !== 'dimension' && e.type !== 'threadMark' && e.type !== 'pivot');
+    const segLists = ents.map(e => entityToSegments(e) || []);
+    const segX = (a, b) => {
+      const d = (b.b.x - b.a.x) * (a.b.y - a.a.y) - (b.b.y - b.a.y) * (a.b.x - a.a.x);
+      if (Math.abs(d) < 1e-9) return false;
+      const ua = ((b.b.x - b.a.x) * (b.a.y - a.a.y) - (b.b.y - b.a.y) * (b.a.x - a.a.x)) / d;
+      const ub = ((a.b.x - a.a.x) * (b.a.y - a.a.y) - (a.b.y - a.a.y) * (b.a.x - a.a.x)) / d;
+      const t = 0.002;
+      return ua > t && ua < 1 - t && ub > t && ub < 1 - t;
+    };
+    outer: for (let i = 0; i < segLists.length && !crossing; i++) {
+      for (let j = i + 1; j < segLists.length; j++) {
+        if (ents[i].groupId && ents[i].groupId === ents[j].groupId) continue; // letters of one word
+        for (const a of segLists[i]) for (const b of segLists[j]) {
+          if (segX(a, b)) { crossing = true; break outer; }
+        }
+      }
+    }
+  } catch (_) {}
+  return { parts: regions.length, used, total: st.w * st.h, outside, crossing };
+}
+
+// Leaving sheet view → parts. Match each outline to an existing part by
+// centroid + size (greedy, nearest first, NO hard cutoff: a sheet has no
+// reason to orphan a part — a moved outline is still the same part), update
+// matched parts in place (shape + thickness; pose untouched), create parts
+// for new outlines flat at their sheet position, drop parts whose outline
+// is gone. Returns a change summary for the status line.
+function syncSheetParts(sk) {
+  if (!sk || !sk.stock) return null;
+  const t = sk.stock.t;
+  const { regions, graphSketch } = sheetPartRegions(sk);
+  const existing = doc.bodies.filter(b => b.type === 'extrude' && b.sheetPart && b.sourceSketchId === sk.id);
+  const pairs = [];
+  for (const r of regions) {
+    const c = regionCentroidOf(r) || { x: 0, y: 0 };
+    const a = Math.sqrt(Math.abs(r.area || 0));
+    for (const b of existing) {
+      const bc = b.regionCentroid || { x: 0, y: 0 };
+      const ba = Math.sqrt(Math.abs(b.regionArea || 0));
+      pairs.push({ r, b, cost: Math.hypot(c.x - bc.x, c.y - bc.y) + 2 * Math.abs(a - ba) });
+    }
+  }
+  pairs.sort((p, q) => p.cost - q.cost);
+  // Same part if it stayed roughly put (any reshaping allowed) OR kept
+  // roughly its size (moved anywhere on the sheet to re-nest). A deleted
+  // outline plus a different shape drawn elsewhere is a new part.
+  const samePart = (p) => {
+    const c = regionCentroidOf(p.r) || { x: 0, y: 0 };
+    const bc = p.b.regionCentroid || { x: 0, y: 0 };
+    const dist = Math.hypot(c.x - bc.x, c.y - bc.y);
+    const a = Math.abs(p.r.area || 0), ba = Math.abs(p.b.regionArea || 0) || a;
+    const ratio = a / ba;
+    if (dist <= Math.max(40, 0.75 * Math.sqrt(a))) return true;
+    return ratio >= 0.7 && ratio <= 1.43;
+  };
+  const usedR = new Set(), usedB = new Set(), matched = [];
+  for (const p of pairs) {
+    if (usedR.has(p.r) || usedB.has(p.b)) continue;
+    if (!samePart(p)) continue;
+    usedR.add(p.r); usedB.add(p.b); matched.push(p);
+  }
+  const fresh = regions.filter(r => !usedR.has(r));
+  const gone = existing.filter(b => !usedB.has(b));
+  if (!fresh.length && !gone.length && !matched.length) return { created: 0, updated: 0, removed: 0, total: 0 };
+  pushUndo();
+  let updated = 0;
+  for (const { r, b } of matched) {
+    b.sketch = regionToSyntheticSketch(r, graphSketch);
+    b.plane = JSON.parse(JSON.stringify(sk.plane));
+    b.height = t;
+    b.regionCentroid = regionCentroidOf(r);
+    b.regionArea = Math.abs(r.area || 0);
+    b.op = 'add';
+    delete b.geometry; // force a fresh mesh from the recipe
+    updated++;
+  }
+  let partNo = doc.bodies.filter(b => b.sheetPart && b.sourceSketchId === sk.id).length;
+  const newIds = [];
+  for (const r of fresh) {
+    partNo++;
+    const body = {
+      id: doc.nextBodyId++, type: 'extrude',
+      sketch: regionToSyntheticSketch(r, graphSketch),
+      plane: JSON.parse(JSON.stringify(sk.plane)),
+      height: t,
+      x: 0, y: 0, z: 0,
+      op: 'add',
+      sourceSketchId: sk.id,
+      regionCentroid: regionCentroidOf(r),
+      regionArea: Math.abs(r.area || 0),
+      sheetPart: true,
+      name: `${sk.name} · part ${partNo}`,
+    };
+    doc.bodies.push(body);
+    newIds.push(body.id);
+  }
+  if (gone.length) {
+    const goneIds = new Set(gone.map(b => b.id));
+    doc.bodies = doc.bodies.filter(b => !goneIds.has(b.id));
+    if (doc.selection?.kind === 'body' && goneIds.has(doc.selection.id)) doc.selection = null;
+    doc.multiSelectedBodies = (doc.multiSelectedBodies || []).filter(id => !goneIds.has(id));
+  }
+  return { created: fresh.length, updated, removed: gone.length, total: regions.length, newIds };
+}
+
+// Called wherever the user leaves the active sketch (Done, tree click,
+// new sheet): if that sketch is a sheet, materialise its parts now.
+function commitActiveSheetIfAny() {
+  if (doc.mode !== '2d') return null;
+  const sk = doc.sketch;
+  if (!sk || !sk.stock) return null;
+  let res = null;
+  try { res = syncSheetParts(sk); }
+  catch (err) { console.error('syncSheetParts failed:', err); setStatus('⚠ Could not build the sheet parts: ' + err.message); return null; }
+  if (res && (res.created || res.removed || res.updated)) {
+    renderTree();
+    const bits = [];
+    if (res.created) bits.push(`${res.created} new`);
+    if (res.updated) bits.push(`${res.updated} updated`);
+    if (res.removed) bits.push(`${res.removed} removed`);
+    setStatus(`${sk.name}: ${res.total} part${res.total === 1 ? '' : 's'} (${bits.join(', ')}) — drag a part to lift it off the sheet; rotate it in Properties. Shapes are edited back on the sheet.`);
+  }
+  return res;
+}
+
+// Lay flat: put a sheet part back exactly where its outline sits on the
+// sheet (zero offsets and rotation).
+function layFlatSheetPart(body) {
+  if (!body) return;
+  pushUndo();
+  body.x = 0; body.y = 0; body.z = 0;
+  body.rotation = { x: 0, y: 0, z: 0 };
+  delete body.rotZero;
+  if (viewer) { viewer.rebuildBodies(); viewer.updateGizmo(); }
+  renderProps();
+  setStatus('Laid flat — back at its place on the sheet.');
+}
+function openSheetForPart(body) {
+  const sk = body && doc.sketches.find(s => s.id === body.sourceSketchId);
+  if (!sk) { showHint('That sheet no longer exists.'); return; }
+  doc.activeSketchId = sk.id;
+  doc.selection = null;
+  doc.multiSelectedSketch = [];
+  doc.multiSelectedBodies = [];
+  setMode('2d');
+  renderTree();
+}
+const SHEET_LOCK_HINT = 'Sheet parts keep the shape drawn on the sheet — open the sheet to change the outline. In 3D you can move, rotate, lift and join them.';
+// Delegated handlers for the sheet UI (Properties re-renders constantly).
+document.addEventListener('click', (e) => {
+  const edit = e.target.closest && e.target.closest('[data-sheet-open]');
+  if (edit) {
+    e.preventDefault();
+    const b = doc.bodies.find(x => x.id === parseInt(edit.dataset.sheetOpen, 10));
+    if (b) openSheetForPart(b);
+    else { const sk = doc.sketches.find(s => s.id === parseInt(edit.dataset.sheetOpen, 10)); if (sk) { doc.activeSketchId = sk.id; setMode('2d'); renderTree(); } }
+    return;
+  }
+  const flat = e.target.closest && e.target.closest('[data-sheet-layflat]');
+  if (flat) {
+    e.preventDefault();
+    layFlatSheetPart(doc.bodies.find(x => x.id === parseInt(flat.dataset.sheetLayflat, 10)));
+  }
+});
+document.addEventListener('change', (e) => {
+  const inp = e.target.closest && e.target.closest('[data-sheet-k]');
+  if (!inp) return;
+  const sk = doc.sketch;
+  if (!sk || !sk.stock) return;
+  const k = inp.dataset.sheetK;
+  if (k === 'label') { pushUndo(); sk.stock.label = (inp.value || '').trim().slice(0, 40); renderTree(); return; }
+  const v = parseFloat(inp.value);
+  if (!(v > 0)) { showHint('Needs to be bigger than 0.'); renderProps(); return; }
+  pushUndo();
+  sk.stock[k] = fromUnit(v);
+  if (k === 'w' || k === 'h') sk.boundary = { type: 'rect', x: 0, y: 0, w: sk.stock.w, h: sk.stock.h };
+  if (sketchEng) sketchEng.render();
+  renderTree(); renderProps();
+  setStatus(k === 't' ? `Thickness ${fmtStock(sk.stock.t)} — every part on this sheet will be rebuilt that thick when you click Done.` : `${sk.name} is now ${sheetSizeLabel(sk)}`);
+});
 
 // Apply a resize-handle drag to the body. `delta` is the signed distance the
 // face moved along its axis. `sign` tells us which face (+/-).
@@ -18884,6 +19296,10 @@ function _revolveProfileFromSketch(sketch) {
 // to create a 3D body (chess-pawn-style workflow).
 function revolveCurrentSketch() {
   const sketch = doc.sketch;
+  if (sketch && sketch.stock) {
+    showHint('📄 A sheet is flat stock — its outlines become flat parts when you click Done. Revolve needs a Front sketch.');
+    return;
+  }
   if (!sketch) {
     // Reachable from the 3D toolbar with no sketch open — guide, don't no-op.
     showHint('Revolve needs a sketch: click + Sketch → Front, draw an outline with the Line tool, then click Revolve.');
@@ -19079,6 +19495,10 @@ function groupSelected(skipUndo) {
     if (typeof CSG === 'undefined') { showHint('The 3D cutting engine did not load — refresh the page and try again.'); return; }
     if (!doc.multiSelectedBodies || doc.multiSelectedBodies.length < 2) {
       showHint('Shift-click 2+ bodies first, then group.');
+      return;
+    }
+    if (doc.multiSelectedBodies.some(id => doc.bodies.find(b => b.id === id)?.sheetPart)) {
+      showHint('📄 Sheet parts stay separate pieces (each one is cut out of the sheet). Use Joint to pin them together, or Shift-click to move several at once.');
       return;
     }
     if (!skipUndo) pushUndo();
@@ -19432,6 +19852,10 @@ function mirror3DBody(planeKind) {
 function startMirrorPick() {
   if (!doc.selection || doc.selection.kind !== 'body') {
     showHint('Select a 3D body first.');
+    return;
+  }
+  if (doc.bodies.find(b => b.id === doc.selection.id)?.sheetPart) {
+    showHint('📄 Mirror the outline on the sheet instead (Mirror in the 2D toolbar) — the mirrored part has to be cut from the material too.');
     return;
   }
   if (doc.mode !== '3d') setMode('3d');
@@ -20777,9 +21201,11 @@ function copySelection() {
       }
       return c;
     };
-    items = ids.map(id => doc.bodies.find(b => b.id === id))
-               .filter(Boolean)
-               .map(cloneForClipboard);
+    const srcBodies = ids.map(id => doc.bodies.find(b => b.id === id)).filter(Boolean);
+    if (srcBodies.some(b => b.sheetPart)) {
+      showHint('📄 To copy a sheet part, copy its outline on the sheet — every part has to be cut from the material.');
+    }
+    items = srcBodies.filter(b => !b.sheetPart).map(cloneForClipboard);
     kind = 'body';
   }
   if (!items.length) { showHint('Nothing selected to copy.'); return; }
@@ -20836,7 +21262,9 @@ function duplicateSelection() {
   } else {
     const ids = (doc.multiSelectedBodies?.length ? doc.multiSelectedBodies :
                 (doc.selection?.kind === 'body' ? [doc.selection.id] : []));
-    const sources = ids.map(id => doc.bodies.find(b => b.id === id)).filter(Boolean);
+    const sourcesAll = ids.map(id => doc.bodies.find(b => b.id === id)).filter(Boolean);
+    const sources = sourcesAll.filter(b => !b.sheetPart);
+    if (sourcesAll.length && !sources.length) { showHint('📄 To duplicate a sheet part, duplicate its outline on the sheet — every part has to be cut from the material.'); return; }
     if (!sources.length) { showHint('Nothing selected to duplicate.'); return; }
     pushUndo();
     // Deep-clone the JSON-safe fields, but pass BufferGeometry through by
@@ -21150,8 +21578,8 @@ function renderTree() {
       <button class="tree-eye" data-action="toggle-sketch" data-id="${sketch.id}" title="${eyeTitle}">${eye}</button>
       <button class="tree-lock${sketch.locked ? ' locked' : ''}" data-action="toggle-lock-sketch" data-id="${sketch.id}" title="${lockTitle}">${lock}</button>
       <button class="tree-pencil" data-kind="sketch" data-id="${sketch.id}" title="Rename sketch">✏️</button>
-      <span class="ico">📐</span> <span class="tree-label" style="${sketch.hidden ? 'opacity:0.45' : ''}">${sketch.name}</span>
-      <span class="tree-count">${sketch.entities.length}</span>
+      <span class="ico">${sketch.stock ? '📄' : '📐'}</span> <span class="tree-label" style="${sketch.hidden ? 'opacity:0.45' : ''}">${sketch.name}</span>
+      <span class="tree-count"${sketch.stock ? ` title="${sheetSizeLabel(sketch)}"` : ''}>${sketch.stock ? `${fmtStockInput(sketch.stock.w)}×${fmtStockInput(sketch.stock.h)}` : sketch.entities.length}</span>
       <button class="tree-del" data-action="del-sketch" data-id="${sketch.id}" title="Delete sketch">×</button></div>`;
   }
   // List all bodies
@@ -21190,7 +21618,8 @@ function renderTree() {
       const spec = getFastenerSpec(body.size);
       label = `${spec ? spec.label : body.size} thread shell (${fmtUL(body.length)})`;
     }
-    const ico = body.type === 'extrude' ? '⇪' :
+    const ico = body.sheetPart ? '▭' :
+                body.type === 'extrude' ? '⇪' :
                 body.type === 'fastener' ? '🔩' :
                 body.type === 'threadShell' ? '⌬' :
                 body.type === 'revolve' ? '⟳' :
@@ -21400,6 +21829,10 @@ function renderTree() {
       } else if (btn.dataset.action === 'del-body') {
         const b = doc.bodies.find(x => x.id === id);
         if (!b) return;
+        if (b.sheetPart) {
+          showHint('📄 Delete the outline on the sheet instead — a sheet part comes back from its outline every time you click Done.');
+          return;
+        }
         if (b.type === 'fastener' && b._threadMarkRef) {
           showHint('🔩 That bolt belongs to a bolt hole — hide it with the eye, or use 🔧 Adjust bolt → Remove this hole to take the bolt and hole away together.');
           return;
@@ -21419,7 +21852,9 @@ function renderTree() {
   tree.querySelectorAll('.tree-node').forEach(n => {
     n.addEventListener('click', () => {
       if (n.dataset.kind === 'sketch') {
-        doc.activeSketchId = parseInt(n.dataset.id);
+        const nextId = parseInt(n.dataset.id);
+        if (doc.mode === '2d' && doc.sketch?.stock && doc.sketch.id !== nextId) commitActiveSheetIfAny();
+        doc.activeSketchId = nextId;
         doc.selection = null;
         doc.multiSelectedSketch = [];
         setMode('2d');
@@ -21534,10 +21969,49 @@ function startTreeRename(node, kind, id) {
   input.addEventListener('mousedown', (e2) => e2.stopPropagation());
 }
 
+// Sheet card: the stock's size/thickness (editable) + a live material
+// readout. Warnings are advisory only.
+function renderSheetCard(sk) {
+  const u = unitLabel();
+  const st = sk.stock;
+  const step = doc.units === 'in' ? '0.125' : '0.5';
+  let stats = null;
+  try { stats = sheetStats(sk); } catch (err) { console.warn('sheetStats:', err); }
+  const areaU = (mm2) => doc.units === 'in' ? `${fmt(mm2 / (MM_PER_IN * MM_PER_IN))} sq in` : `${fmt(mm2 / 100)} cm²`;
+  let readout = '';
+  if (stats) {
+    const pct = stats.total > 0 ? Math.min(100, (stats.used / stats.total) * 100) : 0;
+    const over = stats.used > stats.total + 1e-6;
+    const warn = [];
+    if (stats.outside) warn.push(`${stats.outside} part${stats.outside === 1 ? ' hangs' : 's hang'} off the sheet`);
+    if (stats.crossing) warn.push('some outlines cross each other — the laser cuts every line');
+    if (over) warn.push('the parts need more material than this sheet has');
+    readout = `
+      <h4 style="margin-top:14px">Material</h4>
+      <div class="field"><label>Parts</label><div>${stats.parts}</div></div>
+      <div class="field"><label>Used</label><div>${areaU(stats.used)} <span style="color:var(--ink-soft)">(${Math.round(pct)}%)</span></div></div>
+      <div class="field"><label>Left</label><div>${areaU(Math.max(0, stats.total - stats.used))}</div></div>
+      <div style="height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin:4px 0 6px">
+        <div style="height:100%;width:${pct.toFixed(1)}%;background:${over ? '#e53e3e' : pct > 85 ? '#d97706' : '#8a6d3b'}"></div>
+      </div>
+      ${warn.length ? `<div class="hint" style="color:#b45309">⚠ ${warn.join('. ')}.</div>` : ''}`;
+  }
+  return `
+    <h4>📄 ${sk.name}</h4>
+    <div class="field"><label>Width (${u})</label><input type="number" data-sheet-k="w" value="${fmtStockInput(st.w)}" min="0.1" step="${step}"/></div>
+    <div class="field"><label>Height (${u})</label><input type="number" data-sheet-k="h" value="${fmtStockInput(st.h)}" min="0.1" step="${step}"/></div>
+    <div class="field"><label>Thickness (${u})</label><input type="number" data-sheet-k="t" value="${fmtStockInput(st.t)}" min="0.01" step="${step}"/></div>
+    <div class="field"><label>Material</label><input type="text" data-sheet-k="label" value="${(st.label || '').replace(/"/g, '&quot;')}" placeholder="plywood, acrylic…" maxlength="40"/></div>
+    ${readout}
+    <div class="hint" style="margin-top:10px">Draw each part as a closed outline. A shape inside a part is a hole. Click <b>← Done</b> and every part appears in 3D, ${fmtStock(st.t)} thick, ready to lift and assemble. Export this sheet as SVG for the laser.</div>`;
+}
+
 function renderProps() {
   const props = $('props');
   if (!doc.selection) {
-    if (doc.mode === '2d') {
+    if (doc.mode === '2d' && doc.sketch?.stock) {
+      props.innerHTML = renderSheetCard(doc.sketch);
+    } else if (doc.mode === '2d') {
       const n = doc.sketch.entities.length;
       props.innerHTML = `
         <h4>Sketch 1</h4>
@@ -21952,6 +22426,17 @@ function renderProps() {
         const bb = new THREE.Box3().setFromObject(body.mesh);
         if (!bb.isEmpty()) { const sz = bb.getSize(new THREE.Vector3()); esz = { x: sz.x, y: sz.y, z: sz.z }; }
       }
+      if (body.sheetPart) {
+        const sheet = doc.sketches.find(sk => sk.id === body.sourceSketchId);
+        dimFields = `<h4>📄 Sheet part</h4>
+        <div class="field"><label>From</label><div>${sheet ? sheet.name : 'a deleted sheet'}</div></div>
+        <div class="field"><label>Thickness</label><div>${fmtStock(body.height)}</div></div>
+        <div style="display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap">
+          ${sheet ? `<button class="action" data-sheet-open="${body.id}" title="Open ${sheet.name} to change this part's outline" style="font-size:12px;padding:6px 10px">✏️ Edit on sheet</button>` : ''}
+          <button class="action" data-sheet-layflat="${body.id}" title="Put this part back flat where its outline sits on the sheet" style="font-size:12px;padding:6px 10px">⤓ Lay flat</button>
+        </div>
+        <div class="hint">${SHEET_LOCK_HINT}</div>`;
+      } else
       dimFields = `<h4>Extrude</h4>
         <div class="field"><label>Extrude depth (${u})</label><input type="number" data-k="height" value="${fmtU(body.height)}" min="0.01" step="0.5"/></div>
         ${esz ? `<div style="font-size:11px;font-weight:800;color:var(--ink-muted);margin:8px 0 2px">Overall size</div>
@@ -28121,6 +28606,11 @@ function init() {
         // would be orphaned with no way to get its bolt back (issues1142).
         const blocked = doc.bodies.filter(b => ids.has(b.id) && b.type === 'fastener' && b._threadMarkRef);
         for (const b of blocked) ids.delete(b.id);
+        // Sheet parts come back on the next Done anyway — the outline on
+        // the sheet is the thing to delete.
+        const sheetBlocked = doc.bodies.filter(b => ids.has(b.id) && b.sheetPart);
+        for (const b of sheetBlocked) ids.delete(b.id);
+        if (sheetBlocked.length) showHint('📄 Delete the outline on the sheet instead — a sheet part comes back from its outline every time you click Done.');
         if (blocked.length) {
           showHint('🔩 That bolt belongs to a bolt hole — hide it with the eye in the tree, or use 🔧 Adjust bolt → Remove this hole to take the bolt and hole away together.');
         }
