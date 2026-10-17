@@ -19846,33 +19846,53 @@ function alignBodies(spec) {
   }
   const [axis, kind] = spec.split('-');
   const ids = [...doc.multiSelectedBodies];
-  const meshes = ids.map(id => doc.bodies.find(b => b.id === id)?.mesh).filter(Boolean);
-  if (meshes.length < 2) return;
   viewer.scene.updateMatrixWorld(true);
-  // Compute bounding boxes for each
-  const boxes = meshes.map(m => new THREE.Box3().setFromObject(m));
+  // A move-together group (bodyGroupId — grouped sheet parts) aligns as ONE
+  // rigid unit: one combined bbox, one delta for every member. Aligning
+  // each member on its own collapsed a 4-part assembly onto its centre
+  // line (Charlie's ssissues video, 2026-10-16). Ungrouped bodies are
+  // units of their own.
+  const units = [];
+  const byGroup = new Map();
+  for (const id of ids) {
+    const body = doc.bodies.find(b => b.id === id);
+    if (!body || !body.mesh) continue;
+    const box = new THREE.Box3().setFromObject(body.mesh);
+    if (body.bodyGroupId != null) {
+      let u = byGroup.get(body.bodyGroupId);
+      if (!u) { u = { bodies: [], box: new THREE.Box3() }; byGroup.set(body.bodyGroupId, u); units.push(u); }
+      u.bodies.push(body); u.box.union(box);
+    } else {
+      units.push({ bodies: [body], box });
+    }
+  }
+  if (units.length < 2) {
+    showHint(units.length === 1 && units[0].bodies.length > 1
+      ? 'Those parts are grouped — they align as one piece. Shift-click something outside the group to align the group to it.'
+      : 'Shift-click 2+ bodies first, then align.');
+    return;
+  }
+  const boxes = units.map(u => u.box);
   // Determine the target value
   let target;
   if (kind === 'min') target = Math.min(...boxes.map(b => b.min[axis]));
   else if (kind === 'max') target = Math.max(...boxes.map(b => b.max[axis]));
   else target = (Math.min(...boxes.map(b => b.min[axis])) + Math.max(...boxes.map(b => b.max[axis]))) / 2;
-  // Adjust each body's position so its bbox aligns
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    const body = doc.bodies.find(b => b.id === id);
-    if (!body) continue;
-    const box = boxes[i];
+  // Move each unit so its bbox aligns — every member by the same delta
+  for (const u of units) {
+    const box = u.box;
     let curRef;
     if (kind === 'min') curRef = box.min[axis];
     else if (kind === 'max') curRef = box.max[axis];
     else curRef = (box.min[axis] + box.max[axis]) / 2;
     const delta = target - curRef;
-    body[axis] = (body[axis] || 0) + delta;
+    for (const body of u.bodies) body[axis] = (body[axis] || 0) + delta;
   }
   viewer.rebuildBodies();
   viewer.updateGizmo();
   renderProps();
-  setStatus(`Aligned ${ids.length} bodies — ${spec.replace('-', ' ')}`);
+  const grouped = units.some(u => u.bodies.length > 1);
+  setStatus(`Aligned ${units.length} ${grouped ? 'pieces (grouped parts moved as one)' : 'bodies'} — ${spec.replace('-', ' ')}`);
 }
 
 function groupSelected(skipUndo) {
