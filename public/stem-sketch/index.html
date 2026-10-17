@@ -9488,7 +9488,7 @@ class Viewer3D {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.bodyGroup.add(mesh);
-        if (body.sheetPart && Array.isArray(body.sheetMarks) && body.sheetMarks.length) this._addSheetPivotMarks(body, mesh);
+        if (body.sheetPart && _ensureSheetMarks(body).length) this._addSheetPivotMarks(body, mesh);
         // Phase 2 — render this body's threaded holes as helical overlays built
         // from _mergedShells metadata. They live only in the scene (never in
         // doc.bodies, never baked into body.geometry, never a CSG input), so
@@ -19222,6 +19222,7 @@ function syncSheetParts(sk) {
     b.regionArea = Math.abs(r.area || 0);
     b.op = 'add';
     b.sheetMarks = marksIn(r);
+    delete b._sheetMarkSig; // re-derived lazily against the live sheet
     delete b.geometry; // force a fresh mesh from the recipe
     updated++;
   }
@@ -20518,7 +20519,30 @@ function _sketchAttachedBody(sk) {
 // sits inside that part's outline; syncSheetParts records it on the body).
 function _sheetMarkBody(sketchId, markId) {
   return doc.bodies.find(b => b.sheetPart && b.sourceSketchId === sketchId &&
-    Array.isArray(b.sheetMarks) && b.sheetMarks.some(m => m.markId === markId)) || null;
+    _ensureSheetMarks(b).some(m => m.markId === markId)) || null;
+}
+// A part's sheet pivots, derived on demand when the record is missing or
+// stale: the sheet's pivot marks inside the part's own outline (the first
+// entity of its synthetic sketch). Covers designs saved before pivots on
+// sheets existed and a Done that ran under an older build — reloading
+// such a design shows the pivots without another trip through the sheet.
+function _ensureSheetMarks(b) {
+  if (!b || !b.sheetPart) return [];
+  const sk = doc.sketches.find(x => x.id === b.sourceSketchId);
+  if (!sk || !sk.stock) return Array.isArray(b.sheetMarks) ? b.sheetMarks : [];
+  const marks = (sk.entities || []).filter(e => e.type === 'pivotMark');
+  const sig = marks.map(m => `${m.id}:${m.cx.toFixed(3)},${m.cy.toFixed(3)}`).join('|');
+  if (Array.isArray(b.sheetMarks) && b._sheetMarkSig === sig) return b.sheetMarks;
+  const outer = b.sketch && b.sketch.entities && b.sketch.entities[0];
+  const inside = (m) => {
+    if (!outer) return false;
+    if (outer.type === 'circle') return Math.hypot(m.cx - outer.cx, m.cy - outer.cy) <= outer.r;
+    if (outer.type === 'rect') return m.cx >= outer.x && m.cx <= outer.x + outer.w && m.cy >= outer.y && m.cy <= outer.y + outer.h;
+    return Array.isArray(outer.points) && outer.points.length >= 3 && pointInPolygon(m.cx, m.cy, outer.points);
+  };
+  b.sheetMarks = marks.filter(inside).map(m => ({ markId: m.id, cx: m.cx, cy: m.cy }));
+  b._sheetMarkSig = sig;
+  return b.sheetMarks;
 }
 // The part a joint side refers to — face sketches via their source body,
 // sheets via the part that owns the mark.
@@ -20761,7 +20785,7 @@ function startJointCreation() {
     if (body) pivotBodies.add(body.id);
   }
   // Sheet parts carry the pivots drawn inside their outline on the sheet.
-  for (const b of doc.bodies) if (b.sheetPart && Array.isArray(b.sheetMarks) && b.sheetMarks.length) pivotBodies.add(b.id);
+  for (const b of doc.bodies) if (b.sheetPart && _ensureSheetMarks(b).length) pivotBodies.add(b.id);
   if (pivotBodies.size < 2) {
     showHint('Each part needs a pivot point first: open a face sketch on the part and use the Pivot tool (⊕) — or, for sheet parts, put the Pivot inside the part\'s outline on the sheet. Do that on both parts, then try Joint again.');
     return;
