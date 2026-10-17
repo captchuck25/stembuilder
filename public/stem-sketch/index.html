@@ -8688,6 +8688,7 @@ class Viewer3D {
         if (body.bodyGroupId != null) for (const b of doc.bodies) if (b.bodyGroupId === body.bodyGroupId) ids.add(b.id);
         if (doc.multiSelectedBodies?.includes(body.id)) for (const id of doc.multiSelectedBodies) ids.add(id);
         ids.delete(mm.anchorBodyId);
+        for (const rid of _ridingCompanionIds([...ids])) ids.delete(rid); // bolts ride with their part
         const d = mm.anchor.clone().sub(feat.point);
         pushUndo();
         for (const id of ids) {
@@ -8861,7 +8862,9 @@ class Viewer3D {
             gizmoState.startT = projectRayOnAxis(this.raycaster.ray, gizmoState.axisOrigin, gizmoState.axisDir);
             // Capture starting position for every selected body so they all move together
             gizmoState.startVals = {};
-            const ids = doc.multiSelectedBodies?.length ? doc.multiSelectedBodies : [doc.selection.id];
+            const idsAll = doc.multiSelectedBodies?.length ? doc.multiSelectedBodies : [doc.selection.id];
+            const ridingG = _ridingCompanionIds(idsAll);
+            const ids = idsAll.filter(id => !ridingG.has(id));
             for (const id of ids) {
               const b = doc.bodies.find(x => x.id === id);
               if (b) gizmoState.startVals[id] = b[axis] || 0;
@@ -9029,8 +9032,9 @@ class Viewer3D {
           if (!e.shiftKey && !dragLocked) {
             bodyDrag.armed = true;
             bodyDrag.alt = e.altKey;
-            bodyDrag.ids = [...doc.multiSelectedBodies];
-            bodyDrag.leadId = bodyId; // the body under the cursor sets the snap
+            const riding = _ridingCompanionIds(doc.multiSelectedBodies);
+            bodyDrag.ids = doc.multiSelectedBodies.filter(id => !riding.has(id));
+            bodyDrag.leadId = riding.has(bodyId) ? bodyDrag.ids[0] : bodyId; // the body under the cursor sets the snap
             bodyDrag.startVals = {};
             for (const id of bodyDrag.ids) {
               const b = doc.bodies.find(x => x.id === id);
@@ -17034,6 +17038,23 @@ function _stripStaleThreadCuttersRecursive(group) {
 // Rotation tracking is not yet supported — translation covers the move
 // tools (drag, gizmo, typed XYZ, nudge, align, snap-to-plane).
 let _sketchAnchorsMoved = false;
+// Ids in `ids` that are hole-companion bodies (bolt / nut / thread shell
+// tagged with _threadMarkRef) whose parent part is ALSO in `ids`. The
+// sketch-anchor sync carries those along with the parent, so a move must
+// not shift them a second time.
+function _ridingCompanionIds(ids) {
+  const set = new Set(ids);
+  const out = new Set();
+  for (const id of set) {
+    const b = doc.bodies.find(x => x.id === id);
+    if (!b || !b._threadMarkRef) continue;
+    const sk = doc.sketches.find(x => x.id === b._threadMarkRef.sketchId);
+    if (!sk) continue;
+    const parentId = sk.sourceBodyId != null ? sk.sourceBodyId : (_sketchAttachedBody(sk)?.id);
+    if (parentId != null && parentId !== id && set.has(parentId)) out.add(id);
+  }
+  return out;
+}
 function syncSketchAnchorsToBodies() {
   for (const sk of (doc.sketches || [])) {
     if (sk.sourceBodyId == null || !sk.plane || !Array.isArray(sk.plane.origin)) continue;
@@ -19870,7 +19891,9 @@ function alignBodies(spec) {
   // units of their own.
   const units = [];
   const byGroup = new Map();
+  const ridingA = _ridingCompanionIds(ids);
   for (const id of ids) {
+    if (ridingA.has(id)) continue; // bolts ride with their part
     const body = doc.bodies.find(b => b.id === id);
     if (!body || !body.mesh) continue;
     const box = new THREE.Box3().setFromObject(body.mesh);
