@@ -8999,6 +8999,12 @@ class Viewer3D {
             const idx = doc.multiSelectedBodies.indexOf(bodyId);
             if (idx >= 0) doc.multiSelectedBodies.splice(idx, 1);
             else doc.multiSelectedBodies.push(bodyId);
+          } else if ((doc.multiSelectedBodies?.length || 0) > 1 && doc.multiSelectedBodies.includes(bodyId)) {
+            // Plain click on a body that is already part of a multi-selection:
+            // keep the whole selection so the drag that follows moves all of
+            // it (Shift-click several parts, then grab any one and drag —
+            // Charlie's ssissues video 2026-10-17). A click elsewhere or on
+            // an unselected body still replaces the selection as before.
           } else {
             // Replace; auto-include other bodies in the same group
             doc.multiSelectedBodies = [bodyId];
@@ -19914,17 +19920,27 @@ function groupSelected(skipUndo) {
       showHint('Shift-click 2+ bodies first, then group.');
       return;
     }
-    if (doc.multiSelectedBodies.some(id => doc.bodies.find(b => b.id === id)?.sheetPart)) {
-      // Sheet parts stay separate pieces (each is cut from the sheet), so
-      // Group here means MOVE TOGETHER: one click selects them all, a drag
-      // or Magnet moves them all. Nothing on the sheet changes. Ungroup
-      // splits them again. (Charlie, ssissues video 2026-10-16.)
+    const jointedIds = new Set();
+    for (const j of (doc.joints || [])) {
+      const ba = _jointRefBody(j.a), bb = _jointRefBody(j.b);
+      if (ba) jointedIds.add(ba.id);
+      if (bb) jointedIds.add(bb.id);
+    }
+    const hasJointed = doc.multiSelectedBodies.some(id => jointedIds.has(id));
+    if (hasJointed || doc.multiSelectedBodies.some(id => doc.bodies.find(b => b.id === id)?.sheetPart)) {
+      // Sheet parts stay separate pieces (each is cut from the sheet), and a
+      // part in a JOINT must stay free to swing — welding it into one body
+      // killed the hinge (Charlie's arm, 2026-10-17). So Group here means
+      // MOVE TOGETHER: one click selects them all, a drag or Magnet moves
+      // them all; the joint keeps working. Ungroup splits them again.
       pushUndo();
       const gid = Math.max(0, ...doc.bodies.map(b => b.bodyGroupId || 0)) + 1;
       const ids = [...doc.multiSelectedBodies];
       for (const id of ids) { const b = doc.bodies.find(x => x.id === id); if (b) b.bodyGroupId = gid; }
       renderTree(); renderProps();
-      setStatus(`Grouped ${ids.length} parts to move together — click any one to grab them all. Ungroup splits them again. The sheet is unchanged.`);
+      setStatus(hasJointed
+        ? `Grouped ${ids.length} parts to move together — the joint still swings. Click any one to grab them all; Ungroup splits them again.`
+        : `Grouped ${ids.length} parts to move together — click any one to grab them all. Ungroup splits them again. The sheet is unchanged.`);
       return;
     }
     if (!skipUndo) pushUndo();
