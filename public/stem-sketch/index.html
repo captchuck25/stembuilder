@@ -3855,7 +3855,9 @@ class SketchEngine {
       };
       doc.sketch.entities.push(mark);
       doc.selection = { kind: 'sketch', id: mark.id };
-      setStatus('Pivot point placed — add one to another part too, then use Joint in 3D to pin them together.');
+      setStatus(doc.sketch.stock
+        ? 'Pivot placed — put it INSIDE a part\'s outline (a hole centre is perfect). It becomes that part\'s hinge when you click Done; add one on the other part too, then Joint in 3D.'
+        : 'Pivot point placed — add one to another part too, then use Joint in 3D to pin them together.');
       this.render(); renderTree(); renderProps();
       return;
     }
@@ -8705,6 +8707,7 @@ class Viewer3D {
         this.raycaster.setFromCamera(ndc(e), this.camera);
         const targets = [];
         this.sketchGroup.traverse(o => { if (o.userData?.kind === 'pivotMark') targets.push(o); });
+        this.bodyGroup.traverse(o => { if (o.userData?.kind === 'pivotMark') targets.push(o); }); // sheet-part pivots ride their mesh
         const hits = this.raycaster.intersectObjects(targets, false);
         if (!hits.length) {
           showHint('Click a pivot point — the violet ⊕ marker on a part. (Draw one with the Pivot tool in a face sketch first.)');
@@ -9485,6 +9488,7 @@ class Viewer3D {
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         this.bodyGroup.add(mesh);
+        if (body.sheetPart && Array.isArray(body.sheetMarks) && body.sheetMarks.length) this._addSheetPivotMarks(body, mesh);
         // Phase 2 — render this body's threaded holes as helical overlays built
         // from _mergedShells metadata. They live only in the scene (never in
         // doc.bodies, never baked into body.geometry, never a CSG input), so
@@ -9877,6 +9881,44 @@ class Viewer3D {
   hideMagnetMarker(anchorToo) {
     for (const key of anchorToo ? ['_magnetHover', '_magnetAnchor'] : ['_magnetHover']) {
       if (this[key]) this[key].visible = false;
+    }
+  }
+  // Sheet-part pivot marks: violet ring + dot on BOTH faces of the part,
+  // parented to the mesh in its own (world-at-sheet) coords so they move
+  // with the part. The hit discs carry kind 'pivotMark' for the Joint pick.
+  _addSheetPivotMarks(body, mesh) {
+    const planeM = makePlaneMatrix(body.plane);
+    const n = new THREE.Vector3(...body.plane.n).normalize();
+    const violet = 0x8b5cf6;
+    const R = 3;
+    for (const m of body.sheetMarks) {
+      for (const z of [0.06, Math.max(0.12, (body.height || 0) - 0.06)]) {
+        const pts = [];
+        for (let i = 0; i <= 32; i++) {
+          const t = (i / 32) * Math.PI * 2;
+          pts.push(new THREE.Vector3(m.cx + Math.cos(t) * R, m.cy + Math.sin(t) * R, z).applyMatrix4(planeM));
+        }
+        const ring = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+          new THREE.LineBasicMaterial({ color: violet, transparent: true, opacity: 0.95, depthTest: false }));
+        ring.renderOrder = 7;
+        ring.userData = { kind: 'pivotMark', markId: m.markId, sketchId: body.sourceSketchId, bodyId: body.id };
+        mesh.add(ring);
+        const center = new THREE.Vector3(m.cx, m.cy, z).applyMatrix4(planeM);
+        const dot = new THREE.Mesh(new THREE.CircleGeometry(1.1, 16),
+          new THREE.MeshBasicMaterial({ color: violet, side: THREE.DoubleSide, depthWrite: false, depthTest: false }));
+        dot.position.copy(center);
+        dot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+        dot.renderOrder = 7;
+        dot.userData = { kind: 'pivotMark', markId: m.markId, sketchId: body.sourceSketchId, bodyId: body.id };
+        mesh.add(dot);
+        const hit = new THREE.Mesh(new THREE.CircleGeometry(R + 2, 16),
+          new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide, depthWrite: false }));
+        hit.position.copy(center);
+        hit.quaternion.copy(dot.quaternion);
+        hit.userData = { kind: 'pivotMark', markId: m.markId, sketchId: body.sourceSketchId, bodyId: body.id };
+        hit.renderOrder = 8;
+        mesh.add(hit);
+      }
     }
   }
   clearAlignWidget() {
@@ -19167,6 +19209,10 @@ function syncSheetParts(sk) {
   const gone = existing.filter(b => !usedB.has(b));
   if (!fresh.length && !gone.length && !matched.length) return { created: 0, updated: 0, removed: 0, total: 0 };
   pushUndo();
+  // Pivot marks drawn inside an outline belong to that part (a mark at a
+  // hole's centre still counts — that is the dowel's pivot).
+  const marks = sk.entities.filter(e => e.type === 'pivotMark');
+  const marksIn = (r) => marks.filter(m => pointInPolygon(m.cx, m.cy, r.points)).map(m => ({ markId: m.id, cx: m.cx, cy: m.cy }));
   let updated = 0;
   for (const { r, b } of matched) {
     b.sketch = regionToSyntheticSketch(r, graphSketch);
@@ -19175,6 +19221,7 @@ function syncSheetParts(sk) {
     b.regionCentroid = regionCentroidOf(r);
     b.regionArea = Math.abs(r.area || 0);
     b.op = 'add';
+    b.sheetMarks = marksIn(r);
     delete b.geometry; // force a fresh mesh from the recipe
     updated++;
   }
@@ -19193,6 +19240,7 @@ function syncSheetParts(sk) {
       regionCentroid: regionCentroidOf(r),
       regionArea: Math.abs(r.area || 0),
       sheetPart: true,
+      sheetMarks: marksIn(r),
       name: `${sk.name} · part ${partNo}`,
     };
     doc.bodies.push(body);
@@ -20388,6 +20436,7 @@ function performBooleanCut(targetId, toolId) {
 // the same way) claims it, and the repaired id is stored.
 function _sketchAttachedBody(sk) {
   if (!sk || !sk.plane || !Array.isArray(sk.plane.origin)) return null;
+  if (sk.stock) return null; // a sheet feeds MANY parts — never link it to one
   if (sk.sourceBodyId != null) {
     const b = doc.bodies.find(x => x.id === sk.sourceBodyId);
     if (b) return b;
@@ -20445,6 +20494,20 @@ function _sketchAttachedBody(sk) {
 // Resolve a joint side {sketchId, markId} → live world pivot + axis + body.
 // The body is resolved through _sketchAttachedBody (valid link or healed)
 // so grouping / re-pointing / legacy drawing-sketches all keep working.
+// Sheet parts: which part owns a pivot mark drawn on the sheet (the mark
+// sits inside that part's outline; syncSheetParts records it on the body).
+function _sheetMarkBody(sketchId, markId) {
+  return doc.bodies.find(b => b.sheetPart && b.sourceSketchId === sketchId &&
+    Array.isArray(b.sheetMarks) && b.sheetMarks.some(m => m.markId === markId)) || null;
+}
+// The part a joint side refers to — face sketches via their source body,
+// sheets via the part that owns the mark.
+function _jointRefBody(r) {
+  const sk = doc.sketches.find(x => x.id === r?.sketchId);
+  if (!sk) return null;
+  if (sk.stock) return _sheetMarkBody(sk.id, r.markId);
+  return doc.bodies.find(x => x.id === sk.sourceBodyId) || null;
+}
 function _resolveJointAnchor(ref) {
   const sk = doc.sketches.find(s => s.id === ref.sketchId);
   // A bolt-hole thread mark can anchor a joint too (bolt-as-pivot): it has
@@ -20452,6 +20515,20 @@ function _resolveJointAnchor(ref) {
   const mark = sk?.entities?.find(e => e.id === ref.markId &&
     (e.type === 'pivotMark' || e.type === 'threadMark'));
   if (!sk || !mark) return null;
+  if (sk.stock) {
+    // SHEET PART. The sheet never moves, so the mark's live position is its
+    // sheet-plane position carried through the part's mesh transform (the
+    // part's geometry is built in world-at-sheet coords; position/rotation
+    // sit on the mesh). Axis = the sheet normal, rotated with the part.
+    const body = _sheetMarkBody(sk.id, mark.id);
+    if (!body || !body.mesh) return null;
+    const planeM = makePlaneMatrix(body.plane || sk.plane);
+    if (viewer && viewer.scene) viewer.scene.updateMatrixWorld(true);
+    body.mesh.updateMatrixWorld(true);
+    const P = new THREE.Vector3(mark.cx, mark.cy, 0).applyMatrix4(planeM).applyMatrix4(body.mesh.matrixWorld);
+    const n = new THREE.Vector3(...(body.plane || sk.plane).n).normalize().transformDirection(body.mesh.matrixWorld).normalize();
+    return { P, n, body, sketch: sk, mark };
+  }
   const body = _sketchAttachedBody(sk);
   if (!body) return null;
   const planeM = makePlaneMatrix(sk.plane);
@@ -20663,8 +20740,10 @@ function startJointCreation() {
     const body = _sketchAttachedBody(sk);
     if (body) pivotBodies.add(body.id);
   }
+  // Sheet parts carry the pivots drawn inside their outline on the sheet.
+  for (const b of doc.bodies) if (b.sheetPart && Array.isArray(b.sheetMarks) && b.sheetMarks.length) pivotBodies.add(b.id);
   if (pivotBodies.size < 2) {
-    showHint('Each part needs a pivot point first: open a face sketch on the part and use the Pivot tool (⊕). Do that on both parts, then try Joint again.');
+    showHint('Each part needs a pivot point first: open a face sketch on the part and use the Pivot tool (⊕) — or, for sheet parts, put the Pivot inside the part\'s outline on the sheet. Do that on both parts, then try Joint again.');
     return;
   }
   if (doc.mode !== '3d') setMode('3d');
@@ -20747,6 +20826,7 @@ function pruneOrphanJoints() {
     // Keep the joint as long as the sketch still resolves to SOME part —
     // healing covers drawing-sketches and regrouped bodies. Only prune
     // when the pivot or its part is genuinely gone.
+    if (sk.stock) return !!_sheetMarkBody(sk.id, r.markId);
     if (sk.sourceBodyId != null && doc.bodies.some(b => b.id === sk.sourceBodyId)) return true;
     return !!_sketchAttachedBody(sk);
   };
@@ -22031,8 +22111,7 @@ function renderTree() {
   // Properties panel works with (multi-joint designs). The category only
   // appears once a joint exists. No eye/lock — joints aren't hideable.
   const jointPartName = (r) => {
-    const sk = doc.sketches.find(s => s.id === r?.sketchId);
-    const b = sk && doc.bodies.find(x => x.id === sk.sourceBodyId);
+    const b = _jointRefBody(r);
     return b ? (b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`) : '?';
   };
   const jointItems = (doc.joints || []).filter(j => j.a && j.b);
@@ -22380,7 +22459,7 @@ function renderSheetCard(sk) {
     <div class="field"><label>Thickness (${u})</label><input type="number" data-sheet-k="t" value="${fmtStockInput(st.t)}" min="0.01" step="${step}"/></div>
     <div class="field"><label>Material</label><input type="text" data-sheet-k="label" value="${(st.label || '').replace(/"/g, '&quot;')}" placeholder="plywood, acrylic…" maxlength="40"/></div>
     ${readout}
-    <div class="hint" style="margin-top:10px">Draw each part as a closed outline. A shape inside a part is a hole. Click <b>← Done</b> and every part appears in 3D, ${fmtStock(st.t)} thick, ready to lift and assemble. Export this sheet as SVG for the laser.</div>`;
+    <div class="hint" style="margin-top:10px">Draw each part as a closed outline. A shape inside a part is a hole. A <b>Pivot</b> (⊕) inside an outline becomes that part's hinge point in 3D. Click <b>← Done</b> and every part appears in 3D, ${fmtStock(st.t)} thick, ready to lift, assemble and Joint. Export this sheet as SVG for the laser.</div>`;
 }
 
 function renderProps() {
@@ -22396,8 +22475,7 @@ function renderProps() {
         <div class="hint">Click a shape to edit dimensions, or pick a tool above to draw a new one.</div>`;
     } else {
       const partName = (r) => {
-        const sk = doc.sketches.find(s => s.id === r?.sketchId);
-        const b = sk && doc.bodies.find(x => x.id === sk.sourceBodyId);
+        const b = _jointRefBody(r);
         if (!b) return '?';
         return b.name?.trim() || `${b.type === 'group' ? 'Part' : b.type} ${b.id}`;
       };
@@ -23016,7 +23094,7 @@ function renderProps() {
 
     // Jointed part — point the user at the swing controls
     const inJoint = (doc.joints || []).some(j => {
-      const sideBody = (r) => doc.sketches.find(s => s.id === r?.sketchId)?.sourceBodyId;
+      const sideBody = (r) => _jointRefBody(r)?.id;
       return sideBody(j.a) === body.id || sideBody(j.b) === body.id;
     });
     const jointHint = inJoint
