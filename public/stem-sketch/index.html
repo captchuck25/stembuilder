@@ -9024,6 +9024,7 @@ class Viewer3D {
             bodyDrag.armed = true;
             bodyDrag.alt = e.altKey;
             bodyDrag.ids = [...doc.multiSelectedBodies];
+            bodyDrag.leadId = bodyId; // the body under the cursor sets the snap
             bodyDrag.startVals = {};
             for (const id of bodyDrag.ids) {
               const b = doc.bodies.find(x => x.id === id);
@@ -9207,17 +9208,25 @@ class Viewer3D {
           if (this.raycaster.ray.intersectPlane(bodyDrag.dragPlane, point)) {
             const dx = point.x - bodyDrag.startWorld.x;
             const dz = point.z - bodyDrag.startWorld.z;
+            // One shared delta: snap the grabbed body's new position, then
+            // move every selected body by exactly that amount so a group
+            // (or any multi-selection) stays rigid while it rides the grid.
+            const lead = bodyDrag.startVals[bodyDrag.leadId] || bodyDrag.startVals[bodyDrag.ids[0]];
+            const sdx = snapVal(lead.x + dx) - lead.x;
+            const sdz = snapVal(lead.z + dz) - lead.z;
             for (const id of bodyDrag.ids) {
               const b = doc.bodies.find(x => x.id === id);
-              if (b) { b.x = snapVal(bodyDrag.startVals[id].x + dx); b.z = snapVal(bodyDrag.startVals[id].z + dz); }
+              if (b) { b.x = bodyDrag.startVals[id].x + sdx; b.z = bodyDrag.startVals[id].z + sdz; }
             }
           }
         } else {
           const t = projectRayOnAxis(this.raycaster.ray, bodyDrag.anchor, bodyDrag.axisDir);
           const delta = t - bodyDrag.startT;
+          const leadY = (bodyDrag.startVals[bodyDrag.leadId] || bodyDrag.startVals[bodyDrag.ids[0]]).y;
+          const sdy = snapVal(leadY + delta) - leadY;
           for (const id of bodyDrag.ids) {
             const b = doc.bodies.find(x => x.id === id);
-            if (b) b.y = snapVal(bodyDrag.startVals[id].y + delta);
+            if (b) b.y = bodyDrag.startVals[id].y + sdy;
           }
         }
         this.rebuildBodies();
@@ -20759,7 +20768,10 @@ function handleJointPivotPick(sketchId, markId) {
   if (doc.jointPickStage === 'pivotA') {
     doc.jointDraft = { a: ref };
     doc.jointPickStage = 'pivotB';
-    setStatus('Now click the pivot on the part that should SWING. Esc to cancel.');
+    // Pin a green marker on the chosen pivot (same marker Magnet uses)
+    // so the first click visibly "took" (Charlie's ssissues video 2026-10-17).
+    if (viewer && anchor.P) viewer.showMagnetMarker(anchor.P, 0x2f9e44, true);
+    setStatus('✓ First pivot set (green). Now click the pivot on the part that should SWING. Esc to cancel.');
     return;
   }
   if (doc.jointPickStage === 'pivotB') {
@@ -20804,7 +20816,7 @@ function startJointCreation() {
 function exitJointCreation(msg) {
   doc.jointPickStage = null;
   doc.jointDraft = null;
-  if (viewer) viewer.canvas.style.cursor = '';
+  if (viewer) { viewer.canvas.style.cursor = ''; viewer.hideMagnetMarker(true); }
   document.querySelectorAll('[data-action="joint"]').forEach(b => b.classList.remove('active'));
   if (msg) setStatus(msg);
 }
