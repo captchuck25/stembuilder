@@ -711,6 +711,14 @@
   }
   .zoom-ctls button:hover { background: #ffffff; border-color: #b9c2d6; }
   .zoom-ctls button:active { transform: scale(0.94); }
+  .undo-choice {
+    position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px; z-index: 30;
+    background: rgba(31, 37, 64, 0.94); color: white; padding: 8px 10px 8px 14px;
+    border-radius: 999px; font-size: 12.5px; box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  }
+  .undo-choice[hidden] { display: none; }
+  .undo-choice .action { height: 26px; padding: 0 10px; font-size: 12px; }
   .overlay-hint {
     position: absolute;
     left: 50%; bottom: 16px;
@@ -1560,6 +1568,12 @@
     <svg id="sketch-svg" class="active tool-select"></svg>
     <canvas id="three-canvas"></canvas>
     <div class="overlay-hint" id="hint"></div>
+    <div class="undo-choice" id="undo-choice" hidden>
+      <span id="undo-choice-text">The next step back is sketch work.</span>
+      <button class="action" id="undo-choice-through">Undo through the sketch</button>
+      <button class="action" id="undo-choice-skip">Skip the sketch</button>
+      <button class="action" id="undo-choice-cancel" title="Leave the history as it is">✕</button>
+    </div>
     <!-- On-screen zoom (Chromebooks / touch — no mouse wheel needed).
          Mode-aware: drives the 2D sketch view or the 3D camera. -->
     <div class="zoom-ctls" id="zoom-ctls">
@@ -14543,6 +14557,7 @@ function restoreLocalDraft() {
 }
 
 function pushUndo() {
+  if (typeof hideUndoChoice === 'function' && _undoChoice) hideUndoChoice();
   try {
     undoStack.push(snapshotDoc());
     undoModes.push(doc.mode);
@@ -14556,14 +14571,95 @@ function pushUndo() {
     setStatus('⚠ Undo capture failed: ' + err.message);
   }
 }
+// ── Undo across a sketch (Charlie, 2026-10-17) ───────────────────────────
+// In 3D, when the next step back (or forward) is sketch work, a small bar
+// offers two ways on: "Undo through the sketch" walks those sketch steps
+// (parts follow their lines) and then takes the next 3D step; "Skip the
+// sketch" jumps straight to the 3D step before the sketch and KEEPS the
+// drawing as it is — the skipped sketch steps leave the history. Pressing
+// undo again while the bar is up = through.
+let _undoChoice = null; // 'undo' | 'redo' while the bar is showing
+function _showUndoChoice(kind) {
+  _undoChoice = kind;
+  const bar = $('undo-choice'); if (!bar) return;
+  $('undo-choice-text').textContent = kind === 'undo' ? 'The next step back is sketch work.' : 'The next step forward is sketch work.';
+  $('undo-choice-through').textContent = kind === 'undo' ? 'Undo through the sketch' : 'Redo through the sketch';
+  bar.hidden = false;
+  setStatus(kind === 'undo'
+    ? 'Undo reached sketch work — undo through it (parts follow), or skip it and keep the drawing.'
+    : 'Redo reached sketch work — redo through it, or skip it and keep the drawing.');
+}
+function hideUndoChoice() { _undoChoice = null; const bar = $('undo-choice'); if (bar) bar.hidden = true; }
+// Apply one history step in the given direction (no mode checks).
+function _stepHistory(dir) {
+  const from = dir === 'undo' ? undoStack : redoStack, fromM = dir === 'undo' ? undoModes : redoModes;
+  const to = dir === 'undo' ? redoStack : undoStack, toM = dir === 'undo' ? redoModes : undoModes;
+  if (!from.length) return false;
+  to.push(snapshotDoc());
+  toM.push(fromM.length ? fromM.pop() : doc.mode);
+  applySnapshot(from.pop());
+  return true;
+}
+// Through: walk every consecutive sketch step, then one 3D step.
+function _undoThrough(dir) {
+  const fromM = dir === 'undo' ? undoModes : redoModes;
+  let sketchSteps = 0;
+  try {
+    while (fromM.length && fromM[fromM.length - 1] === '2d') { if (!_stepHistory(dir)) break; sketchSteps++; }
+    const took3D = fromM.length ? _stepHistory(dir) : false;
+    if (doc.mode === '2d') setMode('3d');
+    updateUndoRedoButtons();
+    const left = (dir === 'undo' ? undoStack : redoStack).length;
+    setStatus(`${dir === 'undo' ? 'Undid' : 'Redid'} ${sketchSteps} sketch step${sketchSteps === 1 ? '' : 's'}${took3D ? ' and one 3D change' : ''} (${left} left).`);
+  } catch (err) { console.error('through failed:', err); setStatus('⚠ Undo failed: ' + err.message); }
+}
+// Skip: jump to the next 3D snapshot but keep today's drawing. The sketch
+// steps in between leave the history; the state we leave goes to the other
+// stack so the jump itself is reversible.
+function _undoSkip(dir) {
+  const from = dir === 'undo' ? undoStack : redoStack, fromM = dir === 'undo' ? undoModes : redoModes;
+  const to = dir === 'undo' ? redoStack : undoStack, toM = dir === 'undo' ? redoModes : undoModes;
+  // Skip the sketch steps AND any 3D-filed step that changed no part
+  // (e.g. "+ Sketch" itself) — land on a change the user can see.
+  const partSig = (bodies, joints) => JSON.stringify([
+    (bodies || []).map(b => [b.id, b.type, b.x || 0, b.y || 0, b.z || 0, b.rotation || null, b.height || null, b.w || null, b.h || null, b.d || null, !!b.hidden, b.bodyGroupId ?? null, Array.isArray(b.children) ? b.children.length : 0, b.op || null]),
+    (joints || []).map(j => [j.id, j.angle || 0]),
+  ]);
+  const curSig = partSig(doc.bodies, doc.joints);
+  let i = from.length - 1;
+  while (i >= 0 && (fromM[i] === '2d' || partSig(from[i].bodies, from[i].joints) === curSig)) i--;
+  if (i < 0) { hideUndoChoice(); setStatus('No earlier 3D change in that direction — only sketch work. Open the sketch to undo it there.'); return; }
+  try {
+    const keepSketches = JSON.parse(JSON.stringify(doc.sketches));
+    const keepActive = doc.activeSketchId;
+    const target = from[i];
+    to.push(snapshotDoc()); toM.push('3d');
+    from.splice(i); fromM.splice(i);
+    target.sketches = keepSketches;
+    target.activeSketchId = keepActive;
+    applySnapshot(target);
+    if (doc.mode === '2d') setMode('3d');
+    updateUndoRedoButtons();
+    setStatus(`${dir === 'undo' ? 'Undid' : 'Redid'} the 3D change and kept the drawing as it is — click Done on a sheet if its parts look out of date.`);
+  } catch (err) { console.error('skip failed:', err); setStatus('⚠ Undo failed: ' + err.message); }
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest) return;
+  if (e.target.closest('#undo-choice-through')) { const k = _undoChoice; hideUndoChoice(); if (k) _undoThrough(k); }
+  else if (e.target.closest('#undo-choice-skip')) { const k = _undoChoice; hideUndoChoice(); if (k) _undoSkip(k); }
+  else if (e.target.closest('#undo-choice-cancel')) { hideUndoChoice(); setStatus('History left as it is.'); }
+});
+
 function undo() {
   if (!undoStack.length) { setStatus('Nothing to undo'); return; }
-  // Sketch work stays undoable only where it's visible: inside the sketch.
+  // In 3D the next step back may be sketch work: offer the choice (a
+  // second undo while the bar is up = undo through).
   if (doc.mode === '3d' && undoModes[undoModes.length - 1] === '2d') {
-    showHint('The next undo step is sketch work — open that sketch to undo it there. The 3D view only undoes 3D changes.');
-    setStatus('Undo paused — the next step back is 2D sketch work.');
+    if (_undoChoice === 'undo') { hideUndoChoice(); _undoThrough('undo'); return; }
+    _showUndoChoice('undo');
     return;
   }
+  hideUndoChoice();
   try {
     redoStack.push(snapshotDoc());
     redoModes.push(undoModes.length ? undoModes.pop() : doc.mode);
@@ -14578,10 +14674,11 @@ function undo() {
 function redo() {
   if (!redoStack.length) { setStatus('Nothing to redo'); return; }
   if (doc.mode === '3d' && redoModes[redoModes.length - 1] === '2d') {
-    showHint('The next redo step is sketch work — open that sketch to redo it there.');
-    setStatus('Redo paused — the next step forward is 2D sketch work.');
+    if (_undoChoice === 'redo') { hideUndoChoice(); _undoThrough('redo'); return; }
+    _showUndoChoice('redo');
     return;
   }
+  hideUndoChoice();
   try {
     undoStack.push(snapshotDoc());
     undoModes.push(redoModes.length ? redoModes.pop() : doc.mode);
@@ -14614,6 +14711,7 @@ function updateUndoRedoButtons() {
 }
 
 function setMode(mode) {
+  if (typeof hideUndoChoice === 'function' && _undoChoice) hideUndoChoice();
   // Blank projects have no sketches — entering 2D creates the first one on
   // demand so every drawing tool has a surface to land on.
   if (mode === '2d' && !doc.sketches.length) {
@@ -19245,6 +19343,7 @@ function syncSheetParts(sk) {
   const gone = existing.filter(b => !usedB.has(b));
   if (!fresh.length && !gone.length && !matched.length) return { created: 0, updated: 0, removed: 0, total: 0 };
   pushUndo();
+  if (undoModes.length) undoModes[undoModes.length - 1] = '3d'; // Done = a 3D step (parts), not sketch work
   // Pivot marks drawn inside an outline belong to that part (a mark at a
   // hole's centre still counts — that is the dowel's pivot).
   const marks = sk.entities.filter(e => e.type === 'pivotMark');
