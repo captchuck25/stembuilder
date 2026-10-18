@@ -1060,6 +1060,7 @@
   .entity.preview.perpendicular { stroke: #2ecc71; stroke-width: 2; opacity: 1; }
   .entity.selected { stroke: var(--accent-ink); stroke-width: 2.2; fill: none; }
   .entity.construction { stroke: #ff9a3e; stroke-dasharray: 6 4; fill: none; opacity: 0.85; }
+  .entity.construction.from3d { stroke: #0f9d8a; stroke-dasharray: 3 3; }
   .entity.construction.selected { stroke: #d97419; }
   /* Traced face perimeter — the sketched part's own edge, drawn BLACK so
      it reads as "this is MY part" against red neighbours */
@@ -3398,6 +3399,10 @@ class SketchEngine {
     // (the move-pending → move drag path is blocked separately below).
     if (sketchLocked && this.tool !== 'select') {
       showHint('Sketch is locked. Unlock it in the tree to edit.');
+      return;
+    }
+    if (doc.sketch?.sheetFace && !['select', 'construction', 'pivot', 'eraser', 'dimension', 'magnet', 'extend', 'trim'].includes(this.tool)) {
+      showHint('📄 On a sheet part this sketch is for construction lines, dimensions and pivots. To change the part\'s real outline, go back to the sheet.');
       return;
     }
 
@@ -6658,7 +6663,7 @@ function bboxHandlesSVG(entId, bX, bY, bW, bH, hasW, hasH) {
 }
 
 function renderEntitySVG(ent, eng, selected = false, preview = false, singleSelected = false) {
-  const constructionCls = ent.construction ? ' construction' : '';
+  const constructionCls = ent.construction ? (ent.from3D ? ' construction from3d' : ' construction') : '';
   const perimeterCls = ent.facePerimeter ? ' face-perimeter' : '';
   const cls = `entity${constructionCls}${perimeterCls}${selected ? ' selected' : ''}${preview ? ' preview' : ''}`;
   if (ent.type === 'rect') {
@@ -8644,14 +8649,12 @@ class Viewer3D {
           const dist = bodyCenter.clone().sub(hit.point).dot(normalWorld);
           const planeOrigin = bodyCenter.clone().sub(normalWorld.clone().multiplyScalar(dist));
           const plane = planeFromFace(planeOrigin, normalWorld);
-          if (sourceBody && sourceBody.sheetPart) {
-            showHint('📄 ' + SHEET_LOCK_HINT);
-            doc.faceMode = false;
-            this.canvas.style.cursor = '';
-            return;
-          }
           const boundary = computeFaceBoundary(bbox, plane, sourceBody);
-          createSketchOnPlane(plane, { boundary, sourceBodyId: hit.object.userData.bodyId });
+          // A sheet part takes a CONSTRUCTION-ONLY face sketch: reference
+          // lines (and pivots) to mark where things meet; on Done the lines
+          // are copied onto the sheet in teal (Charlie, 2026-10-17).
+          // Permanent shape changes still happen on the sheet.
+          createSketchOnPlane(plane, { boundary, sourceBodyId: hit.object.userData.bodyId, sheetFace: !!(sourceBody && sourceBody.sheetPart) });
           doc.faceMode = false;
           this.canvas.style.cursor = '';
           return;
@@ -14739,6 +14742,7 @@ function setMode(mode) {
     // the extrudes the user made from them.
     if (doc.sketch?.stock) sheetCommit = commitActiveSheetIfAny();
     else rebuildExtrudesForSketch(doc.activeSketchId);
+    if (doc.sketch?.sheetFace) { try { transferConstructionToSheet(doc.sketch); } catch (err) { console.error('transferConstructionToSheet:', err); } }
     // 2D-mode autosave debounces to 4 s to keep editing snappy; a quick
     // Done would otherwise leave the just-finished sketch unsaved until
     // the next 3D edit. Flush now so the work lands the moment the user
@@ -18574,6 +18578,7 @@ function insert2DShape(kind) {
     showHint('Open a sketch first (or click + Sketch) to insert a 2D shape.');
     return;
   }
+  if (doc.sketch.sheetFace) { showHint('📄 This sketch sits on a sheet part — construction lines only. Draw shapes on the sheet.'); return; }
   pushUndo();
   const u = doc.units === 'in' ? 25.4 : 25;
   const r = u / 2;
@@ -18917,6 +18922,7 @@ function createSketchOnPlane(plane, opts = {}) {
   const sk = { id, plane, entities: [], nextId: 1, name };
   if (opts.boundary)     sk.boundary     = opts.boundary;
   if (opts.sourceBodyId) sk.sourceBodyId = opts.sourceBodyId;
+  if (opts.sheetFace)    sk.sheetFace    = true;
   // FACE PERIMETER AS REAL GEOMETRY: the face's edges become closed
   // polylines in the sketch — they snap, trim, and close regions like any
   // drawn line, and the sketch can rebuild the face even if the body is
@@ -18954,7 +18960,9 @@ function createSketchOnPlane(plane, opts = {}) {
   requestAnimationFrame(() => requestAnimationFrame(fitSketchViewToBodies));
   renderTree();
   renderProps();
-  setStatus(`Sketching on ${name} — draw a shape, then Extrude it (a Negative cuts right into the body).`);
+  setStatus(sk.sheetFace
+    ? `Sketching on a sheet part — construction lines, dimensions and pivots only. Click Done and your construction lines show up on the sheet in teal; change the real outline on the sheet.`
+    : `Sketching on ${name} — draw a shape, then Extrude it (a Negative cuts right into the body).`);
 }
 
 // True if the picked face point sits on a smoothly curved surface — sphere
@@ -19397,6 +19405,45 @@ function syncSheetParts(sk) {
   return { created: fresh.length, updated, removed: gone.length, total: regions.length, newIds };
 }
 
+// Construction lines drawn on a sheet part's face sketch, copied onto the
+// SHEET at the part's outline — through the face plane, back through the
+// part's live transform, into sheet coordinates. Tagged from3D (teal) and
+// keyed by the face sketch so a later Done replaces, never duplicates.
+function transferConstructionToSheet(fsk) {
+  if (!fsk || !fsk.sheetFace) return 0;
+  const body = doc.bodies.find(b => b.id === fsk.sourceBodyId);
+  const sheet = body && doc.sketches.find(sk => sk.id === body.sourceSketchId && sk.stock);
+  if (!body || !sheet) return 0;
+  if (!body.mesh && viewer) viewer.rebuildBodies();
+  if (!body.mesh) return 0;
+  if (viewer) viewer.scene.updateMatrixWorld(true);
+  body.mesh.updateMatrixWorld(true);
+  const faceM = makePlaneMatrix(fsk.plane);
+  const M = new THREE.Matrix4().multiplyMatrices(
+    makePlaneMatrix(body.plane || sheet.plane).clone().invert(),
+    new THREE.Matrix4().multiplyMatrices(body.mesh.matrixWorld.clone().invert(), faceM));
+  const toSheet = (x, y) => { const p = new THREE.Vector3(x, y, 0).applyMatrix4(M); return { x: +p.x.toFixed(4), y: +p.y.toFixed(4) }; };
+  const before = sheet.entities.length;
+  sheet.entities = sheet.entities.filter(e => !(e.from3D && e.fromSketchId === fsk.id));
+  let n = 0;
+  for (const e of fsk.entities) {
+    if (!e.construction || e.facePerimeter) continue;
+    let pts = null, closed = false;
+    if (e.type === 'polyline') { pts = (e.points || []).map(p => toSheet(p.x, p.y)); closed = !!e.closed; }
+    else if (e.type === 'rect' || e.type === 'circle' || e.type === 'ellipse') {
+      const segs = entityToSegments(e) || [];
+      if (segs.length) { pts = [toSheet(segs[0].a.x, segs[0].a.y), ...segs.map(sg => toSheet(sg.b.x, sg.b.y))]; closed = true; if (pts.length > 2) pts.pop(); }
+    }
+    if (!pts || pts.length < 2) continue;
+    sheet.entities.push({ id: sheet.nextId++, type: 'polyline', closed, points: pts, construction: true, from3D: true, fromSketchId: fsk.id });
+    n++;
+  }
+  if (n || sheet.entities.length !== before) {
+    setStatus(`${n} construction line${n === 1 ? '' : 's'} from the part copied onto ${sheet.name} (teal). They never export or cut.`);
+    if (sketchEng && doc.mode === '2d' && doc.sketch === sheet) sketchEng.render();
+  }
+  return n;
+}
 // Called wherever the user leaves the active sketch (Done, tree click,
 // new sheet): if that sketch is a sheet, materialise its parts now.
 function commitActiveSheetIfAny() {
@@ -21978,6 +22025,7 @@ function pasteSelection() {
     for (const item of doc.clipboard.items) {
       const ent = JSON.parse(JSON.stringify(item));
       ent.id = doc.sketch.nextId++;
+      if (doc.sketch.sheetFace && ent.type !== 'dimension' && ent.type !== 'pivotMark') ent.construction = true; // sheet-part sketches are construction-only
       idMap.set(item.id, ent.id);
       if (ent.type === 'rect') { ent.x += off; ent.y += off; }
       else if (ent.type === 'circle') { ent.cx += off; ent.cy += off; }
@@ -23019,6 +23067,7 @@ function renderProps() {
     });
     props.querySelectorAll('.type-toggle button').forEach(btn => {
       btn.addEventListener('click', () => {
+        if (doc.sketch?.sheetFace && btn.dataset.type !== 'construction') { showHint('📄 On a sheet part every line stays construction — change the real outline on the sheet.'); return; }
         ent.construction = btn.dataset.type === 'construction';
         renderProps();
         sketchEng.render();
