@@ -1848,6 +1848,12 @@ class SketchEngine {
   }
 
   setTool(t) {
+    // On a sheet part's face sketch every line is a construction line —
+    // picking a drawing tool flips to Construction and says why.
+    if (doc.sketch?.sheetFace && ['rect', 'circle', 'ellipse', 'text', 'line', 'arc', 'thread-mark'].includes(t)) {
+      showHint('📄 On a sheet part only CONSTRUCTION lines can be drawn here — switched to Construction. Change the real outline on the sheet.', 4000);
+      t = 'construction';
+    }
     // Finalize any active polyline before switching tools
     if (this.activeLine && t !== 'line' && t !== 'construction') this.finalizeLine();
     if (this.activeArc && t !== 'arc') this.activeArc = null;
@@ -8444,6 +8450,7 @@ class Viewer3D {
           doc.multiSelectedBodies = [pickedId];
           renderTree(); renderProps();
           setStatus('Cut — now click the part to carve WITH (a sheet part stays whole). Esc to cancel.');
+          showHint(`✂ Step 2 of 2: now click the part to carve WITH. ${tb && tb.name ? tb.name : 'That body'} is the one being carved.`, 4000);
           return;
         }
         if (doc.cutMode.stage === 'tool') {
@@ -9432,6 +9439,11 @@ class Viewer3D {
             if (allInside) picked.push(body.id);
           }
         }
+        // A move-together group is all-or-nothing: catching any member in
+        // the box brings the whole group (Charlie: "if they're grouped there
+        // should be no way around it", 2026-10-17).
+        const gids = new Set(picked.map(id => doc.bodies.find(b => b.id === id)?.bodyGroupId).filter(g => g != null));
+        if (gids.size) for (const b of doc.bodies) if (b.bodyGroupId != null && gids.has(b.bodyGroupId) && !picked.includes(b.id)) picked.push(b.id);
         if (boxSel.additive) {
           for (const id of picked) if (!doc.multiSelectedBodies.includes(id)) doc.multiSelectedBodies.push(id);
         } else {
@@ -9739,7 +9751,7 @@ class Viewer3D {
       c.material?.dispose();
     }
     for (const sketch of doc.sketches) {
-      if (sketch.hidden || sketch.stock) continue; // sheet outlines are never hand-extruded
+      if (sketch.hidden || sketch.stock || sketch.sheetFace) continue; // sheet outlines / sheet-part face sketches are never hand-extruded
       const planeM = makePlaneMatrix(sketch.plane);
       const regs = computeSketchRegions(sketch);
       for (const r of regs) {
@@ -15399,7 +15411,7 @@ function extrudeCurrentSketch() {
   // Resolve every picked region back to its source sketch so we can build bodies
   const allRegions = [];
   for (const s of doc.sketches) {
-    if (s.stock) continue; // sheets extrude themselves on Done
+    if (s.stock || s.sheetFace) continue; // sheets extrude themselves on Done; sheet-part face sketches are reference only
     for (const r of computeSketchRegions(s)) allRegions.push({ region: r, sketch: s });
   }
   const regionJobs = picked
@@ -20327,7 +20339,10 @@ function ungroupSelected() {
     if (!doc.multiSelectedBodies?.length) { showHint('Select a group first.'); return; }
     // Move-together groups (sheet parts): just unlink them.
     const linked = doc.multiSelectedBodies.map(id => doc.bodies.find(b => b.id === id)).filter(b => b && b.bodyGroupId != null);
-    if (linked.length && !doc.multiSelectedBodies.some(id => doc.bodies.find(b => b.id === id)?.type === 'group')) {
+    if (linked.length) {
+      // Unlink first. Un-welding a carved body hiding inside the linked set
+      // (the basket) was a nasty surprise — select that body on its own and
+      // Ungroup again to restore its pieces.
       pushUndo();
       for (const b of linked) delete b.bodyGroupId;
       renderTree(); renderProps();
@@ -20591,6 +20606,7 @@ function startBooleanCut() {
   if (viewer) viewer.canvas.style.cursor = 'crosshair';
   document.querySelectorAll('[data-action="boolean-cut"]').forEach(b => b.classList.add('active'));
   setStatus('Cut — click the body to CARVE (what you keep, e.g. the basket). Esc to cancel.');
+  showHint('✂ Cut — step 1 of 2: click the body you want to CARVE (the one that keeps its shape, like the basket).', 4000);
 }
 function exitBooleanCut(msg) {
   doc.cutMode = null;
@@ -20648,6 +20664,7 @@ function performBooleanCut(targetId, toolId) {
     exitBooleanCut(toolIsSheet
       ? `Carved with ${tool.name || 'the sheet part'} — the part stays whole and the sheet is unchanged. The cut is a snapshot: it won't follow the part if it moves. Ungroup restores the body.`
       : 'Cut complete — Ungroup (Ctrl+Shift+G) to restore both bodies');
+    showHint(`✅ Cut done — ${target.name || 'the body'} is carved${toolIsSheet ? ` and ${tool.name || 'the sheet part'} stays whole` : ''}. Move the part away to see the notch.`, 5000);
   } catch (err) {
     console.error('Cut failed:', err);
     showHint('Cut failed — geometry too complex or non-manifold. Check console.');
@@ -20829,6 +20846,18 @@ function _applyRigidToBody(body, R, pivotFrom, pivotTo) {
 function _jointChainBodies(rootBody, baseBodyId) {
   const ids = new Set([rootBody.id]);
   const bodies = [rootBody];
+  const base = doc.bodies.find(b => b.id === baseBodyId);
+  // Move-together siblings ride with a swinging body (a basket grouped to
+  // the arm swings with the arm) — except when the base is in that same
+  // group: then the group is the frame and only the joint chain moves.
+  const addSiblings = (b) => {
+    if (b.bodyGroupId == null) return;
+    if (base && base.bodyGroupId === b.bodyGroupId) return;
+    for (const o of doc.bodies) {
+      if (o.bodyGroupId === b.bodyGroupId && !ids.has(o.id) && o.id !== baseBodyId) { ids.add(o.id); bodies.push(o); }
+    }
+  };
+  addSiblings(rootBody);
   let grew = true;
   while (grew) {
     grew = false;
@@ -20841,6 +20870,7 @@ function _jointChainBodies(rootBody, baseBodyId) {
         if (to.body.id === baseBodyId || ids.has(to.body.id)) continue;
         ids.add(to.body.id);
         bodies.push(to.body);
+        addSiblings(to.body);
         grew = true;
       }
     }
