@@ -1531,6 +1531,7 @@
         <!-- Cut toolbar button removed (housekeeping, 2026-08-17): Group with a
              Negative body covers subtraction; the separate two-click Cut tool
              was redundant. Action 'boolean-cut' is still wired in JS. -->
+        <button class="tool" data-action="boolean-cut" title="Cut — click the body to carve (the basket), then the part to carve it with. A sheet part used as the cutter stays whole and stays on the sheet."><svg class="ico"><use href="#i-boolean-cut"/></svg><span class="tool-label">Cut</span></button>
         <button class="tool" data-action="joint" title="Joint (J) — click two bodies, then click near an edge to set the hinge axis"><svg class="ico"><use href="#i-joint"/></svg><span class="tool-label">Joint</span></button>
         <button class="tool" data-action="align" title="Align — Shift-click 2+ bodies first, then click a colored axis handle"><svg class="ico"><use href="#i-align"/></svg><span class="tool-label">Align</span></button>
         <button class="tool" data-action="magnet-3d" title="Magnet — click a corner or hole that stays put, then click a corner or hole on the part that should move. That part jumps so the two points meet."><svg class="ico"><use href="#i-magnet"/></svg><span class="tool-label">Magnet</span></button>
@@ -8427,12 +8428,17 @@ class Viewer3D {
         if (!hits.length) return;
         const pickedId = hits[0].object.userData.bodyId;
         if (doc.cutMode.stage === 'target') {
+          const tb = doc.bodies.find(b => b.id === pickedId);
+          if (tb && tb.sheetPart) {
+            showHint('📄 Sheet parts keep the outline drawn on the sheet, so they can\'t be carved here. Click the body to carve (e.g. the basket) first; the sheet part comes second, as the cutter.');
+            return;
+          }
           doc.cutMode.targetId = pickedId;
           doc.cutMode.stage = 'tool';
           doc.selection = { kind: 'body', id: pickedId };
           doc.multiSelectedBodies = [pickedId];
           renderTree(); renderProps();
-          setStatus('Cut — now click the TOOL body (what to subtract). Esc to cancel.');
+          setStatus('Cut — now click the part to carve WITH (a sheet part stays whole). Esc to cancel.');
           return;
         }
         if (doc.cutMode.stage === 'tool') {
@@ -20537,7 +20543,7 @@ function startBooleanCut() {
   doc.cutMode = { stage: 'target', targetId: null };
   if (viewer) viewer.canvas.style.cursor = 'crosshair';
   document.querySelectorAll('[data-action="boolean-cut"]').forEach(b => b.classList.add('active'));
-  setStatus('Cut — click the TARGET body (what to keep). Esc to cancel.');
+  setStatus('Cut — click the body to CARVE (what you keep, e.g. the basket). Esc to cancel.');
 }
 function exitBooleanCut(msg) {
   doc.cutMode = null;
@@ -20549,6 +20555,12 @@ function performBooleanCut(targetId, toolId) {
   const target = doc.bodies.find(b => b.id === targetId);
   const tool = doc.bodies.find(b => b.id === toolId);
   if (!target || !tool) { exitBooleanCut('Cut cancelled — body missing.'); return; }
+  if (target.sheetPart) { showHint('📄 A sheet part can\'t be carved — its outline lives on the sheet.'); exitBooleanCut('Cut cancelled.'); return; }
+  // A SHEET PART as the cutter: carve with a frozen copy of its shape and
+  // leave the real part (and the sheet) untouched (Charlie's basket,
+  // 2026-10-17). The copy sheds every sheet link so it is just a negative
+  // child of the carved body; it does not follow the part if it moves.
+  const toolIsSheet = !!tool.sheetPart;
   pushUndo();
   setStatus('Computing cut…');
   try {
@@ -20569,19 +20581,26 @@ function performBooleanCut(targetId, toolId) {
     const toolCopy = JSON.parse(JSON.stringify(tool));
     delete toolCopy.mesh;
     toolCopy.op = 'subtract';
+    if (toolIsSheet) {
+      for (const k of ['sheetPart', 'sheetMarks', '_sheetMarkSig', 'sourceSketchId', 'regionCentroid', 'regionArea', 'bodyGroupId', 'locked']) delete toolCopy[k];
+      toolCopy.id = doc.nextBodyId++;
+      toolCopy.name = `cut by ${tool.name || 'sheet part'}`;
+    }
     const cutBody = {
       id: doc.nextBodyId++, type: 'group',
       children: [targetCopy, toolCopy],
       geometry: baked, op: 'add',
       x: 0, y: 0, z: 0,
     };
-    doc.bodies = doc.bodies.filter(b => b.id !== targetId && b.id !== toolId);
+    doc.bodies = doc.bodies.filter(b => b.id !== targetId && (toolIsSheet || b.id !== toolId));
     doc.bodies.push(cutBody);
     doc.selection = { kind: 'body', id: cutBody.id };
     doc.multiSelectedBodies = [cutBody.id];
     viewer.rebuildBodies();
     renderTree(); renderProps();
-    exitBooleanCut('Cut complete — Ungroup (Ctrl+Shift+G) to restore both bodies');
+    exitBooleanCut(toolIsSheet
+      ? `Carved with ${tool.name || 'the sheet part'} — the part stays whole and the sheet is unchanged. The cut is a snapshot: it won't follow the part if it moves. Ungroup restores the body.`
+      : 'Cut complete — Ungroup (Ctrl+Shift+G) to restore both bodies');
   } catch (err) {
     console.error('Cut failed:', err);
     showHint('Cut failed — geometry too complex or non-manifold. Check console.');
